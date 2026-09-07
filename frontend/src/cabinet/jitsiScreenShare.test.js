@@ -6,6 +6,7 @@ import {
   extractDisplaySurface,
   extractTrackResolution,
   parseSharingParticipantIds,
+  selectSharePinTarget,
 } from "./jitsiScreenShare";
 
 describe("parseSharingParticipantIds", () => {
@@ -52,6 +53,21 @@ describe("buildScreenShareSnapshot", () => {
     expect(buildScreenShareSnapshot({ localSharing: true, localId: "me" }).active).toBe(true);
     expect(buildScreenShareSnapshot({ sharingIds: ["other"] }).presenterJitsiId).toBe("other");
     expect(buildScreenShareSnapshot({}).active).toBe(false);
+  });
+});
+
+describe("selectSharePinTarget", () => {
+  it("pins desktop for a remote presenter and camera for the local sharer", () => {
+    expect(selectSharePinTarget({
+      localSharing: false,
+      presenterJitsiId: "teacher",
+      remoteIds: ["student"],
+    })).toEqual({ id: "teacher", mode: "desktop" });
+    expect(selectSharePinTarget({
+      localSharing: true,
+      presenterJitsiId: "teacher",
+      remoteIds: ["student"],
+    })).toEqual({ id: "student", mode: "camera" });
   });
 });
 

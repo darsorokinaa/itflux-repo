@@ -22,9 +22,11 @@ describe("clientTelemetry", () => {
   });
 
     it("sends allowed events without scene payloads", () => {
-    expect(reportClientEvent("board_ws_closed", { code: 1006 })).toBe(true);
+    expect(reportClientEvent("collaboration_connected")).toBe(true);
+    expect(reportClientEvent("screen_share_started")).toBe(true);
+    expect(reportClientEvent("pip_opened")).toBe(true);
     expect(reportClientEvent("RESUME_START", { pwa: true, stage: "start" })).toBe(true);
-    expect(navigator.sendBeacon).toHaveBeenCalledTimes(2);
+    expect(navigator.sendBeacon).toHaveBeenCalledTimes(4);
     const body = navigator.sendBeacon.mock.calls[0][1];
     expect(body).toBeInstanceOf(Blob);
   });

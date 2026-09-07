@@ -4046,6 +4046,7 @@ def _variant_detail_payload(request, variant, *, include_answers=True):
                 if task_list and task_list.part_id
                 else None
             ),
+            "exam_part": getattr(item.task, "exam_part", None),
             "subdivision": (task_list.subdivision or "").strip() or None,
             "subtopic_id": st.id if st else None,
             "subtopic_title": (st.title or "").strip() if st else "",

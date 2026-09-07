@@ -764,6 +764,21 @@ export default function MyTaskEditorPage() {
                 </label>
               </div>
 
+              {isExamLevel(form.level) ? (
+                <button
+                  type="button"
+                  className="saas-switch-line saas-switch-line--block"
+                  title="Номер задания не меняется. В экзамене задача проверяется как часть 2."
+                  onClick={() => setField("exam_part", String(form.exam_part) === "2" ? "1" : "2")}
+                >
+                  <span className={`saas-switch${String(form.exam_part) === "2" ? " is-on" : ""}`} />
+                  <span>
+                    <span className="saas-switch-line__title">Развёрнутый ответ</span>
+                    <span className="saas-switch-line__hint">Считается частью 2 экзамена, номер задания сохраняется</span>
+                  </span>
+                </button>
+              ) : null}
+
               <div className="saas-divider" />
 
               <span className="saas-field-label">Уровень сложности</span>
@@ -812,6 +827,18 @@ export default function MyTaskEditorPage() {
                   </label>
                 </div>
               </div>
+
+              <label>
+                <span className="saas-field-label">Автор</span>
+                <input
+                  className="saas-field"
+                  type="text"
+                  maxLength={500}
+                  value={form.author}
+                  placeholder="Как задача будет подписана в варианте"
+                  onChange={(e) => setField("author", e.target.value)}
+                />
+              </label>
             </article>
           </section>
 

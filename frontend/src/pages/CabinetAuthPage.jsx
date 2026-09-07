@@ -61,6 +61,7 @@ export default function CabinetAuthPage() {
   const [forgotLogin, setForgotLogin] = useState("");
   const [resetForm, setResetForm] = useState({ password: "", password_confirm: "" });
   const valueIntent = inferValueIntent(redirectTo);
+  const returningToUpgrade = String(redirectTo || "").startsWith("/cabinet/upgrade");
   const [registerForm, setRegisterForm] = useState({
     email: "",
     username: "",
@@ -130,6 +131,16 @@ export default function CabinetAuthPage() {
   usePageTitle(authTitle);
 
   useEffect(() => {
+    if (!returningToUpgrade) return undefined;
+    trackValueGoal("auth_started", {
+      next: "upgrade",
+      plan: new URLSearchParams(String(redirectTo).split("?")[1] || "").get("plan") || "",
+      source: "promo_checkout",
+    });
+    return undefined;
+  }, [returningToUpgrade, redirectTo]);
+
+  useEffect(() => {
     let cancelled = false;
     fetchCabinetSession()
       .then((data) => {
@@ -174,6 +185,13 @@ export default function CabinetAuthPage() {
     const home = getCabinetHomePath(session?.user);
     const stored = takeReturnPath();
     const target = safeReturnPath(redirectTo) || stored || home;
+    if (String(target || "").startsWith("/cabinet/upgrade")) {
+      trackValueGoal("auth_completed", {
+        next: "upgrade",
+        plan: new URLSearchParams(String(target).split("?")[1] || "").get("plan") || "",
+        source: "promo_checkout",
+      });
+    }
     navigate(target, { replace: true });
   };
 

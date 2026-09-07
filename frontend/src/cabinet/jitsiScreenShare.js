@@ -74,6 +74,20 @@ export function extractTrackResolution(stats, participantId) {
   return pickLargest(resolution);
 }
 
+export function selectSharePinTarget({
+  localSharing = false,
+  presenterJitsiId = "",
+  remoteIds = [],
+} = {}) {
+  const presenter = safeStr(presenterJitsiId);
+  if (!localSharing) {
+    return { id: presenter, mode: presenter ? "desktop" : "" };
+  }
+  const remote = [...new Set((remoteIds || []).map(safeStr).filter(Boolean))];
+  const id = remote[0] || "";
+  return { id, mode: id ? "camera" : "" };
+}
+
 export function buildScreenShareSnapshot({
   localId = "",
   localSharing = false,
@@ -233,6 +247,15 @@ export function attachScreenSharePresence(api, { onChange, pollMs = 2500 } = {})
         } catch {
           /* ignore */
         }
+      }
+    },
+    pinCamera(participantId) {
+      const id = safeStr(participantId);
+      if (!id || !api || typeof api.pinParticipant !== "function") return;
+      try {
+        api.pinParticipant(id);
+      } catch {
+        /* ignore */
       }
     },
     dispose() {

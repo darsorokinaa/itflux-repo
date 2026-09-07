@@ -1,6 +1,7 @@
 from datetime import timedelta
 from unittest import mock
 
+import jwt
 from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -385,6 +386,9 @@ class VideoMeetingApiTests(TestCase):
         self.assertGreaterEqual(payload["exp"] - payload["iat"], 4 * 3600 - 5)
         self.assertLessEqual(payload["exp"] - payload["iat"], 8 * 3600)
         self.assertNotEqual(payload["room"], "*")
+        header = jwt.get_unverified_header(res.data["jwt"])
+        self.assertEqual(header.get("kid"), "itflux-test")
+        self.assertEqual(header.get("alg"), "HS256")
 
     def test_teacher_and_student_share_domain_and_room(self):
         from Cabinet.video_meeting_service import build_join_config

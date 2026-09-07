@@ -32,7 +32,7 @@ import {
   computeAxesTaskScore,
   findAxisLevel,
 } from "../utils/criteriaAxesScore";
-import { inferExamTaskPart } from "../utils/examTaskPart";
+import { inferExamTaskPart, formatPart2SectionTitle } from "../utils/examTaskPart";
 import TaskNoAnswerBadge from "../components/TaskNoAnswerBadge";
 import { getShareablePageUrl } from "../utils/shareablePageUrl";
 import {
@@ -1760,17 +1760,7 @@ function ExamPage() {
   const inferPart = (t) => inferExamTaskPart(t, level, subject);
   const part1Tasks = tasksFilteredByAuthor.filter((t) => inferPart(t) === 1);
   const part2Tasks = tasksFilteredByAuthor.filter((t) => inferPart(t) === 2);
-  const part2SectionTitle = (() => {
-    const titles = [
-      ...new Set(
-        part2Tasks
-          .map((t) => String(t.part_title || "").trim())
-          .filter(Boolean)
-      ),
-    ];
-    if (titles.length === 1) return titles[0];
-    return "Часть 2";
-  })();
+  const part2SectionTitle = formatPart2SectionTitle(part2Tasks);
 
   // Связанные задания 19–21 — только для ЕГЭ информатика; для математики всё как обычные задания
   const LINKED_19_21 = [19, 20, 21];

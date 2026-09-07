@@ -24,6 +24,7 @@ import PwaEnableNotificationsPrompt from "./pwa/PwaEnableNotificationsPrompt";
 import PwaInstallPrompt from "./pwa/PwaInstallPrompt";
 import { useSeasonalTheme } from "../seasonal/SeasonalThemeProvider";
 import { openSupport } from "./support";
+import { rememberReturnPath } from "../accessGate/accessGate";
 import "../styles/cabinet-dashboard.css";
 import "./styles/teacher-cabinet.css";
 import "../styles/cabinet-mobile-system.css";
@@ -260,11 +261,13 @@ export default function CabinetLayout() {
   }
 
   if (!user) {
+    const from = `${location.pathname}${location.search || ""}`;
+    rememberReturnPath(from);
     return (
       <Navigate
-        to="/cabinet/login"
+        to={`/cabinet/login?next=${encodeURIComponent(from)}`}
         replace
-        state={{ from: location.pathname + location.search }}
+        state={{ from }}
       />
     );
   }

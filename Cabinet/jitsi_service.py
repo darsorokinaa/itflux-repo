@@ -206,7 +206,14 @@ def generate_jitsi_jwt(
         room_name,
         datetime.fromtimestamp(exp, tz=dt_timezone.utc).isoformat(),
     )
-    return jwt.encode(payload, app_secret, algorithm="HS256")
+    # kid = app_id: HS256 Prosody его не требует, но часть сборок token_verification
+    # отвергает токен без kid как not-allowed («вам не разрешено присоединиться»).
+    return jwt.encode(
+        payload,
+        app_secret,
+        algorithm="HS256",
+        headers={"kid": app_id, "typ": "JWT"},
+    )
 
 
 def decode_jitsi_jwt_unsafe_for_tests(token: str) -> dict[str, Any]:

@@ -10,14 +10,25 @@ import {
   cloneBoardElement,
   type BoardSceneOpsPayload,
 } from "./boardOps";
-import { mergeBoardElements, mergeCollabScenes, coalescePendingRemoteScene, type CollabScene } from "./boardSceneMerge";
+import {
+  mergeBoardElements,
+  mergeCollabScenes,
+  coalescePendingRemoteScene,
+  countLiveBoardElements,
+  type CollabScene,
+} from "./boardSceneMerge";
 import {
   normalizeViewportPayload,
   type TeacherViewport,
 } from "./boardViewport";
 
 export type { CollabScene } from "./boardSceneMerge";
-export { mergeCollabScenes, coalescePendingRemoteScene };
+export {
+  mergeCollabScenes,
+  coalescePendingRemoteScene,
+  countLiveBoardElements,
+  shouldReplaceLocalWithAuthoritativeRemote,
+} from "./boardSceneMerge";
 export type { BoardSceneOpsPayload };
 export type { TeacherViewport };
 
@@ -320,6 +331,7 @@ export function createBoardCollabSession(
   let reconnectAttempt = 0;
   let lastPingAt = 0;
   let lastPongAt = 0;
+  let reconnectGaveUp = false;
   let lastHiddenAt = 0;
   let pingAckTimer: number | null = null;
   let connectingTimer: number | null = null;
@@ -369,6 +381,19 @@ export function createBoardCollabSession(
 
   const emitPeers = () => {
     handlers.onPeersChange?.(Array.from(peers.values()));
+  };
+
+  const clearPeers = (reason = "reset") => {
+    if (!peers.size) return;
+    const ids = [...peers.keys()];
+    peers.clear();
+    for (const id of ids) {
+      handlers.onRemoteCursor?.(null, id);
+    }
+    emitPeers();
+    if (reason === "reconnect") {
+      reportClientEvent("collaboration_reconnect", { board: 1, peers: 0 });
+    }
   };
 
   const sendRaw = (payload: Record<string, unknown>) => {
@@ -524,15 +549,20 @@ export function createBoardCollabSession(
 
   const scheduleReconnect = () => {
     if (closed) return;
+    if (reconnectGaveUp) return;
     if (reconnectTimer != null) return;
     if (isSocketLive(socket)) return;
     reconnectAttempt += 1;
     if (reconnectAttempt > BOARD_RECONNECT.MAX_ATTEMPT) {
+      reconnectGaveUp = true;
       handlers.onStatus?.("failed");
-      reconnectAttempt = BOARD_RECONNECT.MAX_ATTEMPT;
+      reportClientEvent("collaboration_error", { reason: "max_reconnect" });
+      boardWsLifecycle(currentSocketId || clientId.slice(0, 8), "RECONNECT GAVE UP");
+      return;
     }
     const delay = boardReconnectDelayMs(reconnectAttempt);
     boardWsLifecycle(currentSocketId || clientId.slice(0, 8), "RECONNECT", `attempt=${reconnectAttempt}`);
+    reportClientEvent("collaboration_reconnect", { attempt: reconnectAttempt });
     reconnectTimer = window.setTimeout(() => {
       reconnectTimer = null;
       if (closed) return;
@@ -554,6 +584,7 @@ export function createBoardCollabSession(
     ) {
       reconnectAttempt = 0;
     }
+    reconnectGaveUp = false;
     clearReconnectTimer();
     clearPingAckTimer();
     clearConnectingTimer();
@@ -663,6 +694,7 @@ export function createBoardCollabSession(
     socketSeq += 1;
     currentSocketId = `${clientId.slice(0, 8)}-${socketSeq}`;
     const url = wsUrl(boardId);
+    reportClientEvent("collaboration_connect_start", { reconnect: openedOnce ? 1 : 0 });
     boardWsLog("connecting", { boardId, clientId, attempt: reconnectAttempt });
     boardWsLifecycle(currentSocketId, "CREATE", `url=${url}`);
     if (openedOnce) {
@@ -695,9 +727,11 @@ export function createBoardCollabSession(
       const isReconnect = openedOnce;
       openedOnce = true;
       handlers.onStatus?.("open");
+      reportClientEvent("collaboration_connected", { reconnect: isReconnect ? 1 : 0 });
       boardWsLifecycle(currentSocketId, "OPEN");
       if (isReconnect) {
         boardWsLifecycle(currentSocketId, "RECONNECT SUCCESS");
+        clearPeers("reconnect");
       }
       lastPongAt = Date.now();
       lastHiddenAt = 0;
@@ -773,6 +807,7 @@ export function createBoardCollabSession(
         });
         emitPeers();
         if (isNew) {
+          reportClientEvent("participant_join", { role: String(data.role || "").slice(0, 16) });
           const now = Date.now();
           if (now - lastPresenceReplyAt > 400) {
             lastPresenceReplyAt = now;
@@ -782,6 +817,9 @@ export function createBoardCollabSession(
         return;
       }
       if (data.type === "presence_leave") {
+        if (peers.has(data.client_id)) {
+          reportClientEvent("participant_leave", { role: String(peers.get(data.client_id)?.role || "").slice(0, 16) });
+        }
         peers.delete(data.client_id);
         emitPeers();
         handlers.onRemoteCursor?.(null, data.client_id);
@@ -948,10 +986,20 @@ export function createBoardCollabSession(
         if (data.client_id === clientId) return;
         const snapScene = data.scene;
         if (!snapScene || !Array.isArray(snapScene.elements)) return;
+        if (
+          countLiveBoardElements(snapScene.elements) === 0
+          && (
+            countLiveBoardElements(lastPublishedElements) > 0
+            || countLiveBoardElements(pendingLive?.elements) > 0
+          )
+        ) {
+          awaitingSnapshot = false;
+          boardWsLog("skip empty snapshot_response", { fromClient: data.client_id });
+          return;
+        }
         awaitingSnapshot = false;
         boardWsLifecycle(currentSocketId, "SYNC COMPLETE");
-        reportClientEvent("board_full_state_received", {
-          boardId: String(boardId).slice(0, 64),
+        reportClientEvent("initial_state_received", {
           via: "snapshot_response",
           elementCount: snapScene.elements.length,
         });
@@ -1020,14 +1068,6 @@ export function createBoardCollabSession(
           version: typeof data.version === "number" ? data.version : undefined,
           clientId: data.client_id,
         });
-        if (awaitingSnapshot) {
-          awaitingSnapshot = false;
-          reportClientEvent("board_full_state_received", {
-            boardId: String(boardId).slice(0, 64),
-            via: "scene_ops",
-            opsCount: ops.ops.length,
-          });
-        }
         return;
       }
       if (data.type === "scene_live" || data.type === "scene_saved") {
@@ -1096,6 +1136,7 @@ export function createBoardCollabSession(
         boardId: String(boardId).slice(0, 64),
         source: "ws",
       });
+      reportClientEvent("collaboration_error", { source: "ws" });
     };
 
     ws.onclose = (event) => {
@@ -1117,6 +1158,7 @@ export function createBoardCollabSession(
       reconnectsTotal += 1;
       if (isSocketLive(socket)) return;
       handlers.onStatus?.("closed");
+      reportClientEvent("collaboration_disconnected", { code: lastCloseCode || 0 });
       reportClientEvent("board_ws_closed", {
         code: lastCloseCode,
         reason: reason.slice(0, 64),
@@ -1397,6 +1439,9 @@ export function createBoardCollabSession(
       if (!target || target === clientId) return false;
       const files = filesForLivePublish(scene.files as Record<string, Record<string, unknown>>);
       const elements = Array.isArray(scene.elements) ? scene.elements.slice(0, 20_000) : [];
+      // Пустой снимок не шлём: очистка идёт через scene_saved.cleared.
+      // Иначе пустой peer на snapshot_request может затереть живую доску.
+      if (countLiveBoardElements(elements) === 0) return false;
       liveSeq += 1;
       const tSent = Date.now();
       boardWsLog("send snapshot_response", {
@@ -1494,6 +1539,7 @@ export function createBoardCollabSession(
     reconnectNow() {
       unlockResume();
       reconnectAttempt = 0;
+      reconnectGaveUp = false;
       forceReconnect("manual");
     },
     close() {

@@ -1,7 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import CabinetIcon from "../CabinetIcons";
 import { canFollowPeer, canGoToPeer } from "./boardFollow";
 import type { CollabPeer } from "./boardCollab";
+import {
+  COLLAB_UI,
+  classifyCollabConnection,
+} from "../collabConnectionUi";
 
 export type BoardPresencePerson = {
   key: string;
@@ -20,6 +24,9 @@ type Props = {
   followingName?: string;
   followingClientId?: string | null;
   compact?: boolean;
+  connectionStatus?: "off" | "connecting" | "open" | "closed" | "error" | "failed";
+  reconnectElapsedMs?: number;
+  onRetry?: () => void;
   onGoTo: (person: BoardPresencePerson) => void;
   onFollow: (person: BoardPresencePerson) => void;
   onStopFollow: () => void;
@@ -166,6 +173,9 @@ export default function BoardCollabControls({
   followingName,
   followingClientId,
   compact = false,
+  connectionStatus = "open",
+  reconnectElapsedMs = 0,
+  onRetry,
   onGoTo,
   onFollow,
   onStopFollow,
@@ -175,6 +185,24 @@ export default function BoardCollabControls({
   const [listOpen, setListOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const onlineCount = people.filter((p) => p.online !== false).length;
+  const remoteCount = people.filter((p) => !p.isSelf && p.online !== false).length;
+  const connection = useMemo(() => {
+    const transport = connectionStatus === "open"
+      ? "open"
+      : connectionStatus === "failed" || connectionStatus === "error"
+        ? "failed"
+        : connectionStatus === "connecting" && reconnectElapsedMs === 0
+          ? "connecting_initial"
+          : connectionStatus === "off"
+            ? "off"
+            : "reconnecting";
+    return classifyCollabConnection({
+      transport,
+      peerCount: remoteCount,
+      collaborative: true,
+      reconnectElapsedMs,
+    });
+  }, [connectionStatus, reconnectElapsedMs, remoteCount]);
 
   useEffect(() => {
     if (!openKey && !listOpen) return undefined;
@@ -192,6 +220,18 @@ export default function BoardCollabControls({
 
   return (
     <div className="cb-board-collab-ui" ref={rootRef}>
+      <div
+        className={`cb-board-collab-ui__status is-${connection.kind}`}
+        role="status"
+        title={connection.label}
+      >
+        {connection.label}
+        {connection.kind === COLLAB_UI.ERROR && onRetry ? (
+          <button type="button" className="cb-board-collab-ui__retry" onClick={onRetry}>
+            Попробовать снова
+          </button>
+        ) : null}
+      </div>
       {compact ? (
         <button
           type="button"

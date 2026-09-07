@@ -24,6 +24,7 @@ import SupportContactLink from "../components/SupportContactLink";
 import TariffUsageBlock from "../components/TariffUsageBlock";
 import { openSupport } from "../support";
 import { buildPlanHighlights, formatStorageLabel } from "../../utils/planHighlights";
+import { trackValueGoal } from "../../utils/valuePath";
 
 function isLocalFrontendHost() {
   const host = window.location.hostname;
@@ -1142,6 +1143,15 @@ export default function CabinetUpgradePage() {
   }, [searchParams]);
 
   useEffect(() => {
+    if (searchParams.get("status") || searchParams.get("payment_id")) return;
+    trackValueGoal("payment_page_opened", {
+      plan: searchParams.get("plan") || "",
+      period: searchParams.get("period") || "month",
+      source: "upgrade",
+    });
+  }, [searchParams]);
+
+  useEffect(() => {
     fetchSubscriptionPlans()
       .then((data) => {
         setPlansData(data);
@@ -1217,6 +1227,10 @@ export default function CabinetUpgradePage() {
         if (cancelled) return;
 
         if (payment.is_paid) {
+          trackValueGoal("payment_success", {
+            plan: payment.plan_slug || "",
+            source: "upgrade_return",
+          });
           showNotice(
             payment.plan_name
               ? `Оплата прошла успешно. Тариф «${payment.plan_name}» активирован.`
@@ -1231,6 +1245,10 @@ export default function CabinetUpgradePage() {
                 try {
                   const again = await syncSubscriptionPayment(paymentId);
                   if (again?.is_paid) {
+                    trackValueGoal("payment_success", {
+                      plan: again.plan_slug || "",
+                      source: "upgrade_return_retry",
+                    });
                     showNotice(
                       again.plan_name
                         ? `Оплата прошла успешно. Тариф «${again.plan_name}» активирован.`
@@ -1527,6 +1545,10 @@ export default function CabinetUpgradePage() {
           activeOffer(plan, period)?.id || null,
         );
         if (payment.granted || payment.status === "paid") {
+          trackValueGoal("payment_success", {
+            plan: plan.slug,
+            source: "upgrade_immediate",
+          });
           await refreshPlans();
           setNotice(payment.discount?.message || payment.pricing?.message || "Предложение применено.");
           return;
@@ -1567,6 +1589,10 @@ export default function CabinetUpgradePage() {
           );
           const paid = await pollLocalPaymentUntilPaid(payment.payment_id);
           if (paid?.is_paid) {
+            trackValueGoal("payment_success", {
+              plan: paid.plan_slug || plan.slug,
+              source: "upgrade_local_poll",
+            });
             delete payIdemRef.current[idemKey];
             setNotice(
               paid.plan_name

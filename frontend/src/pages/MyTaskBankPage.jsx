@@ -684,6 +684,12 @@ export default function MyTaskBankPage() {
                                 <span>{task.task_title}</span>
                               </>
                             ) : null}
+                            {Number(task.exam_part) === 2 ? (
+                              <>
+                                <MetaSep />
+                                <span className="mtb-badge mtb-badge--part2">Развёрнутый ответ</span>
+                              </>
+                            ) : null}
                             {task.subtopic ? (
                               <>
                                 <MetaSep />

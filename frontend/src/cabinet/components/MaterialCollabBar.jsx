@@ -1,6 +1,12 @@
 /** Компактная панель синхронизации активного материала. */
 
 import { COLLAB_PERMISSIONS } from "../materials/collab/constants";
+import {
+  COLLAB_STATUS_GRACE_MS,
+  COLLAB_UI,
+  classifyCollabConnection,
+  presenceCountLabel,
+} from "../collabConnectionUi";
 
 const PERMISSION_LABELS = {
   [COLLAB_PERMISSIONS.ANSWERS_ONLY]: "Только ответы",
@@ -8,6 +14,15 @@ const PERMISSION_LABELS = {
   [COLLAB_PERMISSIONS.EDIT_CONTENT]: "Редактирование содержимого",
   [COLLAB_PERMISSIONS.FULL]: "Полный совместный доступ",
 };
+
+function transportFromSync(syncStatus) {
+  if (syncStatus === "synced" || syncStatus === "saved") return "open";
+  if (syncStatus === "reconnecting") return "reconnecting";
+  if (syncStatus === "offline") return "closed";
+  if (syncStatus === "error") return "failed";
+  if (syncStatus === "connecting") return "connecting_initial";
+  return "open";
+}
 
 export default function MaterialCollabBar({
   canManage,
@@ -28,21 +43,27 @@ export default function MaterialCollabBar({
   onTransferControl,
   onClose,
   onCloseLocal,
+  onRetrySync,
+  reconnectElapsedMs = 0,
   tools = null,
   notice = "",
   presenceLabel = "",
+  presenceCount = 0,
   capabilities = null,
 }) {
-  const statusLabel = {
-    synced: "Синхронизировано",
-    reconnecting: "Соединение восстанавливается",
-    offline: "Соединение потеряно",
-    error: "Ошибка синхронизации",
-    saved: "Состояние сохранено",
-  }[syncStatus] || "Синхронизировано";
-
-  const independent = followPolicy === "independent";
   const isCollab = collaborative || interactionMode === "collaborative";
+  const connection = classifyCollabConnection({
+    transport: transportFromSync(syncStatus),
+    peerCount: Math.max(0, Number(presenceCount) || 0),
+    collaborative: isCollab,
+    reconnectElapsedMs: syncStatus === "reconnecting"
+      ? Math.max(reconnectElapsedMs, COLLAB_STATUS_GRACE_MS)
+      : reconnectElapsedMs,
+  });
+  const statusKind = connection.kind;
+  const statusLabel = connection.label;
+  const peopleLabel = presenceCountLabel((Number(presenceCount) || 0) + 1);
+  const independent = followPolicy === "independent";
 
   const modeLabel = isCollab
     ? `Совместная работа · ${PERMISSION_LABELS[collaborationPermission] || collaborationPermission}`
@@ -64,12 +85,22 @@ export default function MaterialCollabBar({
               {modeLabel}
             </span>
             {" · "}
-            <span className={`vl-collab-bar__sync is-${syncStatus}`}>{statusLabel}</span>
+            <span className={`vl-collab-bar__sync is-${statusKind}`}>{statusLabel}</span>
+            {peopleLabel ? ` · ${peopleLabel}` : ""}
             {presenceLabel ? ` · ${presenceLabel}` : ""}
             {controllerLabel ? ` · Ведёт: ${controllerLabel}` : ""}
           </span>
         </div>
         {notice ? <p className="vl-collab-bar__notice">{notice}</p> : null}
+        {statusKind === COLLAB_UI.ERROR && onRetrySync ? (
+          <button
+            type="button"
+            className="video-lesson-btn video-lesson-btn--primary"
+            onClick={() => onRetrySync()}
+          >
+            Попробовать снова
+          </button>
+        ) : null}
         {!canManage && !independent && !localBrowsingAway && !isCollab ? (
           <p className="vl-collab-bar__notice">Режим: следовать за учителем · можно отвечать на задания</p>
         ) : null}

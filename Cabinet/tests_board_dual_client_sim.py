@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from unittest import IsolatedAsyncioTestCase
+from unittest.mock import AsyncMock
 
 from Cabinet.board_viewport_store import (
     get_teacher_viewport,
@@ -67,6 +68,7 @@ class TwoClientCollabSimTests(IsolatedAsyncioTestCase):
         student.board_id = "b-role"
         student.can_edit = True
         student.group_name = "board_b-role"
+        student.send = AsyncMock()
 
         await student.receive(
             text_data=json.dumps(

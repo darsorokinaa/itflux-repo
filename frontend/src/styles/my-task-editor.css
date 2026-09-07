@@ -528,6 +528,26 @@
   padding: 0;
   font: inherit;
   cursor: pointer;
+  text-align: left;
+}
+
+.mtb-saas .saas-switch-line--block {
+  margin: 4px 0 2px;
+  align-items: flex-start;
+}
+
+.mtb-saas .saas-switch-line__title {
+  display: block;
+  color: #1f2937;
+  font-weight: 600;
+}
+
+.mtb-saas .saas-switch-line__hint {
+  display: block;
+  margin-top: 2px;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .mtb-saas .saas-switch {
@@ -569,6 +589,11 @@
 .mtb-saas .saas-meta-fields label {
   flex: 1;
   min-width: 0;
+}
+
+.mtb-saas .saas-section > label {
+  display: block;
+  margin-top: 16px;
 }
 
 .mtb-saas .saas-right {

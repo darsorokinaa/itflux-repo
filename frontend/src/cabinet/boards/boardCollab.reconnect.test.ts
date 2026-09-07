@@ -587,7 +587,7 @@ describe("createBoardCollabSession reconnect", () => {
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
-  it("keeps retrying after MAX_ATTEMPT instead of leaving a dead socket", () => {
+  it("stops auto-reconnect after MAX_ATTEMPT and resumes on reconnectNow", () => {
     const onStatus = vi.fn();
     session = createBoardCollabSession("board-1", "A", { onStatus });
     for (let i = 0; i <= BOARD_RECONNECT.MAX_ATTEMPT + 1; i += 1) {
@@ -597,6 +597,8 @@ describe("createBoardCollabSession reconnect", () => {
     expect(onStatus).toHaveBeenCalledWith("failed");
     const before = FakeWebSocket.instances.length;
     vi.advanceTimersByTime(20_000);
+    expect(FakeWebSocket.instances.length).toBe(before);
+    session.reconnectNow();
     expect(FakeWebSocket.instances.length).toBeGreaterThan(before);
   });
 
@@ -666,5 +668,83 @@ describe("createBoardCollabSession reconnect", () => {
     const msgs = lastSocket().sent.map((row) => JSON.parse(row));
     expect(msgs.some((row) => row.type === "join")).toBe(true);
     expect(msgs.some((row) => row.type === "snapshot_request")).toBe(true);
+  });
+
+  it("clears stale peers on reconnect", () => {
+    const onPeersChange = vi.fn();
+    session = createBoardCollabSession("board-1", "A", { onPeersChange });
+    lastSocket().open();
+    lastSocket().onmessage?.({
+      data: JSON.stringify({
+        type: "presence_join",
+        client_id: "ghost",
+        display_name: "Старый",
+        role: "student",
+      }),
+    } as MessageEvent);
+    expect(onPeersChange).toHaveBeenCalled();
+    expect(onPeersChange.mock.calls.at(-1)?.[0]).toHaveLength(1);
+    lastSocket().close();
+    vi.advanceTimersByTime(1000);
+    lastSocket().open();
+    expect(onPeersChange.mock.calls.at(-1)?.[0]).toEqual([]);
+  });
+
+  it("does not overlay an empty snapshot on existing local elements", () => {
+    const onRemoteScene = vi.fn();
+    session = createBoardCollabSession("board-1", "A", { onRemoteScene });
+    lastSocket().open();
+    session.publishLive({
+      elements: [{ id: "keep", version: 1, isDeleted: false }],
+      appState: {},
+      files: {},
+    });
+    vi.advanceTimersByTime(30);
+    const join = lastSocket().sent.find((row) => row.includes('"join"'));
+    const clientId = join ? JSON.parse(join).client_id : session.clientId;
+    lastSocket().onmessage?.({
+      data: JSON.stringify({
+        type: "snapshot_response",
+        client_id: "peer",
+        target_client_id: clientId,
+        scene: { elements: [], appState: {}, files: {} },
+      }),
+    } as MessageEvent);
+    expect(onRemoteScene).not.toHaveBeenCalled();
+  });
+
+  it("does not send an empty snapshot_response", () => {
+    session = createBoardCollabSession("board-1", "A");
+    lastSocket().open();
+    const sentBefore = lastSocket().sent.length;
+    const ok = session.publishSnapshot(
+      { elements: [], appState: {}, files: {} },
+      2,
+      "rejoin-1",
+    );
+    expect(ok).toBe(false);
+    expect(lastSocket().sent.length).toBe(sentBefore);
+  });
+
+  it("skips empty snapshot_response when pending live strokes exist", () => {
+    const onRemoteScene = vi.fn();
+    session = createBoardCollabSession("board-1", "A", { onRemoteScene });
+    lastSocket().open();
+    session.publishLive({
+      elements: [{ id: "keep", version: 1, isDeleted: false }],
+      appState: {},
+      files: {},
+    });
+    const join = lastSocket().sent.find((row) => row.includes('"join"'));
+    const clientId = join ? JSON.parse(join).client_id : session.clientId;
+    lastSocket().onmessage?.({
+      data: JSON.stringify({
+        type: "snapshot_response",
+        client_id: "peer",
+        target_client_id: clientId,
+        scene: { elements: [], appState: {}, files: {} },
+      }),
+    } as MessageEvent);
+    expect(onRemoteScene).not.toHaveBeenCalled();
   });
 });

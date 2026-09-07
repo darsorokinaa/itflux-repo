@@ -219,6 +219,9 @@ export function buildJitsiConfigOverwrite({
     p2p: { enabled: false },
     // XMPP websocket на native Prosody может отдавать 501; BOSH уже работает.
     preferBosh: true,
+    // Повторный вход с тем же JWT user.id (обновление, мини-окно, проверка связи)
+    // иначе Prosody отвечает not-allowed → «Ошибка аутентификации».
+    replaceParticipant: true,
     channelLastN: 8,
     startBitrate: 400,
     disableSimulcast: false,
@@ -628,6 +631,7 @@ export function buildJitsiEmbedUrl(config) {
     `config.inviteAppName=${encodeURIComponent(JSON.stringify("Цифровой поток"))}`,
     "config.p2p.enabled=false",
     "config.preferBosh=true",
+    "config.replaceParticipant=true",
     "interfaceConfig.MOBILE_APP_PROMO=false",
     "interfaceConfig.SHOW_JITSI_WATERMARK=false",
     "interfaceConfig.SHOW_WATERMARK_FOR_GUESTS=false",
@@ -811,6 +815,9 @@ function waitForConferenceJoined(api, {
     });
     listen("conferenceFailed", (event) => {
       finish(isJitsiAuthJoinFailure(event) ? JOIN_OUTCOME.auth : JOIN_OUTCOME.conference);
+    });
+    listen("errorOccurred", (event) => {
+      if (isJitsiAuthJoinFailure(event)) finish(JOIN_OUTCOME.auth);
     });
 
     slowTimer = window.setTimeout(() => {

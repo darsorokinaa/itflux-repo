@@ -415,7 +415,10 @@ def build_pdf_context(request, variant, subject, author_filter=None):
                 file_url = request.build_absolute_uri(rel)
 
         part_title_for = part_obj.part_title if part_obj else ""
-        is_part_2 = _title_is_part_2(part_title_for or "")
+        exam_part = getattr(item.task, "exam_part", None)
+        is_part_2 = exam_part == 2 or _title_is_part_2(part_title_for or "")
+        if exam_part == 2 and not _title_is_part_2(part_title_for or ""):
+            part = "Часть 2"
         max_score = int(item.task.max_score or 1)
         max_score_phrase = _format_ru_balls(max_score)
         is_oge_inf_part_2 = is_oge_inf_pdf and is_part_2
@@ -487,6 +490,8 @@ def build_pdf_context(request, variant, subject, author_filter=None):
     part_2_seen = False
 
     def _is_part_2(item):
+        if item.get("is_part_2"):
+            return True
         title = (item.get("part_title") or item.get("part") or "").lower()
         return "часть" in title and "2" in title and "12" not in title and "21" not in title
 

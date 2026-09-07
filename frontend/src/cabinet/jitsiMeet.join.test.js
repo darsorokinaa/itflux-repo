@@ -180,6 +180,20 @@ describe("createJitsiMeetSession join gating", () => {
     expect(api.dispose).toHaveBeenCalledTimes(1);
   });
 
+  it("treats errorOccurred not-allowed as jitsi_auth without waiting", async () => {
+    vi.useFakeTimers();
+    const pending = createJitsiMeetSession(jwtConfig, container, {});
+    await vi.advanceTimersByTimeAsync(300);
+    api.emit("errorOccurred", {
+      type: "CONNECTION",
+      name: "connection.connectionError.not-allowed",
+      message: "Sorry, you are not allowed to join this call.",
+      isFatal: true,
+    });
+    await expect(pending).rejects.toMatchObject({ code: "jitsi_auth" });
+    expect(api.dispose).toHaveBeenCalledTimes(1);
+  });
+
   it("C: fatal watchdog rejects and disposes when join never arrives", async () => {
     vi.useFakeTimers();
     const onJoined = vi.fn();

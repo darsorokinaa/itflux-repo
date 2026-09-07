@@ -187,6 +187,7 @@ export default function SyncedMaterialWorkspace({
   onCloseLocal,
   onCloseForAll,
   onToggleCollaborative,
+  onRetrySync,
   onStatePatch,
   onSendCursor,
   onSendPointer,
@@ -941,8 +942,10 @@ export default function SyncedMaterialWorkspace({
         onReturnToLeader={canManage ? onReturnToLeader : returnToTeacher}
         onTransferControl={onTransferControl}
         onClose={onCloseForAll}
+        onRetrySync={onRetrySync}
         notice={notice || (localBrowsingAway && !canManage ? "Вы временно не следуете за учителем" : "")}
         presenceLabel={presenceLabel}
+        presenceCount={Array.isArray(presence) ? presence.length : 0}
         capabilities={capabilities}
         tools={(showTools && !annotation) || canNavigate ? (
           <div className="vl-collab-tools" role="toolbar" aria-label="Инструменты">

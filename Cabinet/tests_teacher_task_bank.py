@@ -79,6 +79,19 @@ class TeacherTaskBankBase(TestCase):
 
 
 class TeacherTaskBankIsolationTests(TeacherTaskBankBase):
+    def test_owner_can_change_author(self):
+        created = self._create_owned(self.teacher_a, text="A1")
+        self.api.force_authenticate(user=self.teacher_a)
+        resp = self.api.patch(
+            f"/api/cabinet/my-tasks/{created['id']}/",
+            {"author": "ФИПИ"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.json()["author"], "ФИПИ")
+        detail = self.api.get(f"/api/cabinet/my-tasks/{created['id']}/")
+        self.assertEqual(detail.json()["author"], "ФИПИ")
+
     def test_owner_can_get_own_task(self):
         created = self._create_owned(self.teacher_a, text="A1")
         self.api.force_authenticate(user=self.teacher_a)
@@ -365,6 +378,13 @@ class TeacherTaskExamPartAndAttachmentsTests(TeacherTaskBankBase):
     def test_create_infers_exam_part_from_task_list_part_title(self):
         created = self._create_owned(self.teacher_a)
         self.assertEqual(created["exam_part"], 1)
+
+    def test_extended_answer_keeps_task_list_number(self):
+        created = self._create_owned(self.teacher_a, text="развернутый", exam_part=2)
+        self.assertEqual(created["exam_part"], 2)
+        self.assertEqual(created["task_list_id"], self.tl.id)
+        self.assertEqual(created["exam_task_number"], 8)
+        self.assertEqual(created["part_title"], "Часть 1")
 
     def test_explicit_exam_part_and_list_filter(self):
         first = self._create_owned(self.teacher_a, text="part1", exam_part=1)

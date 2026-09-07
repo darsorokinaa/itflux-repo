@@ -120,6 +120,8 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
   const seenOperationIds = new Set();
   let lastPresenceReplyAt = 0;
   const knownPeers = new Set();
+  const leaveTimers = new Map();
+  let openedOnce = false;
   let lastPingAt = 0;
   let lastPongAt = 0;
   let lastHiddenAt = 0;
@@ -357,6 +359,7 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       socket = null;
     }
     handlers.onStatus?.("connecting");
+    reportClientEvent("collaboration_connect_start", { material: 1, reconnect: openedOnce ? 1 : 0 });
     untrackSocket();
     const ws = new WebSocket(wsUrl(meetingUuid));
     socket = ws;
@@ -366,11 +369,21 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       if (closed || socket !== ws) return;
       unlockResume();
       clearPingAckTimer();
+      const isReconnect = openedOnce;
+      openedOnce = true;
       reconnectAttempt = 0;
       lastPongAt = Date.now();
       lastHiddenAt = 0;
       clearReconnectTimer();
+      if (isReconnect) {
+        for (const t of leaveTimers.values()) window.clearTimeout(t);
+        leaveTimers.clear();
+        knownPeers.clear();
+        handlers.onPresenceReset?.();
+        reportClientEvent("collaboration_reconnect", { material: 1 });
+      }
       handlers.onStatus?.("open");
+      reportClientEvent("collaboration_connected", { material: 1, reconnect: isReconnect ? 1 : 0 });
       startHeartbeat();
       send({
         type: "material.request_sync",
@@ -401,6 +414,7 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
         const ms = data.materialSession;
         sessionId = ms?.sessionId || sessionId;
         version = ms?.version || data.server_revision || version;
+        reportClientEvent("initial_state_received", { material: 1, version: Number(version) || 0 });
         handlers.onSyncState?.(data);
         if (data.presented !== undefined) handlers.onPresented?.(data.presented);
         if (data.screenshareSession !== undefined) handlers.onScreenshareSync?.(data.screenshareSession);
@@ -457,8 +471,13 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       }
       if (data.type === "material.presence_join") {
         const uid = data.user_id || data.author_id;
+        if (uid != null && leaveTimers.has(uid)) {
+          window.clearTimeout(leaveTimers.get(uid));
+          leaveTimers.delete(uid);
+        }
         const isNew = uid != null && !knownPeers.has(uid);
         if (uid != null) knownPeers.add(uid);
+        if (isNew) reportClientEvent("participant_join", { role: String(data.author_role || "").slice(0, 16) });
         handlers.onPresenceJoin?.(data);
         if (isNew) {
           const now = Date.now();
@@ -471,8 +490,17 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       }
       if (data.type === "material.presence_leave") {
         const uid = data.user_id || data.author_id;
-        if (uid != null) knownPeers.delete(uid);
-        handlers.onPresenceLeave?.(data);
+        if (uid == null) {
+          handlers.onPresenceLeave?.(data);
+          return;
+        }
+        if (leaveTimers.has(uid)) return;
+        leaveTimers.set(uid, window.setTimeout(() => {
+          leaveTimers.delete(uid);
+          knownPeers.delete(uid);
+          reportClientEvent("participant_leave", { role: String(data.author_role || "").slice(0, 16) });
+          handlers.onPresenceLeave?.(data);
+        }, 800));
         return;
       }
       if (data.type === "material.error") {
@@ -515,6 +543,7 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
     ws.onerror = () => {
       if (closed || socket !== ws) return;
       handlers.onStatus?.("error");
+      reportClientEvent("collaboration_error", { material: 1 });
     };
 
     ws.onclose = (event) => {
@@ -526,6 +555,7 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       if (closed) return;
       if (_isSocketLive(socket)) return;
       handlers.onStatus?.("closed");
+      reportClientEvent("collaboration_disconnected", { material: 1, code: lastCloseCode || 0 });
       reportClientEvent("material_ws_closed", {
         code: lastCloseCode,
         reason: String(event?.reason || "").slice(0, 64),
@@ -712,6 +742,9 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       clearPingAckTimer();
       clearReconnectTimer();
       stopHeartbeat();
+      for (const t of leaveTimers.values()) window.clearTimeout(t);
+      leaveTimers.clear();
+      knownPeers.clear();
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pageshow", onPageShow);
       window.removeEventListener("pagehide", onPageHide);

@@ -75,6 +75,8 @@ import {
   createBoardCollabSession,
   mergeCollabScenes,
   coalescePendingRemoteScene,
+  countLiveBoardElements,
+  shouldReplaceLocalWithAuthoritativeRemote,
   type BoardSceneOpsPayload,
   type CollabPeer,
   type CollabScene,
@@ -1452,6 +1454,7 @@ export default function CabinetBoardEditorPage() {
         lastRawFilesRef.current = files;
         lastElementsRef.current = elements;
         lastElementsVersionSumRef.current = boardElementsVersionSum(elements);
+        collabRef.current?.resetPublishBase(elements);
         return;
       }
 
@@ -1594,6 +1597,12 @@ export default function CabinetBoardEditorPage() {
       // и штрих обрывается до одной точки. Курсор пира на долю секунды
       // отстанет — не страшно, следующий тик догонит.
       if (isDrawingGestureRef.current) return;
+      const now = Date.now();
+      for (const [id, cursor] of [...remoteCursorsRef.current]) {
+        if (cursor.updatedAt && now - cursor.updatedAt > 12_000) {
+          remoteCursorsRef.current.delete(id);
+        }
+      }
       const collaborators = buildCollaboratorsMap(remoteCursorsRef.current);
       // Не трогаем applyingRemoteRef: курсоры пира раньше блокировали publishLive на десятки ms.
       applyingCollaboratorsRef.current = true;
@@ -1982,8 +1991,46 @@ export default function CabinetBoardEditorPage() {
           // После reconnect подтягиваем серверный snapshot и сливаем с локальным.
           void (async () => {
             try {
+              const versionBefore = versionRef.current;
               const fresh = await fetchInteractiveBoard(boardId);
               if (boardIdRef.current !== boardId || !apiRef.current) return;
+              const remoteElements = fresh.scene_data?.elements || [];
+              if (
+                shouldReplaceLocalWithAuthoritativeRemote({
+                  localVersion: versionBefore,
+                  remoteVersion: Number(fresh.version) || 0,
+                  remoteLiveCount: countLiveBoardElements(remoteElements),
+                })
+              ) {
+                versionRef.current = Number(fresh.version) || versionBefore;
+                setBoard((prev) => (prev ? { ...prev, version: versionRef.current } : prev));
+                const remoteScene = buildScenePayload(
+                  markImageElementsSaved(
+                    remoteElements,
+                    Object.keys(fresh.scene_data?.files || {}),
+                  ),
+                  fresh.scene_data?.appState || {},
+                  (fresh.scene_data?.files || {}) as Record<string, unknown>,
+                );
+                applyingRemoteRef.current = true;
+                applyRemoteSceneToApi(apiRef.current, remoteScene);
+                latestSceneRef.current = remoteScene;
+                lastElementsRef.current = remoteScene.elements;
+                lastElementsVersionSumRef.current = boardElementsVersionSum(remoteScene.elements);
+                lastFilesRef.current = remoteScene.files;
+                knownElementIdsRef.current = new Set(
+                  remoteScene.elements
+                    .map((el) => (el && typeof el === "object" ? (el as { id?: string }).id : null))
+                    .filter((id): id is string => Boolean(id)),
+                );
+                collabRef.current?.resetPublishBase(remoteScene.elements);
+                dirtyRef.current = false;
+                lastSavedRevisionRef.current = localRevisionRef.current;
+                safeSetSaveStatus("saved");
+                setConflict(false);
+                clearApplyingRemoteSoon();
+                return;
+              }
               if (typeof fresh.version === "number" && fresh.version >= versionRef.current) {
                 versionRef.current = fresh.version;
               }
@@ -2463,7 +2510,7 @@ export default function CabinetBoardEditorPage() {
             canManage || collabPeersRef.current.some((peer) => peer.role === "teacher");
           if (teacherPresent && !canManage) return;
           const scene = latestSceneRef.current;
-          if (!scene) return;
+          if (!scene || countLiveBoardElements(scene.elements as unknown[]) === 0) return;
           collabRef.current?.publishSnapshot(
             {
               elements: scene.elements as unknown[],
@@ -2514,6 +2561,7 @@ export default function CabinetBoardEditorPage() {
       { role },
     );
     collabRef.current = session;
+    session.resetPublishBase(latestSceneRef.current?.elements);
     setCollabStatus("connecting");
 
     return () => {
@@ -3262,7 +3310,10 @@ export default function CabinetBoardEditorPage() {
 
   const recoveryUi = useMemo(() => {
     if (loadPhase === "failed") {
-      return classifyResumeUi("FAILED", recoveryElapsedMs, navigator.onLine !== false);
+      return {
+        ...classifyResumeUi("FAILED", recoveryElapsedMs, navigator.onLine !== false),
+        title: "Не удалось восстановить совместное редактирование. Попробовать снова",
+      };
     }
     if (loadPhase === "reconnecting") {
       return classifyResumeUi("RECONNECTING", recoveryElapsedMs, navigator.onLine !== false);
@@ -3278,12 +3329,12 @@ export default function CabinetBoardEditorPage() {
     });
     setRecoveryElapsedMs(0);
     setLoadPhase("reconnecting");
-    if (recoveryUi.phase === "failed" || !collabRef.current) {
-      retryBoardLoad();
+    if (collabRef.current) {
+      collabRef.current.reconnectNow();
       return;
     }
-    collabRef.current.reconnectNow();
-  }, [boardId, recoveryUi.phase, retryBoardLoad]);
+    retryBoardLoad();
+  }, [boardId, retryBoardLoad]);
 
   const onManualRoomReload = useCallback(() => {
     reportClientEvent("MANUAL_RELOAD_CLICK", {
@@ -3954,6 +4005,9 @@ export default function CabinetBoardEditorPage() {
             followingName={followTarget?.name || ""}
             followingClientId={followTarget?.clientId || null}
             compact={compactShell}
+            connectionStatus={collabStatus}
+            reconnectElapsedMs={recoveryElapsedMs}
+            onRetry={onManualBoardReconnect}
             onGoTo={(person) => goToPeer(person.clientId, person.name)}
             onFollow={(person) => startFollow(person.clientId, person.name)}
             onStopFollow={() => stopFollow("Слежение выключено")}

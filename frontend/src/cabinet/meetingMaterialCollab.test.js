@@ -276,4 +276,51 @@ describe("createMeetingMaterialCollab reconnect", () => {
     window.dispatchEvent(new Event("focus"));
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
+
+  it("does not drop presence on a brief leave/join blip", () => {
+    const onJoin = vi.fn();
+    const onLeave = vi.fn();
+    collab = createMeetingMaterialCollab("meet-1", {
+      onPresenceJoin: onJoin,
+      onPresenceLeave: onLeave,
+    });
+    lastSocket().open();
+    lastSocket().onmessage?.({
+      data: JSON.stringify({
+        type: "material.presence_join",
+        user_id: 7,
+        author_role: "student",
+        display_name: "Ученик",
+      }),
+    });
+    lastSocket().onmessage?.({
+      data: JSON.stringify({
+        type: "material.presence_leave",
+        user_id: 7,
+        author_role: "student",
+      }),
+    });
+    expect(onLeave).not.toHaveBeenCalled();
+    lastSocket().onmessage?.({
+      data: JSON.stringify({
+        type: "material.presence_join",
+        user_id: 7,
+        author_role: "student",
+        display_name: "Ученик",
+      }),
+    });
+    vi.advanceTimersByTime(1000);
+    expect(onLeave).not.toHaveBeenCalled();
+    expect(onJoin).toHaveBeenCalled();
+  });
+
+  it("resets presence on reconnect", () => {
+    const onReset = vi.fn();
+    collab = createMeetingMaterialCollab("meet-1", { onPresenceReset: onReset });
+    lastSocket().open();
+    lastSocket().close();
+    vi.advanceTimersByTime(1000);
+    lastSocket().open();
+    expect(onReset).toHaveBeenCalledTimes(1);
+  });
 });

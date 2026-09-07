@@ -96,6 +96,13 @@ import { AnnotationProvider } from "../annotations/AnnotationContext";
 import { AnnotationHeaderButton } from "../annotations/AnnotationToolbar";
 import { useFloatingDrag } from "../useFloatingDrag";
 import FloatingResizeHandles from "../FloatingResizeHandles";
+import MiniCallBar from "../components/MiniCallBar";
+import {
+  callStayOnTopAvailable,
+  closeCallStayOnTop,
+  requestCallStayOnTop,
+} from "../callStayOnTop";
+import { selectSharePinTarget } from "../jitsiScreenShare";
 import {
   STUDENT_HOME_ROUTE,
   createLeaveOnce,
@@ -119,6 +126,7 @@ import {
   startMainThreadWatchdog,
 } from "../pwa/runtimeResources";
 import { reportClientEvent } from "../../utils/clientTelemetry";
+import { COLLAB_STATUS_GRACE_MS } from "../collabConnectionUi";
 import "../styles/video-meeting.css";
 import "../styles/live-variant-answers.css";
 
@@ -273,6 +281,7 @@ export default function VideoMeetingPage() {
   const intentionalLeaveRef = useRef(false);
   const programmaticDisposeRef = useRef(false);
   const jitsiInitRef = useRef(false);
+  const jitsiAuthRetryRef = useRef(0);
   const pollTimerRef = useRef(null);
   const lessonTitleRef = useRef("");
 
@@ -292,6 +301,8 @@ export default function VideoMeetingPage() {
   const [workspaceMaterial, setWorkspaceMaterial] = useState(null);
   const [materialSession, setMaterialSession] = useState(null);
   const [materialSyncStatus, setMaterialSyncStatus] = useState("synced");
+  const materialSyncStatusRef = useRef("synced");
+  const materialStatusTimerRef = useRef(null);
   const [materialNotice, setMaterialNotice] = useState("");
   const [remoteCursors, setRemoteCursors] = useState([]);
   const [remotePreviews, setRemotePreviews] = useState({});
@@ -312,6 +323,13 @@ export default function VideoMeetingPage() {
     displaySurface: "",
     localSharing: false,
   });
+  const screenshareLayoutRef = useRef({
+    tileView: false,
+    contentWidth: 0,
+    contentHeight: 0,
+    displaySurface: "",
+    localSharing: false,
+  });
   const screenshareSeenRef = useRef(new Set());
   const ssAnnV2EngineRef = useRef(null);
   const lastShareReportRef = useRef("");
@@ -326,6 +344,13 @@ export default function VideoMeetingPage() {
   const pageRootRef = useRef(null);
   const [callCollapsed, setCallCollapsed] = useState(false);
   const [focusCall, setFocusCall] = useState(false);
+  const [shareMiniDismissed, setShareMiniDismissed] = useState(false);
+  const [localMicOn, setLocalMicOn] = useState(false);
+  const [localCamOn, setLocalCamOn] = useState(false);
+  const [callRoster, setCallRoster] = useState({ remotes: [], local: null });
+  const [stayOnTopActive, setStayOnTopActive] = useState(false);
+  const pipHandleRef = useRef(null);
+  const callRosterRef = useRef({ remotes: [], local: null });
   const [boardInfo, setBoardInfo] = useState({ loading: true, board: null });
   const [liveAnswers, setLiveAnswers] = useState(null);
   const [liveAnswersLoading, setLiveAnswersLoading] = useState(false);
@@ -408,6 +433,10 @@ export default function VideoMeetingPage() {
     }
     screenShareApiRef.current = null;
     lastShareReportRef.current = "";
+    const pipHandle = pipHandleRef.current;
+    pipHandleRef.current = null;
+    setStayOnTopActive(false);
+    void closeCallStayOnTop({ pipWindow: pipHandle?.pipWindow });
     if (containerRef.current) {
       containerRef.current.innerHTML = "";
     }
@@ -496,6 +525,8 @@ export default function VideoMeetingPage() {
       screenSharing: false,
       screenTrackActive: null,
     };
+    setLocalMicOn(!startWithAudioMuted);
+    setLocalCamOn(!startWithVideoMuted);
 
     try {
       const config = await fetchVideoMeetingJoinConfig(meetingUuid, {
@@ -637,20 +668,23 @@ export default function VideoMeetingPage() {
             setParticipantCount(snap.count);
             conferencePresenceRef.current.count = snap.count;
             const remotes = Array.isArray(snap.remoteParticipants)
-              ? snap.remoteParticipants.length
-              : 0;
-            conferencePresenceRef.current.remoteCount = remotes;
+              ? snap.remoteParticipants
+              : [];
+            conferencePresenceRef.current.remoteCount = remotes.length;
+            callRosterRef.current = { remotes, local: snap.localParticipant || null };
+            setCallRoster({ remotes, local: snap.localParticipant || null });
             // Roster already has the peer: they are in the call. Requiring
             // dataChannelOpened left a false «подключается» overlay; combined
             // with a filtered-out hidden remote it looked like «ещё не
             // подключились» and follow/board presence stayed empty.
-            if (remotes >= 1) {
+            if (remotes.length >= 1) {
               conferencePresenceRef.current.mediaUp = true;
             }
             applyConferenceHint();
           }
         },
         onJoined: (event) => {
+          jitsiAuthRetryRef.current = 0;
           setJoinState("joined");
           conferencePresenceRef.current.joined = true;
           resumeControllerRef.current?.succeed?.();
@@ -736,41 +770,70 @@ export default function VideoMeetingPage() {
         onAudioMuteStatusChanged: (payload) => {
           const on = !payload?.muted;
           setMeetingMicEnabled(meetingUuid, on);
+          setLocalMicOn(on);
           intendedMediaRef.current = { ...intendedMediaRef.current, micOn: on };
         },
         onVideoMuteStatusChanged: (payload) => {
           const on = !payload?.muted;
           setMeetingCameraEnabled(meetingUuid, on);
+          setLocalCamOn(on);
           intendedMediaRef.current = { ...intendedMediaRef.current, camOn: on };
         },
         onScreenShare: (snap) => {
+          const localSharing = Boolean(snap?.localSharing);
+          const wasLocalSharing = Boolean(screenshareLayoutRef.current?.localSharing);
           intendedMediaRef.current = {
             ...intendedMediaRef.current,
-            screenSharing: Boolean(snap?.localSharing || snap?.active),
+            screenSharing: Boolean(localSharing || snap?.active),
             screenTrackActive: snap?.active ? true : false,
           };
+          const nextLayout = {
+            tileView: Boolean(snap?.tileView),
+            contentWidth: Number(snap?.contentWidth) || 0,
+            contentHeight: Number(snap?.contentHeight) || 0,
+            displaySurface: snap?.displaySurface || "",
+            localSharing,
+          };
+          screenshareLayoutRef.current = nextLayout;
+          setScreenshareLayout(nextLayout);
+          if (localSharing && !wasLocalSharing) {
+            setShareMiniDismissed(false);
+            setCallCollapsed(false);
+            setFocusCall(false);
+            reportClientEvent("screen_share_started", { surface: String(snap?.displaySurface || "").slice(0, 24) });
+          } else if (!localSharing && wasLocalSharing) {
+            setShareMiniDismissed(false);
+            const pipHandle = pipHandleRef.current;
+            pipHandleRef.current = null;
+            setStayOnTopActive(false);
+            void closeCallStayOnTop({ pipWindow: pipHandle?.pipWindow });
+            reportClientEvent("screen_share_stopped");
+          }
+          const remotes = Array.isArray(callRosterRef.current?.remotes) ? callRosterRef.current.remotes : [];
+          if (conferencePresenceRef.current.joined) {
+            const pin = selectSharePinTarget({
+              localSharing,
+              presenterJitsiId: snap?.presenterJitsiId || "",
+              remoteIds: remotes.map((p) => p.id).filter(Boolean),
+            });
+            if (pin.mode === "desktop" && pin.id) {
+              screenShareApiRef.current?.pinDesktop?.(pin.id);
+            } else if (pin.mode === "camera" && pin.id) {
+              screenShareApiRef.current?.pinCamera?.(pin.id);
+            }
+          }
           const collab = materialCollabRef.current;
           if (!collab || !snap) return;
-          const key = `${snap.active ? 1 : 0}|${snap.presenterJitsiId || ""}|${snap.localSharing ? 1 : 0}|${snap.contentWidth || 0}x${snap.contentHeight || 0}|${snap.tileView ? 1 : 0}|${snap.displaySurface || ""}`;
-          setScreenshareLayout({
-            tileView: Boolean(snap.tileView),
-            contentWidth: Number(snap.contentWidth) || 0,
-            contentHeight: Number(snap.contentHeight) || 0,
-            displaySurface: snap.displaySurface || "",
-            localSharing: Boolean(snap.localSharing),
-          });
+          const key = `${snap.active ? 1 : 0}|${snap.presenterJitsiId || ""}|${localSharing ? 1 : 0}|${snap.contentWidth || 0}x${snap.contentHeight || 0}|${snap.tileView ? 1 : 0}|${snap.displaySurface || ""}`;
           if (key === lastShareReportRef.current) return;
           lastShareReportRef.current = key;
           collab.reportScreenshare({
             active: Boolean(snap.active),
-            localSharing: Boolean(snap.localSharing),
+            localSharing,
             presenterJitsiId: snap.presenterJitsiId || snap.localId || "",
             contentWidth: snap.contentWidth,
             contentHeight: snap.contentHeight,
           });
-          if (snap.active && snap.presenterJitsiId) {
-            screenShareApiRef.current?.pinDesktop?.(snap.presenterJitsiId);
-          }
         },
       });
       if (initGenRef.current !== initGen || abort.signal.aborted) {
@@ -802,11 +865,27 @@ export default function VideoMeetingPage() {
 
       attendanceTracker.cancelPendingLeave();
     } catch (err) {
-      if (initGenRef.current !== initGen || abort.signal.aborted || err?.code === "jitsi_aborted") {
+      if (err?.code === "jitsi_aborted" || abort.signal.aborted) {
+        if (initGenRef.current === initGen) jitsiInitRef.current = false;
+        return;
+      }
+      if (initGenRef.current !== initGen) {
         jitsiInitRef.current = false;
         return;
       }
       jitsiInitRef.current = false;
+      if (err?.code === "jitsi_auth" && jitsiAuthRetryRef.current < 1) {
+        jitsiAuthRetryRef.current += 1;
+        const retryGen = initGenRef.current;
+        disposeApi();
+        setConnectionHint("Повторный вход в конференцию…");
+        await new Promise((resolve) => {
+          window.setTimeout(resolve, 900);
+        });
+        if (shouldIgnoreReconnect(intentionalLeaveRef.current)) return;
+        if (initGenRef.current !== retryGen + 1) return;
+        return initializeJitsi();
+      }
       disposeApi();
       if (err?.code === "not_live" || err?.status === 409) {
         callStateRef.current?.transition(CALL_STATES.ended, err?.code || "not-live");
@@ -1494,6 +1573,54 @@ export default function VideoMeetingPage() {
     }
   };
 
+  const onMiniCallHangup = useCallback(() => {
+    if (canManageRef.current) {
+      setFinishConfirm(true);
+      return;
+    }
+    try {
+      apiRef.current?.executeCommand?.("hangup");
+    } catch {
+      /* ignore */
+    }
+    leaveStudentRoomRef.current?.();
+  }, []);
+
+  const onMiniCallStayOnTop = useCallback(async () => {
+    if (stayOnTopActive) {
+      const pipHandle = pipHandleRef.current;
+      pipHandleRef.current = null;
+      setStayOnTopActive(false);
+      await closeCallStayOnTop({ pipWindow: pipHandle?.pipWindow });
+      return;
+    }
+    if (!callStayOnTopAvailable()) return;
+    const iframe = apiRef.current?.getIFrame?.() || containerRef.current?.querySelector?.("iframe") || null;
+    const result = await requestCallStayOnTop({ iframe });
+    if (result?.ok) {
+      pipHandleRef.current = result;
+      setStayOnTopActive(true);
+      const closer = () => {
+        pipHandleRef.current = null;
+        setStayOnTopActive(false);
+        reportClientEvent("pip_closed");
+      };
+      try {
+        result.video?.addEventListener?.("leavepictureinpicture", closer, { once: true });
+      } catch {
+        /* ignore */
+      }
+      try {
+        result.pipWindow?.addEventListener?.("pagehide", closer, { once: true });
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    setMaterialsToast("Звонок остаётся в мини-окне на странице урока. В этом браузере показ поверх других окон недоступен.");
+    window.setTimeout(() => setMaterialsToast(""), 3200);
+  }, [stayOnTopActive]);
+
   const onCopyLink = async () => {
     const pageUrl = detail?.videoMeeting?.pageUrl || detail?.videoMeeting?.joinUrl
       || (meetingUuid ? `/cabinet/meetings/${meetingUuid}` : "");
@@ -1822,10 +1949,29 @@ export default function VideoMeetingPage() {
     const remoteGuard = remoteApplyGuardRef.current;
     const collab = createMeetingMaterialCollab(meetingUuid, {
       onStatus: (status) => {
-        if (status === "open") setMaterialSyncStatus("synced");
-        else if (status === "connecting") setMaterialSyncStatus("reconnecting");
-        else if (status === "failed") setMaterialSyncStatus("error");
-        else if (status === "closed" || status === "error") setMaterialSyncStatus("reconnecting");
+        if (materialStatusTimerRef.current) {
+          window.clearTimeout(materialStatusTimerRef.current);
+          materialStatusTimerRef.current = null;
+        }
+        if (status === "open") {
+          materialSyncStatusRef.current = "synced";
+          setMaterialSyncStatus("synced");
+          return;
+        }
+        if (status === "failed") {
+          materialSyncStatusRef.current = "error";
+          setMaterialSyncStatus("error");
+          return;
+        }
+        const applyReconnecting = () => {
+          materialSyncStatusRef.current = "reconnecting";
+          setMaterialSyncStatus("reconnecting");
+        };
+        if (materialSyncStatusRef.current === "synced") {
+          materialStatusTimerRef.current = window.setTimeout(applyReconnecting, COLLAB_STATUS_GRACE_MS);
+        } else {
+          applyReconnecting();
+        }
       },
       onSyncState: (payload) => {
         remoteGuard.run(() => applyMaterialSession(payload?.materialSession || null));
@@ -2003,6 +2149,9 @@ export default function VideoMeetingPage() {
             : p
         )));
       },
+      onPresenceReset: () => {
+        setMaterialPresence([]);
+      },
       onPresenceJoin: (payload) => {
         const userId = payload.user_id || payload.author_id;
         if (userId == null) return;
@@ -2116,6 +2265,10 @@ export default function VideoMeetingPage() {
     return () => {
       collab.close();
       materialCollabRef.current = null;
+      if (materialStatusTimerRef.current) {
+        window.clearTimeout(materialStatusTimerRef.current);
+        materialStatusTimerRef.current = null;
+      }
       for (const t of remoteCursorTimersRef.current.values()) window.clearTimeout(t);
       remoteCursorTimersRef.current.clear();
       setRemoteCursors([]);
@@ -2522,8 +2675,14 @@ export default function VideoMeetingPage() {
     || materialSession?.material?.title
     || "";
   const liveVariantAnswers = Boolean(canManage && presented?.kind === "variant");
-  // Материал открыт — звонок сворачивается в плавающее окно, а не пропадает под оверлеем.
-  const compactCall = Boolean(workspaceOpen && showJitsi);
+  const shareMiniCall = Boolean(
+    showJitsi
+    && screenshareLayout.localSharing
+    && !shareMiniDismissed
+    && !focusCall,
+  );
+  // Материал открыт или идёт демонстрация — звонок сворачивается в плавающее окно.
+  const compactCall = Boolean(showJitsi && (workspaceOpen || shareMiniCall));
   // Панель материалов рядом со звонком; у учителя — и при открытом workspace.
   const showAside = showJitsi && asideOpen && (
     !workspaceOpen || liveVariantAnswers || canManage
@@ -2552,11 +2711,11 @@ export default function VideoMeetingPage() {
       compactCallPrevRef.current = false;
       return;
     }
-    if (!compactCallPrevRef.current && isLessonCompactViewport()) {
+    if (!compactCallPrevRef.current && isLessonCompactViewport() && workspaceOpen && !shareMiniCall) {
       setCallCollapsed(true);
     }
     compactCallPrevRef.current = true;
-  }, [compactCall]);
+  }, [compactCall, shareMiniCall, workspaceOpen]);
 
   const studentMaterialRowsResolved = canManage
     ? materialRows
@@ -2667,6 +2826,7 @@ export default function VideoMeetingPage() {
         showAside ? "video-lesson-page--aside" : "",
         workspaceOpen && showJitsi ? "video-lesson-page--workspace" : "",
         compactCall ? "video-lesson-page--compact" : "",
+        shareMiniCall ? "video-lesson-page--share-mini" : "",
         liveVariantAnswers ? "video-lesson-page--live-answers" : "",
         mobilePane === "materials" && showJitsi ? "video-lesson-page--mobile-materials" : "",
         roomFullscreen ? "is-css-fullscreen" : "",
@@ -2881,6 +3041,7 @@ export default function VideoMeetingPage() {
             studentViewports={studentViewports}
             presence={materialPresence}
             notice={materialNotice}
+            onRetrySync={() => materialCollabRef.current?.reconnectNow?.()}
             canEditContent
             currentUserId={detail?.viewerUserId ?? detail?.userId ?? null}
             isController={
@@ -3316,30 +3477,32 @@ export default function VideoMeetingPage() {
           ) : null}
 
           {compactCall ? (
-            <div className="video-lesson-compact-drag">
-              <span>{callCollapsed ? "Звонок скрыт" : "Звонок"}</span>
-              <div className="video-lesson-compact-drag__actions">
-                <button
-                  type="button"
-                  className="video-lesson-compact-drag__expand"
-                  onClick={() => setCallCollapsed((v) => !v)}
-                >
-                  {callCollapsed ? "Показать" : "Скрыть"}
-                </button>
-                <button
-                  type="button"
-                  className="video-lesson-compact-drag__expand"
-                  onClick={() => {
-                    // Только локально убрать материал с экрана — ученику сессия остаётся.
-                    setFocusCall(true);
-                    setCallCollapsed(false);
-                    setMobilePane("call");
-                  }}
-                >
-                  На весь экран
-                </button>
-              </div>
-            </div>
+            <MiniCallBar
+              collapsed={callCollapsed}
+              remoteName={callRoster.remotes?.[0]?.displayName || displayName || "Участник"}
+              remoteAudioMuted={callRoster.remotes?.[0]?.audioMuted}
+              remoteVideoMuted={callRoster.remotes?.[0]?.videoMuted}
+              localMicOn={localMicOn}
+              localCamOn={localCamOn}
+              sharing={Boolean(screenshareLayout.localSharing)}
+              stayOnTopAvailable={callStayOnTopAvailable()}
+              stayOnTopActive={stayOnTopActive}
+              onToggleCollapsed={() => setCallCollapsed((v) => !v)}
+              onExpand={() => {
+                if (shareMiniCall) setShareMiniDismissed(true);
+                setFocusCall(true);
+                setCallCollapsed(false);
+                setMobilePane("call");
+              }}
+              onToggleMic={() => {
+                apiRef.current?.executeCommand?.("toggleAudio");
+              }}
+              onToggleCam={() => {
+                apiRef.current?.executeCommand?.("toggleVideo");
+              }}
+              onStayOnTop={() => { void onMiniCallStayOnTop(); }}
+              onHangup={onMiniCallHangup}
+            />
           ) : null}
           {compactCall && !callCollapsed ? (
             <FloatingResizeHandles onPointerDown={onCompactCallResizePointerDown} />

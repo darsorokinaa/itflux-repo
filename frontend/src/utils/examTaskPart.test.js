@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatExamPartLabel, inferExamTaskPart } from "./examTaskPart";
+import { formatExamPartLabel, formatPart2SectionTitle, inferExamTaskPart } from "./examTaskPart";
 
 describe("inferExamTaskPart", () => {
   it("maps part_id 1/2", () => {
@@ -18,6 +18,11 @@ describe("inferExamTaskPart", () => {
     expect(inferExamTaskPart({ part: 9, part_title: "Часть 2", number: 20 }, "ege", "inf")).toBe(2);
   });
 
+  it("honors teacher bank exam_part over task number", () => {
+    expect(inferExamTaskPart({ number: 5, part: 1, part_title: "Часть 1", exam_part: 2 }, "ege", "inf")).toBe(2);
+    expect(inferExamTaskPart({ number: 27, part: 2, part_title: "Часть 2", exam_part: 1 }, "ege", "inf")).toBe(1);
+  });
+
   it("maps ege chemistry 1–28 to part 1", () => {
     expect(inferExamTaskPart({ number: 28 }, "ege", "chem")).toBe(1);
     expect(inferExamTaskPart({ number: 29 }, "ege", "chem")).toBe(2);
@@ -28,5 +33,12 @@ describe("formatExamPartLabel", () => {
   it("prefers title", () => {
     expect(formatExamPartLabel(3, "Говорение")).toBe("Говорение");
     expect(formatExamPartLabel(2, "")).toBe("Часть 2");
+  });
+});
+
+describe("formatPart2SectionTitle", () => {
+  it("does not label part 2 as Часть 1 when override is used", () => {
+    expect(formatPart2SectionTitle([{ part_title: "Часть 1" }])).toBe("Часть 2");
+    expect(formatPart2SectionTitle([{ part_title: "Говорение" }])).toBe("Говорение");
   });
 });

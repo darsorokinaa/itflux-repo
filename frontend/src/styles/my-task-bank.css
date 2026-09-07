@@ -849,6 +849,13 @@
   font-weight: 600;
 }
 
+.mtb-badge--part2 {
+  background: #eef2ff;
+  color: #3730a3;
+  box-shadow: inset 0 0 0 1px #c7d2fe;
+  font-weight: 600;
+}
+
 .all-tasks-item--mine .all-tasks-item__card {
   background: #f8fafc;
 }

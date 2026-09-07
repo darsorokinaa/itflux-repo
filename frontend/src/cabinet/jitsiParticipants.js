@@ -86,11 +86,15 @@ export function normalizeParticipant(raw, { localId = "" } = {}) {
     || raw.formattedDisplayName
     || raw.name,
   );
+  const audioMuted = raw.muted ?? raw.audioMuted;
+  const videoMuted = raw.videoMuted ?? raw.cameraMuted;
   return {
     id,
     displayName,
     role: safeStr(raw.role),
     local,
+    audioMuted: typeof audioMuted === "boolean" ? audioMuted : undefined,
+    videoMuted: typeof videoMuted === "boolean" ? videoMuted : undefined,
   };
 }
 

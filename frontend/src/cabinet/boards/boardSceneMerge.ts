@@ -139,6 +139,35 @@ export function mergeBoardElements(local: unknown[], remote: unknown[]): unknown
   return ordered;
 }
 
+export function countLiveBoardElements(elements: unknown[] | null | undefined): number {
+  if (!Array.isArray(elements)) return 0;
+  let n = 0;
+  for (const raw of elements) {
+    if (!raw || typeof raw !== "object") continue;
+    if ((raw as { isDeleted?: boolean }).isDeleted) continue;
+    const id = (raw as { id?: unknown }).id;
+    if (typeof id === "string" && id) n += 1;
+  }
+  return n;
+}
+
+/**
+ * Пустой более новый REST-снимок (очистка уже сохранена) нельзя merge-ить:
+ * локальные id, которых нет на сервере, воскресили бы доску после reconnect.
+ * Несравнимый/тот же version — оставляем merge, чтобы не стереть несохранённые штрихи.
+ */
+export function shouldReplaceLocalWithAuthoritativeRemote({
+  localVersion,
+  remoteVersion,
+  remoteLiveCount,
+}: {
+  localVersion: number;
+  remoteVersion: number;
+  remoteLiveCount: number;
+}): boolean {
+  return Number(remoteVersion) > Number(localVersion) && Number(remoteLiveCount) === 0;
+}
+
 const LOCAL_UI_KEYS = [
   "scrollX",
   "scrollY",

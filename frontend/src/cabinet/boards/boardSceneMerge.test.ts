@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   coalescePendingRemoteScene,
+  countLiveBoardElements,
   isNewerBoardElement,
   mergeBoardElements,
   mergeCollabScenes,
+  shouldReplaceLocalWithAuthoritativeRemote,
 } from "./boardSceneMerge";
 
 describe("boardSceneMerge", () => {
@@ -14,6 +16,14 @@ describe("boardSceneMerge", () => {
     expect(
       isNewerBoardElement({ id: "a", version: 2 }, { id: "a", version: 3 }),
     ).toBe(false);
+  });
+
+  it("merge keeps local-only ids when remote is empty (replace must be explicit)", () => {
+    const merged = mergeBoardElements(
+      [{ id: "local-stroke", version: 1, type: "freedraw", isDeleted: false }],
+      [],
+    ) as { id: string }[];
+    expect(merged.map((e) => e.id)).toEqual(["local-stroke"]);
   });
 
   it("keeps both local and remote strokes when ids differ", () => {
@@ -135,5 +145,35 @@ describe("boardSceneMerge", () => {
     expect((slot.scene.elements as { id: string }[]).map((e) => e.id)).toEqual(["y"]);
     expect(slot.meta.lite).toBeFalsy();
     expect(slot.meta.version).toBe(9);
+  });
+});
+
+describe("authoritative empty remote", () => {
+  it("counts only non-deleted elements", () => {
+    expect(countLiveBoardElements([
+      { id: "a", isDeleted: false },
+      { id: "b", isDeleted: true },
+      { id: "c" },
+    ])).toBe(2);
+    expect(countLiveBoardElements([])).toBe(0);
+    expect(countLiveBoardElements(null)).toBe(0);
+  });
+
+  it("replaces local only when saved remote is newer and empty", () => {
+    expect(shouldReplaceLocalWithAuthoritativeRemote({
+      localVersion: 4,
+      remoteVersion: 5,
+      remoteLiveCount: 0,
+    })).toBe(true);
+    expect(shouldReplaceLocalWithAuthoritativeRemote({
+      localVersion: 5,
+      remoteVersion: 5,
+      remoteLiveCount: 0,
+    })).toBe(false);
+    expect(shouldReplaceLocalWithAuthoritativeRemote({
+      localVersion: 4,
+      remoteVersion: 5,
+      remoteLiveCount: 3,
+    })).toBe(false);
   });
 });

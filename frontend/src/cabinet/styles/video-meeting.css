@@ -831,6 +831,14 @@
   touch-action: none;
 }
 
+.video-lesson-page.video-lesson-page--share-mini .video-lesson-content,
+.video-lesson-page.video-lesson-page--compact.video-lesson-page--share-mini .video-lesson-content,
+.video-lesson-page.video-lesson-page--workspace.video-lesson-page--compact.video-lesson-page--share-mini .video-lesson-content {
+  z-index: 11050;
+  width: min(360px, calc(100vw - 24px));
+  height: min(260px, 40vh);
+}
+
 .video-lesson-content--dragging {
   cursor: grabbing;
   user-select: none;
@@ -950,6 +958,96 @@
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+}
+
+.mini-call-bar {
+  gap: 10px;
+}
+
+.mini-call-bar__who {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.mini-call-bar__avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(51, 65, 85, 0.9);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.mini-call-bar__avatar svg {
+  width: 14px;
+  height: 14px;
+}
+
+.mini-call-bar__meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.mini-call-bar__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-call-bar__flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 0.65rem;
+  font-weight: 500;
+  color: #cbd5e1;
+}
+
+.mini-call-bar__share {
+  color: #fbbf24;
+}
+
+.mini-call-bar__iconbtn {
+  appearance: none;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(30, 41, 59, 0.9);
+  color: #e2e8f0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.mini-call-bar__iconbtn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.mini-call-bar__iconbtn.is-off {
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.45);
+}
+
+.mini-call-bar__iconbtn--hangup {
+  background: #b91c1c;
+  border-color: #991b1b;
+  color: #fff;
+}
+
+.video-lesson-compact-drag__expand.is-active {
+  background: rgba(37, 99, 235, 0.35);
+  border-color: rgba(147, 197, 253, 0.55);
 }
 
 .video-lesson-content--call-collapsed {
@@ -2210,12 +2308,19 @@ body.vl-room-fullscreen .student-cabinet-nav {
 }
 
 .vl-collab-bar__sync.is-reconnecting,
-.vl-collab-bar__sync.is-error {
+.vl-collab-bar__sync.is-error,
+.vl-collab-bar__sync.is-offline {
   color: #b45309;
 }
 
+.vl-collab-bar__sync.is-error {
+  color: #b91c1c;
+}
+
 .vl-collab-bar__sync.is-synced,
-.vl-collab-bar__sync.is-saved {
+.vl-collab-bar__sync.is-saved,
+.vl-collab-bar__sync.is-collab_active,
+.vl-collab-bar__sync.is-connected {
   color: #15803d;
 }
 

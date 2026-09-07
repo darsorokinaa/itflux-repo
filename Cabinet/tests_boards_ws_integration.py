@@ -155,3 +155,192 @@ class BoardWebsocketRapidStrokeTests(TransactionTestCase):
                     await ws.disconnect()
                 except BaseException:
                     pass
+
+    async def _consume_ready(self, ws):
+        ready = await ws.receive_json_from(timeout=2)
+        self.assertEqual(ready.get("type"), "ready")
+
+    async def _join(self, ws, client_id, display_name):
+        await ws.send_json_to({
+            "type": "join",
+            "client_id": client_id,
+            "display_name": display_name,
+        })
+        seen = []
+        for _ in range(8):
+            msg = await ws.receive_json_from(timeout=2)
+            seen.append(msg.get("type"))
+            if msg.get("type") == "room_joined":
+                self.assertEqual(msg.get("client_id"), client_id)
+                return
+        self.fail(f"Не получили room_joined для {client_id}. Типы: {seen}")
+
+    async def _wait_scene_op(self, ws, pred, fail_msg, limit=12):
+        seen = []
+        for _ in range(limit):
+            msg = await ws.receive_json_from(timeout=2)
+            seen.append(msg.get("type"))
+            if msg.get("type") != "scene_ops":
+                continue
+            for op in msg.get("ops", {}).get("ops", []):
+                if pred(op):
+                    return msg
+        self.fail(f"{fail_msg}. Типы: {seen}")
+
+    async def test_teacher_and_student_exchange_upsert_and_delete(self):
+        teacher_ws = await self._connect(self.teacher)
+        student_ws = await self._connect(self.student_user)
+        try:
+            await self._consume_ready(teacher_ws)
+            await self._consume_ready(student_ws)
+            await self._join(teacher_ws, "teacher-tab", "Учитель")
+            await self._join(student_ws, "student-tab", "Ученик")
+
+            await teacher_ws.send_json_to({
+                "type": "scene_ops",
+                "client_id": "teacher-tab",
+                "version": 1,
+                "ops": {
+                    "baseVersion": 0,
+                    "ops": [{
+                        "op": "upsert",
+                        "element": {"id": "rect-a", "version": 1, "type": "rectangle"},
+                    }],
+                    "files": {},
+                    "appStatePatch": {},
+                },
+            })
+            await self._wait_scene_op(
+                student_ws,
+                lambda op: op.get("element", {}).get("id") == "rect-a",
+                "Ученик не получил upsert учителя",
+            )
+
+            await student_ws.send_json_to({
+                "type": "scene_ops",
+                "client_id": "student-tab",
+                "version": 1,
+                "ops": {
+                    "baseVersion": 0,
+                    "ops": [{
+                        "op": "upsert",
+                        "element": {"id": "text-b", "version": 1, "type": "text", "text": "TEST"},
+                    }],
+                    "files": {},
+                    "appStatePatch": {},
+                },
+            })
+            await self._wait_scene_op(
+                teacher_ws,
+                lambda op: op.get("element", {}).get("id") == "text-b",
+                "Учитель не получил upsert ученика",
+            )
+
+            await teacher_ws.send_json_to({
+                "type": "scene_ops",
+                "client_id": "teacher-tab",
+                "version": 2,
+                "ops": {
+                    "baseVersion": 1,
+                    "ops": [{"op": "delete", "id": "rect-a"}],
+                    "files": {},
+                    "appStatePatch": {},
+                },
+            })
+            await self._wait_scene_op(
+                student_ws,
+                lambda op: (
+                    (op.get("op") == "delete" and op.get("id") == "rect-a")
+                    or (
+                        op.get("op") == "upsert"
+                        and op.get("element", {}).get("id") == "rect-a"
+                        and op.get("element", {}).get("isDeleted")
+                    )
+                ),
+                "Ученик не получил delete учителя",
+            )
+        finally:
+            for ws in (teacher_ws, student_ws):
+                try:
+                    await ws.disconnect()
+                except BaseException:
+                    pass
+
+    async def test_snapshot_response_is_unicast_to_target(self):
+        teacher_ws = await self._connect(self.teacher)
+        student_ws = await self._connect(self.student_user)
+        try:
+            await self._consume_ready(teacher_ws)
+            await self._consume_ready(student_ws)
+            await self._join(teacher_ws, "teacher-tab", "Учитель")
+            await self._join(student_ws, "student-tab", "Ученик")
+            await teacher_ws.send_json_to({
+                "type": "snapshot_response",
+                "client_id": "teacher-tab",
+                "target_client_id": "student-tab",
+                "version": 3,
+                "scene": {
+                    "elements": [{"id": "keep", "version": 1, "isDeleted": False}],
+                    "appState": {},
+                    "files": {},
+                },
+            })
+            seen = []
+            snap = None
+            for _ in range(12):
+                msg = await student_ws.receive_json_from(timeout=2)
+                seen.append(msg.get("type"))
+                if msg.get("type") == "snapshot_response":
+                    snap = msg
+                    break
+            self.assertIsNotNone(snap, f"Ученик не получил snapshot_response. Типы: {seen}")
+            self.assertEqual(snap.get("target_client_id"), "student-tab")
+            self.assertEqual(snap["scene"]["elements"][0]["id"], "keep")
+
+            await teacher_ws.send_json_to({"type": "ping", "t": 7})
+            ping_seen = []
+            for _ in range(8):
+                msg = await teacher_ws.receive_json_from(timeout=2)
+                ping_seen.append(msg.get("type"))
+                self.assertNotEqual(
+                    msg.get("type"),
+                    "snapshot_response",
+                    "snapshot_response не должен приходить отправителю",
+                )
+                if msg.get("type") == "pong":
+                    break
+            else:
+                self.fail(f"Учитель не получил pong. Типы: {ping_seen}")
+        finally:
+            for ws in (teacher_ws, student_ws):
+                try:
+                    await ws.disconnect()
+                except BaseException:
+                    pass
+
+    async def test_student_disconnect_sends_presence_leave(self):
+        teacher_ws = await self._connect(self.teacher)
+        student_ws = await self._connect(self.student_user)
+        try:
+            await self._consume_ready(teacher_ws)
+            await self._consume_ready(student_ws)
+            await self._join(teacher_ws, "teacher-tab", "Учитель")
+            await self._join(student_ws, "student-tab", "Ученик")
+            await student_ws.disconnect()
+            seen = []
+            leave = None
+            for _ in range(12):
+                msg = await teacher_ws.receive_json_from(timeout=2)
+                seen.append(msg.get("type"))
+                if msg.get("type") == "presence_leave" and msg.get("client_id") == "student-tab":
+                    leave = msg
+                    break
+            self.assertIsNotNone(
+                leave,
+                f"Учитель не получил presence_leave после disconnect ученика. Типы: {seen}",
+            )
+        finally:
+            try:
+                await teacher_ws.disconnect()
+            except BaseException:
+                pass

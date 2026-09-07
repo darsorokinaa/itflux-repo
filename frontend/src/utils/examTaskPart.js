@@ -13,6 +13,10 @@ export function isMathLikeSubject(subject) {
  * Говорение / устная / part_id ≥ 3 → как часть 2.
  */
 export function inferExamTaskPart(task, level, subject) {
+  const examPart = Number(task?.exam_part);
+  if (examPart === 2) return 2;
+  if (examPart === 1) return 1;
+
   const title = String(task?.part_title || "").toLowerCase();
   if (/говорен|устн|speaking|oral/.test(title)) return 2;
   if (/часть\s*2\b/.test(title) || title.trim() === "2") return 2;
@@ -42,4 +46,23 @@ export function formatExamPartLabel(partId, partTitle) {
   const n = Number(partId);
   if (Number.isFinite(n) && n > 0) return `Часть ${n}`;
   return "Часть";
+}
+
+/** Заголовок блока части 2: не показывать «Часть 1», если задача помечена как развёрнутый ответ. */
+export function formatPart2SectionTitle(tasks) {
+  const titles = [
+    ...new Set(
+      (Array.isArray(tasks) ? tasks : [])
+        .map((task) => String(task?.part_title || "").trim())
+        .filter(Boolean),
+    ),
+  ];
+  if (
+    titles.length === 1
+    && !/часть\s*1\b/i.test(titles[0])
+    && titles[0] !== "1"
+  ) {
+    return titles[0];
+  }
+  return "Часть 2";
 }
