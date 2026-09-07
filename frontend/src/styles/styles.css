@@ -5834,6 +5834,23 @@ mjx-container {
     margin: 0.75rem 0 1rem;
 }
 
+.task-files--image {
+    margin: 0.75rem 0 1rem;
+}
+
+.task-attachment-image-link {
+    display: inline-block;
+    max-width: 100%;
+}
+
+.task-attachment-image {
+    display: block;
+    max-width: min(100%, 36rem);
+    height: auto;
+    border-radius: 10px;
+    background: #fff;
+}
+
 .task-audio-player {
     width: 100%;
     max-width: 400px;

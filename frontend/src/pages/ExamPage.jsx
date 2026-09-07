@@ -9,7 +9,7 @@ import { isEgeInfTruthTableTask, isEgeInfParallelProcessesTask, isEgeInfRoadGrap
 // const InformaticsCodeEditorEntry = lazy(
 //   () => import("../components/InformaticsCodeEditor/InformaticsCodeEditorEntry")
 // );
-import TaskFileAttachment from "../components/TaskFileAttachment";
+import { TaskFileAttachments } from "../components/TaskFileAttachment";
 import ImageLightbox from "../components/ImageLightbox";
 import SupportInfoModal from "../components/SupportInfoModal";
 import ResultsModal from "../components/ResultsModal";
@@ -2962,7 +2962,7 @@ function ExamPage() {
                     onConsumedBoardOpenRequest={() => setEduOpenBoardForTaskId(null)}
                   >
                   <ExamTaskCondition html={task.text} subject={subject} level={level} taskNumber={task.number} />
-                  {task.file && <TaskFileAttachment href={task.file} />}
+                  <TaskFileAttachments task={task} />
                   {task.author && <div className="task-author">{task.author}</div>}
 
                   <div className="exam-task-answer">
@@ -3378,7 +3378,7 @@ function ExamPage() {
                             onConsumedBoardOpenRequest={() => setEduOpenBoardForTaskId(null)}
                           >
                           <ExamTaskCondition html={task.text} subject={subject} level={level} taskNumber={task.number} />
-                          {task.file && <TaskFileAttachment href={task.file} />}
+                          <TaskFileAttachments task={task} />
                           {task.author && <div className="task-author">{task.author}</div>}
 
                           <div className="ev2-p2-body">
@@ -3493,7 +3493,7 @@ function ExamPage() {
                         onConsumedBoardOpenRequest={() => setEduOpenBoardForTaskId(null)}
                       >
                       <ExamTaskCondition html={task.text} subject={subject} level={level} taskNumber={task.number} />
-                      {task.file && <TaskFileAttachment href={task.file} />}
+                      <TaskFileAttachments task={task} />
                       {task.author && <div className="task-author">{task.author}</div>}
 
                       <div className="ev2-p2-body">

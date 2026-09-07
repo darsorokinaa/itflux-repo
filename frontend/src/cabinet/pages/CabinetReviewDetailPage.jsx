@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import MathContent from "../../components/MathContent";
-import TaskFileAttachment from "../../components/TaskFileAttachment";
+import { TaskFileAttachments } from "../../components/TaskFileAttachment";
 import {
   CabinetPageShell,
   CabinetPageHeader,
@@ -98,7 +98,7 @@ function hydrateReviewForm(review) {
 }
 
 function TaskCondition({ task, level, subject }) {
-  if (!task?.text && !task?.file) return null;
+  if (!task?.text && !task?.file && !(task?.attachments || []).length) return null;
   return (
     <div className="cb-review-detail__task-body">
       <span className="cb-review-detail__section-label">Условие</span>
@@ -116,7 +116,7 @@ function TaskCondition({ task, level, subject }) {
           egeInf2Enhance={isEgeInfTruthTableTask(level, subject, task.number)}
         />
       ) : null}
-      {task.file ? <TaskFileAttachment href={task.file} /> : null}
+      <TaskFileAttachments task={task} />
       {task.author ? <div className="task-author">{task.author}</div> : null}
     </div>
   );

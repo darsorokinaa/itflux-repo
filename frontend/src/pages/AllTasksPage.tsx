@@ -32,7 +32,7 @@ import "../styles/my-task-bank.css";
 // import type { TaskFileSource } from "../components/InformaticsCodeEditor/types";
 
 import MathContent from "../components/MathContent";
-import TaskFileAttachment from "../components/TaskFileAttachment";
+import { collectTaskFiles, TaskFileAttachments } from "../components/TaskFileAttachment";
 import TaskNoAnswerBadge from "../components/TaskNoAnswerBadge";
 // @ts-ignore JSX module without d.ts
 import ImageLightbox from "../components/ImageLightbox";
@@ -73,6 +73,7 @@ type BankTask = {
   text: string;
   answer?: string | null;
   file_url?: string | null;
+  attachments?: Array<{ url: string; name?: string | null }>;
   part_id?: number | null;
   part_title?: string | null;
   author?: string | null;
@@ -125,6 +126,32 @@ type TasksStructureItem = {
 type BankDisplayEntry =
   | { kind: "single"; task: BankTask }
   | { kind: "group"; groupId: number; tasks: BankTask[] };
+
+function toPickDraftTask(task: {
+  id: number;
+  task_number?: number | null;
+  exam_task_number?: number | null;
+  text?: string;
+  text_preview?: string;
+  answer?: string | null;
+  subtopic?: string | null;
+  task_title?: string | null;
+  file_url?: string | null;
+  attachments?: BankTask["attachments"];
+  author?: string | null;
+}): WorkbookTask {
+  const files = collectTaskFiles(task);
+  return {
+    id: task.id,
+    task_number: task.task_number ?? task.exam_task_number ?? null,
+    text: task.text || task.text_preview || "",
+    answer: task.answer,
+    subtopic: task.subtopic,
+    task_title: task.task_title,
+    file_url: files[0]?.url || task.file_url || null,
+    author: task.author,
+  };
+}
 
 function buildGroupByTaskListId(
   items: TasksStructureItem[]
@@ -556,15 +583,7 @@ export default function AllTasksPage() {
           if (prev.some((item) => item.id === task.id)) return prev;
           return [
             ...prev,
-            {
-              id: task.id,
-              task_number: task.exam_task_number ?? null,
-              text: task.text || task.text_preview || "",
-              answer: task.answer,
-              subtopic: task.subtopic,
-              task_title: task.task_title,
-              file_url: task.file_url,
-            },
+            toPickDraftTask(task),
           ];
         });
       })
@@ -1126,16 +1145,7 @@ export default function AllTasksPage() {
         for (const task of tasks) {
           if (existing.has(task.id)) continue;
           existing.add(task.id);
-          next.push({
-            id: task.id,
-            task_number: task.task_number,
-            text: task.text,
-            answer: task.answer,
-            subtopic: task.subtopic,
-            task_title: task.task_title,
-            file_url: task.file_url,
-            author: task.author,
-          });
+          next.push(toPickDraftTask(task));
         }
         return next;
       });
@@ -1149,19 +1159,10 @@ export default function AllTasksPage() {
     if (checked) {
       setPickDraft((prev) => {
         if (prev.some((item) => item.id === task.id)) return prev;
-        return [
-          ...prev,
-          {
-            id: task.id,
-            task_number: task.task_number,
-            text: task.text,
-            answer: task.answer,
-            subtopic: task.subtopic,
-            task_title: task.task_title,
-            file_url: task.file_url,
-            author: task.author,
-          },
-        ];
+          return [
+            ...prev,
+            toPickDraftTask(task),
+          ];
       });
       return;
     }
@@ -1202,16 +1203,7 @@ export default function AllTasksPage() {
       for (const task of visibleTasks) {
         if (existing.has(task.id)) continue;
         existing.add(task.id);
-        next.push({
-          id: task.id,
-          task_number: task.task_number,
-          text: task.text,
-          answer: task.answer,
-          subtopic: task.subtopic,
-          task_title: task.task_title,
-          file_url: task.file_url,
-          author: task.author,
-        });
+        next.push(toPickDraftTask(task));
       }
       return next;
     });
@@ -1758,8 +1750,8 @@ export default function AllTasksPage() {
                                           progTaskSheet={useProgTaskSheet}
                                           taskNumber={taskNumber}
                                         />
-                                        {t.file_url ? (
-                                          <TaskFileAttachment href={t.file_url} />
+                                        {t.file_url || (t.attachments && t.attachments.length) ? (
+                                          <TaskFileAttachments task={t} />
                                         ) : null}
                                         {t.author ? (
                                           <div className="task-author">{t.author}</div>
@@ -2007,7 +1999,7 @@ export default function AllTasksPage() {
                               progTaskSheet={useProgTaskSheet}
                               taskNumber={taskNumber}
                             />
-                            {t.file_url ? <TaskFileAttachment href={t.file_url} /> : null}
+                            <TaskFileAttachments task={t} />
                             {t.author ? (
                               <div className="task-author">{t.author}</div>
                             ) : null}

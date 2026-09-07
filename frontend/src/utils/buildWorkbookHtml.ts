@@ -63,6 +63,7 @@ export type VariantPdfTask = {
   subtopic_title?: string | null;
   task_title?: string | null;
   file?: string | null;
+  attachments?: Array<{ url?: string; name?: string | null }>;
   part?: number | null;
   max_score?: number | null;
   author?: string | null;
@@ -85,7 +86,7 @@ export function variantTasksToWorkbookTasks(tasks: VariantPdfTask[]): WorkbookTa
       answer: task.answer ?? null,
       subtopic: task.subtopic_title ?? null,
       task_title: task.task_title ?? null,
-      file_url: task.file ?? null,
+      file_url: task.file || task.attachments?.[0]?.url || null,
       part: task.part ?? null,
       max_score: task.max_score ?? null,
       author: task.author ?? null,

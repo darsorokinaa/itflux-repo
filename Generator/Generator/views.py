@@ -2694,6 +2694,7 @@ def api_task_bank(request, level, subject):
         task__subject=subject_instance,
         task__level=level_instance,
     ).select_related('task', 'task__part', 'subtopic').prefetch_related(
+        'attachments',
         Prefetch(
             'tag_options',
             queryset=TagOption.objects.filter(is_active=True).select_related('tag_type'),
@@ -2757,20 +2758,6 @@ def api_task_bank(request, level, subject):
     for task in tasks_list:
         tl = task.task
 
-        file_url = None
-        if getattr(task, 'files', None):
-            f = task.files
-            try:
-                url = f.url
-                if url:
-                    file_url = request.build_absolute_uri(url)
-            except Exception:
-                pass
-            if not file_url and getattr(f, 'name', ''):
-                media_url = getattr(django_settings, 'MEDIA_URL', '/media/') or '/media/'
-                rel = (media_url.rstrip('/') + '/' + f.name.lstrip('/')).replace('//', '/')
-                file_url = request.build_absolute_uri(rel)
-
         keep_tables = bool(tl and tl.part_id == 2)
         task_text_raw = str(task.task_template or '')
         try:
@@ -2789,6 +2776,7 @@ def api_task_bank(request, level, subject):
                 "bare innerimg repair skipped for task %s", task.id, exc_info=True
             )
 
+        attachments = _task_public_attachments(request, task)
         result.append({
             'id': task.id,
             'task_list_id': task.task_id,
@@ -2809,7 +2797,8 @@ def api_task_bank(request, level, subject):
                 )
             ),
             'answer': str(task.answer or ''),
-            'file_url': file_url,
+            'file_url': attachments[0]["url"] if attachments else None,
+            'attachments': attachments,
             'author': (task.author or '').strip() or None,
             'added_at': task.added_at.strftime('%d.%m.%Y') if task.added_at else None,
             'tags': _serialize_task_tags(task),
@@ -3003,6 +2992,60 @@ class TaskListView(APIView):
 # ── end LK Variant Builder ────────────────────────────────────────────────────
 
 
+def _filefield_absolute_url(request, file_field):
+    if not file_field:
+        return None
+    try:
+        url = file_field.url
+        if url:
+            if str(url).startswith(("http://", "https://")):
+                return url
+            return request.build_absolute_uri(url)
+    except Exception:
+        pass
+    name = getattr(file_field, "name", "") or ""
+    if name:
+        media_url = getattr(django_settings, "MEDIA_URL", "/media/") or "/media/"
+        rel = (media_url.rstrip("/") + "/" + str(name).lstrip("/")).replace("//", "/")
+        try:
+            return request.build_absolute_uri(rel)
+        except Exception:
+            return rel
+    return None
+
+
+def _task_public_attachments(request, task):
+    """Legacy FileField + TaskAttachment — публичные media URL для варианта и банка."""
+    items = []
+    seen = set()
+
+    def add(file_field, name=""):
+        url = _filefield_absolute_url(request, file_field)
+        if not url or url in seen:
+            return
+        seen.add(url)
+        items.append({"url": url, "name": str(name or "").strip()})
+
+    files_field = getattr(task, "files", None)
+    if files_field:
+        legacy_name = ""
+        try:
+            legacy_name = str(files_field.name or "").rsplit("/", 1)[-1]
+        except Exception:
+            legacy_name = ""
+        add(files_field, legacy_name)
+    attachments = getattr(task, "attachments", None)
+    if attachments is None:
+        return items
+    try:
+        rows = attachments.all()
+    except Exception:
+        return items
+    for att in rows:
+        add(getattr(att, "file", None), getattr(att, "original_name", "") or "")
+    return items
+
+
 def _group_ids_for_tasks(task_ids):
     """task_id → первый TaskGroup.id; задание может быть в нескольких группах."""
     if not task_ids:
@@ -3019,21 +3062,9 @@ def _group_ids_for_tasks(task_ids):
 
 
 def _bank_task_file_url(request, task):
-    """Абсолютный URL вложения задачи (как в api_task_bank)."""
-    if not getattr(task, 'files', None):
-        return None
-    f = task.files
-    try:
-        url = f.url
-        if url:
-            return request.build_absolute_uri(url)
-    except Exception:
-        pass
-    if getattr(f, 'name', ''):
-        media_url = getattr(django_settings, 'MEDIA_URL', '/media/') or '/media/'
-        rel = (media_url.rstrip('/') + '/' + f.name.lstrip('/')).replace('//', '/')
-        return request.build_absolute_uri(rel)
-    return None
+    """Первый публичный URL вложения (legacy files или TaskAttachment)."""
+    items = _task_public_attachments(request, task)
+    return items[0]["url"] if items else None
 
 
 def _task_matches_bank_filters(task, vpr_vf=None, only_fipi=False, author=None):
@@ -3095,6 +3126,7 @@ def _serialize_bank_group_member(request, member, *, raw_html=False):
             logging.getLogger(__name__).debug(
                 "bare innerimg repair skipped for task %s", t.id, exc_info=True
             )
+    attachments = _task_public_attachments(request, t) if t else []
     return {
         'id': t.id if t else None,
         'task_list_id': tl.id if tl else None,
@@ -3115,7 +3147,8 @@ def _serialize_bank_group_member(request, member, *, raw_html=False):
             )
         ) if t else '',
         'answer': str(t.answer or '') if t else '',
-        'file_url': _bank_task_file_url(request, t) if t else None,
+        'file_url': attachments[0]["url"] if attachments else None,
+        'attachments': attachments,
         'author': (t.author or '').strip() or None if t else None,
         'added_at': t.added_at.strftime('%d.%m.%Y') if t and t.added_at else None,
         'tags': _serialize_task_tags(t),
@@ -3148,6 +3181,7 @@ def api_group_instances(request, level, subject):
         TaskGroupMember.objects
         .select_related('task', 'task__task', 'task__task__part', 'task__subtopic')
         .prefetch_related(
+            'task__attachments',
             Prefetch(
                 'task__tag_options',
                 queryset=TagOption.objects.filter(is_active=True).select_related('tag_type'),
@@ -3992,6 +4026,7 @@ def _variant_detail_payload(request, variant, *, include_answers=True):
         VariantContent.objects
         .filter(variant=variant)
         .select_related("task", "task__task", "task__task__part", "task__subtopic")
+        .prefetch_related("task__attachments")
         .order_by("order")
     )
 
@@ -4012,19 +4047,8 @@ def _variant_detail_payload(request, variant, *, include_answers=True):
 
     for item in contents:
         task_list = item.task.task
-        file_url = None
-        if item.task.files:
-            f = item.task.files
-            try:
-                url = f.url
-                if url:
-                    file_url = request.build_absolute_uri(url)
-            except Exception:
-                pass
-            if not file_url and f.name:
-                media_url = getattr(django_settings, "MEDIA_URL", "/media/") or "/media/"
-                rel = (media_url.rstrip("/") + "/" + f.name.lstrip("/")).replace("//", "/")
-                file_url = request.build_absolute_uri(rel)
+        attachments = _task_public_attachments(request, item.task)
+        file_url = attachments[0]["url"] if attachments else None
 
         if task_list:
             max_score = getattr(task_list, "max_score", 1)
@@ -4051,6 +4075,7 @@ def _variant_detail_payload(request, variant, *, include_answers=True):
             "subtopic_id": st.id if st else None,
             "subtopic_title": (st.title or "").strip() if st else "",
             "file": file_url,
+            "attachments": attachments,
             "author": (item.task.author or "").strip() or None,
             "max_score": max_score,
             "truth_table_enabled": item.task.truth_table_enabled,
@@ -4441,23 +4466,15 @@ def _extract_task_ids_from_block_content(content):
 
 
 def _task_file_absolute_url(request, task):
-    f = getattr(task, "files", None)
-    if not f:
-        return None
-    try:
-        url = f.url
-    except Exception:
-        return None
-    try:
-        return request.build_absolute_uri(url)
-    except Exception:
-        return url
+    items = _task_public_attachments(request, task)
+    return items[0]["url"] if items else None
 
 
 def _serialize_task_for_lesson(request, task, include_answer=False):
     tl = getattr(task, "task", None)
     part_id = getattr(tl, "part_id", None)
     keep_tables = bool(part_id == 2)
+    attachments = _task_public_attachments(request, task)
     payload = {
         "id": task.id,
         "task_list_id": tl.id if tl else None,
@@ -4471,7 +4488,8 @@ def _serialize_task_for_lesson(request, task, include_answer=False):
             keep_layout_tables=keep_tables,
         ),
         "max_score": getattr(task, "max_score", 1) or 1,
-        "file_url": _task_file_absolute_url(request, task),
+        "file_url": attachments[0]["url"] if attachments else None,
+        "attachments": attachments,
     }
     if include_answer:
         payload["answer"] = process_latex(str(task.answer or ""), for_browser=True)

@@ -66,6 +66,7 @@ const DOWNLOAD_SVG = (
 );
 
 const AUDIO_EXTENSIONS = ["MP3", "WAV", "OGG", "AAC", "FLAC", "M4A"];
+const IMAGE_EXTENSIONS = ["PNG", "JPG", "JPEG", "GIF", "WEBP", "BMP", "SVG"];
 
 function normalizeMediaUrl(url) {
   if (!url) return "";
@@ -82,6 +83,30 @@ function normalizeMediaUrl(url) {
   }
   
   return normalized;
+}
+
+export function collectTaskFiles(task) {
+  const files = [];
+  const seen = new Set();
+  const add = (url, name = "") => {
+    const href = String(url || "").trim();
+    if (!href || seen.has(href)) return;
+    seen.add(href);
+    files.push({ url: href, name: String(name || "").trim() });
+  };
+  for (const att of task?.attachments || []) {
+    if (typeof att === "string") add(att);
+    else add(att?.url || att?.href, att?.name);
+  }
+  add(task?.file_url);
+  add(task?.file);
+  return files;
+}
+
+export function TaskFileAttachments({ task }) {
+  return collectTaskFiles(task).map((file) => (
+    <TaskFileAttachment key={file.url} href={file.url} name={file.name} />
+  ));
 }
 
 /**
@@ -106,6 +131,16 @@ export default function TaskFileAttachment({ href, name }) {
         >
           Ваш браузер не поддерживает элемент <code>audio</code>.
         </audio>
+      </div>
+    );
+  }
+
+  if (IMAGE_EXTENSIONS.includes(ext)) {
+    return (
+      <div className="task-files task-files--image">
+        <a className="task-attachment-image-link" href={normalizedHref} target="_blank" rel="noreferrer">
+          <img className="task-attachment-image teacher-task-img" src={normalizedHref} alt={displayName} />
+        </a>
       </div>
     );
   }

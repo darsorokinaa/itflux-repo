@@ -332,6 +332,7 @@ def build_pdf_context(request, variant, subject, author_filter=None):
     contents = list(
         variant.variantcontent_set
         .select_related('task', 'task__task', 'task__task__part')
+        .prefetch_related('task__attachments')
         .order_by('order')
     )
     author_trimmed = (author_filter or "").strip()
@@ -400,19 +401,28 @@ def build_pdf_context(request, variant, subject, author_filter=None):
             seen_parts.append(part)
 
         file_url = None
+        file_fields = []
         if item.task.files:
-            f = item.task.files
-            # Всегда используем HTTP(S) URL для ссылок в PDF — file:// не работает при просмотре PDF на другом устройстве
+            file_fields.append(item.task.files)
+        try:
+            file_fields.extend(
+                att.file for att in item.task.attachments.all() if getattr(att, "file", None)
+            )
+        except Exception:
+            pass
+        for f in file_fields:
             try:
                 url = f.url
                 if url:
                     file_url = request.build_absolute_uri(url)
             except Exception:
                 pass
-            if not file_url and f.name:
+            if not file_url and getattr(f, "name", ""):
                 media_url = getattr(django_settings, "MEDIA_URL", "/media/") or "/media/"
                 rel = (media_url.rstrip("/") + "/" + f.name.lstrip("/")).replace("//", "/")
                 file_url = request.build_absolute_uri(rel)
+            if file_url:
+                break
 
         part_title_for = part_obj.part_title if part_obj else ""
         exam_part = getattr(item.task, "exam_part", None)

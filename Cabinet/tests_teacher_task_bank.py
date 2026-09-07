@@ -303,6 +303,38 @@ class TeacherTaskNumberingTests(TeacherTaskBankBase):
 
 
 class TeacherTaskMixedVariantTests(TeacherTaskBankBase):
+    def test_attachments_appear_in_task_bank_and_variant(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        from Generator.models import TaskAttachment
+
+        created = self._create_owned(self.teacher_a, text="with file")
+        task = Task.objects.get(pk=created["id"])
+        att = TaskAttachment(task=task, original_name="grafik.pdf", size=9)
+        att.file.save("grafik.pdf", SimpleUploadedFile("grafik.pdf", b"%PDF-1.4"), save=True)
+
+        self.http.force_login(self.teacher_a)
+        bank = self.http.get("/api/oge/math/task-bank/?source=mine&per_page=50")
+        self.assertEqual(bank.status_code, 200)
+        row = next(item for item in bank.json()["tasks"] if item["id"] == created["id"])
+        self.assertTrue(row.get("file_url"))
+        self.assertTrue(row.get("attachments"))
+        self.assertIn("grafik", (row["attachments"][0].get("name") or row["file_url"]).lower())
+
+        with patch("Cabinet.subscription_access.SubscriptionAccessService.enforce_variant_creation"):
+            built = self.http.post(
+                "/api/oge/math/variant-from-ids/",
+                data={"task_ids": [created["id"]]},
+                content_type="application/json",
+            )
+        self.assertEqual(built.status_code, 200, built.content)
+        variant_id = built.json()["variant_id"]
+        variant_json = self.http.get(f"/api/oge/math/variant/{variant_id}/").json()
+        vrow = variant_json["tasks"][0]
+        self.assertTrue(vrow.get("file") or vrow.get("attachments"))
+        urls = [vrow.get("file"), *[item.get("url") for item in (vrow.get("attachments") or [])]]
+        self.assertTrue(any(url and "media" in str(url) for url in urls))
+
     def test_mixed_variant_roundtrip_and_student_answers_hidden(self):
         t1 = self._create_owned(self.teacher_a, text="TA", answer="own-a")
         t2 = self._create_owned(self.teacher_a, text="TB", answer="own-b")
