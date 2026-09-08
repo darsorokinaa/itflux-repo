@@ -5,6 +5,12 @@
 export const PAYMENTS_ENABLED = true;
 
 /**
+ * Screen-share annotation overlay in the video lesson.
+ * false — hidden from the UI; engine/protocol stay in the codebase.
+ */
+export const SCREEN_SHARE_ANNOTATIONS_VISIBLE = false;
+
+/**
  * Screen-share annotations V2: captured-surface coordinates, canvas renderer,
  * Document Picture-in-Picture toolbar. V1 остаётся в коде.
  * Override: ?ssAnn=v1|v2 или localStorage itflux.ssAnn=v1|v2

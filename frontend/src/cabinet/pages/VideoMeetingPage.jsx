@@ -83,7 +83,7 @@ import {
   isFollowContentAction,
   isNavigationAction,
 } from "../materials/collab";
-import { SCREEN_SHARE_ANNOTATIONS_V2 } from "../featureFlags";
+import { SCREEN_SHARE_ANNOTATIONS_V2, SCREEN_SHARE_ANNOTATIONS_VISIBLE } from "../featureFlags";
 import ScreenShareAnnotationOverlay from "../screenshare/ScreenShareAnnotationOverlay";
 import ScreenShareAnnotationV2 from "../annotations/v2/ScreenShareAnnotationV2";
 import { operationBelongsToSession } from "../annotations/v2/sessionFilter";
@@ -3570,7 +3570,7 @@ export default function VideoMeetingPage() {
               id="jitsi-container"
               ref={containerRef}
             />
-            {SCREEN_SHARE_ANNOTATIONS_V2 ? (
+            {!SCREEN_SHARE_ANNOTATIONS_VISIBLE ? null : SCREEN_SHARE_ANNOTATIONS_V2 ? (
               <ScreenShareAnnotationV2
                 active={screenshareUiActive && showJitsi}
                 compact={compactCall && !shareMiniCall}
