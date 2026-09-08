@@ -1,11 +1,13 @@
 /** @vitest-environment jsdom */
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import ScreenShareAnnotationV2 from "./ScreenShareAnnotationV2";
+import { ANNOTATION_PIP_SIZE } from "./overlays/documentPip";
 
 afterEach(() => {
   cleanup();
+  delete window.documentPictureInPicture;
 });
 
 describe("ScreenShareAnnotationV2 zoom UX", () => {
@@ -73,7 +75,7 @@ describe("ScreenShareAnnotationV2 zoom UX", () => {
     expect(document.querySelector(".ss-ann-v2-toolbar-slot")).toBeNull();
   });
 
-  it("does not mount a drawing canvas until exact Jitsi geometry arrives", () => {
+  it("does not mount a drawing canvas without a share host or exact geometry", () => {
     render(
       <ScreenShareAnnotationV2
         active
@@ -85,5 +87,86 @@ describe("ScreenShareAnnotationV2 zoom UX", () => {
       />,
     );
     expect(document.querySelector(".ss-ann-v2-canvas")).toBeNull();
+  });
+
+  it("enables pen before exact Jitsi geometry so lines can be drawn", () => {
+    render(
+      <ScreenShareAnnotationV2
+        active
+        canAnnotate
+        canManage
+        currentUserId={1}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Аннотации" }));
+    expect(screen.getByRole("button", { name: "Перо" }).disabled).toBe(false);
+  });
+
+  it("mounts a fixed canvas over the share host so strokes are visible", async () => {
+    const host = document.createElement("div");
+    host.getBoundingClientRect = () => ({
+      left: 40,
+      top: 80,
+      width: 960,
+      height: 540,
+      right: 1000,
+      bottom: 620,
+    });
+    document.body.appendChild(host);
+    render(
+      <ScreenShareAnnotationV2
+        active
+        canAnnotate
+        canManage
+        currentUserId={1}
+        contentWidth={1920}
+        contentHeight={1080}
+        targetRef={{ current: host }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Аннотации" }));
+    fireEvent.click(screen.getByRole("button", { name: "Перо" }));
+    await waitFor(() => {
+      expect(document.querySelector(".ss-ann-v2-canvas")).toBeTruthy();
+    });
+    const canvas = document.querySelector(".ss-ann-v2-canvas");
+    expect(canvas.style.position).toBe("fixed");
+    expect(canvas.classList.contains("is-drawing")).toBe(true);
+    host.remove();
+  });
+
+  it("opens a small always-on-top browser window for the toolbar", async () => {
+    const pipBody = document.createElement("div");
+    const pipWindow = {
+      document: {
+        adoptedStyleSheets: [],
+        querySelectorAll: () => [],
+        head: { appendChild: () => {} },
+        body: pipBody,
+      },
+      addEventListener: vi.fn(),
+      close: vi.fn(),
+    };
+    const requestWindow = vi.fn(async () => pipWindow);
+    window.documentPictureInPicture = { requestWindow };
+    render(
+      <ScreenShareAnnotationV2
+        active
+        canAnnotate
+        canManage
+        currentUserId={1}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Аннотации" }));
+    await waitFor(() => {
+      expect(requestWindow).toHaveBeenCalledWith({
+        width: ANNOTATION_PIP_SIZE.width,
+        height: ANNOTATION_PIP_SIZE.height,
+        disallowReturnToOpener: false,
+      });
+    });
+    await waitFor(() => {
+      expect(pipBody.querySelector("[role=\"toolbar\"]")).toBeTruthy();
+    });
   });
 });

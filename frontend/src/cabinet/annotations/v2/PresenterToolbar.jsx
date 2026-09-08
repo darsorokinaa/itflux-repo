@@ -86,17 +86,18 @@ export default function PresenterToolbar({
 
   useEffect(() => {
     if (!menu) return undefined;
+    const doc = rootRef.current?.ownerDocument || document;
     const onDoc = (event) => {
       if (!rootRef.current?.contains(event.target)) setMenu(null);
     };
     const onKey = (event) => {
       if (event.key === "Escape") setMenu(null);
     };
-    document.addEventListener("pointerdown", onDoc);
-    document.addEventListener("keydown", onKey);
+    doc.addEventListener("pointerdown", onDoc);
+    doc.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("pointerdown", onDoc);
-      document.removeEventListener("keydown", onKey);
+      doc.removeEventListener("pointerdown", onDoc);
+      doc.removeEventListener("keydown", onKey);
     };
   }, [menu]);
 
@@ -466,7 +467,7 @@ export default function PresenterToolbar({
           className="ss-ann-v2-toolbar__status"
           title={geometryStatus === "waiting"
             ? "Ожидание точной геометрии демонстрации"
-            : "Нет моста геометрии Jitsi — рисование недоступно"}
+            : "Геометрия Jitsi приблизительная — линии могут чуть смещаться"}
         >
           {geometryStatus === "waiting" ? "…" : "✕"}
         </span>

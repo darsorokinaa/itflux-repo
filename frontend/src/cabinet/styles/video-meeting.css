@@ -3185,6 +3185,15 @@ body.vl-room-fullscreen .student-cabinet-nav {
   white-space: pre-wrap;
 }
 
+.ss-ann-v2-canvas,
+.ss-ann-v2-platform {
+  position: fixed;
+  z-index: 11000;
+  display: block;
+  pointer-events: none;
+  touch-action: none;
+}
+
 .ss-ann-v2-canvas.is-drawing,
 .ss-ann-v2-platform.is-drawing {
   pointer-events: auto;
@@ -3212,7 +3221,6 @@ body.vl-room-fullscreen .student-cabinet-nav {
 
 .ss-ann-v2-platform {
   inset: 0;
-  z-index: 11000;
 }
 
 .ss-ann-v2-toolbar-slot {

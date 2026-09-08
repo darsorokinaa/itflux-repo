@@ -131,6 +131,7 @@ function drawStamp(ctx, stroke, contentRect) {
   ctx.translate(c.x, c.y);
   ctx.strokeStyle = stroke.color || "#ef4444";
   ctx.fillStyle = stroke.color || "#ef4444";
+  const size = Math.max(16, Number(stroke.fontSize) || 22);
   ctx.lineWidth = Math.max(2, size / 10);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
@@ -381,7 +382,6 @@ export function createAnnotationRenderer(canvas) {
       ctx.fillRect(p.x + 8, p.y - 18, w, 16);
       ctx.fillStyle = "#fff";
       ctx.fillText(text, p.x + 13, p.y - 6);
-      ctx.restore();
     }
     if (needsLoop && !loop) {
       loop = window.requestAnimationFrame(() => {
