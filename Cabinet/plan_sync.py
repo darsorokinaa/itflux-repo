@@ -531,24 +531,31 @@ class PlanSyncService:
         return cls.realign_enrollment_topics(enrollment)
 
     @classmethod
-    def realign_enrollments_for_events(cls, events) -> None:
-        """Пересчитать темы для всех планов, которые видны в выборке расписания."""
+    def realign_enrollments_for_events(cls, events) -> bool:
+        """Пересчитать темы для всех планов, которые видны в выборке расписания.
+
+        Returns True if at least one enrollment was realigned (caller should reload events).
+        """
         from .plan_schedule import get_active_enrollment
 
         seen = set()
+        changed = False
         for event in events:
             enrollment = get_active_enrollment(event) if event else None
             if enrollment is None or enrollment.pk in seen:
                 continue
             seen.add(enrollment.pk)
             try:
-                cls.realign_enrollment_topics(enrollment)
+                result = cls.realign_enrollment_topics(enrollment)
+                if result and result.get("updated_event_ids"):
+                    changed = True
             except Exception:
                 logger.exception(
                     "plan realign failed enrollment=%s event=%s",
                     enrollment.pk,
                     event.pk,
                 )
+        return changed
 
     @classmethod
     @transaction.atomic

@@ -8,7 +8,7 @@ describe("presenter overlay adapter", () => {
     expect(isBrowserTabSurface("monitor")).toBe(false);
     const plan = resolvePresenterOverlayPlan({ localSharing: true, displaySurface: "browser" });
     expect(plan.platformTab).toBe(true);
-    expect(plan.drawingSurface).toBe(OVERLAY_MODES.PLATFORM_TAB_OVERLAY);
+    expect(plan.drawingSurface).toBe(OVERLAY_MODES.FALLBACK_WEB);
   });
 
   it("falls back on the web when PiP and native helper are unavailable", () => {

@@ -89,6 +89,9 @@ async function cabinetFetch(path, options = {}) {
   };
   const csrf = getCsrfToken();
   if (csrf) headers["X-CSRFToken"] = csrf;
+  if (!headers["X-Request-ID"] && typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    headers["X-Request-ID"] = crypto.randomUUID();
+  }
 
   const res = await fetch(`${apiBase()}${path}`, {
     credentials: "same-origin",

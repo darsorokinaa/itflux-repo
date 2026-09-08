@@ -86,6 +86,7 @@ import {
 import { SCREEN_SHARE_ANNOTATIONS_V2 } from "../featureFlags";
 import ScreenShareAnnotationOverlay from "../screenshare/ScreenShareAnnotationOverlay";
 import ScreenShareAnnotationV2 from "../annotations/v2/ScreenShareAnnotationV2";
+import { operationBelongsToSession } from "../annotations/v2/sessionFilter";
 import {
   applyScreenshareOperation,
   annotationsFromList,
@@ -97,6 +98,7 @@ import { useFloatingDrag } from "../useFloatingDrag";
 import FloatingResizeHandles from "../FloatingResizeHandles";
 import MiniCallBar from "../components/MiniCallBar";
 import {
+  callStayOnTopAvailable,
   closeCallStayOnTop,
   liveCallVideoPipAvailable,
   requestCallStayOnTop,
@@ -321,6 +323,7 @@ export default function VideoMeetingPage() {
     contentHeight: 0,
     displaySurface: "",
     localSharing: false,
+    presenterJitsiId: "",
   });
   const screenshareLayoutRef = useRef({
     tileView: false,
@@ -328,8 +331,11 @@ export default function VideoMeetingPage() {
     contentHeight: 0,
     displaySurface: "",
     localSharing: false,
+    presenterJitsiId: "",
   });
   const screenshareSeenRef = useRef(new Set());
+  const screenshareSessionIdRef = useRef("");
+  const screenshareAnnotationsRef = useRef([]);
   const ssAnnV2EngineRef = useRef(null);
   const lastShareReportRef = useRef("");
   const screenShareApiRef = useRef(null);
@@ -401,6 +407,7 @@ export default function VideoMeetingPage() {
   const remountPromiseRef = useRef(null);
   const jitsiGenRef = useRef(0);
   const [displayName, setDisplayName] = useState("");
+  const [jitsiOrigin, setJitsiOrigin] = useState("");
   const moderatorToastTimerRef = useRef(null);
 
   const disposeApi = useCallback(() => {
@@ -554,6 +561,10 @@ export default function VideoMeetingPage() {
       setIsModerator(moderator);
       setRoleLabel(config.meeting?.roleLabel || (moderator ? "Организатор" : "Участник"));
       setDisplayName(resolveJitsiDisplayName(config));
+      if (config.domain) {
+        const host = String(config.domain).replace(/^https?:\/\//, "").replace(/\/$/, "");
+        setJitsiOrigin(host ? `https://${host}` : "");
+      }
       setModeratorLoginHint(
         config.requiresModeratorLogin
           ? (
@@ -794,6 +805,7 @@ export default function VideoMeetingPage() {
             contentHeight: Number(snap?.contentHeight) || 0,
             displaySurface: snap?.displaySurface || "",
             localSharing,
+            presenterJitsiId: snap?.presenterJitsiId || "",
           };
           screenshareLayoutRef.current = nextLayout;
           setScreenshareLayout(nextLayout);
@@ -1592,20 +1604,24 @@ export default function VideoMeetingPage() {
       const pipHandle = pipHandleRef.current;
       pipHandleRef.current = null;
       setStayOnTopActive(false);
-      await closeCallStayOnTop({ pipWindow: pipHandle?.pipWindow });
+      await closeCallStayOnTop({
+        pipWindow: pipHandle?.pipWindow,
+        restore: pipHandle?.restore,
+      });
       return;
     }
     const iframe = apiRef.current?.getIFrame?.() || containerRef.current?.querySelector?.("iframe") || null;
-    if (!liveCallVideoPipAvailable(iframe)) {
-      setMaterialsToast("Звонок остаётся в мини-окне на странице урока. Отдельное окно без видео не открываем.");
-      window.setTimeout(() => setMaterialsToast(""), 3200);
-      return;
-    }
-    const result = await requestCallStayOnTop({ iframe });
+    const host = containerRef.current?.closest?.(".video-lesson-content") || containerRef.current;
+    const result = await requestCallStayOnTop({ iframe, host });
     if (result?.ok) {
       pipHandleRef.current = result;
       setStayOnTopActive(true);
       const closer = () => {
+        try {
+          result.restore?.();
+        } catch {
+          /* ignore */
+        }
         pipHandleRef.current = null;
         setStayOnTopActive(false);
         reportClientEvent("pip_closed");
@@ -1622,8 +1638,12 @@ export default function VideoMeetingPage() {
       }
       return;
     }
-    setMaterialsToast("Звонок остаётся в мини-окне на странице урока. Отдельное окно без видео не открываем.");
-    window.setTimeout(() => setMaterialsToast(""), 3200);
+    setMaterialsToast(
+      result?.mode === "unsupported"
+        ? "Этот браузер не умеет держать звонок поверх других приложений. Откройте урок в Chrome."
+        : "Не удалось вынести звонок поверх окон. Попробуйте Chrome — там открывается отдельное окошко поверх приложений.",
+    );
+    window.setTimeout(() => setMaterialsToast(""), 4200);
   }, [stayOnTopActive]);
 
   const onCopyLink = async () => {
@@ -2210,11 +2230,18 @@ export default function VideoMeetingPage() {
         setMaterialSyncStatus("error");
       },
       onScreenshareSync: (session) => {
-        setScreenshareSession(session || null);
         const list = session?.annotations || [];
+        const sid = session?.sessionId || "";
+        const prevSid = screenshareSessionIdRef.current;
+        if (prevSid && sid && prevSid !== sid) screenshareSeenRef.current.clear();
+        screenshareSessionIdRef.current = sid;
+        screenshareAnnotationsRef.current = list;
+        setScreenshareSession(session || null);
         setScreenshareAnnotations(list);
-        ssAnnV2EngineRef.current?.loadSnapshot(list, {
-          revision: ssAnnV2EngineRef.current.store.sourceRevision,
+        const engine = ssAnnV2EngineRef.current;
+        engine?.setSessionId?.(sid);
+        engine?.loadSnapshot(list, {
+          revision: engine.store.sourceRevision,
         });
         if (!session?.active && !session?.sessionId) {
           setScreenshareLasers({});
@@ -2224,15 +2251,18 @@ export default function VideoMeetingPage() {
       onScreensharePermission: (payload) => {
         const session = payload?.screenshareSession;
         if (session) {
+          if (session.sessionId) screenshareSessionIdRef.current = session.sessionId;
           setScreenshareSession(session);
         } else {
           setScreenshareSession((prev) => prev ? {
             ...prev,
             participantsCanAnnotate: payload?.participantsCanAnnotate,
+            showAuthorNames: payload?.showAuthorNames ?? prev.showAuthorNames,
           } : prev);
         }
       },
       onScreenshareOperation: (op) => {
+        if (!operationBelongsToSession(op, screenshareSessionIdRef.current)) return;
         const opId = op.operation_id || op.operationId;
         if (opId) {
           if (screenshareSeenRef.current.has(opId)) return;
@@ -2261,6 +2291,7 @@ export default function VideoMeetingPage() {
           [key]: {
             x: point.x,
             y: point.y,
+            kind: point.kind || "laser",
             displayName: payload.display_name || "",
             color: prev[key]?.color,
             at: Date.now(),
@@ -2295,6 +2326,8 @@ export default function VideoMeetingPage() {
       setScreenshareAnnotations([]);
       setScreenshareLasers({});
       screenshareSeenRef.current.clear();
+      screenshareSessionIdRef.current = "";
+      screenshareAnnotationsRef.current = [];
       ssAnnV2EngineRef.current = null;
     };
   }, [applyMaterialSession, meetingUuid, pageState, showMaterialNotice, showMaterialsToast]);
@@ -3500,10 +3533,8 @@ export default function VideoMeetingPage() {
               remoteName={callRoster.remotes?.[0]?.displayName || displayName || "Участник"}
               remoteAudioMuted={callRoster.remotes?.[0]?.audioMuted}
               remoteVideoMuted={callRoster.remotes?.[0]?.videoMuted}
-              localMicOn={localMicOn}
-              localCamOn={localCamOn}
               sharing={Boolean(screenshareLayout.localSharing)}
-              stayOnTopAvailable={callVideoPipReady}
+              stayOnTopAvailable={callStayOnTopAvailable() || callVideoPipReady}
               stayOnTopActive={stayOnTopActive}
               onToggleCollapsed={() => setCallCollapsed((v) => !v)}
               onExpand={() => {
@@ -3511,12 +3542,6 @@ export default function VideoMeetingPage() {
                 setFocusCall(true);
                 setCallCollapsed(false);
                 setMobilePane("call");
-              }}
-              onToggleMic={() => {
-                apiRef.current?.executeCommand?.("toggleAudio");
-              }}
-              onToggleCam={() => {
-                apiRef.current?.executeCommand?.("toggleVideo");
               }}
               onStayOnTop={() => { void onMiniCallStayOnTop(); }}
               onHangup={onMiniCallHangup}
@@ -3552,6 +3577,8 @@ export default function VideoMeetingPage() {
                 canManage={canManage}
                 canAnnotate={screenshareCanAnnotate}
                 participantsCanAnnotate={screenshareSession?.participantsCanAnnotate === true}
+                showAuthorNames={screenshareSession?.showAuthorNames === true}
+                presenterUserId={screenshareSession?.presenterUserId ?? null}
                 currentUserId={detail?.viewerUserId ?? null}
                 displayName={displayName}
                 sessionId={screenshareSession?.sessionId || ""}
@@ -3559,8 +3586,11 @@ export default function VideoMeetingPage() {
                 contentHeight={screenshareSession?.contentHeight || screenshareLayout.contentHeight || 0}
                 displaySurface={screenshareLayout.displaySurface || ""}
                 localSharing={Boolean(screenshareLayout.localSharing)}
+                isPresenter={Boolean(screenshareLayout.localSharing)}
                 tileView={Boolean(screenshareLayout.tileView)}
                 targetRef={containerRef}
+                jitsiOrigin={jitsiOrigin}
+                presenterJitsiId={screenshareLayout.presenterJitsiId || ""}
                 remoteLasers={screenshareLasers}
                 syncUnavailable={Boolean(
                   screenshareAnnUnavailable
@@ -3568,6 +3598,11 @@ export default function VideoMeetingPage() {
                 )}
                 onEngineReady={(engine) => {
                   ssAnnV2EngineRef.current = engine;
+                  if (engine) {
+                    engine.setSessionId?.(screenshareSessionIdRef.current);
+                    const list = screenshareAnnotationsRef.current;
+                    if (list?.length) engine.loadSnapshot(list);
+                  }
                 }}
                 onSend={(action, payload) => {
                   sendScreenshareOp(action, {
@@ -3584,6 +3619,14 @@ export default function VideoMeetingPage() {
                   materialCollabRef.current?.setScreensharePermission(
                     enabled,
                     screenshareSession?.sessionId,
+                    { showAuthorNames: screenshareSession?.showAuthorNames === true },
+                  );
+                }}
+                onSetShowAuthorNames={(enabled) => {
+                  materialCollabRef.current?.setScreensharePermission(
+                    screenshareSession?.participantsCanAnnotate === true,
+                    screenshareSession?.sessionId,
+                    { showAuthorNames: enabled },
                   );
                 }}
               />

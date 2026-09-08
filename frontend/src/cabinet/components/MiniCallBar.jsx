@@ -7,15 +7,11 @@ export default function MiniCallBar({
   remoteName = "",
   remoteAudioMuted = null,
   remoteVideoMuted = null,
-  localMicOn = false,
-  localCamOn = false,
   sharing = false,
   stayOnTopAvailable = false,
   stayOnTopActive = false,
   onToggleCollapsed,
   onExpand,
-  onToggleMic,
-  onToggleCam,
   onStayOnTop,
   onHangup,
 }) {
@@ -46,41 +42,17 @@ export default function MiniCallBar({
           </button>
         ) : (
           <>
-            <button
-              type="button"
-              className={`mini-call-bar__iconbtn${localMicOn ? "" : " is-off"}`}
-              aria-label={localMicOn ? "Выключить микрофон" : "Включить микрофон"}
-              title={localMicOn ? "Выключить микрофон" : "Включить микрофон"}
-              onClick={onToggleMic}
-            >
-              <CabinetIcon name={localMicOn ? "mic" : "micOff"} />
-            </button>
-            <button
-              type="button"
-              className={`mini-call-bar__iconbtn${localCamOn ? "" : " is-off"}`}
-              aria-label={localCamOn ? "Выключить камеру" : "Включить камеру"}
-              title={localCamOn ? "Выключить камеру" : "Включить камеру"}
-              onClick={onToggleCam}
-            >
-              <CabinetIcon name={localCamOn ? "video" : "videoOff"} />
-            </button>
             {stayOnTopAvailable ? (
               <button
                 type="button"
                 className={`video-lesson-compact-drag__expand${stayOnTopActive ? " is-active" : ""}`}
                 onClick={onStayOnTop}
                 title="Показывать звонок поверх других окон"
+                aria-pressed={stayOnTopActive}
               >
-                {stayOnTopActive ? "Скрыть окно" : "Поверх окон"}
+                {stayOnTopActive ? "Вернуть в урок" : "Поверх окон"}
               </button>
             ) : null}
-            <button
-              type="button"
-              className="video-lesson-compact-drag__expand"
-              onClick={onToggleCollapsed}
-            >
-              Скрыть
-            </button>
             <button
               type="button"
               className="video-lesson-compact-drag__expand"

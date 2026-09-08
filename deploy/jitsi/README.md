@@ -169,6 +169,17 @@ sudo nginx -t && sudo systemctl reload nginx
 2. Network → `join-config`: `domain=lesson.itflux-academy.ru`, `jwt` не пустой.
 3. Роль организатора сразу, без «Я организатор».
 
+### 8b. Геометрия screen-share annotations
+
+Аннотации поверх демонстрации требуют helper внутри Jitsi: desktop/screen-share track из состояния Jitsi и rect его video element. Камера / `#largeVideo` сами по себе не считаются share.
+
+```bash
+sudo bash /opt/itfluxacademy/itflux/deploy/jitsi/install-screenshare-geometry-bridge.sh
+```
+
+В DEV: `localStorage.setItem("itflux.ann.debug","1")` — рамки iframe / video / content / canvas.
+Тестовая сетка: `/dev/annotation-targets.html` (расшарить вкладку).
+
 ---
 
 ## Если что-то сломалось

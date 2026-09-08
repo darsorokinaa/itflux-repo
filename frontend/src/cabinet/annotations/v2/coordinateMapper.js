@@ -1,11 +1,53 @@
 /** Captured-surface coordinate space: 0..1 of the demonstrated image, not the viewer tile. */
 
 export const COORD_SPACE_CAPTURED_V1 = "captured_surface_v1";
+export const FALLBACK_SOURCE_WIDTH = 1920;
+export const FALLBACK_SOURCE_HEIGHT = 1080;
 
 export function clamp01(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return 0;
   return Math.min(1, Math.max(0, n));
+}
+
+/** Reject NaN/Infinity/far-out values. Clamp a tiny overshoot to the content edge. */
+export function sanitizeNormalizedPoint(point) {
+  if (!point || typeof point !== "object") return null;
+  const x = Number(point.x);
+  const y = Number(point.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  if (x < -0.05 || x > 1.05 || y < -0.05 || y > 1.05) return null;
+  return {
+    ...point,
+    x: Math.min(1, Math.max(0, x)),
+    y: Math.min(1, Math.max(0, y)),
+  };
+}
+
+export function clampCoordinates(x, y) {
+  return sanitizeNormalizedPoint({ x, y });
+}
+
+export function sanitizeNormalizedPoints(points, { limit = 800 } = {}) {
+  if (!Array.isArray(points)) return [];
+  const out = [];
+  for (const item of points.slice(0, limit)) {
+    const next = sanitizeNormalizedPoint(item);
+    if (next) out.push(next);
+  }
+  return out;
+}
+
+export function normalizeShapePoints(tool, points) {
+  if (!Array.isArray(points) || points.length < 2) return points || [];
+  const kind = String(tool || "");
+  if (kind !== "rect" && kind !== "ellipse") return points;
+  const a = points[0];
+  const b = points[points.length - 1];
+  return [
+    { ...a, x: Math.min(a.x, b.x), y: Math.min(a.y, b.y) },
+    { ...b, x: Math.max(a.x, b.x), y: Math.max(a.y, b.y) },
+  ];
 }
 
 export function sourceAspect(sourceWidth, sourceHeight) {
@@ -29,17 +71,22 @@ export function computeContentRect({
   const top = Number(container?.top) || 0;
   const width = Number(container?.width) || 0;
   const height = Number(container?.height) || 0;
-  const sw = Number(sourceWidth) || 0;
-  const sh = Number(sourceHeight) || 0;
+  let sw = Number(sourceWidth) || 0;
+  let sh = Number(sourceHeight) || 0;
   const fit = String(objectFit || "contain").toLowerCase();
+  const sourceUnknown = !sw || !sh;
   if (!width || !height) {
     return {
       left, top, width, height, offsetX: 0, offsetY: 0, scale: 1, objectFit: fit, sourceUnknown: true,
     };
   }
+  if (sourceUnknown && fit !== "fill") {
+    sw = FALLBACK_SOURCE_WIDTH;
+    sh = FALLBACK_SOURCE_HEIGHT;
+  }
   if (!sw || !sh || fit === "fill") {
     return {
-      left, top, width, height, offsetX: 0, offsetY: 0, scale: 1, objectFit: fit, sourceUnknown: !sw || !sh,
+      left, top, width, height, offsetX: 0, offsetY: 0, scale: 1, objectFit: fit, sourceUnknown: true,
     };
   }
   const scale = fit === "cover"
@@ -58,7 +105,7 @@ export function computeContentRect({
     offsetY,
     scale,
     objectFit: fit,
-    sourceUnknown: false,
+    sourceUnknown,
   };
 }
 
@@ -118,11 +165,11 @@ export function pxWidthToNormalized(px, sourceWidth) {
 export function normalizedWidthToPx(widthNormalized, renderWidth, fallbackPx = 3) {
   const wn = Number(widthNormalized);
   if (Number.isFinite(wn) && wn > 0 && wn < 1) {
-    return Math.max(1.25, wn * (Number(renderWidth) || 1));
+  return Math.max(0.75, wn * (Number(renderWidth) || 1));
   }
   const legacy = Number(fallbackPx);
   const rw = Number(renderWidth) || 960;
-  return Math.max(1.25, (Number.isFinite(legacy) && legacy > 0 ? legacy : 3) * (rw / 960));
+  return Math.max(0.75, (Number.isFinite(legacy) && legacy > 0 ? legacy : 3) * (rw / 960));
 }
 
 export function dimensionsChanged(prev, next, { aspectEpsilon = 0.012 } = {}) {

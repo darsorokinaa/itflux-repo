@@ -1,11 +1,19 @@
 """Map schedule events to lesson plan items (one lesson → one plan item)."""
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 from django.db.models import Q
 from django.utils import timezone
 
 from .choices import EnrollmentStatus, PlanItemStatus
 from .journal_models import AttendanceStatus
 from .models import LessonPlanEnrollment, ScheduleEvent
+
+# Request-scoped caches for calendar list: one teacher load instead of N+1 per event.
+_enrollment_rows: ContextVar[list | None] = ContextVar("schedule_enrollment_rows", default=None)
+_enrollment_events: ContextVar[dict | None] = ContextVar("schedule_enrollment_events", default=None)
+_plan_items_cache: ContextVar[dict | None] = ContextVar("schedule_plan_items", default=None)
 
 PLAN_CANCEL_SHIFT = "shift"
 PLAN_CANCEL_SKIP = "skip"
@@ -82,9 +90,82 @@ def plan_passed_items_count(plan, *, now=None):
     return sum(1 for item in plan.items.all() if plan_item_is_passed(item, now=now))
 
 
+@contextmanager
+def schedule_list_caches(teacher_id):
+    """Prime enrollments once for a calendar GET. Does not change matching rules."""
+    rows = list(
+        LessonPlanEnrollment.objects.filter(teacher_id=teacher_id)
+        .exclude(status__in=[EnrollmentStatus.COMPLETED, EnrollmentStatus.CANCELLED])
+        .select_related("plan", "student_subject")
+        .prefetch_related(
+            "plan__items__materials",
+            "plan__items__attached_interactives",
+            "plan__items__homework_materials",
+            "plan__items__homework_interactives",
+            "plan__items__linked_lesson",
+            "plan__items__plan",
+        )
+        .order_by("-created_at")
+    )
+    t_rows = _enrollment_rows.set(rows)
+    t_events = _enrollment_events.set({})
+    t_items = _plan_items_cache.set({})
+    try:
+        yield rows
+    finally:
+        _enrollment_rows.reset(t_rows)
+        _enrollment_events.reset(t_events)
+        _plan_items_cache.reset(t_items)
+
+
+def _pick_enrollment_from_rows(rows, event):
+    if event.student_id:
+        cand = [row for row in rows if row.student_id == event.student_id]
+        if event.student_subject_id:
+            subject = [row for row in cand if row.student_subject_id == event.student_subject_id]
+            cand = subject if subject else [row for row in cand if row.student_subject_id is None]
+        else:
+            unbound = [row for row in cand if row.student_subject_id is None]
+            if unbound:
+                cand = unbound
+            else:
+                event_date = event_local_date(event)
+                if event_date:
+                    cand = [
+                        row
+                        for row in cand
+                        if any(
+                            getattr(item, "scheduled_date", None) == event_date
+                            for item in row.plan.items.all()
+                        )
+                    ]
+                else:
+                    cand = []
+    elif event.group_id:
+        cand = [row for row in rows if row.group_id == event.group_id]
+    else:
+        return None
+    cand.sort(key=lambda row: row.created_at, reverse=True)
+    matches = cand[:3]
+    if len(matches) > 1:
+        import logging
+        logging.getLogger("cabinet.plan_sync").warning(
+            "Multiple active plans detected teacher=%s student=%s subject=%s ids=%s",
+            event.owner_id,
+            event.student_id,
+            event.student_subject_id,
+            [m.pk for m in matches],
+        )
+    return matches[0] if matches else None
+
+
 def get_active_enrollment(event):
+    cached_rows = _enrollment_rows.get()
+    if cached_rows is not None:
+        return _pick_enrollment_from_rows(cached_rows, event)
+
     qs = LessonPlanEnrollment.objects.filter(
-        teacher=event.owner,
+        teacher_id=event.owner_id,
     ).exclude(
         status__in=[EnrollmentStatus.COMPLETED, EnrollmentStatus.CANCELLED],
     )
@@ -135,6 +216,12 @@ def get_active_enrollment(event):
 
 
 def events_for_enrollment(enrollment, owner):
+    cache = _enrollment_events.get()
+    owner_id = getattr(owner, "pk", owner)
+    cache_key = (enrollment.pk, owner_id)
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]
+
     qs = ScheduleEvent.objects.filter(owner=owner)
     if enrollment.student_id:
         by_student = Q(student_id=enrollment.student_id)
@@ -170,12 +257,20 @@ def events_for_enrollment(enrollment, owner):
             | Q(lesson_plan_item__plan_id=enrollment.plan_id, group_id=enrollment.group_id)
         ).distinct()
     else:
-        return ScheduleEvent.objects.none()
+        result = list(ScheduleEvent.objects.none()) if cache is not None else ScheduleEvent.objects.none()
+        if cache is not None:
+            cache[cache_key] = result
+        return result
 
     start = enrollment_start_date(enrollment)
     if start:
         qs = qs.filter(starts_at__date__gte=start)
-    return qs.order_by("starts_at", "pk")
+    qs = qs.order_by("starts_at", "pk")
+    if cache is None:
+        return qs
+    result = list(qs)
+    cache[cache_key] = result
+    return result
 
 
 def plan_start_order_for_enrollment(enrollment, items=None):
@@ -197,6 +292,9 @@ def plan_start_order_for_enrollment(enrollment, items=None):
 
 
 def plan_items_for_enrollment(enrollment):
+    cache = _plan_items_cache.get()
+    if cache is not None and enrollment.pk in cache:
+        return cache[enrollment.pk]
     items = list(enrollment.plan.items.order_by("order", "id"))
     start_order = plan_start_order_for_enrollment(enrollment, items)
     min_order = items[0].order if items else 0
@@ -207,6 +305,8 @@ def plan_items_for_enrollment(enrollment):
         elif start_order <= len(items):
             # 1-based fallback: «начать с урока N»
             items = items[max(0, start_order - 1):]
+    if cache is not None:
+        cache[enrollment.pk] = items
     return items
 
 
@@ -402,7 +502,12 @@ def plan_item_display_number(item):
     """Номер темы в карточке: 1, 2, 3… по порядку плана, даже если order с нуля."""
     if item is None:
         return None
-    items = list(item.plan.items.order_by("order", "id"))
+    plan = getattr(item, "plan", None)
+    cached = getattr(plan, "_prefetched_objects_cache", {}).get("items") if plan is not None else None
+    if cached is not None:
+        items = sorted(cached, key=lambda row: (row.order, row.id))
+    else:
+        items = list(item.plan.items.order_by("order", "id"))
     for index, row in enumerate(items, start=1):
         if row.id == item.id:
             return index
@@ -434,6 +539,13 @@ def plan_item_matching_event_date(event):
     return date_match
 
 
+def _linked_plan_items(event):
+    cached = getattr(event, "_prefetched_objects_cache", {}).get("plan_items")
+    if cached is not None:
+        return sorted(cached, key=lambda item: (item.order, item.id))[:2]
+    return list(event.plan_items.order_by("order", "id")[:2])
+
+
 def resolve_plan_item_for_event(event):
     """
     Тема карточки урока = пункт плана на эту дату.
@@ -461,7 +573,7 @@ def resolve_plan_item_for_event(event):
     if dated is not None:
         return _result(dated)
 
-    linked = list(event.plan_items.order_by("order", "id")[:2])
+    linked = _linked_plan_items(event)
     if len(linked) == 1:
         return _result(linked[0])
     if len(linked) > 1 and event.lesson_plan_item_id:
@@ -499,7 +611,7 @@ def explicit_plan_item_for_event(event):
     Пункт плана, явно привязанный к занятию (не слот enrollment).
     Нужен для записи материалов: слот нельзя мутировать для уроков «вне плана».
     """
-    linked = list(event.plan_items.order_by("order", "id")[:2])
+    linked = _linked_plan_items(event)
     if len(linked) == 1:
         item = linked[0]
         return item, item.order or None

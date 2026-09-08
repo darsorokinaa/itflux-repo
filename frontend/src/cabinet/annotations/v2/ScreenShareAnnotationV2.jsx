@@ -3,18 +3,26 @@ import { createPortal } from "react-dom";
 
 import { useElementClientRect } from "../useElementClientRect";
 import { useFloatingDrag } from "../../useFloatingDrag";
-import { TOOLS, participantColor } from "../../screenshare/constants";
+import {
+  HIGHLIGHTER_OPACITY_DEFAULT,
+  TOOLS,
+  isPassthroughTool,
+  participantColor,
+} from "../../screenshare/constants";
 import { computeScreenShareContentRect } from "../../screenshare/contentRect";
 import CabinetIcon from "../../CabinetIcons";
-import { dimensionsChanged } from "./coordinateMapper";
 import { createAnnotationEngine } from "./engine";
-import { annDebug } from "./debug";
+import { annDebug, isAnnDebugEnabled } from "./debug";
 import PresenterToolbar from "./PresenterToolbar";
+import GeometryDebugOverlay from "./GeometryDebugOverlay";
+import { useJitsiShareGeometry } from "./useJitsiShareGeometry";
+import { GEOMETRY_STATUS } from "./jitsiGeometry";
 import { resolvePresenterOverlayPlan } from "./overlays/presenterAdapter";
 import { closeDocumentPipWindow } from "./overlays/documentPip";
 import {
   collapsedAnnotationUi,
   openedAnnotationUi,
+  shouldResetAnnotationUi,
   shouldShowAnnotationTrigger,
 } from "./zoomSession";
 
@@ -34,7 +42,10 @@ export default function ScreenShareAnnotationV2({
   compact = false,
   canManage = false,
   canAnnotate = false,
+  isPresenter = false,
   participantsCanAnnotate = false,
+  showAuthorNames = false,
+  presenterUserId = null,
   currentUserId = null,
   displayName = "",
   sessionId = "",
@@ -44,19 +55,21 @@ export default function ScreenShareAnnotationV2({
   localSharing = false,
   tileView = false,
   targetRef = null,
+  jitsiOrigin = "",
+  presenterJitsiId = "",
   remoteLasers = {},
   syncUnavailable = false,
   onEngineReady,
   onSend,
   onPointer,
   onSetParticipantsCanAnnotate,
+  onSetShowAuthorNames,
 }) {
   const canvasRef = useRef(null);
   const viewportCanvasRef = useRef(null);
   const engineRef = useRef(null);
-  const sourceRevisionRef = useRef(1);
-  const lastSourceRef = useRef({ width: 0, height: 0, surface: "" });
   const pipWindowRef = useRef(null);
+  const sessionIdRef = useRef(sessionId);
   const onSendRef = useRef(onSend);
   const onPointerRef = useRef(onPointer);
   onSendRef.current = onSend;
@@ -65,21 +78,79 @@ export default function ScreenShareAnnotationV2({
   const [toolbarOpen, setToolbarOpen] = useState(false);
   const [tool, setTool] = useState(TOOLS.POINTER);
   const [color, setColor] = useState(() => participantColor(currentUserId));
-  const [width, setWidth] = useState(4);
+  const [width, setWidth] = useState(2);
+  const [opacity, setOpacity] = useState(HIGHLIGHTER_OPACITY_DEFAULT);
+  const [fontSize, setFontSize] = useState(18);
+  const [fontWeight, setFontWeight] = useState(650);
+  const [stampKind, setStampKind] = useState("star");
+  const [textDraft, setTextDraft] = useState(null);
   const [fsTick, setFsTick] = useState(0);
+  const [iframeNode, setIframeNode] = useState(null);
+  const [debugOn, setDebugOn] = useState(false);
 
   const hostBox = useElementClientRect(targetRef, {
     enabled: active,
     live: active,
   });
 
-  const drawing = Boolean(active && canAnnotate && tool !== TOOLS.POINTER);
+  useEffect(() => {
+    if (!active) {
+      setIframeNode(null);
+      return undefined;
+    }
+    const host = targetRef?.current;
+    const read = () => {
+      const node = host?.querySelector?.("iframe") || null;
+      setIframeNode((prev) => (prev === node ? prev : node));
+    };
+    read();
+    const mo = typeof MutationObserver !== "undefined" && host
+      ? new MutationObserver(read)
+      : null;
+    try { mo?.observe(host, { childList: true, subtree: true }); } catch { /* ignore */ }
+    const timer = window.setInterval(read, 1000);
+    return () => {
+      mo?.disconnect();
+      window.clearInterval(timer);
+    };
+  }, [active, targetRef]);
+
+  const geometry = useJitsiShareGeometry({
+    enabled: active,
+    iframe: iframeNode,
+    jitsiOrigin,
+    shareSessionId: sessionId,
+    presenterJitsiId,
+  });
+
+  const geometryExact = geometry.status === GEOMETRY_STATUS.EXACT && Boolean(geometry.contentRect);
+  const drawing = Boolean(
+    active
+    && canAnnotate
+    && toolbarOpen
+    && !isPassthroughTool(tool)
+    && geometryExact,
+  );
   const plan = useMemo(
     () => resolvePresenterOverlayPlan({ localSharing, displaySurface }),
     [localSharing, displaySurface],
   );
-  const usePlatformOverlay = Boolean(active && plan.platformTab && drawing);
+  // Tab-viewport overlay would use a different space than viewers' contain-fit tile.
+  const usePlatformOverlay = Boolean(active && plan.nativeAvailable && drawing);
   const layout = useMemo(() => {
+    if (geometryExact && geometry.contentRect) {
+      return computeScreenShareContentRect({
+        hostRect: geometry.iframeRect || hostBox,
+        contentWidth: geometry.videoWidth || contentWidth,
+        contentHeight: geometry.videoHeight || contentHeight,
+        compact,
+        tileView,
+        objectFit: geometry.objectFit,
+        exactContentRect: geometry.contentRect,
+        exactVideoRect: geometry.videoRect,
+        geometryStatus: GEOMETRY_STATUS.EXACT,
+      });
+    }
     if (!hostBox) return null;
     return computeScreenShareContentRect({
       hostRect: hostBox,
@@ -87,8 +158,25 @@ export default function ScreenShareAnnotationV2({
       contentHeight,
       compact,
       tileView,
+      geometryStatus: geometry.status === GEOMETRY_STATUS.WAITING
+        ? GEOMETRY_STATUS.WAITING
+        : GEOMETRY_STATUS.FALLBACK,
     });
-  }, [hostBox, contentWidth, contentHeight, compact, tileView]);
+  }, [
+    geometryExact,
+    geometry.contentRect,
+    geometry.videoRect,
+    geometry.iframeRect,
+    geometry.videoWidth,
+    geometry.videoHeight,
+    geometry.objectFit,
+    geometry.status,
+    hostBox,
+    contentWidth,
+    contentHeight,
+    compact,
+    tileView,
+  ]);
 
   const drag = useFloatingDrag({
     enabled: active && !pipWindow,
@@ -104,8 +192,15 @@ export default function ScreenShareAnnotationV2({
       sourceWidth: contentWidth || 1920,
       canAnnotate,
       canManage,
+      isPresenter: Boolean(isPresenter || localSharing),
+      showAuthorNames,
+      presenterUserId: presenterUserId ?? currentUserId,
+      sessionId,
       onSend: (...args) => onSendRef.current?.(...args),
       onPointer: (...args) => onPointerRef.current?.(...args),
+      onTextRequest: (point) => {
+        setTextDraft({ x: point.x, y: point.y, value: "" });
+      },
     });
     engineRef.current = engine;
     onEngineReady?.(engine);
@@ -115,20 +210,51 @@ export default function ScreenShareAnnotationV2({
       engine.dispose();
       engineRef.current = null;
     };
-  }, [active, sessionId]); // eslint-disable-line react-hooks/exhaustive-deps -- recreate per share session
+  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps -- overlay lifetime; session swap is setSessionId
+
+  useEffect(() => {
+    engineRef.current?.setSessionId(sessionId);
+  }, [sessionId]);
 
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
     engine.setCanAnnotate(canAnnotate);
     engine.setCanManage(canManage);
+    engine.setIsPresenter(Boolean(isPresenter || localSharing));
+    engine.setShowAuthorNames(showAuthorNames);
+    engine.setPresenterUserId(presenterUserId ?? currentUserId);
     engine.setTool(tool);
     engine.setColor(color);
     engine.setWidth(width);
-    engine.setDrawingEnabled(drawing && canAnnotate);
-    engine.setSourceWidth(contentWidth || 1920);
+    engine.setOpacity(opacity);
+    engine.setFontSize(fontSize);
+    engine.setFontWeight(fontWeight);
+    engine.setStampKind(stampKind);
+    engine.setDrawingEnabled(drawing && canAnnotate && geometryExact);
+    engine.setSourceWidth(geometry.videoWidth || contentWidth || 1920);
     engine.setPointerSpace(usePlatformOverlay ? "viewport" : "content");
-  }, [canAnnotate, canManage, tool, color, width, drawing, contentWidth, usePlatformOverlay]);
+  }, [
+    canAnnotate,
+    canManage,
+    isPresenter,
+    localSharing,
+    showAuthorNames,
+    presenterUserId,
+    currentUserId,
+    tool,
+    color,
+    width,
+    opacity,
+    fontSize,
+    fontWeight,
+    stampKind,
+    drawing,
+    contentWidth,
+    geometryExact,
+    geometry.videoWidth,
+    usePlatformOverlay,
+  ]);
 
   useEffect(() => {
     const engine = engineRef.current;
@@ -160,33 +286,8 @@ export default function ScreenShareAnnotationV2({
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine || !layout?.content) return;
-    const nextSource = {
-      width: Number(contentWidth) || 0,
-      height: Number(contentHeight) || 0,
-      surface: String(displaySurface || ""),
-    };
-    const prev = lastSourceRef.current;
-    const sourceChanged = (prev.width || prev.height)
-      && (
-        dimensionsChanged(prev, nextSource)
-        || prev.surface !== nextSource.surface
-      );
-    if (sourceChanged) {
-      engine.machine.disable();
-      sourceRevisionRef.current += 1;
-      if (localSharing && canManage) engine.clearAll();
-      annDebug("source-change", {
-        from: prev,
-        to: nextSource,
-        sourceRevision: sourceRevisionRef.current,
-      });
-    }
-    lastSourceRef.current = nextSource;
     engine.setLayout(
-      {
-        content: layout.content,
-        sourceRevision: localSharing ? sourceRevisionRef.current : engine.store.sourceRevision,
-      },
+      { content: layout.content },
       {
         cssWidth: layout.content.width,
         cssHeight: layout.content.height,
@@ -194,24 +295,30 @@ export default function ScreenShareAnnotationV2({
       },
     );
     annDebug("layout", {
-      sourceWidth: contentWidth,
-      sourceHeight: contentHeight,
+      sourceWidth: geometry.videoWidth || contentWidth,
+      sourceHeight: geometry.videoHeight || contentHeight,
       displaySurface,
       container: hostBox,
+      iframeRect: geometry.iframeRect,
+      videoRect: geometry.videoRect,
       contentRect: layout.content,
-      dpr: typeof window !== "undefined" ? window.devicePixelRatio : 1,
-      sourceRevision: sourceRevisionRef.current,
+      geometryStatus: geometry.status,
+      shareSessionId: sessionId,
     });
-  }, [layout, contentWidth, contentHeight, displaySurface, localSharing, canManage, hostBox]);
+  }, [layout, contentWidth, contentHeight, displaySurface, hostBox]);
 
   useEffect(() => {
     engineRef.current?.setLasers(lasersToList(remoteLasers));
   }, [remoteLasers]);
 
   useEffect(() => {
+    const prevSessionId = sessionIdRef.current;
+    sessionIdRef.current = sessionId;
+    if (!shouldResetAnnotationUi({ active, prevSessionId, sessionId })) return;
     const next = collapsedAnnotationUi();
     setToolbarOpen(next.toolbarOpen);
     setTool(next.tool);
+    setTextDraft(null);
   }, [active, sessionId]);
 
   useEffect(() => {
@@ -219,7 +326,12 @@ export default function ScreenShareAnnotationV2({
     const next = collapsedAnnotationUi();
     setToolbarOpen(next.toolbarOpen);
     setTool(next.tool);
+    setTextDraft(null);
   }, [canAnnotate]);
+
+  useEffect(() => {
+    setDebugOn(isAnnDebugEnabled());
+  }, [active, fsTick]);
 
   useEffect(() => {
     const open = () => {
@@ -237,6 +349,41 @@ export default function ScreenShareAnnotationV2({
   }, []);
 
   useEffect(() => {
+    if (!active || !toolbarOpen) return undefined;
+    const onKey = (event) => {
+      const key = String(event.key || "");
+      if (key === "Escape") {
+        if (textDraft) {
+          setTextDraft(null);
+          return;
+        }
+        setTool(TOOLS.POINTER);
+        engineRef.current?.setDrawingEnabled(false);
+        return;
+      }
+      const meta = event.metaKey || event.ctrlKey;
+      if (!meta) return;
+      const lower = key.toLowerCase();
+      if (lower === "z" && event.shiftKey) {
+        event.preventDefault();
+        engineRef.current?.redo();
+        return;
+      }
+      if (lower === "z") {
+        event.preventDefault();
+        engineRef.current?.undo();
+        return;
+      }
+      if (lower === "y") {
+        event.preventDefault();
+        engineRef.current?.redo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, toolbarOpen, textDraft]);
+
+  useEffect(() => {
     if (active) return undefined;
     const pip = pipWindowRef.current;
     pipWindowRef.current = null;
@@ -252,10 +399,12 @@ export default function ScreenShareAnnotationV2({
 
   if (!active) return null;
 
-  const content = layout?.content;
+  const content = geometryExact ? layout?.content : null;
+  const dockRect = content || hostBox;
   const collapseToolbar = () => {
     const next = collapsedAnnotationUi();
     setTool(next.tool);
+    setTextDraft(null);
     engineRef.current?.setDrawingEnabled(false);
     setToolbarOpen(next.toolbarOpen);
   };
@@ -265,42 +414,66 @@ export default function ScreenShareAnnotationV2({
     setToolbarOpen(next.toolbarOpen);
   };
   const showTrigger = shouldShowAnnotationTrigger({ active, canAnnotate });
+  const presenter = Boolean(isPresenter || localSharing);
   const toolbar = toolbarOpen && showTrigger ? (
     <PresenterToolbar
       tool={tool}
       color={color}
       width={width}
-      canAnnotate={canAnnotate}
+      opacity={opacity}
+      fontSize={fontSize}
+      fontWeight={fontWeight}
+      stampKind={stampKind}
+      canAnnotate={canAnnotate && geometryExact}
       canManage={canManage}
+      isPresenter={presenter}
       participantsCanAnnotate={participantsCanAnnotate}
+      showAuthorNames={showAuthorNames}
       syncUnavailable={syncUnavailable}
+      geometryStatus={geometry.status}
       onToolChange={setTool}
       onColorChange={setColor}
       onWidthChange={setWidth}
+      onOpacityChange={setOpacity}
+      onFontSizeChange={setFontSize}
+      onFontWeightChange={setFontWeight}
+      onStampKindChange={setStampKind}
       onUndo={() => engineRef.current?.undo()}
+      onRedo={() => engineRef.current?.redo()}
       onClearMine={() => engineRef.current?.clearMine()}
+      onClearViewers={() => engineRef.current?.clearViewers()}
       onClearAll={() => engineRef.current?.clearAll()}
       onSetParticipantsCanAnnotate={onSetParticipantsCanAnnotate}
+      onSetShowAuthorNames={onSetShowAuthorNames}
+      onDock={() => drag.reset?.()}
       onClose={collapseToolbar}
       onPointerDownDrag={pipWindow ? undefined : drag.onPointerDown}
     />
-  ) : showTrigger ? (
-    <button
-      type="button"
-      className="ss-ann-v2-reopen"
-      onClick={openToolbar}
-      title="Аннотации"
-      aria-expanded="false"
-      aria-label="Аннотации"
-    >
-      <CabinetIcon name="pencil" />
-      <span>Аннотации</span>
-    </button>
   ) : null;
 
   const host = portalRoot() || document.body;
   void fsTick;
-  const toolbarPortal = !toolbar
+
+  const viewH = typeof window !== "undefined"
+    ? (window.visualViewport?.height || window.innerHeight)
+    : 800;
+  const defaultToolbarStyle = dockRect ? {
+    left: Math.max(8, dockRect.left + 12),
+    top: Math.max(8, Math.min(dockRect.top + dockRect.height - 92, viewH - 100)),
+    right: "auto",
+    bottom: "auto",
+    transform: "none",
+  } : undefined;
+
+  const triggerStyle = dockRect ? {
+    left: Math.max(8, dockRect.left + 12),
+    top: Math.max(8, Math.min(dockRect.top + dockRect.height - 48, viewH - 56)),
+    right: "auto",
+    bottom: "auto",
+    transform: "none",
+  } : undefined;
+
+  const toolbarPortal = !toolbar && !showTrigger
     ? null
     : pipWindow?.document?.body
       ? createPortal(toolbar, pipWindow.document.body)
@@ -309,29 +482,74 @@ export default function ScreenShareAnnotationV2({
           ref={drag.nodeRef}
           className={`ss-ann-v2-toolbar-slot${compact ? " is-compact" : ""}`}
           style={{
-            ...drag.style,
-            transform: drag.positioned ? "none" : undefined,
+            ...(drag.positioned ? drag.style : (toolbar ? defaultToolbarStyle : triggerStyle)),
+            transform: drag.positioned ? "none" : (toolbar ? defaultToolbarStyle?.transform : triggerStyle?.transform),
           }}
         >
-          {toolbar}
+          {toolbar || (showTrigger ? (
+            <button
+              type="button"
+              className="ss-ann-v2-reopen"
+              onClick={openToolbar}
+              title="Аннотации"
+              aria-expanded="false"
+              aria-label="Аннотации"
+            >
+              <CabinetIcon name="pencil" />
+              <span>Аннотации</span>
+            </button>
+          ) : null)}
         </div>,
         host,
       );
 
+  const contentCanvas = content ? (
+    <canvas
+      ref={canvasRef}
+      className={[
+        "ss-ann-v2-canvas",
+        drawing && !usePlatformOverlay ? "is-drawing" : "",
+        tool === TOOLS.SELECT ? "is-select" : "",
+      ].filter(Boolean).join(" ")}
+      style={{
+        left: content.left,
+        top: content.top,
+        width: content.width,
+        height: content.height,
+      }}
+    />
+  ) : null;
+
+  const textEditor = textDraft && content ? createPortal(
+    <input
+      className="ss-ann-v2-text"
+      autoFocus
+      maxLength={280}
+      value={textDraft.value}
+      aria-label="Текст аннотации"
+      style={{
+        left: content.left + textDraft.x * content.width,
+        top: content.top + textDraft.y * content.height - 18,
+      }}
+      onChange={(event) => setTextDraft((prev) => (prev ? { ...prev, value: event.target.value } : prev))}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          engineRef.current?.commitText(textDraft, textDraft.value);
+          setTextDraft(null);
+        }
+        if (event.key === "Escape") setTextDraft(null);
+      }}
+      onBlur={() => {
+        if (textDraft.value.trim()) engineRef.current?.commitText(textDraft, textDraft.value);
+        setTextDraft(null);
+      }}
+    />,
+    host,
+  ) : null;
+
   return (
     <>
-      {content ? (
-        <canvas
-          ref={canvasRef}
-          className={`ss-ann-v2-canvas${drawing && !usePlatformOverlay ? " is-drawing" : ""}`}
-          style={{
-            left: content.left,
-            top: content.top,
-            width: content.width,
-            height: content.height,
-          }}
-        />
-      ) : null}
+      {contentCanvas ? createPortal(contentCanvas, host) : null}
       {usePlatformOverlay ? createPortal(
         <canvas
           ref={viewportCanvasRef}
@@ -339,7 +557,23 @@ export default function ScreenShareAnnotationV2({
         />,
         host,
       ) : null}
+      {textEditor}
       {toolbarPortal}
+      <GeometryDebugOverlay
+        enabled={debugOn}
+        iframeRect={geometry.iframeRect}
+        videoRect={geometry.videoRect}
+        contentRect={geometry.contentRect}
+        canvasRect={content}
+        videoWidth={geometry.videoWidth}
+        videoHeight={geometry.videoHeight}
+        dpr={typeof window !== "undefined" ? window.devicePixelRatio : 1}
+        shareSessionId={sessionId}
+        status={geometry.status}
+        surfaceKind={geometry.raw?.surfaceKind || ""}
+        stageSurfaceFound={Boolean(geometry.raw?.stageSurfaceFound)}
+        surfaceCandidateCount={Number(geometry.raw?.surfaceCandidateCount) || 0}
+      />
     </>
   );
 }

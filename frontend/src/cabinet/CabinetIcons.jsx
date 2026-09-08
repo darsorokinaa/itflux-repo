@@ -64,6 +64,10 @@ const ICON_PATHS = {
   rect:      "M5 5h14v14H5z",
   ellipse:   "M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z",
   text:      "M4 7V4h16v3 M12 4v16 M8 20h8",
+  select:    "M3 3l7 18 2.5-7.5L20 11z M14 14l6 6",
+  stamp:     "M12 3l2.2 4.5 5 .7-3.6 3.5.9 5.1L12 14.8 7.5 16.8l.9-5.1L4.8 8.2l5-.7z",
+  vanishing: "M4 20h4l8-8-4-4-8 8v4z M16 6l2-2 2 2-2 2z M14 4h.01",
+  arrowPointer: "M4 4l8 16 1.8-6.2L20 12z M14 14l6 6",
 };
 
 export default function CabinetIcon({ name }) {

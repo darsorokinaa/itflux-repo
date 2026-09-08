@@ -1,19 +1,33 @@
 import { useEffect, useRef, useState } from "react";
 
 import CabinetIcon from "../../CabinetIcons";
-import { PALETTE, TOOLS, WIDTH_PRESETS } from "../../screenshare/constants";
+import {
+  PALETTE,
+  STAMP_KINDS,
+  TEXT_SIZES,
+  TEXT_WEIGHTS,
+  TOOLS,
+  WIDTH_PRESETS,
+} from "../../screenshare/constants";
 
-const PRIMARY_TOOLS = [
-  { id: TOOLS.POINTER, icon: "pointer", label: "Указка" },
-  { id: TOOLS.LASER, icon: "laser", label: "Лазер" },
-  { id: TOOLS.PEN, icon: "pencil", label: "Карандаш" },
-  { id: TOOLS.ARROW, icon: "arrow", label: "Стрелка" },
+const CORE_TOOLS = [
+  { id: TOOLS.POINTER, icon: "pointer", label: "Мышь" },
+  { id: TOOLS.PEN, icon: "pencil", label: "Перо" },
+  { id: TOOLS.HIGHLIGHTER, icon: "highlighter", label: "Маркер" },
+  { id: TOOLS.TEXT, icon: "text", label: "Текст" },
 ];
 
-const OPTIONAL_TOOLS = [
+const SHAPE_ITEMS = [
+  { id: TOOLS.ARROW, icon: "arrow", label: "Стрелка" },
   { id: TOOLS.LINE, icon: "minus", label: "Линия" },
   { id: TOOLS.RECT, icon: "rect", label: "Прямоугольник" },
-  { id: TOOLS.ERASER, icon: "eraser", label: "Ластик" },
+  { id: TOOLS.ELLIPSE, icon: "ellipse", label: "Эллипс" },
+];
+
+const PRESENTER_TOOLS = [
+  { id: TOOLS.SELECT, icon: "select", label: "Выбор" },
+  { id: TOOLS.SPOTLIGHT, icon: "laser", label: "Spotlight" },
+  { id: TOOLS.VANISHING, icon: "vanishing", label: "Исчезающее перо" },
 ];
 
 function ToolButton({ item, tool, canAnnotate, onToolChange, className = "" }) {
@@ -36,22 +50,39 @@ export default function PresenterToolbar({
   tool,
   color,
   width,
+  opacity = 0.38,
+  fontSize = 18,
+  fontWeight = 650,
+  stampKind = "star",
   canAnnotate = false,
   canManage = false,
+  isPresenter = false,
   participantsCanAnnotate = false,
+  showAuthorNames = false,
   syncUnavailable = false,
   onToolChange,
   onColorChange,
   onWidthChange,
+  onOpacityChange,
+  onFontSizeChange,
+  onFontWeightChange,
+  onStampKindChange,
   onUndo,
+  onRedo,
   onClearMine,
+  onClearViewers,
   onClearAll,
   onSetParticipantsCanAnnotate,
+  onSetShowAuthorNames,
+  onDock,
   onClose,
   onPointerDownDrag,
+  geometryStatus = "",
 }) {
   const rootRef = useRef(null);
   const [menu, setMenu] = useState(null);
+  const hostControls = Boolean(canManage || isPresenter);
+  const presenterTools = Boolean(isPresenter);
 
   useEffect(() => {
     if (!menu) return undefined;
@@ -73,30 +104,128 @@ export default function PresenterToolbar({
     setMenu((prev) => (prev === id ? null : id));
   };
 
-  const colorControl = (
+  const formatControl = (
     <div className="ss-ann-v2-popwrap">
       <button
         type="button"
-        className={`ss-ann-v2-colorbtn${menu === "color" ? " is-open" : ""}`}
+        className={menu === "format" ? "is-open" : ""}
         disabled={!canAnnotate}
-        title="Цвет"
-        aria-label="Цвет"
-        aria-expanded={menu === "color"}
-        onClick={() => toggleMenu("color")}
+        title="Формат"
+        aria-label="Формат"
+        aria-expanded={menu === "format"}
+        onClick={() => toggleMenu("format")}
       >
         <span className="ss-ann-v2-colorbtn__chip" style={{ background: color }} />
       </button>
-      {menu === "color" ? (
-        <div className="ss-ann-v2-pop" role="menu" aria-label="Цвет">
-          {PALETTE.map((c) => (
-            <button
-              key={c}
-              type="button"
-              className={`ann-toolbar__swatch${color === c ? " is-active" : ""}`}
-              style={{ background: c }}
-              aria-label={`Цвет ${c}`}
-              onClick={() => {
-                onColorChange?.(c);
+      {menu === "format" ? (
+        <div className="ss-ann-v2-pop ss-ann-v2-pop--format" role="dialog" aria-label="Формат">
+          <p className="ss-ann-v2-pop__label">Цвет</p>
+          <div className="ss-ann-v2-pop__row">
+            {PALETTE.map((c) => (
+              <button
+                key={c}
+                type="button"
+                className={`ann-toolbar__swatch${color === c ? " is-active" : ""}`}
+                style={{ background: c }}
+                aria-label={`Цвет ${c}`}
+                onClick={() => onColorChange?.(c)}
+              />
+            ))}
+          </div>
+          <p className="ss-ann-v2-pop__label">Толщина</p>
+          <div className="ss-ann-v2-pop__row ss-ann-v2-pop__row--stack">
+            {WIDTH_PRESETS.map((preset) => (
+              <button
+                key={preset.value}
+                type="button"
+                className={Number(width) === preset.value ? "is-active" : ""}
+                title={preset.label}
+                aria-label={preset.label}
+                onClick={() => onWidthChange?.(preset.value)}
+              >
+                <span className="ss-ann-v2-widthopt" style={{ height: Math.max(1, preset.value) }} />
+                <span className="ss-ann-v2-widthopt__label">{preset.label}</span>
+              </button>
+            ))}
+          </div>
+          <label className="ss-ann-v2-pop__label" htmlFor="ss-ann-width-range">Тонкая линия</label>
+          <input
+            id="ss-ann-width-range"
+            type="range"
+            min="0.75"
+            max="12"
+            step="0.25"
+            value={width}
+            aria-label="Толщина пера"
+            onChange={(event) => onWidthChange?.(Number(event.target.value))}
+          />
+          <label className="ss-ann-v2-pop__label" htmlFor="ss-ann-opacity-range">Прозрачность маркера</label>
+          <input
+            id="ss-ann-opacity-range"
+            type="range"
+            min="0.12"
+            max="0.7"
+            step="0.02"
+            value={opacity}
+            aria-label="Прозрачность маркера"
+            onChange={(event) => onOpacityChange?.(Number(event.target.value))}
+          />
+          <p className="ss-ann-v2-pop__label">Размер текста</p>
+          <div className="ss-ann-v2-pop__row">
+            {TEXT_SIZES.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                className={Number(fontSize) === item.value ? "is-active" : ""}
+                aria-label={`Размер текста ${item.label}`}
+                onClick={() => onFontSizeChange?.(item.value)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          <p className="ss-ann-v2-pop__label">Начертание</p>
+          <div className="ss-ann-v2-pop__row">
+            {TEXT_WEIGHTS.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                className={Number(fontWeight) === item.value ? "is-active" : ""}
+                aria-label={item.label}
+                onClick={() => onFontWeightChange?.(item.value)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+
+  const shapesControl = (
+    <div className="ss-ann-v2-popwrap ss-ann-v2-tool--optional">
+      <button
+        type="button"
+        className={[SHAPE_ITEMS.some((item) => item.id === tool) ? "is-active" : "", menu === "shapes" ? "is-open" : ""].filter(Boolean).join(" ")}
+        disabled={!canAnnotate}
+        title="Рисование / Фигуры"
+        aria-label="Рисование / Фигуры"
+        aria-expanded={menu === "shapes"}
+        onClick={() => toggleMenu("shapes")}
+      >
+        <CabinetIcon name="rect" />
+      </button>
+      {menu === "shapes" ? (
+        <div className="ss-ann-v2-pop" role="menu" aria-label="Фигуры">
+          {SHAPE_ITEMS.map((item) => (
+            <ToolButton
+              key={item.id}
+              item={item}
+              tool={tool}
+              canAnnotate={canAnnotate}
+              onToolChange={(id) => {
+                onToolChange?.(id);
                 setMenu(null);
               }}
             />
@@ -106,35 +235,38 @@ export default function PresenterToolbar({
     </div>
   );
 
-  const widthControl = (
+  const stampControl = (
     <div className="ss-ann-v2-popwrap ss-ann-v2-tool--optional">
       <button
         type="button"
-        className={`ss-ann-v2-widthbtn${menu === "width" ? " is-open" : ""}`}
+        className={[tool === TOOLS.STAMP ? "is-active" : "", menu === "stamp" ? "is-open" : ""].filter(Boolean).join(" ")}
         disabled={!canAnnotate}
-        title="Толщина"
-        aria-label="Толщина"
-        aria-expanded={menu === "width"}
-        onClick={() => toggleMenu("width")}
+        title="Штамп"
+        aria-label="Штамп"
+        aria-expanded={menu === "stamp"}
+        onClick={() => {
+          onToolChange?.(TOOLS.STAMP);
+          toggleMenu("stamp");
+        }}
       >
-        <span className="ss-ann-v2-widthbtn__mark" style={{ height: Math.max(2, Number(width) || 4) }} />
+        <CabinetIcon name="stamp" />
       </button>
-      {menu === "width" ? (
-        <div className="ss-ann-v2-pop ss-ann-v2-pop--width" role="menu" aria-label="Толщина">
-          {WIDTH_PRESETS.map((preset) => (
+      {menu === "stamp" ? (
+        <div className="ss-ann-v2-pop" role="menu" aria-label="Штамп">
+          {STAMP_KINDS.map((item) => (
             <button
-              key={preset.value}
+              key={item.id}
               type="button"
-              className={Number(width) === preset.value ? "is-active" : ""}
-              title={preset.label}
-              aria-label={preset.label}
+              className={stampKind === item.id ? "is-active" : ""}
+              aria-label={item.label}
+              title={item.label}
               onClick={() => {
-                onWidthChange?.(preset.value);
+                onStampKindChange?.(item.id);
+                onToolChange?.(TOOLS.STAMP);
                 setMenu(null);
               }}
             >
-              <span className="ss-ann-v2-widthopt" style={{ height: preset.value }} />
-              <span className="ss-ann-v2-widthopt__label">{preset.label}</span>
+              {item.label}
             </button>
           ))}
         </div>
@@ -142,19 +274,75 @@ export default function PresenterToolbar({
     </div>
   );
 
-  const allowControl = canManage ? (
-    <button
-      type="button"
-      className={`ss-ann-v2-allow${participantsCanAnnotate ? " is-on" : ""}`}
-      onClick={() => onSetParticipantsCanAnnotate?.(!participantsCanAnnotate)}
-      title={participantsCanAnnotate ? "Запретить пометки ученику" : "Разрешить пометки ученику"}
-      aria-label={participantsCanAnnotate ? "Запретить пометки ученику" : "Разрешить пометки ученику"}
-      aria-pressed={participantsCanAnnotate}
-    >
-      <CabinetIcon name="users" />
-      <span>{participantsCanAnnotate ? "Ученик рисует" : "Разрешить пометки ученику"}</span>
-    </button>
-  ) : null;
+  const clearControl = (
+    <div className="ss-ann-v2-popwrap">
+      <button
+        type="button"
+        className={menu === "clear" ? "is-open" : ""}
+        disabled={!canAnnotate}
+        title="Очистить"
+        aria-label="Очистить"
+        aria-expanded={menu === "clear"}
+        onClick={() => toggleMenu("clear")}
+      >
+        <CabinetIcon name="trash" />
+      </button>
+      {menu === "clear" ? (
+        <div className="ss-ann-v2-pop ss-ann-v2-pop--confirm" role="menu" aria-label="Очистить">
+          {hostControls ? (
+            <>
+              <button
+                type="button"
+                className="is-danger"
+                onClick={() => {
+                  onClearAll?.();
+                  setMenu(null);
+                }}
+              >
+                Все рисунки
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onClearMine?.();
+                  setMenu(null);
+                }}
+              >
+                Мои рисунки
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onClearViewers?.();
+                  setMenu(null);
+                }}
+              >
+                Рисунки участников
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                onClearMine?.();
+                setMenu(null);
+              }}
+            >
+              Мои рисунки
+            </button>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+
+  const moreItems = [
+    ...SHAPE_ITEMS,
+    { id: TOOLS.STAMP, icon: "stamp", label: "Штамп" },
+    { id: TOOLS.ARROW_POINTER, icon: "arrowPointer", label: "Указатель" },
+    { id: TOOLS.ERASER, icon: "eraser", label: "Ластик" },
+    ...(presenterTools ? PRESENTER_TOOLS : []),
+  ];
 
   return (
     <div
@@ -165,7 +353,7 @@ export default function PresenterToolbar({
       onPointerDown={onPointerDownDrag}
     >
       <span className="ss-ann-v2-toolbar__grip" title="Переместить" aria-hidden="true" />
-      {PRIMARY_TOOLS.map((item) => (
+      {CORE_TOOLS.map((item) => (
         <ToolButton
           key={item.id}
           item={item}
@@ -174,72 +362,66 @@ export default function PresenterToolbar({
           onToolChange={onToolChange}
         />
       ))}
-      {OPTIONAL_TOOLS.map((item) => (
+      {shapesControl}
+      {stampControl}
+      <ToolButton
+        item={{ id: TOOLS.ARROW_POINTER, icon: "arrowPointer", label: "Указатель" }}
+        tool={tool}
+        canAnnotate={canAnnotate}
+        onToolChange={onToolChange}
+        className="ss-ann-v2-tool--optional"
+      />
+      <ToolButton
+        item={{ id: TOOLS.ERASER, icon: "eraser", label: "Ластик" }}
+        tool={tool}
+        canAnnotate={canAnnotate}
+        onToolChange={onToolChange}
+      />
+      {presenterTools ? PRESENTER_TOOLS.map((item) => (
         <ToolButton
           key={item.id}
           item={item}
           tool={tool}
           canAnnotate={canAnnotate}
           onToolChange={onToolChange}
-          className={item.id === TOOLS.ERASER ? undefined : "ss-ann-v2-tool--optional"}
+          className="ss-ann-v2-tool--presenter"
         />
-      ))}
+      )) : null}
       <span className="ss-ann-v2-toolbar__sep" />
-      {colorControl}
-      {widthControl}
-      {allowControl}
-      <span className="ss-ann-v2-toolbar__sep" />
-      <button
-        type="button"
-        disabled={!canAnnotate}
-        title="Отменить своё"
-        aria-label="Отменить своё"
-        onClick={() => onUndo?.()}
-      >
-        <CabinetIcon name="undo" />
-      </button>
-      {canManage ? (
-        <div className="ss-ann-v2-popwrap">
+      {formatControl}
+      {hostControls ? (
+        <>
           <button
             type="button"
-            className={menu === "clear" ? "is-open" : ""}
-            title="Очистить все"
-            aria-label="Очистить все"
-            aria-expanded={menu === "clear"}
-            onClick={() => toggleMenu("clear")}
+            className={`ss-ann-v2-allow${participantsCanAnnotate ? " is-on" : ""}`}
+            onClick={() => onSetParticipantsCanAnnotate?.(!participantsCanAnnotate)}
+            title={participantsCanAnnotate ? "Запретить аннотации участникам" : "Разрешить аннотации участникам"}
+            aria-label={participantsCanAnnotate ? "Запретить аннотации участникам" : "Разрешить аннотации участникам"}
+            aria-pressed={participantsCanAnnotate}
           >
-            <CabinetIcon name="trash" />
+            <CabinetIcon name="users" />
+            <span>{participantsCanAnnotate ? "Участники рисуют" : "Разрешить аннотации участникам"}</span>
           </button>
-          {menu === "clear" ? (
-            <div className="ss-ann-v2-pop ss-ann-v2-pop--confirm" role="dialog" aria-label="Очистить все пометки">
-              <p>Очистить все пометки?</p>
-              <div className="ss-ann-v2-pop__actions">
-                <button type="button" onClick={() => setMenu(null)}>Отмена</button>
-                <button
-                  type="button"
-                  className="is-danger"
-                  onClick={() => {
-                    onClearAll?.();
-                    setMenu(null);
-                  }}
-                >
-                  Очистить
-                </button>
-              </div>
-            </div>
-          ) : null}
-        </div>
-      ) : (
-        <button
-          type="button"
-          disabled={!canAnnotate}
-          title="Очистить свои пометки"
-          aria-label="Очистить свои пометки"
-          onClick={() => onClearMine?.()}
-        >
-          <CabinetIcon name="trash" />
-        </button>
-      )}
+          <button
+            type="button"
+            className={`ss-ann-v2-allow${showAuthorNames ? " is-on" : ""}`}
+            onClick={() => onSetShowAuthorNames?.(!showAuthorNames)}
+            title="Показывать имена авторов"
+            aria-label="Показывать имена авторов"
+            aria-pressed={showAuthorNames}
+          >
+            <CabinetIcon name="user" />
+          </button>
+        </>
+      ) : null}
+      <span className="ss-ann-v2-toolbar__sep" />
+      <button type="button" disabled={!canAnnotate} title="Отменить" aria-label="Отменить" onClick={() => onUndo?.()}>
+        <CabinetIcon name="undo" />
+      </button>
+      <button type="button" disabled={!canAnnotate} title="Повторить" aria-label="Повторить" onClick={() => onRedo?.()}>
+        <CabinetIcon name="redo" />
+      </button>
+      {clearControl}
       <div className="ss-ann-v2-popwrap ss-ann-v2-more">
         <button
           type="button"
@@ -253,7 +435,7 @@ export default function PresenterToolbar({
         </button>
         {menu === "more" ? (
           <div className="ss-ann-v2-pop ss-ann-v2-pop--more" role="menu" aria-label="Ещё">
-            {OPTIONAL_TOOLS.filter((item) => item.id !== TOOLS.ERASER).map((item) => (
+            {moreItems.map((item) => (
               <ToolButton
                 key={`more-${item.id}`}
                 item={item}
@@ -265,28 +447,29 @@ export default function PresenterToolbar({
                 }}
               />
             ))}
-            {WIDTH_PRESETS.map((preset) => (
-              <button
-                key={`more-w-${preset.value}`}
-                type="button"
-                className={Number(width) === preset.value ? "is-active" : ""}
-                disabled={!canAnnotate}
-                onClick={() => {
-                  onWidthChange?.(preset.value);
-                  setMenu(null);
-                }}
-              >
-                {preset.label}
-              </button>
-            ))}
           </div>
         ) : null}
       </div>
+      {onDock ? (
+        <button type="button" title="Вернуть к краю" aria-label="Вернуть к краю" onClick={() => onDock?.()}>
+          <CabinetIcon name="expand" />
+        </button>
+      ) : null}
       <button type="button" onClick={() => onClose?.()} title="Свернуть" aria-label="Свернуть">
         <CabinetIcon name="close" />
       </button>
       {syncUnavailable ? (
         <span className="ss-ann-v2-toolbar__status" title="Совместные пометки временно недоступны">!</span>
+      ) : null}
+      {geometryStatus && geometryStatus !== "exact" ? (
+        <span
+          className="ss-ann-v2-toolbar__status"
+          title={geometryStatus === "waiting"
+            ? "Ожидание точной геометрии демонстрации"
+            : "Нет моста геометрии Jitsi — рисование недоступно"}
+        >
+          {geometryStatus === "waiting" ? "…" : "✕"}
+        </span>
       ) : null}
     </div>
   );

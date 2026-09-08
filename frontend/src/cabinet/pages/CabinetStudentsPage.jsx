@@ -891,19 +891,18 @@ export default function CabinetStudentsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [studentsData, groupsData] = await Promise.all([
+      const [studentsData, groupsData, pendingInvites, acceptedInvites, expiredInvites] = await Promise.all([
         fetchStudents({ status: "active" }),
         fetchGroups({ status: "active" }),
+        fetchInvitations({ status: "pending" }).catch(() => []),
+        fetchInvitations({ status: "accepted" }).catch(() => []),
+        fetchInvitations({ status: "expired" }).catch(() => []),
+        loadEnrollments(),
       ]);
       setStudents(normalizeCabinetList(studentsData).map(mapApiStudent));
       setGroups(normalizeCabinetList(groupsData).map(mapApiGroup));
 
       try {
-        const [pendingInvites, acceptedInvites, expiredInvites] = await Promise.all([
-          fetchInvitations({ status: "pending" }),
-          fetchInvitations({ status: "accepted" }),
-          fetchInvitations({ status: "expired" }),
-        ]);
         const mergedInvites = [
           ...normalizeCabinetList(pendingInvites),
           ...normalizeCabinetList(acceptedInvites),
@@ -919,8 +918,6 @@ export default function CabinetStudentsPage() {
       } catch {
         setInvitations([]);
       }
-
-      await loadEnrollments();
     } catch (err) {
       setError(err.message || "Не удалось загрузить данные");
     } finally {

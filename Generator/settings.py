@@ -194,6 +194,7 @@ MIDDLEWARE = [
     # manage.py кладёт Generator/ в sys.path → пакет называется Generator (= Generator/Generator/)
     "Generator.middleware.NoStoreApiMiddleware",
     "Generator.middleware.MinimumClientVersionMiddleware",
+    "Generator.middleware.PerformanceTimingMiddleware",
 ]
 
 # Django admin: требовать TOTP (настроить: python manage.py setup_admin_totp <user>)

@@ -81,6 +81,18 @@ export function applyScreenshareOperation(map, op) {
     }
   } else if (action === "clear_all") {
     next.clear();
+  } else if (action === "clear_viewers") {
+    const presenterId = Number(op.presenterId ?? op.presenter_id);
+    for (const [id, ann] of next) {
+      if (Number(ann.authorId) !== presenterId) next.delete(id);
+    }
+  } else if (action === "object_update") {
+    const ann = payload.annotation || payload;
+    if (ann?.id && next.has(String(ann.id))) {
+      const id = String(ann.id);
+      const prev = next.get(id);
+      next.set(id, { ...prev, ...ann, id, authorId: prev.authorId });
+    }
   }
   if (next.size > MAX_ANNOTATIONS) {
     const extra = next.size - MAX_ANNOTATIONS;

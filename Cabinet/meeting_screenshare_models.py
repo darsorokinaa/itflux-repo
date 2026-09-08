@@ -41,6 +41,10 @@ class MeetingScreenShareSession(models.Model):
         "Участники могут рисовать",
         default=True,
     )
+    show_author_names = models.BooleanField(
+        "Показывать имена авторов",
+        default=False,
+    )
     content_width = models.PositiveIntegerField(
         "Ширина демонстрируемого кадра",
         null=True,

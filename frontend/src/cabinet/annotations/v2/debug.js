@@ -1,4 +1,4 @@
-function enabled() {
+export function isAnnDebugEnabled() {
   if (typeof window === "undefined") return false;
   try {
     if (window.__ITFLUX_ANN_DEBUG) return true;
@@ -6,11 +6,11 @@ function enabled() {
   } catch {
     /* ignore */
   }
-  try {
-    return Boolean(import.meta.env?.DEV);
-  } catch {
-    return false;
-  }
+  return false;
+}
+
+function enabled() {
+  return isAnnDebugEnabled();
 }
 
 export function annDebug(event, payload) {

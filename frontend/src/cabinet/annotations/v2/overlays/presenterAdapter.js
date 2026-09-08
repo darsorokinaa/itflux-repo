@@ -22,7 +22,9 @@ export function nativeDesktopOverlayAvailable() {
 
 /**
  * Overlay adapters are independent of AnnotationEngine / coordinate space.
- * Native desktop overlay is a stub until a helper exists.
+ * Until a native helper exists, the presenter draws on the same contain-fit
+ * content rect as viewers. Mapping the teacher's tab viewport 1:1 would put
+ * strokes on a different object than students see in the Jitsi tile.
  */
 export function resolvePresenterOverlayPlan({
   localSharing = false,
@@ -35,8 +37,8 @@ export function resolvePresenterOverlayPlan({
     mode: native
       ? OVERLAY_MODES.NATIVE_DESKTOP_OVERLAY
       : (pip ? OVERLAY_MODES.DOCUMENT_PIP_OVERLAY : OVERLAY_MODES.FALLBACK_WEB),
-    drawingSurface: platformTab
-      ? OVERLAY_MODES.PLATFORM_TAB_OVERLAY
+    drawingSurface: native
+      ? OVERLAY_MODES.NATIVE_DESKTOP_OVERLAY
       : OVERLAY_MODES.FALLBACK_WEB,
     toolbar: native
       ? OVERLAY_MODES.NATIVE_DESKTOP_OVERLAY

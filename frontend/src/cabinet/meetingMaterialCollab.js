@@ -701,9 +701,10 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       type: "screenshare.report",
       ...payload,
     }),
-    setScreensharePermission: (participantsCanAnnotate, sessionIdValue) => send({
+    setScreensharePermission: (participantsCanAnnotate, sessionIdValue, extra = {}) => send({
       type: "screenshare.set_permission",
       participantsCanAnnotate: Boolean(participantsCanAnnotate),
+      showAuthorNames: extra.showAuthorNames,
       sessionId: sessionIdValue,
     }),
     sendScreenshareOperation: ({ action, payload, operationId, sessionId: sid } = {}) => {

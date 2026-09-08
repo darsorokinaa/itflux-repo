@@ -252,6 +252,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     "Generator.middleware.NoStoreApiMiddleware",
     "Generator.middleware.MinimumClientVersionMiddleware",
+    "Generator.middleware.PerformanceTimingMiddleware",
 ]
 
 # Django admin TOTP (python manage.py setup_admin_totp <user>)

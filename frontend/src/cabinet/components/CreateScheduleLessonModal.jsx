@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import CabinetIcon from "../CabinetIcons";
 import {
@@ -115,6 +115,7 @@ export default function CreateScheduleLessonModal({
   const [meetingMode, setMeetingMode] = useState("auto");
   const [manualLink, setManualLink] = useState("");
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const { modal: accessGateModal, openFromError } = useAccessGate({
     authenticated: true,
     sourcePage: "/cabinet/schedule",
@@ -366,6 +367,7 @@ export default function CreateScheduleLessonModal({
 
   const handleSubmit = async (e, force = false) => {
     e.preventDefault();
+    if (savingRef.current) return;
     setError("");
     setConflict(null);
     if (!groupId && !studentId && !selectedStudentIds.length) {
@@ -384,6 +386,7 @@ export default function CreateScheduleLessonModal({
       setError(billingPreview.warning || "Недостаточно абонемента для этого занятия.");
       return;
     }
+    savingRef.current = true;
     setSaving(true);
     try {
       await onCreate(buildPayload(force));
@@ -397,6 +400,7 @@ export default function CreateScheduleLessonModal({
         setError(err.message || "Не удалось сохранить урок.");
       }
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };

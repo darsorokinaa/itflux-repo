@@ -8,6 +8,7 @@ import CabinetIcon from "../CabinetIcons";
 import {
   collapsedAnnotationUi,
   openedAnnotationUi,
+  shouldResetAnnotationUi,
   shouldShowAnnotationTrigger,
 } from "../annotations/v2/zoomSession";
 import {
@@ -197,6 +198,7 @@ export default function ScreenShareAnnotationOverlay({
   const [textDraft, setTextDraft] = useState(null);
   const [redoStack, setRedoStack] = useState([]);
   const [toolbarOpen, setToolbarOpen] = useState(false);
+  const sessionIdRef = useRef(sessionId);
   const drawingRef = useRef(null);
   const activePointerRef = useRef(null);
   const pendingPointsRef = useRef([]);
@@ -214,6 +216,9 @@ export default function ScreenShareAnnotationOverlay({
   const panelOpen = toolbarOpen;
 
   useEffect(() => {
+    const prevSessionId = sessionIdRef.current;
+    sessionIdRef.current = sessionId;
+    if (!shouldResetAnnotationUi({ active, prevSessionId, sessionId })) return;
     const next = collapsedAnnotationUi();
     setToolbarOpen(next.toolbarOpen);
     setTool(next.tool);
@@ -547,7 +552,7 @@ export default function ScreenShareAnnotationOverlay({
         height: visibleRect.height,
         pointerEvents: capturing ? "auto" : "none",
         touchAction: capturing ? "none" : "auto",
-        zIndex: 45,
+        zIndex: 11000,
       }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

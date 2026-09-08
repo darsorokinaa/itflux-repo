@@ -61,6 +61,17 @@ describe("pointer machine", () => {
     expect(machine.state).toBe(POINTER_STATES.IDLE);
   });
 
+  it("records a gap instead of a point when the pointer leaves the content", () => {
+    const onGap = vi.fn();
+    const onPoint = vi.fn();
+    const machine = createPointerMachine({ onGap, onPoint, onStart: vi.fn(), onEnd: vi.fn() });
+    machine.pointerdown(ev(), point(0.1, 0.1), { strokeId: "s1" });
+    machine.pointermove(ev(), null);
+    expect(onGap).toHaveBeenCalledTimes(1);
+    expect(onPoint).not.toHaveBeenCalled();
+    expect(machine.state).toBe(POINTER_STATES.DRAWING);
+  });
+
   it("lostpointercapture ends the stroke", () => {
     const onEnd = vi.fn();
     const machine = createPointerMachine({ onEnd, onStart: vi.fn() });

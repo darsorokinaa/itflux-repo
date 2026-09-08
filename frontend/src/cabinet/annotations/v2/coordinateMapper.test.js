@@ -40,7 +40,8 @@ describe("captured-surface coordinate mapper", () => {
     { name: "1920×1080 → mobile portrait", source: { w: 1920, h: 1080 }, container: { w: 390, h: 844 } },
     { name: "1366×768 → 2560×1440", source: { w: 1366, h: 768 }, container: { w: 2560, h: 1440 } },
     { name: "4K → 1366×768", source: { w: 3840, h: 2160 }, container: { w: 1366, h: 768 } },
-    { name: "21:9 → 16:9", source: { w: 2560, h: 1080 }, container: { w: 1920, h: 1080 } },
+    { name: "1920×1200 → 1000×800", source: { w: 1920, h: 1200 }, container: { w: 1000, h: 800 } },
+    { name: "4:3 1024×768 → 1000×800", source: { w: 1024, h: 768 }, container: { w: 1000, h: 800 } },
     { name: "16:9 → 21:9", source: { w: 1920, h: 1080 }, container: { w: 2560, h: 1080 } },
     { name: "portrait → landscape", source: { w: 1080, h: 1920 }, container: { w: 1920, h: 1080 } },
     { name: "landscape → portrait", source: { w: 1920, h: 1080 }, container: { w: 1080, h: 1920 } },
@@ -72,6 +73,17 @@ describe("captured-surface coordinate mapper", () => {
     expect(content.offsetX).toBeCloseTo(0);
     expect(content.offsetY).toBeCloseTo(118.75);
     expect(pointerToNormalized(10, 10, content)).toBeNull();
+  });
+
+  it("assumes 16:9 contain-fit when source size is unknown", () => {
+    const content = computeContentRect({
+      container: { left: 0, top: 0, width: 1000, height: 800 },
+      sourceWidth: 0,
+      sourceHeight: 0,
+    });
+    expect(content.sourceUnknown).toBe(true);
+    expect(content.height).toBeCloseTo(562.5);
+    expect(content.height).toBeLessThan(800);
   });
 
   it("does not treat container size as source size", () => {

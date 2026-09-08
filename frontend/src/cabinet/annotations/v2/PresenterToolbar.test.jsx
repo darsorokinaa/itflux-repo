@@ -50,9 +50,9 @@ describe("PresenterToolbar", () => {
         onWidthChange={noop}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Очистить все" }));
-    expect(onClearAll).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Очистить" }));
+    expect(onClearAll).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Все рисунки" }));
     expect(onClearAll).toHaveBeenCalledTimes(1);
   });
 
@@ -73,7 +73,31 @@ describe("PresenterToolbar", () => {
         onWidthChange={noop}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Разрешить пометки ученику" }));
+    fireEvent.click(screen.getByRole("button", { name: "Разрешить аннотации участникам" }));
     expect(onSetParticipantsCanAnnotate).toHaveBeenCalledWith(true);
+  });
+
+  it("lets a presenter clear viewer drawings without touching the host drawings", () => {
+    const onClearViewers = vi.fn();
+    const onClearMine = vi.fn();
+    render(
+      <PresenterToolbar
+        tool={TOOLS.POINTER}
+        color="#ef4444"
+        width={2}
+        canAnnotate
+        isPresenter
+        onClearViewers={onClearViewers}
+        onClearMine={onClearMine}
+        onClose={noop}
+        onToolChange={noop}
+        onColorChange={noop}
+        onWidthChange={noop}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Очистить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Рисунки участников" }));
+    expect(onClearViewers).toHaveBeenCalledTimes(1);
+    expect(onClearMine).not.toHaveBeenCalled();
   });
 });

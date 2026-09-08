@@ -12,17 +12,18 @@ export const OBJECT_FIT = Object.freeze({
 });
 
 /**
- * Оценка chrome Jitsi вокруг large video.
- * iframe кросс-доменный — измерить <video> нельзя; insets выводятся из
- * interfaceConfig (VERTICAL_FILMSTRIP, FILM_STRIP_MAX_HEIGHT) и размера контейнера.
- * Не обнулять chrome в compact/split-screen: тулбар Jitsi остаётся.
+ * Emergency-only Jitsi chrome estimate. NEVER used for drawing coordinates.
+ * Production drawing requires the Jitsi geometry bridge (`geometryStatus: "exact"`).
  */
-export const JITSI_CHROME = {
-  desktop: { top: 0, right: 128, bottom: 76, left: 0 },
-  compact: { top: 0, right: 0, bottom: 52, left: 0 },
-  mobile: { top: 0, right: 0, bottom: 64, left: 0 },
-  tile: { top: 0, right: 0, bottom: 76, left: 0 },
+export const JITSI_CHROME_FALLBACK = {
+  desktop: { top: 0, right: 0, bottom: 0, left: 0 },
+  compact: { top: 0, right: 0, bottom: 0, left: 0 },
+  mobile: { top: 0, right: 0, bottom: 0, left: 0 },
+  tile: { top: 0, right: 0, bottom: 0, left: 0 },
 };
+
+/** @deprecated name kept so stray imports fail loudly in reviews — use JITSI_CHROME_FALLBACK. */
+export const JITSI_CHROME = JITSI_CHROME_FALLBACK;
 
 export function clamp01(value) {
   const n = Number(value);
@@ -37,23 +38,8 @@ export function resolveObjectFit(value) {
   return OBJECT_FIT.CONTAIN;
 }
 
-export function resolveChromeInsets(containerWidth, containerHeight, {
-  compact = false,
-  tileView = false,
-} = {}) {
-  if (tileView) return { ...JITSI_CHROME.tile };
-  const w = Number(containerWidth) || 0;
-  const h = Number(containerHeight) || 0;
-  if (compact || w < 420 || h < 260) {
-    return { ...JITSI_CHROME.compact };
-  }
-  if (w < 720) {
-    return { ...JITSI_CHROME.mobile };
-  }
-  const chrome = { ...JITSI_CHROME.desktop };
-  if (w - chrome.right < 240) chrome.right = 0;
-  if (h - chrome.bottom < 160) chrome.bottom = 0;
-  return chrome;
+export function resolveChromeInsets() {
+  return { top: 0, right: 0, bottom: 0, left: 0 };
 }
 
 export function intersectRects(a, b) {
@@ -98,17 +84,22 @@ export function getFittedContentRect(stage, videoWidth, videoHeight, objectFit =
   const top = Number(stage?.top) || 0;
   const width = Number(stage?.width) || 0;
   const height = Number(stage?.height) || 0;
-  const vw = Number(videoWidth) || 0;
-  const vh = Number(videoHeight) || 0;
+  let vw = Number(videoWidth) || 0;
+  let vh = Number(videoHeight) || 0;
   const fit = resolveObjectFit(objectFit);
+  const sourceUnknown = !vw || !vh;
   if (!width || !height) {
     return {
       left, top, width, height, offsetX: 0, offsetY: 0, scale: 1, objectFit: fit, sourceUnknown: true,
     };
   }
+  if (sourceUnknown && fit !== OBJECT_FIT.FILL) {
+    vw = DEFAULT_CONTENT_WIDTH;
+    vh = DEFAULT_CONTENT_HEIGHT;
+  }
   if (!vw || !vh || fit === OBJECT_FIT.FILL) {
     return {
-      left, top, width, height, offsetX: 0, offsetY: 0, scale: 1, objectFit: fit, sourceUnknown: !vw || !vh,
+      left, top, width, height, offsetX: 0, offsetY: 0, scale: 1, objectFit: fit, sourceUnknown: true,
     };
   }
   const scale = fit === OBJECT_FIT.COVER
@@ -127,7 +118,7 @@ export function getFittedContentRect(stage, videoWidth, videoHeight, objectFit =
     offsetY,
     scale,
     objectFit: fit,
-    sourceUnknown: false,
+    sourceUnknown,
   };
 }
 
@@ -137,9 +128,10 @@ export function getContainedContentRect(stage, videoWidth, videoHeight) {
 }
 
 /**
- * Content rectangle of the demonstrated screen inside the host overlay.
- * 1) subtract estimated Jitsi chrome (filmstrip/toolbar)
- * 2) object-fit the shared video aspect inside the remaining stage
+ * Content rectangle of the demonstrated screen.
+ * Primary path: exactContentRect from the Jitsi geometry bridge (parent client px).
+ * Fallback path: contain-fit inside the host with no filmstrip/toolbar guesses.
+ * Fallback must not be used for collaborative drawing.
  */
 export function computeScreenShareContentRect({
   hostRect,
@@ -148,6 +140,9 @@ export function computeScreenShareContentRect({
   compact = false,
   tileView = false,
   objectFit = OBJECT_FIT.CONTAIN,
+  exactContentRect = null,
+  exactVideoRect = null,
+  geometryStatus = "",
 } = {}) {
   const host = {
     left: Number(hostRect?.left) || 0,
@@ -155,15 +150,34 @@ export function computeScreenShareContentRect({
     width: Number(hostRect?.width) || 0,
     height: Number(hostRect?.height) || 0,
   };
-  const chrome = resolveChromeInsets(host.width, host.height, { compact, tileView });
+  const sourceW = Number(contentWidth) || 0;
+  const sourceH = Number(contentHeight) || 0;
+  const exact = asExactRect(exactContentRect);
+  if (exact) {
+    const stage = asExactRect(exactVideoRect) || exact;
+    return {
+      host,
+      chrome: { top: 0, right: 0, bottom: 0, left: 0 },
+      stage,
+      content: exact,
+      visible: exact,
+      objectFit: resolveObjectFit(objectFit),
+      contentWidth: sourceW,
+      contentHeight: sourceH,
+      coordSpace: COORD_SPACE,
+      geometryStatus: "exact",
+      source: "jitsi-bridge",
+    };
+  }
+  void compact;
+  void tileView;
+  const chrome = resolveChromeInsets();
   const stage = {
     left: host.left + chrome.left,
     top: host.top + chrome.top,
     width: Math.max(0, host.width - chrome.left - chrome.right),
     height: Math.max(0, host.height - chrome.top - chrome.bottom),
   };
-  const sourceW = Number(contentWidth) || 0;
-  const sourceH = Number(contentHeight) || 0;
   const content = getFittedContentRect(stage, sourceW, sourceH, objectFit);
   const visible = intersectRects(content, stage);
   return {
@@ -176,7 +190,19 @@ export function computeScreenShareContentRect({
     contentWidth: sourceW,
     contentHeight: sourceH,
     coordSpace: COORD_SPACE,
+    geometryStatus: geometryStatus || "fallback",
+    source: "estimated",
   };
+}
+
+function asExactRect(rect) {
+  const left = Number(rect?.left);
+  const top = Number(rect?.top);
+  const width = Number(rect?.width);
+  const height = Number(rect?.height);
+  if (![left, top, width, height].every(Number.isFinite)) return null;
+  if (width <= 1 || height <= 1) return null;
+  return { left, top, width, height };
 }
 
 export function clientToNormalized(clientX, clientY, contentRect, { clamp = false } = {}) {

@@ -30,6 +30,7 @@ export function createPointerMachine({
   onPoint,
   onEnd,
   onCancel,
+  onGap,
 } = {}) {
   let state = POINTER_STATES.IDLE;
   let activePointerId = null;
@@ -115,7 +116,15 @@ export function createPointerMachine({
         endStroke("buttons-up", point || null);
         return;
       }
-      if (!point) return;
+      if (!point) {
+        onGap?.({
+          strokeId,
+          pointerId: activePointerId,
+          sourceRevision,
+          sequence,
+        });
+        return;
+      }
       sequence += 1;
       const coalesced = typeof event.getCoalescedEvents === "function"
         ? event.getCoalescedEvents()

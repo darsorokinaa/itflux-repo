@@ -396,6 +396,120 @@ class ScreenShareAnnotationServiceTests(TestCase):
         session.refresh_from_db()
         self.assertEqual(session.annotations, [])
 
+    def test_clear_viewers_keeps_presenter_drawings(self):
+        session = report_screenshare_state(
+            meeting=self.meeting,
+            user=self.teacher,
+            active=True,
+            local_sharing=True,
+            presenter_jitsi_id="abc",
+        )
+        apply_screenshare_operation(
+            meeting=self.meeting,
+            user=self.teacher,
+            action="object_upsert",
+            payload={"annotation": {
+                "id": "teacher-line",
+                "tool": "line",
+                "points": [{"x": 0.1, "y": 0.1}, {"x": 0.2, "y": 0.2}],
+            }},
+            operation_id="tv1",
+            session_id=str(session.uuid),
+        )
+        set_screenshare_permission(
+            meeting=self.meeting,
+            user=self.teacher,
+            participants_can_annotate=True,
+            session_id=str(session.uuid),
+        )
+        apply_screenshare_operation(
+            meeting=self.meeting,
+            user=self.student_user,
+            action="object_upsert",
+            payload={"annotation": {
+                "id": "student-line",
+                "tool": "line",
+                "points": [{"x": 0.3, "y": 0.3}, {"x": 0.4, "y": 0.4}],
+            }},
+            operation_id="sv1",
+            session_id=str(session.uuid),
+        )
+        with self.assertRaises(VideoMeetingError):
+            apply_screenshare_operation(
+                meeting=self.meeting,
+                user=self.student_user,
+                action="clear_viewers",
+                payload={},
+                operation_id="s-clear-viewers",
+                session_id=str(session.uuid),
+            )
+        apply_screenshare_operation(
+            meeting=self.meeting,
+            user=self.teacher,
+            action="clear_viewers",
+            payload={},
+            operation_id="t-clear-viewers",
+            session_id=str(session.uuid),
+        )
+        session.refresh_from_db()
+        self.assertEqual([a["id"] for a in session.annotations], ["teacher-line"])
+
+    def test_vanishing_pen_is_not_persisted_in_snapshot(self):
+        session = report_screenshare_state(
+            meeting=self.meeting,
+            user=self.teacher,
+            active=True,
+            local_sharing=True,
+            presenter_jitsi_id="abc",
+        )
+        apply_screenshare_operation(
+            meeting=self.meeting,
+            user=self.teacher,
+            action="stroke_start",
+            payload={"annotation": {
+                "id": "fade-1",
+                "tool": "vanishing",
+                "points": [{"x": 0.2, "y": 0.2}],
+            }},
+            operation_id="vanish-1",
+            session_id=str(session.uuid),
+        )
+        apply_screenshare_operation(
+            meeting=self.meeting,
+            user=self.teacher,
+            action="object_upsert",
+            payload={"annotation": {
+                "id": "keep-1",
+                "tool": "pen",
+                "points": [{"x": 0.4, "y": 0.4}],
+            }},
+            operation_id="keep-1",
+            session_id=str(session.uuid),
+        )
+        from Cabinet.meeting_screenshare import serialize_screenshare_session
+        session.refresh_from_db()
+        snapshot = serialize_screenshare_session(session)
+        ids = [a["id"] for a in snapshot["annotations"]]
+        self.assertIn("keep-1", ids)
+        self.assertNotIn("fade-1", ids)
+
+    def test_show_author_names_permission(self):
+        session = report_screenshare_state(
+            meeting=self.meeting,
+            user=self.teacher,
+            active=True,
+            local_sharing=True,
+            presenter_jitsi_id="abc",
+        )
+        updated = set_screenshare_permission(
+            meeting=self.meeting,
+            user=self.teacher,
+            show_author_names=True,
+            session_id=str(session.uuid),
+        )
+        self.assertTrue(updated.show_author_names)
+        self.assertFalse(updated.participants_can_annotate)
+
     def test_coordinates_clamped_and_duplicate_ops_ignored(self):
         session = report_screenshare_state(
             meeting=self.meeting,
@@ -432,6 +546,49 @@ class ScreenShareAnnotationServiceTests(TestCase):
         session.refresh_from_db()
         self.assertEqual(session.annotations[0]["points"][0]["x"], 0)
         self.assertEqual(session.annotations[0]["points"][0]["y"], 1)
+
+    def test_stroke_end_without_start_does_not_create_origin_stroke(self):
+        session = report_screenshare_state(
+            meeting=self.meeting,
+            user=self.teacher,
+            active=True,
+            local_sharing=True,
+            presenter_jitsi_id="abc",
+        )
+        result = apply_screenshare_operation(
+            meeting=self.meeting,
+            user=self.teacher,
+            action="stroke_end",
+            payload={"annotation": {"id": "ghost", "tool": "pen", "points": []}},
+            operation_id="orphan-end",
+            session_id=str(session.uuid),
+        )
+        self.assertIsNone(result["operation"])
+        session.refresh_from_db()
+        self.assertEqual(session.annotations, [])
+
+    def test_nan_and_non_finite_points_rejected(self):
+        session = report_screenshare_state(
+            meeting=self.meeting,
+            user=self.teacher,
+            active=True,
+            local_sharing=True,
+            presenter_jitsi_id="abc",
+        )
+        with self.assertRaises(VideoMeetingError) as ctx:
+            apply_screenshare_operation(
+                meeting=self.meeting,
+                user=self.teacher,
+                action="stroke_start",
+                payload={"annotation": {
+                    "id": "bad",
+                    "tool": "pen",
+                    "points": [{"x": float("nan"), "y": 0.2}],
+                }},
+                operation_id="nan-pt",
+                session_id=str(session.uuid),
+            )
+        self.assertEqual(ctx.exception.code, "invalid_annotation")
 
     def test_wrong_session_id_rejected_and_outsider_blocked(self):
         session = report_screenshare_state(

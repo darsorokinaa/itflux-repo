@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 import uuid
 from typing import Any
@@ -34,19 +35,32 @@ ALLOWED_TOOLS = frozenset({
     "ellipse",
     "oval",
     "text",
+    "stamp",
     "laser",
+    "spotlight",
+    "vanishing",
+    "arrow_pointer",
+    "select",
+    "eraser",
+    "pointer",
+    "mouse",
 })
-SHAPE_TOOLS = frozenset({"line", "arrow", "rect", "rectangle", "ellipse", "oval", "text"})
-EPHEMERAL_ACTIONS = frozenset({"pointer", "stroke_preview"})
+SHAPE_TOOLS = frozenset({"line", "arrow", "rect", "rectangle", "ellipse", "oval", "text", "stamp", "arrow_pointer"})
+EPHEMERAL_TOOLS = frozenset({"vanishing", "spotlight", "laser"})
+EPHEMERAL_ACTIONS = frozenset({"pointer", "stroke_preview", "spotlight", "vanishing_preview"})
 MUTATING_ACTIONS = frozenset({
     "stroke_start",
     "stroke_update",
     "stroke_end",
     "stroke_cancel",
     "object_upsert",
+    "object_update",
+    "arrow_set",
     "annotation_deleted",
     "clear_mine",
+    "clear_viewers",
     "clear_all",
+    "state_restore",
 })
 COLOR_RE = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
 MODERATOR_ROLES = frozenset({"teacher", "coteacher", "staff"})
@@ -80,6 +94,10 @@ def normalize_tool(tool: Any) -> str:
         return "rect"
     if raw == "oval":
         return "ellipse"
+    if raw == "mouse":
+        return "pointer"
+    if raw == "laser":
+        return "spotlight"
     if raw in ALLOWED_TOOLS:
         return raw
     return "pen"
@@ -98,7 +116,7 @@ def _normalize_point(raw: Any) -> dict | None:
         py = float(y)
     except (TypeError, ValueError):
         return None
-    if not (px == px and py == py):  # NaN
+    if not math.isfinite(px) or not math.isfinite(py):
         return None
     return {"x": _clamp01(px), "y": _clamp01(py)}
 
@@ -140,14 +158,29 @@ def normalize_annotation(raw: dict, *, author_id: int, author_role: str, display
     except (TypeError, ValueError):
         width_n = 3.0
     width_n = max(0.5, min(24.0, width_n))
+    opacity = raw.get("opacity")
+    try:
+        opacity_n = float(opacity) if opacity is not None else 1.0
+    except (TypeError, ValueError):
+        opacity_n = 1.0
+    opacity_n = max(0.08, min(1.0, opacity_n))
+    font_size = _clamp_int(raw.get("fontSize") or raw.get("font_size"), lo=10, hi=72, default=18)
+    font_weight = _clamp_int(raw.get("fontWeight") or raw.get("font_weight"), lo=400, hi=800, default=650)
+    stamp = str(raw.get("stamp") or "")[:24]
+    ephemeral = bool(raw.get("ephemeral")) or tool in EPHEMERAL_TOOLS
     return {
         "id": ann_id,
         "tool": tool,
         "color": normalize_color(raw.get("color")),
         "width": width_n,
+        "opacity": opacity_n,
+        "fontSize": font_size,
+        "fontWeight": font_weight,
+        "stamp": stamp,
         "points": points,
         "text": text,
         "completed": bool(raw.get("completed", tool in SHAPE_TOOLS or tool == "text")),
+        "ephemeral": ephemeral,
         "authorId": int(author_id),
         "authorRole": str(author_role or "")[:32],
         "displayName": str(display_name or "")[:MAX_DISPLAY_NAME],
@@ -192,6 +225,10 @@ def serialize_screenshare_session(session: MeetingScreenShareSession | None) -> 
     if session is None:
         return None
     annotations = session.annotations if isinstance(session.annotations, list) else []
+    persistent = [
+        item for item in annotations
+        if isinstance(item, dict) and str(item.get("tool") or "") not in EPHEMERAL_TOOLS and not item.get("ephemeral")
+    ]
     return {
         "sessionId": str(session.uuid),
         "screenShareSessionId": str(session.uuid),
@@ -199,11 +236,12 @@ def serialize_screenshare_session(session: MeetingScreenShareSession | None) -> 
         "presenterUserId": session.presenter_user_id,
         "presenterJitsiId": session.presenter_jitsi_id or "",
         "participantsCanAnnotate": bool(session.participants_can_annotate),
+        "showAuthorNames": bool(getattr(session, "show_author_names", False)),
         "contentWidth": session.content_width,
         "contentHeight": session.content_height,
         "version": session.version,
-        "annotations": annotations,
-        "annotationCount": len(annotations),
+        "annotations": persistent,
+        "annotationCount": len(persistent),
     }
 
 
@@ -352,18 +390,26 @@ def set_screenshare_permission(
     *,
     meeting: VideoMeeting,
     user: User,
-    participants_can_annotate: bool,
+    participants_can_annotate: bool | None = None,
+    show_author_names: bool | None = None,
     session_id: str | None = None,
 ) -> MeetingScreenShareSession:
     access = resolve_access(user, meeting.schedule_event)
-    if access.role not in MODERATOR_ROLES:
-        raise VideoMeetingError("Только преподаватель может менять права", code="forbidden", status=403)
     session = _locked_session(meeting, session_id)
     if session is None:
         raise VideoMeetingError("Нет активной демонстрации экрана", code="no_screenshare", status=409)
-    session.participants_can_annotate = bool(participants_can_annotate)
+    is_presenter = bool(session.presenter_user_id and session.presenter_user_id == user.pk)
+    if access.role not in MODERATOR_ROLES and not is_presenter:
+        raise VideoMeetingError("Только преподаватель или демонстрирующий может менять права", code="forbidden", status=403)
+    fields = ["version", "updated_at"]
+    if participants_can_annotate is not None:
+        session.participants_can_annotate = bool(participants_can_annotate)
+        fields.append("participants_can_annotate")
+    if show_author_names is not None and hasattr(session, "show_author_names"):
+        session.show_author_names = bool(show_author_names)
+        fields.append("show_author_names")
     session.version = int(session.version or 1) + 1
-    session.save(update_fields=["participants_can_annotate", "version", "updated_at"])
+    session.save(update_fields=fields)
     return session
 
 
@@ -416,13 +462,14 @@ def apply_screenshare_operation(
     display_name = _display_name(user)
     body = payload if isinstance(payload, dict) else {}
 
-    if action_name in EPHEMERAL_ACTIONS:
-        if action_name == "pointer":
+    if action_name in EPHEMERAL_ACTIONS or action_name in ("spotlight",):
+        if action_name in ("pointer", "spotlight"):
             if not user_can_annotate(session, access.role):
                 raise VideoMeetingError("Рисование участникам запрещено", code="forbidden", status=403)
             point = _normalize_point({"x": body.get("x"), "y": body.get("y")})
             if point is None:
                 raise VideoMeetingError("Некорректные координаты", code="invalid_annotation")
+            kind = str(body.get("kind") or ("spotlight" if action_name == "spotlight" else "laser"))[:24]
             return {
                 "ephemeral": True,
                 "duplicate": False,
@@ -435,7 +482,7 @@ def apply_screenshare_operation(
                     "author_id": user.pk,
                     "author_role": access.role,
                     "display_name": display_name,
-                    "payload": point,
+                    "payload": {**point, "kind": kind},
                 },
             }
         return {"ephemeral": True, "duplicate": False, "operation": None}
@@ -452,9 +499,12 @@ def apply_screenshare_operation(
         }
 
     can_draw = user_can_annotate(session, access.role)
+    is_host = access.role in MODERATOR_ROLES or bool(session.presenter_user_id and session.presenter_user_id == user.pk)
     by_id = _annotation_map(session)
+    persist = True
+    ann = None
 
-    if action_name in ("stroke_start", "stroke_update", "stroke_end", "object_upsert"):
+    if action_name in ("stroke_start", "stroke_update", "stroke_end", "object_upsert", "object_update", "arrow_set"):
         if not can_draw:
             raise VideoMeetingError("Рисование участникам запрещено", code="forbidden", status=403)
         raw = body.get("annotation") if isinstance(body.get("annotation"), dict) else body
@@ -462,44 +512,73 @@ def apply_screenshare_operation(
             raw.get("points"),
             limit=MAX_POINTS_PER_MESSAGE if action_name == "stroke_update" else MAX_POINTS_PER_STROKE,
         )
-        ann = normalize_annotation(
-            {**raw, "points": incoming_points or raw.get("points") or [{"x": 0, "y": 0}]},
-            author_id=user.pk,
-            author_role=access.role,
-            display_name=display_name,
-        )
-        existing = by_id.get(ann["id"])
-        if existing is not None:
-            if int(existing.get("authorId") or 0) != user.pk:
-                raise VideoMeetingError("Нельзя изменить чужую аннотацию", code="forbidden", status=403)
-            if action_name == "stroke_update":
-                merged = list(existing.get("points") or [])
-                merged.extend(incoming_points)
-                if len(merged) > MAX_POINTS_PER_STROKE:
-                    merged = merged[:MAX_POINTS_PER_STROKE]
-                existing["points"] = merged
-                existing["color"] = ann["color"]
-                existing["width"] = ann["width"]
-                existing["tool"] = ann["tool"]
-                by_id[ann["id"]] = existing
-                ann = existing
-            elif action_name == "stroke_end":
-                if incoming_points:
+        existing_id = str(raw.get("id") or raw.get("annotationId") or "")[:64]
+        existing = by_id.get(existing_id)
+
+        if action_name == "stroke_end" and not incoming_points:
+            if existing is None:
+                session.save(update_fields=["recent_operation_ids", "updated_at"])
+                return {
+                    "duplicate": False,
+                    "ephemeral": False,
+                    "version": session.version,
+                    "operation": None,
+                }
+            existing["completed"] = True
+            by_id[existing_id] = existing
+            ann = existing
+        else:
+            if not incoming_points and action_name == "object_update" and existing is not None:
+                incoming_points = list(existing.get("points") or [])
+            ann = normalize_annotation(
+                {**raw, "points": incoming_points},
+                author_id=user.pk,
+                author_role=access.role,
+                display_name=display_name,
+            )
+            if ann["tool"] in EPHEMERAL_TOOLS or ann.get("ephemeral"):
+                persist = False
+            existing = by_id.get(ann["id"])
+            if persist and existing is not None:
+                if int(existing.get("authorId") or 0) != user.pk:
+                    raise VideoMeetingError("Нельзя изменить чужую аннотацию", code="forbidden", status=403)
+                if action_name == "stroke_update":
                     merged = list(existing.get("points") or [])
                     merged.extend(incoming_points)
-                    existing["points"] = merged[:MAX_POINTS_PER_STROKE]
-                existing["completed"] = True
-                by_id[ann["id"]] = existing
-                ann = existing
-            else:
-                by_id[ann["id"]] = {**existing, **ann, "authorId": user.pk}
-                ann = by_id[ann["id"]]
-        else:
-            if action_name == "stroke_end":
-                ann["completed"] = True
-            if action_name == "stroke_update" and not incoming_points:
-                raise VideoMeetingError("Пустое обновление штриха", code="invalid_annotation")
-            by_id[ann["id"]] = ann
+                    if len(merged) > MAX_POINTS_PER_STROKE:
+                        merged = merged[:MAX_POINTS_PER_STROKE]
+                    existing["points"] = merged
+                    existing["color"] = ann["color"]
+                    existing["width"] = ann["width"]
+                    existing["tool"] = ann["tool"]
+                    by_id[ann["id"]] = existing
+                    ann = existing
+                elif action_name == "stroke_end":
+                    if incoming_points:
+                        merged = list(existing.get("points") or [])
+                        merged.extend(incoming_points)
+                        existing["points"] = merged[:MAX_POINTS_PER_STROKE]
+                    existing["completed"] = True
+                    by_id[ann["id"]] = existing
+                    ann = existing
+                elif action_name == "object_update":
+                    by_id[ann["id"]] = {**existing, **ann, "authorId": user.pk, "id": existing["id"]}
+                    ann = by_id[ann["id"]]
+                else:
+                    by_id[ann["id"]] = {**existing, **ann, "authorId": user.pk}
+                    ann = by_id[ann["id"]]
+            elif persist:
+                if action_name == "stroke_end":
+                    ann["completed"] = True
+                if action_name == "stroke_update" and not incoming_points:
+                    raise VideoMeetingError("Пустое обновление штриха", code="invalid_annotation")
+                if action_name == "arrow_set":
+                    by_id = {
+                        key: value
+                        for key, value in by_id.items()
+                        if not (value.get("tool") == "arrow_pointer" and int(value.get("authorId") or 0) == user.pk)
+                    }
+                by_id[ann["id"]] = ann
 
     elif action_name in ("annotation_deleted", "stroke_cancel"):
         ann_id = str(body.get("id") or body.get("annotation_id") or body.get("annotationId") or "")[:64]
@@ -524,7 +603,7 @@ def apply_screenshare_operation(
                     "payload": {"id": ann_id},
                 },
             }
-        if int(existing.get("authorId") or 0) != user.pk and access.role not in MODERATOR_ROLES:
+        if int(existing.get("authorId") or 0) != user.pk and not is_host:
             raise VideoMeetingError("Нельзя удалить чужую аннотацию", code="forbidden", status=403)
         del by_id[ann_id]
         ann = {"id": ann_id}
@@ -537,25 +616,60 @@ def apply_screenshare_operation(
         }
         ann = None
 
+    elif action_name == "clear_viewers":
+        if not is_host:
+            raise VideoMeetingError("Очистить рисунки участников может только ведущий", code="forbidden", status=403)
+        presenter_id = int(session.presenter_user_id or user.pk)
+        by_id = {
+            key: value
+            for key, value in by_id.items()
+            if int(value.get("authorId") or 0) == presenter_id
+        }
+        ann = None
+
     elif action_name == "clear_all":
-        if access.role not in MODERATOR_ROLES:
+        if not is_host:
             raise VideoMeetingError("Очистить все может только преподаватель", code="forbidden", status=403)
         by_id = {}
         ann = None
 
-    _store_annotations(session, by_id)
-    session.version = int(session.version or 1) + 1
-    session.save(update_fields=["annotations", "recent_operation_ids", "version", "updated_at"])
+    elif action_name == "state_restore":
+        if not can_draw:
+            raise VideoMeetingError("Рисование участникам запрещено", code="forbidden", status=403)
+        items = body.get("annotations") if isinstance(body.get("annotations"), list) else []
+        for item in items[:MAX_ANNOTATIONS]:
+            if not isinstance(item, dict):
+                continue
+            restored = normalize_annotation(
+                item,
+                author_id=user.pk,
+                author_role=access.role,
+                display_name=display_name,
+            )
+            if restored["tool"] in EPHEMERAL_TOOLS or restored.get("ephemeral"):
+                continue
+            by_id[restored["id"]] = restored
+        ann = None
+
+    if persist:
+        _store_annotations(session, by_id)
+        session.version = int(session.version or 1) + 1
+        session.save(update_fields=["annotations", "recent_operation_ids", "version", "updated_at"])
+    else:
+        session.save(update_fields=["recent_operation_ids", "updated_at"])
 
     op_payload: dict[str, Any] = {}
-    if action_name in ("stroke_start", "stroke_update", "stroke_end", "object_upsert"):
-        op_payload = {"annotation": by_id.get(ann["id"], ann)}
+    if action_name in ("stroke_start", "stroke_update", "stroke_end", "object_upsert", "object_update", "arrow_set"):
+        stored = by_id.get(ann["id"]) if persist and ann else None
+        op_payload = {"annotation": stored or ann}
     elif action_name in ("annotation_deleted", "stroke_cancel"):
         op_payload = {"id": ann["id"]}
+    elif action_name == "state_restore":
+        op_payload = {"annotations": [item for item in by_id.values() if int(item.get("authorId") or 0) == user.pk]}
 
     return {
         "duplicate": False,
-        "ephemeral": False,
+        "ephemeral": not persist,
         "version": session.version,
         "operation": {
             "type": "screenshare.operation",
@@ -567,6 +681,7 @@ def apply_screenshare_operation(
             "author_id": user.pk,
             "author_role": access.role,
             "display_name": display_name,
+            "presenter_id": session.presenter_user_id,
             "version": session.version,
             "payload": op_payload,
         },

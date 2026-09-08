@@ -917,6 +917,26 @@
   pointer-events: none;
 }
 
+.video-lesson-call-pip-body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  background: #0f172a;
+  overflow: hidden;
+}
+
+.video-lesson-content--os-pip {
+  position: static !important;
+  inset: auto !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
+  transform: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
 .video-lesson-compact-drag {
   flex: 0 0 40px;
   display: flex;
@@ -3129,23 +3149,70 @@ body.vl-room-fullscreen .student-cabinet-nav {
   }
 }
 
-.ss-ann-v2-canvas,
-.ss-ann-v2-platform {
+.ss-ann-v2-geom-debug {
   position: fixed;
+  inset: 0;
+  z-index: 13000;
   pointer-events: none;
-  z-index: 45;
-  touch-action: none;
+}
+
+.ss-ann-v2-geom-box {
+  position: fixed;
+  box-sizing: border-box;
+  border: 2px solid currentColor;
+  font: 650 10px/1 Inter, system-ui, sans-serif;
+}
+
+.ss-ann-v2-geom-box span {
+  position: absolute;
+  left: 0;
+  top: -14px;
+  padding: 1px 4px;
+  background: rgba(15, 23, 42, 0.85);
+}
+
+.ss-ann-v2-geom-debug__log {
+  position: fixed;
+  right: 8px;
+  bottom: 8px;
+  margin: 0;
+  max-width: min(420px, 90vw);
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.88);
+  color: #e2e8f0;
+  font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
 }
 
 .ss-ann-v2-canvas.is-drawing,
 .ss-ann-v2-platform.is-drawing {
   pointer-events: auto;
   cursor: crosshair;
+  touch-action: none;
+}
+
+.ss-ann-v2-canvas.is-select {
+  cursor: default;
+}
+
+.ss-ann-v2-text {
+  position: fixed;
+  z-index: 12010;
+  min-width: 120px;
+  max-width: min(360px, 70vw);
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgba(226, 232, 240, 0.55);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #f8fafc;
+  font: 650 14px/28px Inter, system-ui, sans-serif;
 }
 
 .ss-ann-v2-platform {
   inset: 0;
-  z-index: 46;
+  z-index: 11000;
 }
 
 .ss-ann-v2-toolbar-slot {
@@ -3154,7 +3221,7 @@ body.vl-room-fullscreen .student-cabinet-nav {
   left: 50%;
   transform: translateX(-50%);
   z-index: 12000;
-  max-width: calc(100vw - 24px);
+  max-width: calc(100vw - 24px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
   pointer-events: none;
 }
 
@@ -3176,15 +3243,18 @@ body.vl-room-fullscreen .student-cabinet-nav {
   flex-wrap: nowrap;
   max-width: 100%;
   overflow: visible;
-  height: 40px;
+  min-height: 44px;
+  height: auto;
   padding: 4px 6px;
   gap: 2px;
   animation: ss-ann-v2-in 0.16s ease-out;
 }
 
 .ss-ann-v2-toolbar.ann-toolbar button {
-  width: 30px;
-  height: 30px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
   border-radius: 8px;
 }
 
@@ -3274,11 +3344,40 @@ body.vl-room-fullscreen .student-cabinet-nav {
   gap: 6px;
 }
 
+.ss-ann-v2-pop--format {
+  min-width: 196px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.ss-ann-v2-pop__label {
+  margin: 0;
+  font: 650 11px/1 Inter, system-ui, sans-serif;
+  color: #94a3b8;
+}
+
+.ss-ann-v2-pop__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ss-ann-v2-pop__row--stack {
+  flex-direction: column;
+}
+
+.ss-ann-v2-pop--format input[type="range"] {
+  width: 100%;
+}
+
 .ss-ann-v2-pop--confirm button {
   width: auto !important;
-  height: 28px !important;
+  min-width: 100%;
+  height: 36px !important;
   padding: 0 10px !important;
   font: 650 12px/1 Inter, system-ui, sans-serif;
+  justify-content: flex-start !important;
 }
 
 .ss-ann-v2-pop--confirm button.is-danger {
@@ -3386,8 +3485,8 @@ body.vl-room-fullscreen .student-cabinet-nav {
 @media (pointer: coarse) {
   .ss-ann-v2-toolbar.ann-toolbar button,
   .ss-ann-v2-reopen {
-    min-width: 36px;
-    min-height: 36px;
+    min-width: 44px;
+    min-height: 44px;
   }
 }
 
@@ -3415,16 +3514,28 @@ body.vl-room-fullscreen .student-cabinet-nav {
   border-radius: 0;
 }
 
+@media (max-width: 960px) {
+  .ss-ann-v2-tool--optional,
+  .ss-ann-v2-tool--presenter,
+  .ss-ann-v2-allow span {
+    display: none;
+  }
+
+  .ss-ann-v2-more {
+    display: inline-flex;
+  }
+}
+
 @media (max-width: 720px) {
   .ss-ann-v2-toolbar-slot,
   .ss-ann-v2-toolbar-slot.is-compact,
   .video-lesson-page--share-mini .ss-ann-v2-toolbar-slot,
   .video-lesson-page--share-mini .ss-ann-v2-toolbar-slot.is-compact {
-    top: calc(var(--vl-header-height, 56px) + 8px);
-    bottom: auto;
-    left: 50%;
+    top: auto;
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    left: 8px;
     right: auto;
-    transform: translateX(-50%);
+    transform: none;
     max-width: calc(100vw - 16px);
   }
 
@@ -3435,8 +3546,8 @@ body.vl-room-fullscreen .student-cabinet-nav {
   }
 
   .ss-ann-v2-toolbar.ann-toolbar button {
-    width: 28px;
-    height: 28px;
+    width: 40px;
+    height: 40px;
   }
 
   .ss-ann-v2-toolbar__grip {

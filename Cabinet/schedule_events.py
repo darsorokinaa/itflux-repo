@@ -160,9 +160,27 @@ def _assigned_homework_to_json(homework: Homework | None, *, plan_item=None) -> 
     }
 
 
+def _active_participants(event):
+    memo = getattr(event, "_itflux_active_participants", None)
+    if memo is not None:
+        return memo
+    cached = getattr(event, "_prefetched_objects_cache", {}).get("participants")
+    if cached is not None:
+        rows = [p for p in cached if p.status != ParticipantStatus.REMOVED]
+        rows.sort(key=lambda p: (p.role or "", p.display_name or "", p.pk))
+    else:
+        rows = list(
+            event.participants.exclude(status=ParticipantStatus.REMOVED).select_related(
+                "student", "teacher", "user",
+            )
+        )
+    event._itflux_active_participants = rows
+    return rows
+
+
 def _participants_to_json(event):
     participants = []
-    for participant in event.participants.exclude(status=ParticipantStatus.REMOVED):
+    for participant in _active_participants(event):
         name = (participant.display_name or "").strip()
         if not name and participant.student_id and participant.student:
             name = participant.student.full_name
@@ -225,11 +243,10 @@ def schedule_event_to_json(event, *, self_booked=None):
     link = (event.telemost_url or "").strip() or None
     is_online = event.format == ScheduleEvent.Format.ONLINE
     video_meeting_json = None
-    # Reverse OneToOne raises DoesNotExist — не используем getattr.
+    from .models import VideoMeeting
     try:
-        from .models import VideoMeeting
-        meeting = VideoMeeting.objects.filter(schedule_event_id=event.pk).first()
-    except Exception:
+        meeting = event.video_meeting
+    except VideoMeeting.DoesNotExist:
         meeting = None
     if meeting is not None:
         from .video_meeting_service import meeting_join_window_state, ui_state_message
@@ -258,9 +275,9 @@ def schedule_event_to_json(event, *, self_booked=None):
             "count": s.recurrence_count,
         }
 
-    participant_ids = list(
-        event.participants.exclude(status=ParticipantStatus.REMOVED).values_list("student_id", flat=True)
-    )
+    participant_ids = [
+        p.student_id for p in _active_participants(event) if p.student_id
+    ]
     plan_item, lesson_number = resolve_plan_item_for_event(event)
     plan_item_json = _plan_item_to_json(plan_item, lesson_number=lesson_number) if plan_item else None
     participants = _participants_to_json(event)
@@ -382,7 +399,7 @@ def schedule_event_to_json(event, *, self_booked=None):
         "hasPlan": has_plan,
         "timezone": event.timezone,
         "reminderMinutes": event.reminder_minutes,
-        "participantStudentIds": [x for x in participant_ids if x],
+        "participantStudentIds": participant_ids,
         "participants": participants,
         "planItem": plan_item_json,
         "planItems": [plan_item_json] if plan_item_json else [],
@@ -433,37 +450,43 @@ def _self_booked_series_ids(series_ids):
 
 
 def list_schedule_events(*, user, date_from, date_to, include_cancelled=False):
-    qs = _schedule_events_queryset(
-        user=user,
-        date_from=date_from,
-        date_to=date_to,
-        include_cancelled=include_cancelled,
-    )
-    try:
-        from .plan_sync import PlanSyncService
+    from .plan_schedule import schedule_list_caches
 
-        PlanSyncService.realign_enrollments_for_events(list(qs.order_by("starts_at")))
+    with schedule_list_caches(user.id):
         qs = _schedule_events_queryset(
             user=user,
             date_from=date_from,
             date_to=date_to,
             include_cancelled=include_cancelled,
         )
-    except Exception:
-        import logging
-        logging.getLogger("cabinet.plan_sync").exception(
-            "plan realign on schedule list failed teacher=%s", user.pk,
-        )
-    event_rows = list(qs.order_by("starts_at"))
-    booked_series = _self_booked_series_ids(ev.series_id for ev in event_rows)
-    events = []
-    for ev in event_rows:
         try:
-            events.append(schedule_event_to_json(ev, self_booked=ev.series_id in booked_series))
+            from .plan_sync import PlanSyncService
+
+            event_rows = list(qs.order_by("starts_at"))
+            realigned = PlanSyncService.realign_enrollments_for_events(event_rows)
+            if realigned:
+                qs = _schedule_events_queryset(
+                    user=user,
+                    date_from=date_from,
+                    date_to=date_to,
+                    include_cancelled=include_cancelled,
+                )
+                event_rows = list(qs.order_by("starts_at"))
         except Exception:
-            # Один битый урок не должен обнулять весь календарь.
-            continue
-    return events
+            import logging
+            logging.getLogger("cabinet.plan_sync").exception(
+                "plan realign on schedule list failed teacher=%s", user.pk,
+            )
+            event_rows = list(qs.order_by("starts_at"))
+        booked_series = _self_booked_series_ids(ev.series_id for ev in event_rows)
+        events = []
+        for ev in event_rows:
+            try:
+                events.append(schedule_event_to_json(ev, self_booked=ev.series_id in booked_series))
+            except Exception:
+                # Один битый урок не должен обнулять весь календарь.
+                continue
+        return events
 
 
 def _schedule_events_queryset(*, user, date_from, date_to, include_cancelled=False):
@@ -472,6 +495,9 @@ def _schedule_events_queryset(*, user, date_from, date_to, include_cancelled=Fal
         starts_at__date__lte=date_to,
         ends_at__date__gte=date_from,
     ).select_related(
+        "owner",
+        "owner__profile",
+        "video_meeting",
         "series",
         "series__lesson_plan_item",
         "series__lesson_plan_item__plan",
@@ -501,6 +527,7 @@ def _schedule_events_queryset(*, user, date_from, date_to, include_cancelled=Fal
         "lesson_plan_item__attached_interactives",
         "lesson_plan_item__homework_materials",
         "lesson_plan_item__homework_interactives",
+        "lesson_plan_item__plan__items",
         "series__lesson_plan_item__materials",
         "series__lesson_plan_item__attached_interactives",
         "series__lesson_plan_item__homework_materials",

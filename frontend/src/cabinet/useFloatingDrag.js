@@ -292,6 +292,16 @@ export function useFloatingDrag({
     return Object.keys(next).length ? next : undefined;
   }, [layout]);
 
+  const reset = useCallback(() => {
+    setLayout(null);
+    if (!storageKey) return;
+    try {
+      sessionStorage.removeItem(storageKey);
+    } catch {
+      /* ignore */
+    }
+  }, [storageKey]);
+
   return {
     nodeRef,
     style,
@@ -300,5 +310,6 @@ export function useFloatingDrag({
     positioned: typeof layout?.left === "number" && typeof layout?.top === "number",
     onPointerDown,
     onResizePointerDown,
+    reset,
   };
 }

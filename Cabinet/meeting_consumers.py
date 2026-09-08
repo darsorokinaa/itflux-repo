@@ -260,6 +260,7 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
             "meetingUuid": str(self.meeting_uuid),
             "screenshareSession": serialized,
             "participantsCanAnnotate": serialized.get("participantsCanAnnotate") if serialized else False,
+            "showAuthorNames": serialized.get("showAuthorNames") if serialized else False,
             "author_id": self.user.pk,
             "author_role": self.role,
         })
@@ -603,10 +604,14 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def _set_screenshare_permission(self, payload: dict, enabled: bool):
         meeting = get_meeting_by_uuid(self.meeting_uuid)
+        show_names = payload.get("showAuthorNames")
+        if show_names is None:
+            show_names = payload.get("show_author_names")
         return set_screenshare_permission(
             meeting=meeting,
             user=self.user,
             participants_can_annotate=enabled,
+            show_author_names=None if show_names is None else bool(show_names),
             session_id=payload.get("session_id")
             or payload.get("sessionId")
             or payload.get("screenShareSessionId"),

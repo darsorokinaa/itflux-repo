@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import CabinetModal from "./CabinetModal";
 import ConfirmActionModal from "./ConfirmActionModal";
 import StudentBillingPanel from "./StudentBillingPanel";
@@ -54,6 +54,7 @@ export function StudentFormModal({ student, onClose, onSave, onArchive, onDelete
   ));
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
@@ -75,15 +76,18 @@ export function StudentFormModal({ student, onClose, onSave, onArchive, onDelete
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (savingRef.current) return;
     if (!isRegistered && !form.first_name.trim()) {
       setError("Укажите имя ученика");
       return;
     }
+    savingRef.current = true;
     setSaving(true);
     try {
       await onSave(studentToApiPayload(form, { registered: isRegistered }));
     } catch (err) {
       setError(err.message || "Не удалось сохранить ученика");
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -354,6 +358,7 @@ export function InviteFormModal({ group, onClose, onCreate, onScheduleLesson, on
   const [form, setForm] = useState(() => emptyInviteForm(group));
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [createdInvite, setCreatedInvite] = useState(null);
   const [copied, setCopied] = useState(false);
   const [showQr, setShowQr] = useState(false);
@@ -374,6 +379,7 @@ export function InviteFormModal({ group, onClose, onCreate, onScheduleLesson, on
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (savingRef.current) return;
     if (!(form.first_name || "").trim()) {
       setError("Укажите имя ученика");
       trackActivationIntent("student_form_validation_failed", {
@@ -383,6 +389,7 @@ export function InviteFormModal({ group, onClose, onCreate, onScheduleLesson, on
       });
       return;
     }
+    savingRef.current = true;
     setSaving(true);
     setError("");
     try {
@@ -392,6 +399,7 @@ export function InviteFormModal({ group, onClose, onCreate, onScheduleLesson, on
     } catch (err) {
       setError(err.message || "Не удалось создать приглашение");
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -587,6 +595,7 @@ export function GroupFormModal({ group, enrollment, onClose, onSave, onArchive, 
   ));
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
 
   useEffect(() => {
@@ -601,15 +610,18 @@ export function GroupFormModal({ group, enrollment, onClose, onSave, onArchive, 
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (savingRef.current) return;
     if (!form.title.trim()) {
       setError("Укажите название группы");
       return;
     }
+    savingRef.current = true;
     setSaving(true);
     try {
       await onSave(groupToApiPayload(form));
     } catch (err) {
       setError(err.message || "Не удалось сохранить группу");
+      savingRef.current = false;
       setSaving(false);
     }
   };

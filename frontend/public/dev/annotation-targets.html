@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Annotation targets — 9 crosshairs</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0b1220; color: #e2e8f0; font: 16px/1.4 Inter, system-ui, sans-serif; }
+    .grid {
+      position: relative;
+      width: min(96vw, 1280px);
+      height: min(90vh, 720px);
+      margin: 4vh auto 0;
+      background:
+        linear-gradient(#1e293b 1px, transparent 1px) 0 0 / 40px 40px,
+        linear-gradient(90deg, #1e293b 1px, transparent 1px) 0 0 / 40px 40px,
+        #111827;
+      border: 2px solid #38bdf8;
+    }
+    .t {
+      position: absolute;
+      width: 28px;
+      height: 28px;
+      margin: -14px 0 0 -14px;
+    }
+    .t::before, .t::after {
+      content: "";
+      position: absolute;
+      background: #f43f5e;
+    }
+    .t::before { left: 13px; top: 0; width: 2px; height: 28px; }
+    .t::after { left: 0; top: 13px; width: 28px; height: 2px; }
+    .t span {
+      position: absolute;
+      left: 32px;
+      top: 6px;
+      font: 700 12px/1 ui-monospace, monospace;
+      color: #fbbf24;
+      white-space: nowrap;
+    }
+    h1 { text-align: center; font-size: 18px; font-weight: 650; margin: 12px 0 0; }
+    p { text-align: center; opacity: 0.75; margin: 8px 16px 0; }
+  </style>
+</head>
+<body>
+  <h1>9 targets for screen-share annotation QA</h1>
+  <p>Share this tab. Participant dots the center of every crosshair. Host must see the same centers after resize / chat / filmstrip / fullscreen.</p>
+  <div class="grid" aria-label="targets">
+    <div class="t" style="left:0;top:0"><span>TL</span></div>
+    <div class="t" style="left:50%;top:0"><span>TC</span></div>
+    <div class="t" style="left:100%;top:0"><span>TR</span></div>
+    <div class="t" style="left:0;top:50%"><span>CL</span></div>
+    <div class="t" style="left:50%;top:50%"><span>CC</span></div>
+    <div class="t" style="left:100%;top:50%"><span>CR</span></div>
+    <div class="t" style="left:0;top:100%"><span>BL</span></div>
+    <div class="t" style="left:50%;top:100%"><span>BC</span></div>
+    <div class="t" style="left:100%;top:100%"><span>BR</span></div>
+  </div>
+</body>
+</html>

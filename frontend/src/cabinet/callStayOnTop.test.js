@@ -60,7 +60,29 @@ describe("callStayOnTop", () => {
     expect(findSameOriginCallVideo(iframe)).toBe(video);
   });
 
-  it("does not open a document window when there is no call video", async () => {
+  it("opens a document window for the mini call when Document PiP exists", async () => {
+    const host = document.createElement("div");
+    const parent = document.createElement("div");
+    parent.appendChild(host);
+    const pipWindow = {
+      document: {
+        adoptedStyleSheets: [],
+        querySelectorAll: () => [],
+        head: { appendChild: () => {} },
+        body: { className: "", appendChild: vi.fn((node) => node) },
+      },
+      addEventListener: vi.fn(),
+    };
+    const requestWindow = vi.fn(async () => pipWindow);
+    window.documentPictureInPicture = { requestWindow };
+    const result = await requestCallStayOnTop({ host });
+    expect(result.ok).toBe(true);
+    expect(result.mode).toBe("document-pip");
+    expect(pipWindow.document.body.appendChild).toHaveBeenCalledWith(host);
+    delete window.documentPictureInPicture;
+  });
+
+  it("does not open a document window when there is no call video and no host", async () => {
     const requestWindow = vi.fn();
     vi.stubGlobal("document", {
       pictureInPictureEnabled: true,

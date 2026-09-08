@@ -101,6 +101,9 @@ class StudentListSerializer(serializers.ModelSerializer):
         read_only_fields = ["created_at", "updated_at"]
 
     def get_group_ids(self, obj):
+        prefetched = getattr(obj, "_prefetched_objects_cache", {}).get("groups")
+        if prefetched is not None:
+            return [g.id for g in prefetched if g.status == "active"]
         return list(obj.groups.filter(status="active").values_list("id", flat=True))
 
     def get_subjects_count(self, obj):
@@ -110,7 +113,13 @@ class StudentListSerializer(serializers.ModelSerializer):
         return obj.subjects.filter(status=StudentSubjectStatus.ACTIVE).count()
 
     def get_subjects_preview(self, obj):
-        qs = obj.subjects.filter(status=StudentSubjectStatus.ACTIVE).order_by("subject", "title", "id")[:5]
+        prefetched = getattr(obj, "_prefetched_objects_cache", {}).get("subjects")
+        if prefetched is not None:
+            rows = [s for s in prefetched if s.status == StudentSubjectStatus.ACTIVE]
+            rows.sort(key=lambda s: (s.subject or "", s.title or "", s.id))
+            qs = rows[:5]
+        else:
+            qs = obj.subjects.filter(status=StudentSubjectStatus.ACTIVE).order_by("subject", "title", "id")[:5]
         return [
             {
                 "id": s.id,

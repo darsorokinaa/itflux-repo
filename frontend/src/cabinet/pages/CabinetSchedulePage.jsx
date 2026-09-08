@@ -61,6 +61,9 @@ import {
   formatLocalDateTimeIso,
   getUpcomingEvents,
   getSeriesRefreshRange,
+  getCalendarFetchRange,
+  getCalendarFetchWindows,
+  mergeScheduleEventLists,
   localClockToTimeZone,
   parseScheduleScope,
   upcomingEventDateLabel,
@@ -132,6 +135,24 @@ function availabilitySlotsToEvents(slots = []) {
   }));
 }
 
+async function fetchEventsForCalendarView(fetchEvents, view, focusDate) {
+  const windows = getCalendarFetchWindows(view, focusDate);
+  const results = await Promise.allSettled(windows.map((range) => fetchEvents(range)));
+  const batches = [];
+  let lastError = null;
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      batches.push(result.value);
+    } else {
+      lastError = result.reason;
+    }
+  }
+  if (!batches.length) {
+    throw lastError || new Error("Не удалось загрузить расписание.");
+  }
+  return mergeScheduleEventLists(batches);
+}
+
 function eventAccentColor(event) {
   if (event.kind === "availability" || event.type === "availability") return "#1A73E8";
   if (event.status === "cancelled") return "#EF4444";
@@ -166,31 +187,6 @@ function formatApiDate(date) {
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const d = String(date.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
-}
-
-function getCalendarFetchRange(view, focusDate) {
-  let range;
-  if (view === "day") {
-    range = { from: formatApiDate(focusDate), to: formatApiDate(focusDate) };
-  } else if (view === "month") {
-    const start = new Date(focusDate.getFullYear(), focusDate.getMonth(), 1);
-    const end = new Date(focusDate.getFullYear(), focusDate.getMonth() + 1, 0);
-    range = { from: formatApiDate(start), to: formatApiDate(end) };
-  } else if (view === "list") {
-    const start = startOfDay(new Date());
-    const end = addDays(start, 60);
-    range = { from: formatApiDate(start), to: formatApiDate(end) };
-  } else {
-    const ws = startOfWeek(focusDate);
-    const we = endOfWeek(focusDate);
-    range = { from: formatApiDate(ws), to: formatApiDate(we) };
-  }
-  const upcomingFrom = formatApiDate(startOfDay(new Date()));
-  const upcomingTo = formatApiDate(addDays(startOfDay(new Date()), 21));
-  return {
-    from: range.from < upcomingFrom ? range.from : upcomingFrom,
-    to: range.to > upcomingTo ? range.to : upcomingTo,
-  };
 }
 
 function startOfDay(date) {
@@ -2670,21 +2666,24 @@ export default function CabinetSchedulePage() {
     setCalendarLoading(true);
     setCalendarError("");
 
-    fetchEvents(range)
-      .then(async (data) => {
+    const eventsPromise = fetchEventsForCalendarView(fetchEvents, view, focusDate);
+    const availabilityPromise = useYandex
+      ? Promise.resolve(null)
+      : fetchTeacherAvailability(range).catch(() => null);
+
+    Promise.all([eventsPromise, availabilityPromise])
+      .then(([events, availability]) => {
         if (cancelled) return;
-        setEvents(Array.isArray(data?.events) ? data.events : []);
+        setEvents(events);
         if (!useYandex) {
-          try {
-            const availability = await fetchTeacherAvailability(range);
-            if (cancelled) return;
+          if (availability) {
             setAvailabilitySlots(availability?.slots || []);
             if (availability?.link) setBookingLink(availability.link);
             if (availability?.default_slot_duration_minutes) {
               setAvailabilityDuration(availability.default_slot_duration_minutes);
             }
-          } catch {
-            if (!cancelled) setAvailabilitySlots([]);
+          } else {
+            setAvailabilitySlots([]);
           }
         } else {
           setAvailabilitySlots([]);
@@ -3012,9 +3011,8 @@ export default function CabinetSchedulePage() {
   const handleCreateLesson = useCallback(async (payload) => {
     const data = await createScheduleEvent(payload);
     if (data?.events_created && data.events_created > 1) {
-      const range = getCalendarFetchRange(view, focusDate);
-      const refreshed = await fetchScheduleEvents(range);
-      if (refreshed?.events) setEvents(refreshed.events);
+      const refreshed = await fetchEventsForCalendarView(fetchScheduleEvents, view, focusDate);
+      setEvents(refreshed);
     } else if (data?.event) {
       setEvents((prev) => [...prev, data.event].sort((a, b) => {
         const aTime = a.startsAt || a.startTime;
@@ -3386,10 +3384,8 @@ export default function CabinetSchedulePage() {
             notify_participants: true,
             plan_cancel_action: planCancelAction || "shift",
           });
-          const range = getCalendarFetchRange(view, focusDate);
-          const refreshed = await fetchScheduleEvents(range);
-          if (refreshed?.events) setEvents(refreshed.events);
-          else setEvents((prev) => applyCancelEvents(prev, event, scope));
+          const refreshed = await fetchEventsForCalendarView(fetchScheduleEvents, view, focusDate);
+          setEvents(refreshed);
         } else {
           setEvents((prev) => applyCancelEvents(prev, event, scope));
         }
@@ -3709,10 +3705,8 @@ export default function CabinetSchedulePage() {
             setHomeworkAssignModal(null);
             showToast("Домашнее задание выдано");
             if (!eventPk) return;
-            const range = getCalendarFetchRange(view, focusDate);
-            fetchScheduleEvents(range)
-              .then((data) => {
-                const next = Array.isArray(data?.events) ? data.events : [];
+            fetchEventsForCalendarView(fetchScheduleEvents, view, focusDate)
+              .then((next) => {
                 setEvents(next);
                 const refreshed = next.find((ev) => scheduleEventNumericId(ev.id) === Number(eventPk));
                 if (refreshed) setSelectedEvent(refreshed);

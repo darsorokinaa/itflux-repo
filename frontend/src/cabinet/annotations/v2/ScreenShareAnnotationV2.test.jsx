@@ -22,7 +22,7 @@ describe("ScreenShareAnnotationV2 zoom UX", () => {
     expect(screen.queryByRole("toolbar", { name: "Аннотации демонстрации экрана" })).toBeNull();
   });
 
-  it("opens the toolbar from the trigger and keeps Pointer selected", () => {
+  it("opens the toolbar from the trigger on Mouse", () => {
     render(
       <ScreenShareAnnotationV2
         active
@@ -33,7 +33,7 @@ describe("ScreenShareAnnotationV2 zoom UX", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Аннотации" }));
     expect(screen.getByRole("toolbar", { name: "Аннотации демонстрации экрана" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Указка" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Мышь" }).getAttribute("aria-pressed")).toBe("true");
   });
 
   it("hides student controls until the teacher allows drawing", () => {
@@ -47,5 +47,43 @@ describe("ScreenShareAnnotationV2 zoom UX", () => {
     );
     expect(screen.queryByRole("button", { name: "Аннотации" })).toBeNull();
     expect(screen.queryByRole("toolbar", { name: "Аннотации демонстрации экрана" })).toBeNull();
+  });
+
+  it("unmounts the overlay when sharing stops", () => {
+    const { rerender } = render(
+      <ScreenShareAnnotationV2
+        active
+        canAnnotate
+        canManage
+        currentUserId={1}
+        contentWidth={1920}
+        contentHeight={1080}
+      />,
+    );
+    expect(document.querySelector(".ss-ann-v2-toolbar-slot")).toBeTruthy();
+    rerender(
+      <ScreenShareAnnotationV2
+        active={false}
+        canAnnotate
+        canManage
+        currentUserId={1}
+      />,
+    );
+    expect(document.querySelector(".ss-ann-v2-canvas")).toBeNull();
+    expect(document.querySelector(".ss-ann-v2-toolbar-slot")).toBeNull();
+  });
+
+  it("does not mount a drawing canvas until exact Jitsi geometry arrives", () => {
+    render(
+      <ScreenShareAnnotationV2
+        active
+        canAnnotate
+        canManage
+        currentUserId={1}
+        contentWidth={1920}
+        contentHeight={1080}
+      />,
+    );
+    expect(document.querySelector(".ss-ann-v2-canvas")).toBeNull();
   });
 });

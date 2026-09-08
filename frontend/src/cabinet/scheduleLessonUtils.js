@@ -14,6 +14,100 @@ export function formatApiDate(date) {
   return `${y}-${m}-${d}`;
 }
 
+export const UPCOMING_CALENDAR_DAYS = 21;
+
+function startOfLocalDay(date) {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  return next;
+}
+
+function addLocalDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function startOfLocalWeek(date) {
+  const next = startOfLocalDay(date);
+  const day = (next.getDay() + 6) % 7;
+  return addLocalDays(next, -day);
+}
+
+export function unionDateRanges(a, b) {
+  return {
+    from: a.from < b.from ? a.from : b.from,
+    to: a.to > b.to ? a.to : b.to,
+  };
+}
+
+export function getVisibleCalendarRange(view, focusDate, now = new Date()) {
+  if (view === "day") {
+    return { from: formatApiDate(focusDate), to: formatApiDate(focusDate) };
+  }
+  if (view === "month") {
+    const start = new Date(focusDate.getFullYear(), focusDate.getMonth(), 1);
+    const end = new Date(focusDate.getFullYear(), focusDate.getMonth() + 1, 0);
+    return { from: formatApiDate(start), to: formatApiDate(end) };
+  }
+  if (view === "list") {
+    const start = startOfLocalDay(now);
+    const end = addLocalDays(start, 60);
+    return { from: formatApiDate(start), to: formatApiDate(end) };
+  }
+  const weekStart = startOfLocalWeek(focusDate);
+  const weekEnd = addLocalDays(weekStart, 6);
+  return { from: formatApiDate(weekStart), to: formatApiDate(weekEnd) };
+}
+
+export function getUpcomingCalendarRange(now = new Date()) {
+  const start = startOfLocalDay(now);
+  return {
+    from: formatApiDate(start),
+    to: formatApiDate(addLocalDays(start, UPCOMING_CALENDAR_DAYS)),
+  };
+}
+
+function rangeDaySpan(range) {
+  const from = Date.parse(`${range.from}T00:00:00`);
+  const to = Date.parse(`${range.to}T00:00:00`);
+  if (Number.isNaN(from) || Number.isNaN(to)) return 0;
+  return Math.round((to - from) / 86400000) + 1;
+}
+
+export function getCalendarFetchWindows(view, focusDate, now = new Date()) {
+  const visible = getVisibleCalendarRange(view, focusDate, now);
+  const upcoming = getUpcomingCalendarRange(now);
+  const united = unionDateRanges(visible, upcoming);
+  if (rangeDaySpan(united) > rangeDaySpan(visible) + rangeDaySpan(upcoming) + 3) {
+    return [visible, upcoming];
+  }
+  return [united];
+}
+
+export function getCalendarFetchRange(view, focusDate, now = new Date()) {
+  return getCalendarFetchWindows(view, focusDate, now).reduce(
+    (acc, range) => (acc ? unionDateRanges(acc, range) : range),
+    null,
+  );
+}
+
+export function mergeScheduleEventLists(batches) {
+  const byId = new Map();
+  for (const batch of batches) {
+    const events = Array.isArray(batch) ? batch : batch?.events;
+    for (const event of events || []) {
+      if (event && event.id != null) byId.set(String(event.id), event);
+    }
+  }
+  return Array.from(byId.values()).sort((a, b) => {
+    const startA = Date.parse(a.startsAt || "") || 0;
+    const startB = Date.parse(b.startsAt || "") || 0;
+    if (startA !== startB) return startA - startB;
+    return String(a.id).localeCompare(String(b.id), "en");
+  });
+}
+
 export function normalizeTimeValue(value) {
   if (!value) return "00:00";
   const parts = String(value).trim().split(":");

@@ -59,6 +59,29 @@ describe("screen-share content rect", () => {
     expect(clientToNormalized(b.x, b.y, phone).y).toBeCloseTo(0.32, 5);
   });
 
+  it("computes contain letterbox for 1920×1080 inside 1000×800", () => {
+    const box = getFittedContentRect(
+      { left: 0, top: 0, width: 1000, height: 800 },
+      1920,
+      1080,
+      OBJECT_FIT.CONTAIN,
+    );
+    expect(box.width).toBeCloseTo(1000);
+    expect(box.height).toBeCloseTo(562.5);
+    expect(box.offsetY).toBeCloseTo(118.75);
+  });
+
+  it("does not fill the stage when source size is unknown", () => {
+    const box = getFittedContentRect(
+      { left: 0, top: 0, width: 1000, height: 800 },
+      0,
+      0,
+      OBJECT_FIT.CONTAIN,
+    );
+    expect(box.sourceUnknown).toBe(true);
+    expect(box.height).toBeCloseTo(562.5);
+  });
+
   it("computes contain letterbox for 1920×1080 inside 1200×800", () => {
     const box = getFittedContentRect(
       { left: 0, top: 0, width: 1200, height: 800 },
@@ -84,9 +107,24 @@ describe("screen-share content rect", () => {
     expect(box.offsetX).toBeLessThan(0);
   });
 
-  it("does not zero chrome in compact/split-screen", () => {
+  it("does not apply magic filmstrip/toolbar offsets", () => {
     const chrome = resolveChromeInsets(360, 248, { compact: true });
-    expect(chrome.bottom).toBeGreaterThan(0);
+    expect(chrome).toEqual({ top: 0, right: 0, bottom: 0, left: 0 });
+  });
+
+  it("uses the Jitsi bridge rect as-is without chrome compensation", () => {
+    const layout = computeScreenShareContentRect({
+      hostRect: { left: 0, top: 0, width: 1000, height: 800 },
+      contentWidth: 1920,
+      contentHeight: 1080,
+      exactContentRect: { left: 40, top: 80, width: 640, height: 360 },
+      exactVideoRect: { left: 40, top: 62, width: 640, height: 396 },
+    });
+    expect(layout.source).toBe("jitsi-bridge");
+    expect(layout.geometryStatus).toBe("exact");
+    expect(layout.chrome).toEqual({ top: 0, right: 0, bottom: 0, left: 0 });
+    expect(layout.content).toEqual({ left: 40, top: 80, width: 640, height: 360 });
+    expect(layout.content.left).not.toBe(128);
   });
 
   it("ignores pointers in letterbox and keeps normalized coords after resize", () => {

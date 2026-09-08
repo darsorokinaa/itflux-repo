@@ -1261,9 +1261,13 @@ class LessonLearningPlanSyncService:
 
     @classmethod
     def event_materials_payload(cls, event: ScheduleEvent) -> dict[str, list]:
-        links = list(
-            event.event_materials.select_related("material", "interactive").order_by("order", "id")
-        )
+        cached = getattr(event, "_prefetched_objects_cache", {}).get("event_materials")
+        if cached is not None:
+            links = sorted(cached, key=lambda row: (row.order, row.id))
+        else:
+            links = list(
+                event.event_materials.select_related("material", "interactive").order_by("order", "id")
+            )
 
         def serialize(link: ScheduleEventMaterial) -> dict:
             if link.material_id and link.material:

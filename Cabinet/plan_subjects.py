@@ -1,4 +1,8 @@
+from functools import lru_cache
+
 from django.apps import apps
+from django.core.signals import request_started
+from django.dispatch import receiver
 
 
 LEGACY_SUBJECT_LABELS = {
@@ -19,6 +23,21 @@ def _normalize_subject_id(value):
 
 def get_plan_subject_options():
     """Предметы для планов уроков из БД предметов Generator.Subject."""
+    return [{"id": subject_id, "label": label} for subject_id, label in _cached_plan_subject_options()]
+
+
+def clear_plan_subject_options_cache():
+    _cached_plan_subject_options.cache_clear()
+
+
+@receiver(request_started, dispatch_uid="cabinet.clear_plan_subject_options")
+def _clear_plan_subject_options_cache_on_request(sender, **kwargs):
+    """Subject catalog can change via admin/import without a process restart."""
+    clear_plan_subject_options_cache()
+
+
+@lru_cache(maxsize=1)
+def _cached_plan_subject_options():
     try:
         subject_model = apps.get_model("Generator", "Subject")
     except LookupError:
@@ -35,17 +54,15 @@ def get_plan_subject_options():
             if not subject_id or subject_id in seen:
                 continue
             seen.add(subject_id)
-            options.append(
-                {
-                    "id": subject_id,
-                    "label": (subject_name or subject_short or "").strip() or subject_id,
-                }
-            )
+            options.append((
+                subject_id,
+                (subject_name or subject_short or "").strip() or subject_id,
+            ))
 
     if options:
-        return options
+        return tuple(options)
 
-    return [{"id": key, "label": label} for key, label in LEGACY_SUBJECT_LABELS.items()]
+    return tuple((key, label) for key, label in LEGACY_SUBJECT_LABELS.items())
 
 
 def normalize_plan_subject_id(value):
