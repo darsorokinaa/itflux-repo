@@ -8,6 +8,15 @@ import {
 import { getInteractiveDisplayTitle } from "../interactivesData";
 import { playInteractiveSound, unlockInteractiveAudio, startInteractiveBackgroundSound, stopInteractiveBackgroundSound } from "../interactiveSounds";
 import { shuffleArray } from "../quizUtils";
+import { usePlaybackBridge } from "../materials/collab/usePlaybackBridge";
+
+function orderByIds(items, order) {
+  if (!Array.isArray(order) || order.length === 0) return items;
+  const byId = Object.fromEntries(items.map((it) => [String(it.id), it]));
+  const ordered = order.map((id) => byId[String(id)]).filter(Boolean);
+  const seen = new Set(ordered.map((it) => String(it.id)));
+  return [...ordered, ...items.filter((it) => !seen.has(String(it.id)))];
+}
 
 function InlineImage({ src, alt, className }) {
   const value = String(src || "").trim();
@@ -49,17 +58,41 @@ function FlashcardConsolidationPrompt({ count, onStart, onSkip }) {
   );
 }
 
-function FlashcardPlayer({ cards, bare, playing, appearance, onComplete }) {
+function FlashcardPlayer({ cards, bare, playing, appearance, onComplete, collab, readOnly }) {
   const list = useMemo(
     () => cards.filter((c) => c.front || c.back),
     [cards],
   );
+  const { emit, shouldApplyRemote, consumeSkipEmit } = usePlaybackBridge(collab || {});
   const [phase, setPhase] = useState("main");
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [knownIndices, setKnownIndices] = useState(() => new Set());
   const [repeatIndices, setRepeatIndices] = useState(() => new Set());
   const studyMode = bare || playing;
+
+  useEffect(() => {
+    if (!collab?.follow || !shouldApplyRemote(collab.remote)) return;
+    const remote = collab.remote;
+    if (remote.phase) setPhase(String(remote.phase));
+    if (remote.index != null) setIndex(Number(remote.index) || 0);
+    if (remote.flipped != null) setFlipped(Boolean(remote.flipped));
+    if (Array.isArray(remote.knownIndices)) setKnownIndices(new Set(remote.knownIndices.map(Number)));
+    if (Array.isArray(remote.repeatIndices)) setRepeatIndices(new Set(remote.repeatIndices.map(Number)));
+  }, [collab?.follow, collab?.remote, shouldApplyRemote]);
+
+  useEffect(() => {
+    if (consumeSkipEmit()) return;
+    emit({
+      type: "flashcards",
+      started: true,
+      phase,
+      index,
+      flipped,
+      knownIndices: [...knownIndices],
+      repeatIndices: [...repeatIndices],
+    });
+  }, [phase, index, flipped, knownIndices, repeatIndices, emit, consumeSkipEmit]);
 
   const consolidateQueue = useMemo(
     () => [...repeatIndices].sort((a, b) => a - b),
@@ -92,6 +125,7 @@ function FlashcardPlayer({ cards, bare, playing, appearance, onComplete }) {
 
   useEffect(() => {
     const onKey = (e) => {
+      if (readOnly) return;
       if (phase === "consolidate-prompt" || phase === "done") return;
       if (e.key === "ArrowLeft" && index > 0) {
         setIndex((i) => i - 1);
@@ -112,9 +146,10 @@ function FlashcardPlayer({ cards, bare, playing, appearance, onComplete }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [index, activeLength, appearance, phase]);
+  }, [index, activeLength, appearance, phase, readOnly]);
 
   const flipCard = () => {
+    if (readOnly) return;
     setFlipped((v) => {
       if (!v) playInteractiveSound(appearance, "flip");
       return !v;
@@ -122,6 +157,7 @@ function FlashcardPlayer({ cards, bare, playing, appearance, onComplete }) {
   };
 
   const goNext = (markedKnown) => {
+    if (readOnly) return;
     const origIdx = activeOriginalIndex;
     let nextKnown = knownIndices;
     let nextRepeat = repeatIndices;
@@ -263,7 +299,8 @@ function FlashcardPlayer({ cards, bare, playing, appearance, onComplete }) {
   );
 }
 
-function MatchingPlayer({ pairs, shuffle, bare, playing, appearance, onComplete }) {
+function MatchingPlayer({ pairs, shuffle, bare, playing, appearance, onComplete, collab, readOnly }) {
+  const { emit, shouldApplyRemote, consumeSkipEmit } = usePlaybackBridge(collab || {});
   const [selectedLeft, setSelectedLeft] = useState(null);
   const [matched, setMatched] = useState([]);
   const [wrong, setWrong] = useState(null);
@@ -274,24 +311,49 @@ function MatchingPlayer({ pairs, shuffle, bare, playing, appearance, onComplete 
   const rightRefs = useRef({});
   const studyMode = bare || playing;
 
-  const [leftItems] = useState(() => {
+  const makeLeft = (order) => {
     const items = pairs.map((p, i) => ({
       id: `l${i}`,
       text: p.left || `— ${i + 1}`,
       image_url: p.left_image_url || "",
     }));
-    return shuffle ? shuffleArray(items) : items;
-  });
-
-  const [rightItems] = useState(() => {
+    return order?.length ? orderByIds(items, order) : (shuffle ? shuffleArray(items) : items);
+  };
+  const makeRight = (order) => {
     const items = pairs.map((p, i) => ({
       id: `r${i}`,
       text: p.right || `— ${i + 1}`,
       image_url: p.right_image_url || "",
       pairIndex: i,
     }));
-    return shuffle ? shuffleArray(items) : items;
-  });
+    return order?.length ? orderByIds(items, order) : (shuffle ? shuffleArray(items) : items);
+  };
+
+  const [leftItems, setLeftItems] = useState(() => makeLeft(collab?.remote?.leftOrder));
+  const [rightItems, setRightItems] = useState(() => makeRight(collab?.remote?.rightOrder));
+
+  useEffect(() => {
+    if (!collab?.follow || !shouldApplyRemote(collab.remote)) return;
+    const remote = collab.remote;
+    if (Array.isArray(remote.leftOrder)) setLeftItems(makeLeft(remote.leftOrder));
+    if (Array.isArray(remote.rightOrder)) setRightItems(makeRight(remote.rightOrder));
+    if (remote.selectedLeft !== undefined) setSelectedLeft(remote.selectedLeft || null);
+    if (Array.isArray(remote.matched)) setMatched(remote.matched.map(String));
+    if (remote.done != null) setDone(Boolean(remote.done));
+  }, [collab?.follow, collab?.remote, shouldApplyRemote]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (consumeSkipEmit()) return;
+    emit({
+      type: "matching",
+      started: true,
+      selectedLeft,
+      matched,
+      done,
+      leftOrder: leftItems.map((it) => it.id),
+      rightOrder: rightItems.map((it) => it.id),
+    });
+  }, [selectedLeft, matched, done, leftItems, rightItems, emit, consumeSkipEmit]);
 
   const updateLines = useCallback(() => {
     const stage = stageRef.current;
@@ -347,6 +409,7 @@ function MatchingPlayer({ pairs, shuffle, bare, playing, appearance, onComplete 
   }, [appearance, matched.length, pairs.length, done, onComplete]);
 
   const handleLeft = (id) => {
+    if (readOnly) return;
     if (matched.includes(id.replace("l", ""))) return;
     playInteractiveSound(appearance, "tap");
     setSelectedLeft(id);
@@ -354,6 +417,7 @@ function MatchingPlayer({ pairs, shuffle, bare, playing, appearance, onComplete 
   };
 
   const handleRight = (item) => {
+    if (readOnly) return;
     if (!selectedLeft) return;
     const leftIndex = selectedLeft.replace("l", "");
     const rightIndex = String(item.pairIndex);
@@ -453,7 +517,8 @@ function MatchingPlayer({ pairs, shuffle, bare, playing, appearance, onComplete 
   );
 }
 
-function SequencePlayer({ steps, shuffle, bare, playing, appearance, onComplete }) {
+function SequencePlayer({ steps, shuffle, bare, playing, appearance, onComplete, collab, readOnly }) {
+  const { emit, shouldApplyRemote, consumeSkipEmit } = usePlaybackBridge(collab || {});
   const [order, setOrder] = useState([]);
   const [checked, setChecked] = useState(false);
   const [checkOk, setCheckOk] = useState(null);
@@ -467,25 +532,53 @@ function SequencePlayer({ steps, shuffle, bare, playing, appearance, onComplete 
 
   const correctOrder = sortedSteps.map((s, i) => s.text || `Шаг ${i + 1}`);
 
-  const [shuffled] = useState(() => {
+  const makeBank = (orderIds) => {
     const items = steps.map((s, i) => ({
       id: `s${i}`,
       text: s.text || `Шаг ${i + 1}`,
       image_url: s.image_url || "",
     }));
+    if (orderIds?.length) return orderByIds(items, orderIds);
     if (!shuffle) return items;
     return shuffleArray(items);
-  });
+  };
+
+  const [shuffled, setShuffled] = useState(() => makeBank(collab?.remote?.itemOrder));
+
+  useEffect(() => {
+    if (!collab?.follow || !shouldApplyRemote(collab.remote)) return;
+    const remote = collab.remote;
+    if (Array.isArray(remote.itemOrder)) setShuffled(makeBank(remote.itemOrder));
+    if (Array.isArray(remote.order)) setOrder(remote.order.map(String));
+    if (remote.checked != null) setChecked(Boolean(remote.checked));
+    if (remote.checkOk !== undefined) setCheckOk(remote.checkOk);
+    if (remote.done != null) setDone(Boolean(remote.done));
+  }, [collab?.follow, collab?.remote, shouldApplyRemote]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (consumeSkipEmit()) return;
+    emit({
+      type: "sequence",
+      started: true,
+      itemOrder: shuffled.map((s) => s.id),
+      order: order.length > 0 ? order : shuffled.map((s) => s.id),
+      checked,
+      checkOk,
+      done,
+    });
+  }, [shuffled, order, checked, checkOk, done, emit, consumeSkipEmit]);
 
   const current = order.length > 0 ? order : shuffled.map((s) => s.id);
 
   const handleReorder = (next) => {
+    if (readOnly) return;
     setOrder(next);
     setChecked(false);
     setCheckOk(null);
   };
 
   const handleCheck = () => {
+    if (readOnly) return;
     setChecked(true);
     const correct = current.every((id, i) => {
       const step = shuffled.find((s) => s.id === id);
@@ -584,6 +677,11 @@ export default function InteractivePlayer({
   onComplete,
   onProgress,
   sessionKey = 0,
+  playbackRemote = null,
+  onPlaybackChange = null,
+  playbackFollow = false,
+  playbackPublish = false,
+  readOnly = false,
 }) {
   const appearance = useMemo(
     () => appearanceProp || resolveInteractiveAppearance(interactive),
@@ -592,11 +690,34 @@ export default function InteractivePlayer({
   const cardClass = appearance?.cardStyle?.css_class || "ix-cards--classic";
   const needsIntro = interactive.type === "wheel" ? false : (showIntro ?? bare);
   const [introDismissedFor, setIntroDismissedFor] = useState(null);
-  const started = (!needsIntro || playing || introDismissedFor === sessionKey);
+  const started = (!needsIntro || playing || introDismissedFor === sessionKey)
+    || Boolean(playbackFollow && playbackRemote?.started);
+
+  const collab = useMemo(() => ({
+    remote: playbackRemote,
+    follow: playbackFollow,
+    publish: playbackPublish,
+    onChange: onPlaybackChange,
+  }), [playbackRemote, playbackFollow, playbackPublish, onPlaybackChange]);
 
   useEffect(() => {
     if (bare) unlockInteractiveAudio();
   }, [bare]);
+
+  useEffect(() => {
+    if (playbackFollow && playbackRemote?.started) {
+      setIntroDismissedFor(sessionKey);
+    }
+  }, [playbackFollow, playbackRemote?.started, sessionKey]);
+
+  useEffect(() => {
+    if (!playbackPublish || !started) return;
+    onPlaybackChange?.({
+      ...(playbackRemote && typeof playbackRemote === "object" ? playbackRemote : {}),
+      type: interactive?.type,
+      started: true,
+    });
+  }, [started]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!started || !interactive) {
@@ -623,6 +744,7 @@ export default function InteractivePlayer({
         <PlayIntro
           interactive={interactive}
           onStart={() => {
+            if (readOnly) return;
             notifyProgress();
             setIntroDismissedFor(sessionKey);
           }}
@@ -646,6 +768,8 @@ export default function InteractivePlayer({
           playing={playing}
           appearance={appearance}
           onComplete={handleComplete}
+          collab={collab}
+          readOnly={readOnly}
         />
       ) : null}
       {interactive.type === "matching" ? (
@@ -657,6 +781,8 @@ export default function InteractivePlayer({
           playing={playing}
           appearance={appearance}
           onComplete={handleComplete}
+          collab={collab}
+          readOnly={readOnly}
         />
       ) : null}
       {interactive.type === "sequence" ? (
@@ -668,6 +794,8 @@ export default function InteractivePlayer({
           playing={playing}
           appearance={appearance}
           onComplete={handleComplete}
+          collab={collab}
+          readOnly={readOnly}
         />
       ) : null}
       {interactive.type === "quiz" ? (
@@ -680,6 +808,8 @@ export default function InteractivePlayer({
           playing={playing}
           appearance={appearance}
           onComplete={handleComplete}
+          collab={collab}
+          readOnly={readOnly}
         />
       ) : null}
       {interactive.type === "wheel" ? (
@@ -690,6 +820,8 @@ export default function InteractivePlayer({
           playing={playing}
           appearance={appearance}
           onComplete={handleComplete}
+          collab={collab}
+          readOnly={readOnly}
         />
       ) : null}
     </div>

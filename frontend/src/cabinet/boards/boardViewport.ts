@@ -18,6 +18,8 @@ export type TeacherViewport = {
   role?: string;
   displayName?: string;
   updatedAt: number;
+  /** Teacher summoned peers to this scene center. Existing viewport_update field. */
+  force?: boolean;
 };
 
 export function sceneCenterX(scrollX: number, zoom: number, cssWidth: number): number {
@@ -83,6 +85,7 @@ export function normalizeViewportPayload(
     role: role || (typeof raw.role === "string" ? raw.role : undefined),
     displayName,
     updatedAt: Date.now(),
+    force: Boolean(raw.force),
   };
 }
 
@@ -152,7 +155,7 @@ export type SceneViewportRect = {
 
 /**
  * Видимая область холста в координатах сцены Excalidraw.
- * sceneX = cssX / zoom - scrollX (как pointer → scene в BoardExcalidrawCanvas).
+ * sceneX = (clientX - offsetLeft) / zoom - scrollX (boardSceneCoordsFromClient).
  * Если appState.width/height ещё 0 после file picker — берём fallbackSize.
  */
 export function sceneViewportRect(
@@ -234,6 +237,65 @@ export function imageRectAtViewportCenter(
     width,
     height,
   };
+}
+
+/** Видимая область пира в координатах сцены (из width/height CSS и zoom). */
+export function peerViewportSceneRect(
+  vp: Pick<TeacherViewport, "centerX" | "centerY" | "zoom" | "width" | "height">,
+): { minX: number; minY: number; width: number; height: number } | null {
+  const zoom = vp.zoom > 0 ? vp.zoom : 1;
+  const cssW = Number(vp.width);
+  const cssH = Number(vp.height);
+  if (!(cssW > 8 && cssH > 8)) return null;
+  const width = cssW / zoom;
+  const height = cssH / zoom;
+  return {
+    minX: vp.centerX - width / 2,
+    minY: vp.centerY - height / 2,
+    width,
+    height,
+  };
+}
+
+/**
+ * Рамка экрана отслеживаемого в CSS-пикселях холста получателя.
+ * scene → (scene + localScroll) * localZoom — та же формула, что boardClientCoordsFromScene
+ * без offsetLeft/Top: оверлей живёт внутри хоста.
+ */
+export function followViewportFrameCss(
+  peer: Pick<TeacherViewport, "centerX" | "centerY" | "zoom" | "width" | "height">,
+  local: { scrollX?: unknown; scrollY?: unknown; zoom?: unknown },
+  inset = 1,
+): { left: number; top: number; width: number; height: number } | null {
+  const scene = peerViewportSceneRect(peer);
+  if (!scene) return null;
+  const zoom = zoomValueOf(local.zoom);
+  const sx = Number(local.scrollX);
+  const sy = Number(local.scrollY);
+  const scrollX = Number.isFinite(sx) ? sx : 0;
+  const scrollY = Number.isFinite(sy) ? sy : 0;
+  const left = (scene.minX + scrollX) * zoom + inset;
+  const top = (scene.minY + scrollY) * zoom + inset;
+  const width = scene.width * zoom - inset * 2;
+  const height = scene.height * zoom - inset * 2;
+  if (!(width > 2 && height > 2)) return null;
+  return { left, top, width, height };
+}
+
+export function applyFollowViewportFrame(
+  el: HTMLElement | null | undefined,
+  frame: { left: number; top: number; width: number; height: number } | null,
+): void {
+  if (!el) return;
+  if (!frame) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  el.style.left = `${frame.left}px`;
+  el.style.top = `${frame.top}px`;
+  el.style.width = `${frame.width}px`;
+  el.style.height = `${frame.height}px`;
 }
 
 export function imageIntersectsViewport(

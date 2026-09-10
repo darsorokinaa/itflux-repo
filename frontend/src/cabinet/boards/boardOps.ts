@@ -146,6 +146,48 @@ export function diffBoardElements(
   return ops;
 }
 
+function findElementById(list: unknown[] | null | undefined, id: string): El | null {
+  for (const raw of list || []) {
+    const cand = asEl(raw);
+    if (cand?.id === id) return cand;
+  }
+  return null;
+}
+
+/** Live-штрих: сравнить один элемент, не строить Map на всю сцену. */
+export function diffSingleBoardElement(
+  prev: unknown[] | null | undefined,
+  element: unknown,
+  prevById?: Map<string, unknown> | null,
+): BoardElementOp[] {
+  const el = asEl(element);
+  if (!el?.id) return [];
+  const was = asEl(prevById ? prevById.get(el.id) : findElementById(prev, el.id));
+  if (!was) return [{ op: "upsert", element: cloneBoardElement(el) }];
+  if (elKey(was) !== elKey(el)) return [{ op: "upsert", element: cloneBoardElement(el) }];
+  return [];
+}
+
+/**
+ * Live-кадр: заменить один id в уже принадлежащем collab snapshot.
+ * Не выделяет Map/новый массив на всю сцену.
+ */
+export function replacePublishedElementInPlace(
+  snapshot: unknown[] | null | undefined,
+  element: unknown,
+): boolean {
+  const el = asEl(element);
+  if (!el?.id || !Array.isArray(snapshot)) return false;
+  for (let i = 0; i < snapshot.length; i += 1) {
+    if (asEl(snapshot[i])?.id === el.id) {
+      snapshot[i] = element;
+      return true;
+    }
+  }
+  snapshot.push(element);
+  return true;
+}
+
 export function shouldPublishFullScene(
   elementCount: number,
   opsCount: number,
@@ -239,10 +281,16 @@ export function buildLivePublishPayload(
   prevElements: unknown[] | null | undefined,
   scene: CollabScene,
   version?: number,
+  hotElement?: unknown,
+  prevById?: Map<string, unknown> | null,
 ): { kind: "ops"; payload: BoardSceneOpsPayload; version?: number }
   | { kind: "full"; scene: CollabScene; version?: number } {
-  const ops = coalesceBoardOps(diffBoardElements(prevElements, scene.elements));
-  const files = filesForLivePublish(scene.files as Record<string, Record<string, unknown>>);
+  const ops = hotElement
+    ? coalesceBoardOps(diffSingleBoardElement(prevElements, hotElement, prevById))
+    : coalesceBoardOps(diffBoardElements(prevElements, scene.elements));
+  const files = hotElement
+    ? {}
+    : filesForLivePublish(scene.files as Record<string, Record<string, unknown>>);
   if (!ops.length && !Object.keys(files).length) {
     return { kind: "ops", payload: { ops: [], files }, version };
   }

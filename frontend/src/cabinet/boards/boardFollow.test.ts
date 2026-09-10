@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   canFollowPeer,
   canGoToPeer,
+  chaseViewportCenters,
+  isFollowPoseSettled,
   lerpViewportCenters,
   shouldSnapFollow,
 } from "./boardFollow";
@@ -14,16 +16,13 @@ import {
 } from "./boardViewport";
 
 describe("board follow permissions", () => {
-  it("student may follow teacher, not another student", () => {
+  it("allows viewport follow for any remote participant", () => {
     expect(canFollowPeer("student", "teacher")).toBe(true);
-    expect(canFollowPeer("student", "student")).toBe(false);
-    expect(canGoToPeer("student", "teacher")).toBe(true);
-  });
-
-  it("teacher may follow student, not another teacher", () => {
+    expect(canFollowPeer("student", "student")).toBe(true);
+    expect(canFollowPeer("teacher", "teacher")).toBe(true);
     expect(canFollowPeer("teacher", "student")).toBe(true);
-    expect(canFollowPeer("owner", "student")).toBe(true);
-    expect(canFollowPeer("teacher", "teacher")).toBe(false);
+    expect(canFollowPeer(undefined, undefined)).toBe(true);
+    expect(canGoToPeer("student", "teacher")).toBe(true);
   });
 });
 
@@ -77,6 +76,17 @@ describe("LESSON_BOARD_FOLLOW_CENTER", () => {
     expect(vp.centerY).toBeCloseTo(-40 + 400 / 4, 5);
   });
 
+  it("keeps teacher summon force on the existing viewport payload", () => {
+    const vp = normalizeViewportPayload(
+      { scrollX: 0, scrollY: 0, zoom: 1, width: 400, height: 300, seq: 4, force: true },
+      "teacher-1",
+      1,
+      "teacher",
+    )!;
+    expect(vp.force).toBe(true);
+    expect(vp.role).toBe("teacher");
+  });
+
   it("manual pan past threshold stops follow; tiny jitter does not", () => {
     const target = normalizeViewportPayload(
       { scrollX: 0, scrollY: 0, zoom: 1, width: 400, height: 300, seq: 1, centerX: 200, centerY: 150 },
@@ -106,5 +116,21 @@ describe("LESSON_BOARD_FOLLOW_CENTER", () => {
     const mid = lerpViewportCenters(a, near, 0.5);
     expect(mid.centerX).toBeGreaterThan(0);
     expect(mid.centerX).toBeLessThan(40);
+  });
+
+  it("chase continues from the last painted pose instead of rewinding", () => {
+    const painted = { centerX: 64, centerY: 8, zoom: 1 };
+    const nextTarget = { centerX: 150, centerY: 8, zoom: 1 };
+    const stepped = chaseViewportCenters(painted, nextTarget, 16);
+    expect(stepped.centerX).toBeGreaterThan(64);
+    expect(stepped.centerX).toBeLessThan(150);
+    const later = chaseViewportCenters(stepped, { centerX: 220, centerY: 8, zoom: 1 }, 16);
+    expect(later.centerX).toBeGreaterThan(stepped.centerX);
+  });
+
+  it("settles only when the chase is visually still", () => {
+    const pose = { centerX: 10, centerY: 4, zoom: 1 };
+    expect(isFollowPoseSettled(pose, { ...pose, centerX: 10.2 })).toBe(true);
+    expect(isFollowPoseSettled(pose, { ...pose, centerX: 40 })).toBe(false);
   });
 });

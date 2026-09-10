@@ -1279,6 +1279,25 @@ class VideoMeetingApiTests(TestCase):
         self.assertTrue(jitsi_rooms_match(room, f"{room}@conference.lesson.example"))
         self.assertFalse(jitsi_rooms_match(room, "other@conference.example"))
 
+    def test_jwt_uses_virtual_host_as_sub_and_local_room_name(self):
+        """Prosody token_verification: aud=jitsi, sub=VirtualHost, room=локальное имя MUC."""
+        room = "digitalstreamabc123"
+        with self.settings(
+            JITSI_DOMAIN="lesson.itflux-academy.ru",
+            JITSI_SUB="lesson.itflux-academy.ru",
+            JITSI_AUD="jitsi",
+        ):
+            token = generate_jitsi_jwt(
+                room_name=room,
+                user=self.teacher,
+                is_moderator=True,
+            )
+            claims = decode_jitsi_jwt_unsafe_for_tests(token)
+            self.assertEqual(claims["sub"], "lesson.itflux-academy.ru")
+            self.assertEqual(claims["aud"], "jitsi")
+            self.assertEqual(claims["iss"], "itflux-test")
+            self.assertEqual(claims["room"], room)
+
     def test_refresh_and_roles_keep_same_conference_identity(self):
         meeting = self._create_meeting()
         start_meeting(meeting=meeting, user=self.teacher)

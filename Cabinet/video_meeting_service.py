@@ -1224,7 +1224,7 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
         exp_dt = jwt_expires_at(jwt_token)
         jwt_exp_iso = exp_dt.isoformat() if exp_dt else None
         jwt_room = str(jwt_claims.get("room") or "")
-        if jwt_room and jwt_room != room_name:
+        if jwt_room and jwt_room != "*" and not jitsi_rooms_match(jwt_room, room_name):
             raise VideoMeetingError(
                 "JWT room не совпадает с roomName конференции",
                 code="jwt_room_mismatch",

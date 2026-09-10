@@ -14,7 +14,9 @@ from .meeting_material_session import (
     meeting_material_group_name,
     open_material_session,
     serialize_material_session,
+    set_follow_policy,
     set_interaction_mode,
+    set_presentation_mode,
     sync_state_payload,
 )
 from .meeting_screenshare import (
@@ -115,7 +117,14 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
         if msg_type == "material.request_sync":
             payload = await self._sync_state()
             await self.send(text_data=json.dumps(payload, ensure_ascii=False))
-            # Повторно заявляем presence после reconnect.
+            logger.info(
+                "material_snapshot_restore meeting=%s user=%s role=%s session=%s revision=%s",
+                self.meeting_uuid,
+                self.user.pk,
+                self.role,
+                (payload.get("materialSession") or {}).get("sessionId"),
+                payload.get("server_revision") or (payload.get("materialSession") or {}).get("version"),
+            )
             await self._broadcast({
                 "type": "material.presence_join",
                 "lesson_id": str(self.meeting_uuid),
@@ -147,10 +156,15 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
         if msg_type == "material.close":
             await self._handle_close(data)
             return
-        if msg_type == "material.permission_changed" or msg_type == "material.set_permission":
+        if msg_type == "material.permission_changed" or msg_type == "material.set_permission" or msg_type == "material.set_mode":
             await self._handle_permission(data)
             return
-        if msg_type == "material.operation":
+        if msg_type in (
+            "material.operation",
+            "material.navigation",
+            "material.state",
+            "material.annotation",
+        ):
             await self._handle_operation(data)
             return
         if msg_type in ("material.cursor", "material.pointer", "material.student_viewport"):
@@ -430,8 +444,9 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
             )
             return
         mode = data.get("mode") or data.get("interaction_mode") or data.get("interactionMode")
+        presentation_mode = data.get("presentationMode") or data.get("presentation_mode")
         try:
-            session = await self._set_permission(data, mode)
+            session = await self._set_permission(data, mode, presentation_mode)
         except VideoMeetingError as exc:
             await self._send_error(exc.message, code=exc.code)
             return
@@ -440,8 +455,11 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
             "type": "material.permission_changed",
             "session_id": session.pk,
             "interaction_mode": session.interaction_mode,
+            "follow_policy": session.follow_policy,
+            "presentation_mode": serialized.get("presentationMode") if serialized else None,
             "collaborative_scope": session.collaborative_scope,
             "collaborative_user_ids": list(session.collaborative_user_ids or []),
+            "collaboration_permission": getattr(session, "collaboration_permission", None) or "annotate",
             "version": session.version,
             "materialSession": serialized,
         })
@@ -472,11 +490,23 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
             }, ensure_ascii=False))
             return
 
+        if result.get("stale"):
+            await self.send(text_data=json.dumps({
+                "type": "material.operation_ack",
+                "stale": True,
+                "operation_id": data.get("operation_id") or data.get("operationId"),
+                "version": result.get("version"),
+            }, ensure_ascii=False))
+            return
+
         operation = result.get("operation")
         if not operation:
             return
 
         await self._broadcast(operation)
+        typed = operation.get("typed_type")
+        if typed and typed != operation.get("type"):
+            await self._broadcast({**operation, "type": typed})
         if not result.get("ephemeral"):
             await self.send(text_data=json.dumps({
                 "type": "material.operation_ack",
@@ -536,8 +566,25 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
         close_material_session(meeting=meeting, user=self.user, session_id=session_id)
 
     @database_sync_to_async
-    def _set_permission(self, data: dict, mode: str):
+    def _set_permission(self, data: dict, mode: str, presentation_mode: str | None = None):
         meeting = get_meeting_by_uuid(self.meeting_uuid)
+        if presentation_mode:
+            return set_presentation_mode(
+                meeting=meeting,
+                user=self.user,
+                mode=str(presentation_mode),
+                session_id=data.get("session_id") or data.get("sessionId"),
+                collaboration_permission=data.get("collaboration_permission") or data.get("collaborationPermission"),
+            )
+        follow_policy = data.get("follow_policy") or data.get("followPolicy")
+        if follow_policy and not mode:
+            return set_follow_policy(
+                meeting=meeting,
+                user=self.user,
+                policy=str(follow_policy),
+                session_id=data.get("session_id") or data.get("sessionId"),
+                independent_user_ids=data.get("independent_user_ids") or data.get("independentUserIds"),
+            )
         return set_interaction_mode(
             meeting=meeting,
             user=self.user,

@@ -28,6 +28,8 @@ import {
   registerJitsiSession,
   unregisterJitsiSession,
 } from "./pwa/runtimeResources";
+import { attachOfficialRemoteControl } from "./jitsiRemoteControl";
+import { getJitsiElectronRemoteControlSetup } from "./jitsiElectronRemoteControlRender";
 
 export {
   createBrowserTabSessionId,
@@ -183,6 +185,26 @@ export function setMeetingMicEnabled(meetingUuid, enabled) {
   }
 }
 
+export function buildJitsiHostsOverwrite(domain) {
+  const host = String(domain || "")
+    .replace(/^https?:\/\//, "")
+    .replace(/\/$/, "")
+    .split("/")[0]
+    .toLowerCase();
+  if (
+    !host
+    || host === "meet.jit.si"
+    || host === "8x8.vc"
+    || host.endsWith(".8x8.vc")
+  ) {
+    return null;
+  }
+  return {
+    domain: host,
+    muc: `conference.${host}`,
+  };
+}
+
 /**
  * Минимальный configOverwrite для стабильного входа.
  * Без lobby/prejoin/deeplink — чтобы не зависеть от кнопки предэкрана.
@@ -192,8 +214,10 @@ export function buildJitsiConfigOverwrite({
   subject,
   startWithVideoMuted = false,
   startWithAudioMuted = true,
+  domain,
 } = {}) {
   const title = String(subject || "").trim() || "Урок";
+  const hosts = buildJitsiHostsOverwrite(domain);
   return {
     prejoinConfig: { enabled: false },
     prejoinPageEnabled: false,
@@ -242,6 +266,9 @@ export function buildJitsiConfigOverwrite({
       "notify.connectedTwoMembers",
       "notify.connectedThreePlusMembers",
     ],
+    // Official Jitsi remote-control (Electron SDK). Browser cannot inject OS input.
+    disableRemoteControl: false,
+    ...(hosts ? { hosts } : {}),
   };
 }
 
@@ -610,6 +637,7 @@ export function buildJitsiEmbedUrl(config) {
   const startWithAudioMuted = config.startWithAudioMuted !== false;
   const params = new URLSearchParams();
   if (config.jwt) params.set("jwt", config.jwt);
+  const hosts = buildJitsiHostsOverwrite(domain);
 
   const hashParts = [
     "config.prejoinPageEnabled=false",
@@ -632,6 +660,10 @@ export function buildJitsiEmbedUrl(config) {
     "config.p2p.enabled=false",
     "config.preferBosh=true",
     "config.replaceParticipant=true",
+    ...(hosts ? [
+      `config.hosts.domain=${encodeURIComponent(JSON.stringify(hosts.domain))}`,
+      `config.hosts.muc=${encodeURIComponent(JSON.stringify(hosts.muc))}`,
+    ] : []),
     "interfaceConfig.MOBILE_APP_PROMO=false",
     "interfaceConfig.SHOW_JITSI_WATERMARK=false",
     "interfaceConfig.SHOW_WATERMARK_FOR_GUESTS=false",
@@ -902,6 +934,7 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
       subject,
       startWithVideoMuted,
       startWithAudioMuted,
+      domain,
     }),
     interfaceConfigOverwrite: buildJitsiInterfaceConfigOverwrite(),
     userInfo: {
@@ -966,6 +999,7 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
     subject,
     diagnostics,
   });
+  attachOfficialRemoteControl(api, getJitsiElectronRemoteControlSetup());
 
   let disposed = false;
   const sessionHolder = { current: null };

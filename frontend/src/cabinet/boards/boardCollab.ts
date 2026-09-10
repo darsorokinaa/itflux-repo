@@ -5,11 +5,13 @@ import { reportClientEvent } from "../../utils/clientTelemetry";
 import { RESUME_TIMING } from "../pwa/pwaResumeLifecycle";
 import { trackRealtimeSocket } from "../pwa/runtimeResources";
 import { boardPerfMarkRealtimePayload } from "./boardPerfDev";
+import { livePublishIntervalMs } from "./boardLiveStroke";
 import {
   applyBoardOps,
   buildLivePublishPayload,
   cloneBoardElement,
   mergePublishedSnapshotWithOps,
+  replacePublishedElementInPlace,
   type BoardSceneOpsPayload,
 } from "./boardOps";
 import {
@@ -180,6 +182,7 @@ export type CollabMessage =
       centerY?: number;
       seq?: number;
       t_sent?: number;
+      force?: boolean;
     }
   | {
       type: "viewport_state";
@@ -196,6 +199,7 @@ export type CollabMessage =
       centerY?: number;
       seq?: number;
       t_sent?: number;
+      force?: boolean;
     }
   | { type: "viewport_request"; client_id: string }
   | {
@@ -322,8 +326,24 @@ export function createBoardCollabSession(
   let reconnectTimer: number | null = null;
   let liveTimer: number | null = null;
   let pendingLive: CollabScene | null = null;
+  let pendingHotElement: unknown = null;
   let pendingVersion: number | undefined;
   let lastPublishedElements: unknown[] | null = null;
+  let lastPublishedById: Map<string, unknown> | null = null;
+
+  const indexLastPublished = (elements: unknown[] | null) => {
+    lastPublishedElements = elements;
+    if (!elements?.length) {
+      lastPublishedById = null;
+      return;
+    }
+    const map = new Map<string, unknown>();
+    for (const raw of elements) {
+      const id = boardElementId(raw);
+      if (id) map.set(id, raw);
+    }
+    lastPublishedById = map;
+  };
   let lastPresenceReplyAt = 0;
   let heartbeatTimer: number | null = null;
   let cursorRaf: number | null = null;
@@ -356,6 +376,7 @@ export function createBoardCollabSession(
     height?: number;
   } | null = null;
   let pendingViewportImmediate = false;
+  let pendingViewportForce = false;
   let lastViewportSentAt = 0;
   let viewportSeq = 0;
   let liveSeq = 0;
@@ -373,8 +394,7 @@ export function createBoardCollabSession(
     { tSent: number; resolve: (r: SyncProbeResult) => void; timer: number; gotEcho?: boolean }
   >();
   const CURSOR_MIN_INTERVAL_MS = 40; // ~25 Hz max
-  /** Throttle промежуточных live-кадров. Финал — flushLiveNow(). */
-  const LIVE_PUBLISH_INTERVAL_MS = 24;
+  /** Throttle промежуточных live-кадров. Финал — flushLiveNow(). Интервал: livePublishIntervalMs. */
   const VIEWPORT_MIN_INTERVAL_MS = 50;
   const peers = new Map<string, CollabPeer>();
   const selfRole = opts.role || "";
@@ -874,6 +894,7 @@ export function createBoardCollabSession(
             seq: data.seq,
             role: data.role,
             displayName: data.display_name,
+            force: data.force,
           },
           data.client_id,
           data.user_id,
@@ -1190,12 +1211,19 @@ export function createBoardCollabSession(
   flushLive = () => {
     liveTimer = null;
     if (!pendingLive || !socket || socket.readyState !== WebSocket.OPEN) return;
-    const built = buildLivePublishPayload(lastPublishedElements, pendingLive, pendingVersion);
+    const built = buildLivePublishPayload(
+      lastPublishedElements,
+      pendingLive,
+      pendingVersion,
+      pendingHotElement,
+      lastPublishedById,
+    );
     liveSeq += 1;
     const tSent = Date.now();
     if (built.kind === "ops") {
       if (!built.payload.ops.length && !Object.keys(built.payload.files || {}).length) {
         pendingLive = null;
+        pendingHotElement = null;
         return;
       }
       const payload = {
@@ -1234,13 +1262,27 @@ export function createBoardCollabSession(
     }
     // Снимок, не live-ссылка: Excalidraw мутирует элементы in-place (version++),
     // иначе следующий diff сравнивает массив сам с собой и ops пустые.
-    // На ops не клонируем points всей сцены — только затронутые id.
-    if (built.kind === "ops" && lastPublishedElements?.length) {
-      lastPublishedElements = mergePublishedSnapshotWithOps(lastPublishedElements, built.payload.ops);
+    // Live-штрих: один upsert in-place, без Map на всю сцену.
+    const hotUpsert =
+      built.kind === "ops"
+      && built.payload.ops.length === 1
+      && built.payload.ops[0].op === "upsert"
+        ? built.payload.ops[0].element
+        : null;
+    if (hotUpsert && lastPublishedElements?.length) {
+      replacePublishedElementInPlace(lastPublishedElements, hotUpsert);
+      const hotId = boardElementId(hotUpsert);
+      if (hotId) {
+        if (!lastPublishedById) lastPublishedById = new Map();
+        lastPublishedById.set(hotId, hotUpsert);
+      }
+    } else if (built.kind === "ops" && lastPublishedElements?.length) {
+      indexLastPublished(mergePublishedSnapshotWithOps(lastPublishedElements, built.payload.ops));
     } else {
-      lastPublishedElements = snapshotElementsForDiff(pendingLive.elements);
+      indexLastPublished(snapshotElementsForDiff(pendingLive.elements));
     }
     pendingLive = null;
+    pendingHotElement = null;
     lastLiveSentAt = Date.now();
   };
 
@@ -1254,7 +1296,7 @@ export function createBoardCollabSession(
     const incoming = snapshotElementsForDiff(remoteElements);
     if (!incoming?.length) return;
     if (!lastPublishedElements?.length) {
-      lastPublishedElements = incoming;
+      indexLastPublished(incoming);
     } else {
       const map = new Map<string, unknown>();
       for (const raw of lastPublishedElements) {
@@ -1265,7 +1307,7 @@ export function createBoardCollabSession(
         const id = boardElementId(raw);
         if (id) map.set(id, raw);
       }
-      lastPublishedElements = [...map.values()];
+      indexLastPublished([...map.values()]);
     }
     if (pendingLive) {
       pendingLive = {
@@ -1304,6 +1346,7 @@ export function createBoardCollabSession(
     if (!pendingViewport || !socket || socket.readyState !== WebSocket.OPEN) return;
     const now = Date.now();
     const force = pendingViewportImmediate;
+    const summon = pendingViewportForce;
     if (!force && now - lastViewportSentAt < VIEWPORT_MIN_INTERVAL_MS) {
       viewportTimer = window.setTimeout(
         flushViewport,
@@ -1314,6 +1357,7 @@ export function createBoardCollabSession(
     const vp = pendingViewport;
     pendingViewport = null;
     pendingViewportImmediate = false;
+    pendingViewportForce = false;
     lastViewportSentAt = now;
     viewportSeq += 1;
     sendRaw({
@@ -1329,25 +1373,28 @@ export function createBoardCollabSession(
       seq: viewportSeq,
       t_sent: now,
       immediate: force,
+      ...(summon ? { force: true } : {}),
     });
   };
 
   return {
     clientId,
-    publishLive(scene: CollabScene, version?: number) {
+    publishLive(scene: CollabScene, version?: number, hotElement?: unknown) {
       pendingLive = {
         elements: scene.elements,
         appState: scene.appState,
         files: scene.files,
       };
       pendingVersion = version;
+      pendingHotElement = hotElement ?? null;
       if (liveTimer != null) return;
+      const interval = livePublishIntervalMs(pendingHotElement);
       const elapsed = Date.now() - lastLiveSentAt;
-      if (elapsed >= LIVE_PUBLISH_INTERVAL_MS) {
+      if (elapsed >= interval) {
         flushLive();
         return;
       }
-      liveTimer = window.setTimeout(flushLive, LIVE_PUBLISH_INTERVAL_MS - elapsed);
+      liveTimer = window.setTimeout(flushLive, interval - elapsed);
     },
     /** Сразу отправить накопленный live (конец штриха / pointerup) — без debounce. */
     flushLiveNow() {
@@ -1359,7 +1406,7 @@ export function createBoardCollabSession(
     },
     /** После полной очистки доски — база для следующего diff. */
     resetPublishBase(elements: unknown[] | null | undefined) {
-      lastPublishedElements = snapshotElementsForDiff(elements);
+      indexLastPublished(snapshotElementsForDiff(elements));
     },
     acknowledgeRemoteElements(remoteElements: unknown[] | null | undefined) {
       acknowledgeRemoteElements(remoteElements);
@@ -1394,7 +1441,7 @@ export function createBoardCollabSession(
       centerY: number;
       width?: number;
       height?: number;
-    }, opts: { immediate?: boolean } = {}) {
+    }, opts: { immediate?: boolean; force?: boolean } = {}) {
       pendingViewport = {
         scrollX: vp.scrollX,
         scrollY: vp.scrollY,
@@ -1404,7 +1451,8 @@ export function createBoardCollabSession(
         width: vp.width,
         height: vp.height,
       };
-      if (opts.immediate) {
+      if (opts.force) pendingViewportForce = true;
+      if (opts.immediate || opts.force) {
         pendingViewportImmediate = true;
         if (viewportTimer != null) {
           window.clearTimeout(viewportTimer);

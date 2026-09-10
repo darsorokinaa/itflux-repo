@@ -1,0 +1,19 @@
+{
+  "name": "itflux-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Thin Electron companion for Цифровой поток: native screen capture and Jitsi remote control.",
+  "main": "src/main.cjs",
+  "scripts": {
+    "build:preload": "esbuild src/preload.js --bundle --platform=node --external:electron --outfile=dist/preload.cjs",
+    "build": "npm run build:preload",
+    "start": "npm run build && electron ."
+  },
+  "dependencies": {
+    "@jitsi/electron-sdk": "10.0.6"
+  },
+  "devDependencies": {
+    "electron": "^37.2.5",
+    "esbuild": "^0.25.8"
+  }
+}

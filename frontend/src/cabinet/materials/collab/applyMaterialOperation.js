@@ -26,6 +26,7 @@ export function initialMaterialState() {
     activeSheetId: "",
     activeCell: "",
     selection: null,
+    interactive: {},
   };
 }
 
@@ -45,9 +46,9 @@ function isRow(value) {
   return Boolean(value && typeof value === "object" && ("value" in value || "author_id" in value));
 }
 
-function userAnswerBucket(state, key, authorId) {
+function userAnswerBucket(state, key, authorId, contentScope = "personal") {
   const root = ensureDict(state, key);
-  const userKey = String(authorId);
+  const userKey = contentScope === "shared" ? "shared" : String(authorId);
   if (root && Object.keys(root).length && Object.values(root).every(isRow)) {
     const legacy = { ...root };
     Object.keys(root).forEach((k) => delete root[k]);
@@ -61,6 +62,18 @@ function userAnswerBucket(state, key, authorId) {
     root[userKey] = {};
   }
   return root[userKey];
+}
+
+function applyLwwRow(bucket, itemId, row, incomingRevision) {
+  const prev = bucket[itemId] && typeof bucket[itemId] === "object" ? bucket[itemId] : null;
+  const prevRev = Number(prev?.revision || 0);
+  const newRev = Number(incomingRevision ?? row.revision ?? 0);
+  if (prev && incomingRevision != null && newRev < prevRev) return;
+  bucket[itemId] = {
+    ...(prev || {}),
+    ...row,
+    revision: Math.max(prevRev, newRev),
+  };
 }
 
 function normalizeAnnotation(payload, authorId, authorRole) {
@@ -105,6 +118,8 @@ export function applyMaterialOperation(state, op) {
   const payload = op?.payload && typeof op.payload === "object" ? op.payload : {};
   const authorId = op?.authorId ?? op?.author_id ?? null;
   const authorRole = op?.authorRole ?? op?.author_role ?? "student";
+  const contentScope = op?.contentScope || op?.content_scope || "personal";
+  const revision = op?.revision ?? op?.payload?.revision ?? null;
   const next = {
     ...initialMaterialState(),
     ...(state && typeof state === "object" ? state : {}),
@@ -119,8 +134,14 @@ export function applyMaterialOperation(state, op) {
 
   switch (action) {
     case "page_changed": {
-      const page = Math.max(1, Math.min(10000, Number(payload.page) || 1));
+      const page = Math.max(1, Math.min(10000, Number(payload.page || payload.slideIndex || payload.slide_index) || 1));
       next.page = page;
+      if (payload.slideId || payload.slide_id) next.slideId = String(payload.slideId || payload.slide_id).slice(0, 120);
+      if (payload.slideIndex != null || payload.slide_index != null) {
+        next.slideIndex = Number(payload.slideIndex || payload.slide_index || page);
+      }
+      if (payload.stepId || payload.step_id) next.stepId = String(payload.stepId || payload.step_id).slice(0, 120);
+      if (payload.anchorId || payload.anchor_id) next.anchorId = String(payload.anchorId || payload.anchor_id).slice(0, 120);
       break;
     }
     case "scrolled": {
@@ -180,19 +201,18 @@ export function applyMaterialOperation(state, op) {
       if (!questionId || authorId == null) break;
       let value = payload.value;
       if (typeof value === "string") value = value.slice(0, MAX_FIELD_VALUE_LEN);
-      const bucket = userAnswerBucket(next, "answers", authorId);
-      const prev = bucket[questionId] && typeof bucket[questionId] === "object" ? bucket[questionId] : {};
+      const bucket = userAnswerBucket(next, "answers", authorId, contentScope);
       let status = String(payload.status || "draft").slice(0, 32);
       if (!["draft", "submitted", "checked", "needs_revision"].includes(status)) status = "draft";
-      bucket[questionId] = {
+      applyLwwRow(bucket, questionId, {
         value,
         author_id: authorId,
         author_role: authorRole,
         status,
         updated_at: payload.updated_at || payload.updatedAt || new Date().toISOString(),
-        attempt: Number(payload.attempt || prev.attempt || 1),
+        attempt: Number(payload.attempt || 1),
         typing: Boolean(payload.typing),
-      };
+      }, revision);
       break;
     }
     case "field_changed": {
@@ -200,17 +220,17 @@ export function applyMaterialOperation(state, op) {
       if (!fieldId || authorId == null) break;
       let value = payload.value;
       if (typeof value === "string") value = value.slice(0, MAX_FIELD_VALUE_LEN);
-      const bucket = userAnswerBucket(next, "fields", authorId);
+      const bucket = userAnswerBucket(next, "fields", authorId, contentScope);
       let status = String(payload.status || "draft").slice(0, 32);
       if (!["draft", "submitted", "checked", "needs_revision"].includes(status)) status = "draft";
-      bucket[fieldId] = {
+      applyLwwRow(bucket, fieldId, {
         value,
         author_id: authorId,
         author_role: authorRole,
         status,
         updated_at: payload.updated_at || payload.updatedAt || new Date().toISOString(),
         typing: Boolean(payload.typing),
-      };
+      }, revision);
       break;
     }
     case "item_moved": {
@@ -311,11 +331,17 @@ export function applyMaterialOperation(state, op) {
     }
     case "state_updated": {
       const patch = payload.patch && typeof payload.patch === "object" ? payload.patch : payload;
-      const allowed = new Set(["answers", "fields", "items", "pairs", "tab", "page", "zoom", "scroll", "scrollX", "sheets", "activeSheetId", "activeCell"]);
+      const allowed = new Set([
+        "answers", "fields", "items", "pairs", "tab", "page", "zoom", "scroll", "scrollX",
+        "sheets", "activeSheetId", "activeCell", "interactive",
+        "slideId", "slideIndex", "stepId", "anchorId", "rotation",
+      ]);
       for (const [key, value] of Object.entries(patch)) {
         if (!allowed.has(key)) continue;
         if (["answers", "fields", "items", "sheets"].includes(key) && value && typeof value === "object") {
           next[key] = { ...(next[key] || {}), ...value };
+        } else if (key === "interactive" && value && typeof value === "object") {
+          next.interactive = { ...(next.interactive || {}), ...value };
         } else if (key === "pairs" && Array.isArray(value)) {
           next.pairs = value.slice(0, 200);
         } else {

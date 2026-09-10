@@ -10,36 +10,40 @@ export function canSendMaterialAction({
   canManage,
   isController = true,
   interactionMode = "view_only",
+  followPolicy = "strict",
+  presentationMode = null,
   collaborationPermission = COLLAB_PERMISSIONS.ANSWERS_ONLY,
   followingTeacher = true,
   localBrowsingAway = false,
 }) {
   if (!action) return false;
+  const mode = presentationMode || (interactionMode === "collaborative"
+    ? "collaboration"
+    : (followPolicy === "independent" ? "independent" : "presentation"));
   if (canManage) {
     if (isNavigationAction(action) && !isController) return false;
     return true;
   }
 
-  const collab = interactionMode === "collaborative";
-  if (isFollowContentAction(action)) return true;
+  if (isNavigationAction(action)) return false;
 
-  if (collab) {
-    if (collaborationPermission === COLLAB_PERMISSIONS.FULL) return true;
+  if (mode === "collaboration") {
+    if (collaborationPermission === COLLAB_PERMISSIONS.FULL) return !isNavigationAction(action);
     if (collaborationPermission === COLLAB_PERMISSIONS.EDIT_CONTENT) {
-      return !isDrawAction(action) || isFollowContentAction(action) || action === "cell_updated"
-        || action === "sheet_changed" || action === "selection_changed" || isNavigationAction(action);
+      return isFollowContentAction(action) || action === "cell_updated"
+        || action === "sheet_changed" || action === "selection_changed";
     }
     if (collaborationPermission === COLLAB_PERMISSIONS.ANNOTATE) {
-      return isDrawAction(action) || action === "cursor" || action === "pointer" || isNavigationAction(action);
+      return isDrawAction(action) || action === "cursor" || action === "pointer" || isFollowContentAction(action);
     }
-    // answers_only
     return isFollowContentAction(action) || action === "cursor" || action === "pointer";
   }
 
-  // Follow mode: temporary local browse may change local page, but we do NOT send nav to server.
-  if (localBrowsingAway || !followingTeacher) {
-    return false;
+  if (mode === "independent" || localBrowsingAway || !followingTeacher) {
+    return isFollowContentAction(action);
   }
+
+  // presentation: ученик не меняет общее состояние
   return false;
 }
 

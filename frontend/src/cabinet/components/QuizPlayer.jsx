@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   checkQuestionAnswer,
   computeQuizResult,
@@ -6,6 +6,7 @@ import {
   shuffleArray,
 } from "../quizUtils";
 import { playInteractiveSound } from "../interactiveSounds";
+import { usePlaybackBridge } from "../materials/collab/usePlaybackBridge";
 
 function QuizImage({ src, alt, className }) {
   const value = String(src || "").trim();
@@ -234,11 +235,12 @@ function QuizQuestionView({
   showExplanation,
   showCorrectAnswers,
   preview = false,
+  disabled = false,
 }) {
   const answerType = question.answer_type || "single";
 
   const toggleAnswer = (answerId) => {
-    if (answered) return;
+    if (answered || disabled) return;
     if (answerType === "single") {
       onSelect([answerId]);
       return;
@@ -264,7 +266,7 @@ function QuizQuestionView({
             <button
               key={answer.id}
               type="button"
-              disabled={answered}
+              disabled={answered || disabled}
               className={[
                 "ix-quiz-play-answer",
                 selected ? "ix-quiz-play-answer--selected" : "",
@@ -325,8 +327,11 @@ export default function QuizPlayer({
   preview = false,
   showBack = false,
   onBack,
+  collab = null,
+  readOnly = false,
 }) {
   const studyMode = bare || playing;
+  const { emit, shouldApplyRemote, consumeSkipEmit } = usePlaybackBridge(collab || {});
   const [index, setIndex] = useState(0);
   const [selectedIds, setSelectedIds] = useState([]);
   const [answered, setAnswered] = useState(false);
@@ -334,18 +339,74 @@ export default function QuizPlayer({
   const [records, setRecords] = useState([]);
   const [done, setDone] = useState(false);
   const [startedAt] = useState(() => Date.now());
+  const [optionOrders, setOptionOrders] = useState(() => collab?.remote?.optionOrders || {});
 
   const questions = useMemo(() => {
     const list = (rawQuestions || []).filter((q) => (q.text || "").trim());
+    const remoteOrder = collab?.follow ? collab?.remote?.questionOrder : null;
+    if (Array.isArray(remoteOrder) && remoteOrder.length) {
+      const byId = new Map(list.map((q) => [String(q.id), q]));
+      const ordered = remoteOrder.map((id) => byId.get(String(id))).filter(Boolean);
+      const seen = new Set(ordered.map((q) => String(q.id)));
+      return [...ordered, ...list.filter((q) => !seen.has(String(q.id)))];
+    }
     return params.shuffleQuestions !== false ? shuffleArray(list) : list;
-  }, [rawQuestions, params.shuffleQuestions]);
+  }, [rawQuestions, params.shuffleQuestions, collab?.follow, collab?.remote?.questionOrder]);
 
   const current = useMemo(() => {
     if (!questions[index]) return null;
     const q = questions[index];
-    const answers = params.shuffleOptions !== false ? shuffleArray(q.answers || []) : (q.answers || []);
+    const qid = String(q.id);
+    const remoteOpts = optionOrders?.[qid] || (collab?.follow ? collab?.remote?.optionOrders?.[qid] : null);
+    let answers = q.answers || [];
+    if (Array.isArray(remoteOpts) && remoteOpts.length) {
+      const byId = new Map(answers.map((a) => [String(a.id), a]));
+      const ordered = remoteOpts.map((id) => byId.get(String(id))).filter(Boolean);
+      const seen = new Set(ordered.map((a) => String(a.id)));
+      answers = [...ordered, ...answers.filter((a) => !seen.has(String(a.id)))];
+    } else if (params.shuffleOptions !== false) {
+      answers = shuffleArray(answers);
+    }
     return { ...q, answers };
-  }, [questions, index, params.shuffleOptions]);
+  }, [questions, index, params.shuffleOptions, optionOrders, collab?.follow, collab?.remote?.optionOrders]);
+
+  useEffect(() => {
+    if (!current?.id || optionOrders[String(current.id)]) return;
+    setOptionOrders((prev) => ({
+      ...prev,
+      [String(current.id)]: (current.answers || []).map((a) => a.id),
+    }));
+  }, [current, optionOrders]);
+
+  useEffect(() => {
+    if (!collab?.follow || !shouldApplyRemote(collab.remote)) return;
+    const remote = collab.remote;
+    if (remote.index != null) setIndex(Number(remote.index) || 0);
+    if (Array.isArray(remote.selectedIds)) setSelectedIds(remote.selectedIds);
+    if (remote.answered != null) setAnswered(Boolean(remote.answered));
+    if (remote.isCorrect != null) setIsCorrect(Boolean(remote.isCorrect));
+    if (Array.isArray(remote.records)) setRecords(remote.records);
+    if (remote.done != null) setDone(Boolean(remote.done));
+    if (remote.optionOrders && typeof remote.optionOrders === "object") {
+      setOptionOrders(remote.optionOrders);
+    }
+  }, [collab?.follow, collab?.remote, shouldApplyRemote]);
+
+  useEffect(() => {
+    if (consumeSkipEmit()) return;
+    emit({
+      type: "quiz",
+      started: true,
+      index,
+      selectedIds,
+      answered,
+      isCorrect,
+      records,
+      done,
+      questionOrder: questions.map((q) => q.id),
+      optionOrders,
+    });
+  }, [index, selectedIds, answered, isCorrect, records, done, questions, optionOrders, emit, consumeSkipEmit]);
 
   const showExplanation = params.showExplanationAfterAnswer !== false;
   const showCorrectAfterAnswer = params.showCorrectImmediately === true;
@@ -360,6 +421,7 @@ export default function QuizPlayer({
   };
 
   const handleSubmit = () => {
+    if (readOnly) return;
     if (!current || selectedIds.length === 0) return;
     const correct = checkQuestionAnswer(current, selectedIds);
     const record = gradeQuestionAnswer(current, selectedIds);
@@ -370,6 +432,7 @@ export default function QuizPlayer({
   };
 
   const goNext = () => {
+    if (readOnly) return;
     if (index >= questions.length - 1) {
       const nextRecords = records;
       const result = computeQuizResult(questions, nextRecords);
@@ -424,10 +487,11 @@ export default function QuizPlayer({
           showExplanation={showExplanation}
           showCorrectAnswers={showCorrectAfterAnswer}
           preview={preview}
+          disabled={readOnly}
         />
       ) : null}
       {answered && !preview ? (
-        <button type="button" className="cb-btn cb-btn--primary cb-btn--sm ix-quiz-next" onClick={goNext}>
+        <button type="button" className="cb-btn cb-btn--primary cb-btn--sm ix-quiz-next" onClick={goNext} disabled={readOnly}>
           {index >= questions.length - 1 ? "Завершить" : "Следующий вопрос"}
         </button>
       ) : null}

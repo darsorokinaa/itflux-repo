@@ -2465,7 +2465,8 @@ body.vl-room-fullscreen .student-cabinet-nav {
 
 .vl-material-surface--fill > .video-lesson-workspace__frame,
 .vl-material-surface--fill > .vl-synced-interactive,
-.vl-material-surface--fill > .video-lesson-workspace__text {
+.vl-material-surface--fill > .video-lesson-workspace__text,
+.vl-material-surface--fill > .vl-pdf-page {
   flex: 1 1 auto;
   min-height: 0;
 }
@@ -2480,14 +2481,16 @@ body.vl-room-fullscreen .student-cabinet-nav {
 
 .vl-synced-content.is-tools-active .video-lesson-workspace__frame,
 .vl-synced-content.is-tools-active .vl-synced-image,
-.vl-synced-content.is-tools-active .video-lesson-workspace__text {
+.vl-synced-content.is-tools-active .video-lesson-workspace__text,
+.vl-synced-content.is-tools-active .vl-pdf-page {
   pointer-events: none;
   user-select: none;
 }
 
 .vl-synced-content:not(.is-tools-active) .video-lesson-workspace__frame,
 .vl-synced-content:not(.is-tools-active) .vl-synced-image,
-.vl-synced-content:not(.is-tools-active) .video-lesson-workspace__text {
+.vl-synced-content:not(.is-tools-active) .video-lesson-workspace__text,
+.vl-synced-content:not(.is-tools-active) .vl-pdf-page {
   pointer-events: auto;
 }
 
@@ -2500,6 +2503,37 @@ body.vl-room-fullscreen .student-cabinet-nav {
   object-fit: contain;
   user-select: none;
   background: #fff;
+}
+
+.vl-pdf-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: #e2e8f0;
+  position: relative;
+}
+
+.vl-pdf-page__canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  background: #fff;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16);
+}
+
+.vl-pdf-page__status {
+  position: absolute;
+  margin: 0;
+  color: #475569;
+  font-size: 14px;
+}
+
+.vl-empty .cb-btn {
+  margin-top: 12px;
 }
 
 .vl-synced-overlay {
@@ -2783,6 +2817,69 @@ body.vl-room-fullscreen .student-cabinet-nav {
 .vl-collab-bar__mode.is-follow {
   color: #1d4ed8;
   font-weight: 600;
+}
+
+.vl-collab-bar__mode.is-independent {
+  color: #57534e;
+}
+
+.vl-collab-bar__follow-chip {
+  margin: 6px 0 0;
+  font-size: 0.8rem;
+  color: #1d4ed8;
+}
+
+.vl-collab-bar__mode-menu {
+  position: relative;
+}
+
+.vl-collab-bar__mode-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 8;
+  min-width: 220px;
+  padding: 6px;
+  border: 1px solid var(--vl-border, rgba(15, 23, 42, 0.12));
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+}
+
+.vl-collab-bar__mode-dropdown button {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+
+.vl-collab-bar__mode-dropdown button.is-active,
+.vl-collab-bar__mode-dropdown button:hover {
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.vl-synced-lock {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: transparent;
+}
+
+.vl-synced-interactive.is-content-locked {
+  pointer-events: none;
+}
+
+.vl-material-surface--fill > iframe,
+.vl-material-surface--fill > img,
+.vl-synced-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
 }
 
 .vl-collab-bar__mode-switch {
@@ -3672,5 +3769,111 @@ body.vl-room-fullscreen .student-cabinet-nav {
   .itflux-recovery-banner {
     bottom: 8px;
     padding: 8px 12px;
+  }
+}
+
+.video-lesson-workspace__hint {
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.vl-ss-control {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 24px);
+  padding: 8px 10px 8px 14px;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #f8fafc;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.35);
+  pointer-events: auto;
+}
+
+.vl-ss-control__label {
+  font-size: 0.82rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.vl-ss-control__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.vl-ss-control__btn {
+  min-height: 32px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+}
+
+.vl-ss-control__picker {
+  position: relative;
+}
+
+.vl-ss-control__menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  min-width: 220px;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border-radius: 12px;
+  background: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.45);
+}
+
+.vl-ss-control__menu button {
+  width: 100%;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #f8fafc;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.vl-ss-control__menu button:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.vl-ss-control__menu button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.vl-ss-control__empty {
+  padding: 8px 10px;
+  color: #94a3b8;
+  font-size: 0.78rem;
+}
+
+@media (max-width: 820px) {
+  .vl-ss-control {
+    left: 12px;
+    right: 12px;
+    transform: none;
+    max-width: none;
+    flex-wrap: wrap;
+  }
+
+  .video-lesson-workspace__hint {
+    display: none;
   }
 }

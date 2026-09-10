@@ -153,6 +153,7 @@ def generate_jitsi_jwt(
 
     domain = get_jitsi_domain()
     sub = get_jitsi_sub()
+    jwt_room = str(room_name or "").strip()
     aud = (getattr(settings, "JITSI_AUD", "") or "").strip() or "jitsi"
     if ttl_seconds is None:
         ttl = int(getattr(settings, "JITSI_TOKEN_TTL_SECONDS", 7200) or 7200)
@@ -183,7 +184,7 @@ def generate_jitsi_jwt(
         "aud": aud,
         "iss": app_id,
         "sub": sub,
-        "room": room_name,
+        "room": jwt_room,
         "iat": iat,
         "nbf": nbf,
         "exp": exp,
@@ -203,7 +204,7 @@ def generate_jitsi_jwt(
         aud,
         app_id,
         sub,
-        room_name,
+        jwt_room,
         datetime.fromtimestamp(exp, tz=dt_timezone.utc).isoformat(),
     )
     # kid = app_id: HS256 Prosody его не требует, но часть сборок token_verification

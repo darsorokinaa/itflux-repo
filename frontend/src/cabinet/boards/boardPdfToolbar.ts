@@ -92,11 +92,9 @@ export function mountBoardPdfToolbar(
   ensure();
   const observer = new MutationObserver(ensure);
   observer.observe(host, { childList: true, subtree: true });
-  const timers = [40, 160, 500, 1400].map((ms) => window.setTimeout(ensure, ms));
 
   return () => {
     observer.disconnect();
-    timers.forEach((id) => window.clearTimeout(id));
     button?.remove();
     button = null;
   };

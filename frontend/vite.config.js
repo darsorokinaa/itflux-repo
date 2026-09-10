@@ -175,6 +175,9 @@ const backendProxy = {
 
 export default defineConfig(({ command }) => ({
   plugins: [react(), tailwindcss(), injectAppVersionPlugin()],
+  optimizeDeps: {
+    exclude: ["@jitsi/robotjs"],
+  },
   base: command === 'build' ? '/static/' : '/',
   experimental: {
     renderBuiltUrl(filename) {

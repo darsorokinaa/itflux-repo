@@ -18,21 +18,21 @@ export function emptyCapabilities() {
 const BY_KIND = {
   pdf: {
     pageNavigation: true,
-    scrollSync: true,
-    zoomSync: true,
+    scrollSync: false,
+    zoomSync: false,
     pointerSync: true,
     annotations: true,
   },
   presentation: {
     pageNavigation: true,
-    scrollSync: true,
-    zoomSync: true,
+    scrollSync: false,
+    zoomSync: false,
     pointerSync: true,
     annotations: true,
   },
   image: {
-    scrollSync: true,
-    zoomSync: true,
+    scrollSync: false,
+    zoomSync: false,
     pointerSync: true,
     annotations: true,
   },
@@ -73,9 +73,11 @@ const BY_KIND = {
     annotations: true,
   },
   embed: {
-    scrollSync: true,
+    pageNavigation: true,
+    scrollSync: false,
     annotations: true,
     mediaSync: true,
+    formInputs: true,
   },
   link: {
     scrollSync: true,
@@ -83,8 +85,8 @@ const BY_KIND = {
   },
   file: {
     pageNavigation: true,
-    scrollSync: true,
-    zoomSync: true,
+    scrollSync: false,
+    zoomSync: false,
     pointerSync: true,
     annotations: true,
   },

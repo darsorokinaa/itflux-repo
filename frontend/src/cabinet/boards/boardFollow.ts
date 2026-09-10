@@ -2,9 +2,12 @@
 
 import type { TeacherViewport } from "./boardViewport";
 
-export const FOLLOW_SMOOTH_MS = 120;
+/** Time constant for chasing the followed viewport. Not a one-shot tween. */
+export const FOLLOW_SMOOTH_MS = 180;
 export const FOLLOW_SNAP_SCENE_PX = 900;
 export const FOLLOW_SNAP_ZOOM_RATIO = 0.35;
+export const FOLLOW_SETTLE_SCENE_PX = 0.6;
+export const FOLLOW_SETTLE_ZOOM_RATIO = 0.0015;
 
 export function isTeacherRole(role?: string | null): boolean {
   const r = String(role || "").toLowerCase();
@@ -16,10 +19,9 @@ export function isStudentRole(role?: string | null): boolean {
   return r === "student";
 }
 
-/** Teacher → any student. Student → teacher only. */
-export function canFollowPeer(selfRole?: string | null, targetRole?: string | null): boolean {
-  if (isTeacherRole(selfRole)) return isStudentRole(targetRole);
-  return isTeacherRole(targetRole);
+/** Viewport follow is not an edit permission: any remote participant can be followed. */
+export function canFollowPeer(_selfRole?: string | null, _targetRole?: string | null): boolean {
+  return true;
 }
 
 export function canGoToPeer(selfRole?: string | null, targetRole?: string | null): boolean {
@@ -55,4 +57,35 @@ export function lerpViewportCenters(
     centerY: lerp(from.centerY, to.centerY, k),
     zoom: lerp(from.zoom, to.zoom, k),
   };
+}
+
+export function followCatchupT(dtMs: number, smoothMs = FOLLOW_SMOOTH_MS): number {
+  const tau = Math.max(1, smoothMs);
+  return 1 - Math.exp(-Math.max(0, dtMs) / tau);
+}
+
+/** Smoothly chase a moving follow target from the last painted pose. */
+export function chaseViewportCenters(
+  from: { centerX: number; centerY: number; zoom: number },
+  to: { centerX: number; centerY: number; zoom: number },
+  dtMs: number,
+  smoothMs = FOLLOW_SMOOTH_MS,
+): { centerX: number; centerY: number; zoom: number } {
+  const k = followCatchupT(dtMs, smoothMs);
+  return {
+    centerX: lerp(from.centerX, to.centerX, k),
+    centerY: lerp(from.centerY, to.centerY, k),
+    zoom: lerp(from.zoom, to.zoom, k),
+  };
+}
+
+export function isFollowPoseSettled(
+  from: { centerX: number; centerY: number; zoom: number },
+  to: { centerX: number; centerY: number; zoom: number },
+  scenePx = FOLLOW_SETTLE_SCENE_PX,
+  zoomRatio = FOLLOW_SETTLE_ZOOM_RATIO,
+): boolean {
+  const dist = Math.hypot(from.centerX - to.centerX, from.centerY - to.centerY);
+  const zoomJump = Math.abs(from.zoom - to.zoom) / Math.max(to.zoom, 0.01);
+  return dist <= scenePx && zoomJump <= zoomRatio;
 }

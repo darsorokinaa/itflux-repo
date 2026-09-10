@@ -21,7 +21,7 @@ import CabinetIcon from "../CabinetIcons";
 import BoardAccessModal from "../components/BoardAccessModal";
 import ConfirmActionModal from "../components/ConfirmActionModal";
 import BoardExcalidrawCanvas from "../boards/BoardExcalidrawCanvas";
-import { isActiveFreedrawGesture, flushScheduledFrame, scheduleOncePerFrame } from "../boards/boardLiveStroke";
+import { isActiveFreedrawGesture, isFinishingLiveFreedraw, versionSumAfterLiveStroke, flushScheduledFrame, scheduleOncePerFrame } from "../boards/boardLiveStroke";
 import {
   AUTOSAVE_DEBOUNCE_MS,
   boardElementsVersionSum,
@@ -90,16 +90,24 @@ import {
   filterUnauthorizedMutations,
   stampElementOwnership,
 } from "../boards/boardOwnership";
-import { isNewerViewport, sceneCenterFromAppState, viewportAppStatePatch, viewportDriftTooFar, zoomValueOf } from "../boards/boardViewport";
 import {
-  FOLLOW_SMOOTH_MS,
-  lerpViewportCenters,
+  applyFollowViewportFrame,
+  followViewportFrameCss,
+  isNewerViewport,
+  sceneCenterFromAppState,
+  viewportAppStatePatch,
+  viewportDriftTooFar,
+  zoomValueOf,
+} from "../boards/boardViewport";
+import {
+  chaseViewportCenters,
+  isFollowPoseSettled,
+  isTeacherRole,
   shouldSnapFollow,
 } from "../boards/boardFollow";
-import BoardCollabControls, { peersToPresence } from "../boards/BoardCollabControls";
+import BoardCollabControls, { peersToPresence, remoteFollowablePeople } from "../boards/BoardCollabControls";
 import {
   bindBoardVisualViewport,
-  isBoardCompactShell,
   lockBoardPageScroll,
 } from "../boards/boardMobileShell";
 import {
@@ -114,7 +122,7 @@ import {
   prepareBoardImageFile,
   readCanvasAppState,
 } from "../boards/boardImageInsert";
-import { restoreImagesErasedByEraser } from "../boards/boardImageErase";
+import { restoreImagesErasedByEraser, syncImageLocksForEraser, isEraserTool } from "../boards/boardImageErase";
 import {
   BOARD_PDF_INSERT_ERROR,
   BOARD_PDF_UNPACK_ERROR,
@@ -397,7 +405,6 @@ export default function CabinetBoardEditorPage() {
   const [pdfBusy, setPdfBusy] = useState<"idle" | "adding" | "unpacking">("idle");
   const [collabPeers, setCollabPeers] = useState<CollabPeer[]>([]);
   const collabPeersRef = useRef<CollabPeer[]>([]);
-  const [collabStatus, setCollabStatus] = useState<"off" | "connecting" | "open" | "closed" | "error" | "failed">("off");
   const editorRootRef = useRef<HTMLDivElement | null>(null);
   const paperOverlayRef = useRef<HTMLDivElement | null>(null);
   const gridStyleRef = useRef<BoardGridStyle>("none");
@@ -419,6 +426,7 @@ export default function CabinetBoardEditorPage() {
   const isDrawingGestureRef = useRef(false);
   const liveStrokeRafRef = useRef<number | null>(null);
   const liveStrokeOwnedRef = useRef(false);
+  const liveStrokeElementRef = useRef<unknown>(null);
   const flushLiveStrokePublishRef = useRef<() => void>(() => {});
   const syncUiAfterGestureRef = useRef<() => void>(() => {});
   const pendingRemoteOpsQueueRef = useRef<Array<{ ops: BoardSceneOpsPayload; meta: { version?: number } }>>([]);
@@ -445,25 +453,16 @@ export default function CabinetBoardEditorPage() {
   const remoteCursorsRef = useRef(new Map<string, RemoteCursor>());
   const peerViewportsRef = useRef(new Map<string, TeacherViewport>());
   const followTargetRef = useRef<{ clientId: string; name: string } | null>(null);
+  const followFrameRef = useRef<HTMLDivElement | null>(null);
   const applyingViewportRef = useRef(false);
   const followAnimRef = useRef<number | null>(null);
   const lastAppliedFollowRef = useRef<TeacherViewport | null>(null);
-  const homeViewportRef = useRef<{
-    scrollX: number;
-    scrollY: number;
-    zoom: number;
-    centerX: number;
-    centerY: number;
-  } | null>(null);
   const applyPeerViewportRef = useRef<(vp: TeacherViewport, opts?: { notice?: string; follow?: boolean }) => void>(() => {});
   const remoteApplyRafRef = useRef<number | null>(null);
   const pendingRemoteOpsFrameRef = useRef<Array<{ ops: BoardSceneOpsPayload; meta: { version?: number } }>>([]);
   const pendingRemoteSceneFrameRef = useRef<{ scene: CollabScene; meta: { fromSaved?: boolean; version?: number; cleared?: boolean; lite?: boolean } } | null>(null);
   const cursorApplyRafRef = useRef<number | null>(null);
   const [followTarget, setFollowTarget] = useState<{ clientId: string; name: string } | null>(null);
-  const [compactShell, setCompactShell] = useState(() => (
-    typeof window !== "undefined" ? isBoardCompactShell() : false
-  ));
   const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
   const [cssImmersive, setCssImmersive] = useState(false);
   const boardNamesRef = useRef({ owner: "", student: "" });
@@ -480,6 +479,7 @@ export default function CabinetBoardEditorPage() {
   const repairingImageRef = useRef(false);
   /** updateScene после отката ластика — не крутим persist повторно. */
   const restoringEraseRef = useRef(false);
+  const imageLockSnapshotRef = useRef(new Map<string, boolean>());
   const pendingEraseSceneRef = useRef<unknown[] | null>(null);
   const repairNewLocalImagesRef = useRef<
     ((
@@ -506,16 +506,6 @@ export default function CabinetBoardEditorPage() {
   const collaborative = Boolean(board?.collaborative_edit);
   const boardReady = Boolean(board);
   const selfRole = canManage ? "teacher" : (board?.viewer_role || "student");
-
-  useEffect(() => {
-    const onResize = () => setCompactShell(isBoardCompactShell());
-    window.addEventListener("resize", onResize);
-    window.addEventListener("orientationchange", onResize);
-    return () => {
-      window.removeEventListener("resize", onResize);
-      window.removeEventListener("orientationchange", onResize);
-    };
-  }, []);
 
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showNotice = useCallback((text: string) => {
@@ -923,7 +913,7 @@ export default function CabinetBoardEditorPage() {
     followTargetRef.current = null;
     setFollowTarget(null);
     lastAppliedFollowRef.current = null;
-    homeViewportRef.current = null;
+    applyFollowViewportFrame(followFrameRef.current, null);
     metricsRef.current = createBoardLoadMetrics();
     setLoading(true);
     setLoadPhase("loading_scene");
@@ -1387,6 +1377,7 @@ export default function CabinetBoardEditorPage() {
   const resetCollabTransientState = useCallback(() => {
     isDrawingGestureRef.current = false;
     liveStrokeOwnedRef.current = false;
+    liveStrokeElementRef.current = null;
     pendingRemoteOpsQueueRef.current = [];
     pendingRemoteSceneRef.current = null;
     pendingResyncRef.current = false;
@@ -1415,6 +1406,8 @@ export default function CabinetBoardEditorPage() {
     applyingViewportRef.current = false;
     followTargetRef.current = null;
     setFollowTarget(null);
+    lastAppliedFollowRef.current = null;
+    applyFollowViewportFrame(followFrameRef.current, null);
     if (followAnimRef.current != null) {
       window.cancelAnimationFrame(followAnimRef.current);
       followAnimRef.current = null;
@@ -1457,11 +1450,11 @@ export default function CabinetBoardEditorPage() {
 
   const publishLiveStrokeScene = useCallback(() => {
     const scene = latestSceneRef.current;
-    if (!scene) return;
-    lastElementsVersionSumRef.current = boardElementsVersionSum(scene.elements);
+    const hot = liveStrokeElementRef.current;
+    if (!scene || !hot) return;
+    // Не boardElementsVersionSum / JSON всей сцены: только hot upsert, throttle 24ms.
     markLocalSceneChange();
     safeSetSaveStatus((s) => (s === "dirty" || s === "saving" ? s : "dirty"));
-    debouncedSaver.schedule();
     collabRef.current?.publishLive(
       {
         elements: scene.elements as unknown[],
@@ -1469,9 +1462,11 @@ export default function CabinetBoardEditorPage() {
         files: scene.files,
       },
       versionRef.current,
+      hot,
     );
-  }, [debouncedSaver, markLocalSceneChange, safeSetSaveStatus]);
+  }, [markLocalSceneChange, safeSetSaveStatus]);
   flushLiveStrokePublishRef.current = () => {
+    if (liveStrokeRafRef.current == null && !liveStrokeElementRef.current) return;
     flushScheduledFrame(liveStrokeRafRef, publishLiveStrokeScene);
   };
 
@@ -1504,29 +1499,55 @@ export default function CabinetBoardEditorPage() {
       }
 
       if (liveFreedraw) {
-        let nextElements = elements as unknown[];
         if (!liveStrokeOwnedRef.current) {
-          nextElements = stampElementOwnership(
-            nextElements,
-            knownElementIdsRef.current,
-            viewerUserIdRef.current,
-            viewerRoleRef.current,
-          );
-          for (const raw of nextElements) {
-            const id = raw && typeof raw === "object" ? (raw as { id?: string }).id : null;
-            if (id) knownElementIdsRef.current.add(id);
+          const newEl = appState.newElement as { id?: string } | null | undefined;
+          if (newEl && typeof newEl === "object") {
+            stampElementOwnership(
+              [newEl],
+              knownElementIdsRef.current,
+              viewerUserIdRef.current,
+              viewerRoleRef.current,
+            );
+            if (newEl.id) knownElementIdsRef.current.add(newEl.id);
+            liveStrokeElementRef.current = newEl;
+            liveStrokeOwnedRef.current = true;
           }
-          liveStrokeOwnedRef.current = true;
         }
         const prevScene = latestSceneRef.current;
         latestSceneRef.current = {
-          elements: nextElements,
+          elements: elements as unknown[],
           appState: prevScene?.appState || sanitizeAppState(appState),
           files: lastFilesRef.current || (files as Record<string, unknown>),
         };
-        lastElementsRef.current = nextElements;
+        lastElementsRef.current = elements as unknown[];
         lastRawFilesRef.current = files;
-        scheduleOncePerFrame(liveStrokeRafRef, publishLiveStrokeScene);
+        if (liveStrokeElementRef.current) {
+          scheduleOncePerFrame(liveStrokeRafRef, publishLiveStrokeScene);
+        }
+        return;
+      }
+
+      // Finalize после pointerup: штрих уже в elements, ownership проставлен.
+      // Не stamp/diff/versionSum всей сцены — это hitch после отпускания Pencil.
+      if (isFinishingLiveFreedraw(liveFreedraw, liveStrokeOwnedRef.current)) {
+        const prevScene = latestSceneRef.current;
+        latestSceneRef.current = {
+          elements: elements as unknown[],
+          appState: prevScene?.appState || sanitizeAppState(appState),
+          files: lastFilesRef.current || (files as Record<string, unknown>),
+        };
+        lastElementsRef.current = elements as unknown[];
+        lastRawFilesRef.current = files;
+        lastElementsVersionSumRef.current = versionSumAfterLiveStroke(
+          lastElementsVersionSumRef.current,
+          liveStrokeElementRef.current as { version?: number } | null,
+        );
+        markLocalSceneChange();
+        safeSetSaveStatus((s) => (s === "dirty" || s === "saving" ? s : "dirty"));
+        debouncedSaver.schedule();
+        flushScheduledFrame(liveStrokeRafRef, publishLiveStrokeScene);
+        liveStrokeOwnedRef.current = false;
+        liveStrokeElementRef.current = null;
         return;
       }
 
@@ -1569,7 +1590,14 @@ export default function CabinetBoardEditorPage() {
       });
       const eraseFix = restoreImagesErasedByEraser(prevElements, nextElements, appState);
       nextElements = eraseFix.elements;
-      const shouldPersist = !eraseFix.restored || isBoardPersistableChange({
+      const lockFix = syncImageLocksForEraser(
+        nextElements,
+        isEraserTool(appState),
+        imageLockSnapshotRef.current,
+      );
+      nextElements = lockFix.elements;
+      const imageGuardChanged = eraseFix.restored || lockFix.changed;
+      const shouldPersist = !imageGuardChanged || isBoardPersistableChange({
         prevVersionSum: lastElementsVersionSumRef.current,
         nextVersionSum: boardElementsVersionSum(nextElements),
         prevElementCount: lastElementsRef.current?.length || 0,
@@ -1584,7 +1612,7 @@ export default function CabinetBoardEditorPage() {
         nextTheme,
       });
       if (!shouldPersist) {
-        if (eraseFix.restored) pushLocalEraseScene(nextElements);
+        if (imageGuardChanged) pushLocalEraseScene(nextElements);
         return;
       }
       const incomingNewImages: Record<string, unknown>[] = [];
@@ -1646,7 +1674,7 @@ export default function CabinetBoardEditorPage() {
       publishLiveScene(
         liveElements.length === nextElements.length ? scene : { ...scene, elements: liveElements },
       );
-      if (eraseFix.restored) pushLocalEraseScene(nextElements);
+      if (imageGuardChanged) pushLocalEraseScene(nextElements);
     },
     [debouncedSaver, externalizeAndSyncFiles, markLocalSceneChange, publishLiveScene, publishLiveStrokeScene, pushLocalEraseScene, safeSetSaveStatus, syncPaperOverlay, syncLeftPanels],
   );
@@ -2476,10 +2504,9 @@ export default function CabinetBoardEditorPage() {
             metricsRef.current.wsConnectedAt = performance.now();
             setRecoveryElapsedMs(0);
             setLoadPhase(hostReadyRef.current ? "ready" : "connecting");
-            // Любой участник сразу отдаёт viewport — follow не ждёт первого pan.
-            window.setTimeout(() => publishOwnViewportNow(true), 80);
+            publishOwnViewportNow(true);
             if (canManage) {
-              window.setTimeout(() => publishOwnPaperStyleRef.current(), 100);
+              publishOwnPaperStyleRef.current();
             } else {
               collabRef.current?.requestViewport();
               collabRef.current?.requestPaperStyle();
@@ -2515,7 +2542,6 @@ export default function CabinetBoardEditorPage() {
               setLoadPhase("reconnecting");
             }
           }
-          setCollabStatus(status === "connecting" ? "connecting" : status);
         },
         onPeersChange: (peers) => {
           collabPeersRef.current = peers;
@@ -2529,6 +2555,12 @@ export default function CabinetBoardEditorPage() {
             followTargetRef.current = null;
             setFollowTarget(null);
             lastAppliedFollowRef.current = null;
+            applyFollowViewportFrame(followFrameRef.current, null);
+            if (followAnimRef.current != null) {
+              window.cancelAnimationFrame(followAnimRef.current);
+              followAnimRef.current = null;
+            }
+            applyingViewportRef.current = false;
             showNotice("Участник отключился");
           }
         },
@@ -2608,6 +2640,21 @@ export default function CabinetBoardEditorPage() {
           const prev = peerViewportsRef.current.get(vp.clientId) || null;
           if (!isNewerViewport(prev, vp)) return;
           peerViewportsRef.current.set(vp.clientId, vp);
+          if (vp.force && isTeacherRole(vp.role)) {
+            if (followTargetRef.current) {
+              followTargetRef.current = null;
+              setFollowTarget(null);
+              lastAppliedFollowRef.current = null;
+              applyFollowViewportFrame(followFrameRef.current, null);
+              if (followAnimRef.current != null) {
+                window.cancelAnimationFrame(followAnimRef.current);
+                followAnimRef.current = null;
+              }
+              applyingViewportRef.current = false;
+            }
+            applyPeerViewportRef.current(vp, { follow: false });
+            return;
+          }
           if (followTargetRef.current?.clientId === vp.clientId) {
             applyPeerViewportRef.current(vp, { follow: true });
           }
@@ -2634,7 +2681,6 @@ export default function CabinetBoardEditorPage() {
     );
     collabRef.current = session;
     session.resetPublishBase(latestSceneRef.current?.elements);
-    setCollabStatus("connecting");
 
     return () => {
       session.close();
@@ -2642,7 +2688,6 @@ export default function CabinetBoardEditorPage() {
       remoteCursorsRef.current.clear();
       resetCollabTransientState();
       setCollabPeers([]);
-      setCollabStatus("off");
     };
   }, [
     boardId,
@@ -2662,90 +2707,93 @@ export default function CabinetBoardEditorPage() {
   const applyPeerViewport = useCallback((vp: TeacherViewport, opts: { notice?: string; follow?: boolean } = {}) => {
     const api = apiRef.current;
     if (!api) return;
-    if (followAnimRef.current != null) {
-      window.cancelAnimationFrame(followAnimRef.current);
-      followAnimRef.current = null;
-    }
-    const paint = (centerX: number, centerY: number, zoom: number) => {
+    const paint = (pose: TeacherViewport, centerX: number, centerY: number, zoom: number) => {
       const receiver = api.getAppState?.() || {};
+      const patch = viewportAppStatePatch({ ...pose, centerX, centerY, zoom }, receiver);
       api.updateScene?.({
-        appState: viewportAppStatePatch({ ...vp, centerX, centerY, zoom }, receiver),
+        appState: patch,
         captureUpdate: CaptureUpdateAction.NEVER,
       });
+      lastAppliedFollowRef.current = { ...pose, centerX, centerY, zoom };
+      const targetId = followTargetRef.current?.clientId;
+      const peer = targetId ? peerViewportsRef.current.get(targetId) : undefined;
+      applyFollowViewportFrame(
+        followFrameRef.current,
+        peer ? followViewportFrameCss(peer, patch) : null,
+      );
     };
-    applyingViewportRef.current = true;
-    const finishApply = () => {
+    if (!opts.follow) {
+      if (followAnimRef.current != null) {
+        window.cancelAnimationFrame(followAnimRef.current);
+        followAnimRef.current = null;
+      }
+      applyingViewportRef.current = true;
+      paint(vp, vp.centerX, vp.centerY, vp.zoom);
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          applyingViewportRef.current = false;
+          if (followAnimRef.current == null) applyingViewportRef.current = false;
         });
       });
-    };
-    const prev = lastAppliedFollowRef.current;
-    if (!opts.follow || !prev || shouldSnapFollow(prev, vp)) {
-      paint(vp.centerX, vp.centerY, vp.zoom);
-      lastAppliedFollowRef.current = vp;
-      finishApply();
       if (opts.notice) showNotice(opts.notice);
       return;
     }
-    const from = prev;
-    const start = performance.now();
+    applyingViewportRef.current = true;
+    if (opts.notice) showNotice(opts.notice);
+    if (followAnimRef.current != null) return;
+
+    let lastTs = performance.now();
     const tick = (now: number) => {
-      const t = Math.min(1, (now - start) / FOLLOW_SMOOTH_MS);
-      const lerped = lerpViewportCenters(from, vp, t);
-      paint(lerped.centerX, lerped.centerY, lerped.zoom);
-      if (t < 1) {
-        followAnimRef.current = window.requestAnimationFrame(tick);
+      const targetId = followTargetRef.current?.clientId;
+      const goal = targetId ? peerViewportsRef.current.get(targetId) : undefined;
+      const from = lastAppliedFollowRef.current;
+      if (!goal) {
+        followAnimRef.current = null;
+        applyingViewportRef.current = false;
+        applyFollowViewportFrame(followFrameRef.current, null);
         return;
       }
-      followAnimRef.current = null;
-      lastAppliedFollowRef.current = vp;
-      finishApply();
+      const dt = Math.min(48, Math.max(0, now - lastTs));
+      lastTs = now;
+      if (!from || shouldSnapFollow(from, goal)) {
+        paint(goal, goal.centerX, goal.centerY, goal.zoom);
+      } else if (isFollowPoseSettled(from, goal)) {
+        paint(goal, goal.centerX, goal.centerY, goal.zoom);
+        followAnimRef.current = null;
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (followAnimRef.current == null) applyingViewportRef.current = false;
+          });
+        });
+        return;
+      } else {
+        const next = chaseViewportCenters(from, goal, dt);
+        paint(goal, next.centerX, next.centerY, next.zoom);
+      }
+      followAnimRef.current = window.requestAnimationFrame(tick);
     };
     followAnimRef.current = window.requestAnimationFrame(tick);
-    if (opts.notice) showNotice(opts.notice);
   }, [showNotice]);
   applyPeerViewportRef.current = applyPeerViewport;
-
-  const captureHomeViewport = useCallback(() => {
-    const api = apiRef.current;
-    if (!api) return;
-    homeViewportRef.current = sceneCenterFromAppState(api.getAppState?.() || {});
-  }, []);
 
   const stopFollow = useCallback((reason?: string) => {
     if (!followTargetRef.current) return;
     followTargetRef.current = null;
     setFollowTarget(null);
     lastAppliedFollowRef.current = null;
+    applyFollowViewportFrame(followFrameRef.current, null);
     if (followAnimRef.current != null) {
       window.cancelAnimationFrame(followAnimRef.current);
       followAnimRef.current = null;
     }
+    applyingViewportRef.current = false;
     if (reason) showNotice(reason);
   }, [showNotice]);
-
-  const goToPeer = useCallback((clientId: string | null, name: string, notice?: string) => {
-    if (!clientId) {
-      showNotice("Участник ещё не подключился");
-      return;
-    }
-    const cached = peerViewportsRef.current.get(clientId);
-    if (!cached) {
-      collabRef.current?.requestViewport();
-      showNotice("Ожидаем область участника…");
-      return;
-    }
-    applyPeerViewport(cached, { notice: notice || `Перешли к ${name}` });
-  }, [applyPeerViewport, showNotice]);
 
   const startFollow = useCallback((clientId: string | null, name: string) => {
     if (!clientId) {
       showNotice("Участник ещё не подключился");
       return;
     }
-    captureHomeViewport();
     followTargetRef.current = { clientId, name };
     setFollowTarget({ clientId, name });
     const cached = peerViewportsRef.current.get(clientId);
@@ -2755,28 +2803,26 @@ export default function CabinetBoardEditorPage() {
       showNotice("Ожидаем положение участника…");
     }
     collabRef.current?.requestViewport();
-  }, [applyPeerViewport, captureHomeViewport, showNotice]);
+  }, [applyPeerViewport, showNotice]);
 
-  const returnToMyArea = useCallback(() => {
-    stopFollow();
-    const home = homeViewportRef.current;
+  const bringPeersToMe = useCallback(() => {
     const api = apiRef.current;
-    if (!home || !api) return;
-    applyingViewportRef.current = true;
-    api.updateScene?.({
-      appState: {
-        scrollX: home.scrollX,
-        scrollY: home.scrollY,
-        zoom: { value: home.zoom },
+    if (!api) return;
+    const center = sceneCenterFromAppState(api.getAppState?.() || {});
+    if (!(center.width > 8 && center.height > 8)) return;
+    collabRef.current?.publishViewport(
+      {
+        scrollX: center.scrollX,
+        scrollY: center.scrollY,
+        zoom: center.zoom,
+        centerX: center.centerX,
+        centerY: center.centerY,
+        width: center.width,
+        height: center.height,
       },
-      captureUpdate: CaptureUpdateAction.NEVER,
-    });
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        applyingViewportRef.current = false;
-      });
-    });
-  }, [stopFollow]);
+      { immediate: true, force: true },
+    );
+  }, []);
 
   const handleScrollChange = useCallback((scrollX: number, scrollY: number, zoom: number) => {
     if (applyingViewportRef.current) return;
@@ -2812,6 +2858,7 @@ export default function CabinetBoardEditorPage() {
   const handlePointerSceneDown = useCallback(() => {
     isDrawingGestureRef.current = true;
     liveStrokeOwnedRef.current = false;
+    liveStrokeElementRef.current = null;
     // Страховка: pointerup может уйти мимо host (iframe / capture) — слушаем window.
     if (gestureEndBoundRef.current) {
       window.removeEventListener("pointerup", gestureEndBoundRef.current);
@@ -3367,18 +3414,24 @@ export default function CabinetBoardEditorPage() {
     setLoadPhase("ready");
     logBoardMetrics("ready", metricsRef.current);
     const api = apiRef.current;
-    const refresh = () => {
-      try {
-        api?.refresh?.();
-      } catch {
-        /* ignore */
-      }
-    };
-    if (typeof requestIdleCallback === "function") {
-      requestIdleCallback(refresh, { timeout: 1200 });
-    } else {
-      window.setTimeout(refresh, 0);
-    }
+    if (!api) return;
+    if (followTargetRef.current || applyingViewportRef.current) return;
+    const app = api.getAppState?.() || {};
+    const center = sceneCenterFromAppState(app);
+    if (!(center.width > 8 && center.height > 8)) return;
+    collabRef.current?.publishViewport(
+      {
+        scrollX: center.scrollX,
+        scrollY: center.scrollY,
+        zoom: center.zoom,
+        centerX: center.centerX,
+        centerY: center.centerY,
+        width: center.width,
+        height: center.height,
+      },
+      { immediate: true },
+    );
+    if (canManageRefLocal.current) publishOwnPaperStyleRef.current();
   }, []);
 
   const retryBoardLoad = useCallback(() => {
@@ -3478,17 +3531,8 @@ export default function CabinetBoardEditorPage() {
   }, []);
 
   useEffect(() => {
-    return bindBoardVisualViewport(
-      () => editorRootRef.current,
-      () => {
-        try {
-          apiRef.current?.refresh?.();
-        } catch {
-          /* ignore */
-        }
-      },
-    );
-  }, [boardId, loading, excalidrawReady, hostReady]);
+    return bindBoardVisualViewport(() => editorRootRef.current);
+  }, [boardId, loading]);
 
   const applyBackground = (color: string) => {
     setBgColor(color);
@@ -3792,6 +3836,7 @@ export default function CabinetBoardEditorPage() {
       ownerName: board.owner_name,
     })
     : [];
+  const remoteCollabPeople = remoteFollowablePeople(collabPeople);
 
   const editorClassName = [
     "cb-board-editor",
@@ -4057,6 +4102,13 @@ export default function CabinetBoardEditorPage() {
           ) : null}
         </div>
 
+        <div
+          ref={followFrameRef}
+          className="cb-board-follow-frame"
+          hidden
+          aria-hidden="true"
+        />
+
         {canEdit && packedPdf && packedPdf.pageCount > 1 && !packedPdf.unpacked ? (
           <div className="cb-board-pdf-action" role="region" aria-label="PDF на доске">
             <span className="cb-board-pdf-action__meta">
@@ -4075,20 +4127,14 @@ export default function CabinetBoardEditorPage() {
           </div>
         ) : null}
 
-        {collaborative && collabPeople.length > 0 ? (
+        {collaborative && remoteCollabPeople.length > 0 ? (
           <BoardCollabControls
             people={collabPeople}
-            selfRole={selfRole}
-            followingName={followTarget?.name || ""}
             followingClientId={followTarget?.clientId || null}
-            compact={compactShell}
-            connectionStatus={collabStatus}
-            reconnectElapsedMs={recoveryElapsedMs}
-            onRetry={onManualBoardReconnect}
-            onGoTo={(person) => goToPeer(person.clientId, person.name)}
+            canSummon={canManage}
             onFollow={(person) => startFollow(person.clientId, person.name)}
-            onStopFollow={() => stopFollow("Слежение выключено")}
-            onMyArea={returnToMyArea}
+            onStopFollow={() => stopFollow()}
+            onSummon={bringPeersToMe}
           />
         ) : null}
 

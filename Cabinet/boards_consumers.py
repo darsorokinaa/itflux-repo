@@ -655,6 +655,8 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
             if center_y is not None:
                 payload["centerY"] = center_y
             force = bool(data.get("immediate") or data.get("force"))
+            if force:
+                payload["force"] = True
             event = {"type": "board.collab", "payload": payload}
             now = time.monotonic()
             elapsed = now - self._last_viewport_at

@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   applyBoardOps,
+  buildLivePublishPayload,
   cloneBoardElement,
   coalesceBoardOps,
   diffBoardElements,
+  diffSingleBoardElement,
   mergePublishedSnapshotWithOps,
+  replacePublishedElementInPlace,
   shouldPublishFullScene,
 } from "./boardOps";
 
@@ -22,6 +25,70 @@ describe("boardOps", () => {
     expect(ops.some((o) => o.op === "upsert" && o.op === "upsert" && (o as { element: { id: string } }).element.id === "a")).toBe(true);
     expect(ops.some((o) => o.op === "upsert" && (o as { element: { id: string } }).element.id === "c")).toBe(true);
     expect(ops.some((o) => o.op === "delete" && o.id === "b")).toBe(true);
+  });
+
+  it("diffSingleBoardElement clones only the live stroke", () => {
+    const keepPts = [[0, 0]];
+    const prev = [
+      { id: "keep", version: 1, points: keepPts },
+      { id: "stroke", version: 1, points: [[0, 0]] },
+    ];
+    const stroke = { id: "stroke", version: 4, points: [[0, 0], [1.25, 2.5]] };
+    const ops = diffSingleBoardElement(prev, stroke);
+    expect(ops).toHaveLength(1);
+    expect(ops[0].op).toBe("upsert");
+    const el = (ops[0] as { element: { id: string; points: number[][] } }).element;
+    expect(el.id).toBe("stroke");
+    expect(el.points).toEqual([[0, 0], [1.25, 2.5]]);
+    expect(el.points).not.toBe(stroke.points);
+  });
+
+  it("diffSingleBoardElement uses prevById without scanning the scene list", () => {
+    const strokePrev = { id: "stroke", version: 1, points: [[0, 0]] };
+    const prevById = new Map<string, unknown>([["stroke", strokePrev]]);
+    const stroke = { id: "stroke", version: 4, points: [[0, 0], [3, 4]] };
+    const ops = diffSingleBoardElement(
+      [{ id: "missing-on-purpose", version: 1 }],
+      stroke,
+      prevById,
+    );
+    expect(ops).toHaveLength(1);
+    expect((ops[0] as { element: { id: string } }).element.id).toBe("stroke");
+  });
+
+  it("replacePublishedElementInPlace mutates one slot and keeps other refs", () => {
+    const keep = { id: "keep", version: 1, points: [[0, 0]] };
+    const stroke = { id: "stroke", version: 1, points: [[0, 0]] };
+    const snapshot = [keep, stroke];
+    const nextStroke = { id: "stroke", version: 4, points: [[0, 0], [1, 1]] };
+    expect(replacePublishedElementInPlace(snapshot, nextStroke)).toBe(true);
+    expect(snapshot).toHaveLength(2);
+    expect(snapshot[0]).toBe(keep);
+    expect(snapshot[1]).toBe(nextStroke);
+  });
+
+  it("buildLivePublishPayload with hotElement emits only that stroke", () => {
+    const prev = [
+      { id: "keep", version: 1, points: [[0, 0]] },
+      { id: "stroke", version: 1, points: [[0, 0]] },
+    ];
+    const stroke = { id: "stroke", version: 5, points: [[0, 0], [2, 2]] };
+    const built = buildLivePublishPayload(
+      prev,
+      {
+        elements: [...prev.slice(0, 1), stroke],
+        appState: {},
+        files: { img: { dataURL: "https://cdn.example/a.png" } },
+      },
+      1,
+      stroke,
+    );
+    expect(built.kind).toBe("ops");
+    if (built.kind !== "ops") return;
+    expect(built.payload.ops).toHaveLength(1);
+    expect(built.payload.ops[0].op).toBe("upsert");
+    expect((built.payload.ops[0] as { element: { id: string } }).element.id).toBe("stroke");
+    expect(built.payload.files).toEqual({});
   });
 
   it("applyBoardOps применяет upsert и tombstone", () => {
@@ -186,5 +253,34 @@ describe("boardOps", () => {
       ops: [{ op: "delete", id: "z", version: 8 }],
     });
     expect((afterNewerDelete.elements[0] as { isDeleted?: boolean }).isDeleted).toBe(true);
+  });
+
+  it("hot live publish on a large board clones only the live stroke", () => {
+    const prev = Array.from({ length: 4000 }, (_, i) => ({
+      id: `e${i}`,
+      version: 1,
+      points: [[i, i]],
+    }));
+    const keepPts = prev[0].points;
+    const stroke = { id: "e3999", version: 9, points: [[3999, 3999], [4000.25, 4001.5]] };
+    const prevById = new Map(prev.map((el) => [el.id, el]));
+    const built = buildLivePublishPayload(
+      prev,
+      { elements: prev, appState: {}, files: { img: { dataURL: "https://cdn.example/a.png" } } },
+      3,
+      stroke,
+      prevById,
+    );
+    expect(built.kind).toBe("ops");
+    if (built.kind !== "ops") return;
+    expect(built.payload.ops).toHaveLength(1);
+    const el = (built.payload.ops[0] as { element: { points: number[][] } }).element;
+    expect(el.points).toEqual(stroke.points);
+    expect(el.points).not.toBe(stroke.points);
+    expect(prev[0].points).toBe(keepPts);
+    expect(built.payload.files).toEqual({});
+    expect(replacePublishedElementInPlace(prev, el)).toBe(true);
+    expect(prev[0].points).toBe(keepPts);
+    expect(prev[3999]).toBe(el);
   });
 });

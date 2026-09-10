@@ -5,6 +5,7 @@ import {
   buildJitsiConfigOverwrite,
   buildJitsiEmbedUrl,
   buildJitsiExternalApiOptions,
+  buildJitsiHostsOverwrite,
   buildJitsiInterfaceConfigOverwrite,
   getMeetingCameraEnabled,
   hasValidJitsiLocalStorageContent,
@@ -40,6 +41,25 @@ describe("meeting camera preference", () => {
     expect(cfg.replaceParticipant).toBe(true);
     expect(cfg.channelLastN).toBe(8);
     expect(cfg.enableNoAudioDetection).toBe(true);
+    expect(cfg.disableRemoteControl).toBe(false);
+  });
+
+  it("pins MUC host to conference.<domain> so JWT sub matches the room", () => {
+    expect(buildJitsiHostsOverwrite("lesson.itflux-academy.ru")).toEqual({
+      domain: "lesson.itflux-academy.ru",
+      muc: "conference.lesson.itflux-academy.ru",
+    });
+    expect(buildJitsiConfigOverwrite({ domain: "lesson.itflux-academy.ru" }).hosts).toEqual({
+      domain: "lesson.itflux-academy.ru",
+      muc: "conference.lesson.itflux-academy.ru",
+    });
+    expect(buildJitsiConfigOverwrite({ domain: "meet.jit.si" }).hosts).toBeUndefined();
+    const embed = buildJitsiEmbedUrl({
+      domain: "lesson.itflux-academy.ru",
+      roomName: "digitalstreamroom",
+    });
+    expect(embed).toContain("config.hosts.domain=");
+    expect(embed).toContain("conference.lesson.itflux-academy.ru");
   });
 
   it("encodes startWithVideoMuted in embed URL", () => {

@@ -6,6 +6,7 @@ import {
   isBoardEmbeddedInIframe,
   isBoardTouchShell,
   lockBoardPageScroll,
+  subscribeBoardCompactShell,
 } from "./boardMobileShell";
 
 describe("boardMobileShell", () => {
@@ -55,6 +56,30 @@ describe("boardMobileShell", () => {
     } as Window;
     expect(isBoardTouchShell(win)).toBe(true);
     expect(isBoardCompactShell(win)).toBe(false);
+  });
+
+  it("subscribeBoardCompactShell follows matchMedia change, not window.resize", () => {
+    const listeners: Array<() => void> = [];
+    const phone = {
+      matches: true,
+      addEventListener: (_: string, fn: () => void) => listeners.push(fn),
+      removeEventListener: () => {},
+    };
+    const land = {
+      matches: false,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    };
+    const win = {
+      matchMedia: (query: string) => (query.includes("max-width: 768px") ? phone : land),
+    } as unknown as Window;
+    const seen: boolean[] = [];
+    const stop = subscribeBoardCompactShell((compact) => seen.push(compact), win);
+    expect(seen).toEqual([true]);
+    phone.matches = false;
+    listeners.forEach((fn) => fn());
+    expect(seen).toEqual([true, false]);
+    stop();
   });
 
   it("lockBoardPageScroll restores overflow and classes", () => {

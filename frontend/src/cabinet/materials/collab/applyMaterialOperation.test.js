@@ -74,14 +74,32 @@ describe("applyMaterialOperation", () => {
 });
 
 describe("permissions", () => {
-  it("allows follow content actions for students", () => {
-    expect(isFollowContentAction("field_changed")).toBe(true);
+  it("blocks student content in presentation mode", () => {
     expect(canSendMaterialAction({
       action: "field_changed",
       canManage: false,
       interactionMode: "view_only",
+      followPolicy: "strict",
+      presentationMode: "presentation",
       followingTeacher: true,
+    })).toBe(false);
+  });
+
+  it("allows student content in collaboration but not navigation", () => {
+    expect(canSendMaterialAction({
+      action: "field_changed",
+      canManage: false,
+      presentationMode: "collaboration",
+      interactionMode: "collaborative",
+      collaborationPermission: "answers_only",
     })).toBe(true);
+    expect(canSendMaterialAction({
+      action: "page_changed",
+      canManage: false,
+      presentationMode: "collaboration",
+      interactionMode: "collaborative",
+      collaborationPermission: "full",
+    })).toBe(false);
   });
 
   it("blocks draw for students in follow mode", () => {
@@ -117,5 +135,26 @@ describe("capabilities + html bridge", () => {
     });
     expect(op.action).toBe("field_changed");
     expect(op.payload.fieldId).toBe("task-5");
+  });
+});
+
+describe("interactive playback state", () => {
+  it("merges logical interactive snapshots without dropping keys", () => {
+    let state = applyMaterialOperation({}, {
+      action: "state_updated",
+      payload: { patch: { interactive: { type: "quiz", started: true, index: 0 } } },
+      authorId: 1,
+      authorRole: "teacher",
+    });
+    state = applyMaterialOperation(state, {
+      action: "state_updated",
+      payload: { patch: { interactive: { index: 2, selectedIds: ["a"] } } },
+      authorId: 1,
+      authorRole: "teacher",
+    });
+    expect(state.interactive.type).toBe("quiz");
+    expect(state.interactive.started).toBe(true);
+    expect(state.interactive.index).toBe(2);
+    expect(state.interactive.selectedIds).toEqual(["a"]);
   });
 });

@@ -1,6 +1,6 @@
 /**
- * Временная DEV-инструментация пайплайна стилуса.
- * В production Vite заменяет import.meta.env.DEV на false — UI не монтируется.
+ * Опциональная DEV-инструментация пайплайна стилуса.
+ * Overlay не монтируется сам: только localStorage.itflux_board_perf=1.
  */
 
 type WindowCounters = {
@@ -29,7 +29,12 @@ let longTaskObserver: PerformanceObserver | null = null;
 let lastFrameAt = 0;
 
 function enabled(): boolean {
-  return Boolean(import.meta.env?.DEV);
+  if (!import.meta.env?.DEV) return false;
+  try {
+    return window.localStorage?.getItem("itflux_board_perf") === "1";
+  } catch {
+    return false;
+  }
 }
 
 export function boardPerfEnabled(): boolean {

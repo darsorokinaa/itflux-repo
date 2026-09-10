@@ -38,3 +38,33 @@ function readSsAnnOverride() {
 export const SCREEN_SHARE_ANNOTATIONS_V2 = typeof window === "undefined"
   ? SS_ANN_DEFAULT_V2
   : readSsAnnOverride();
+
+/**
+ * Синхронизированная презентация материалов в комнате урока.
+ * Продуктовая модель снята: материал открывается локально,
+ * показ другим участникам — через демонстрацию экрана Jitsi.
+ * Override: ?materialCollab=1 или localStorage itflux.materialCollab=1
+ */
+const MATERIAL_COLLAB_DEFAULT = false;
+
+function readMaterialCollabOverride() {
+  try {
+    const query = new URLSearchParams(window.location.search).get("materialCollab");
+    if (query === "0" || query === "false") return false;
+    if (query === "1" || query === "true") return true;
+  } catch {
+    /* ignore */
+  }
+  try {
+    const stored = window.localStorage.getItem("itflux.materialCollab");
+    if (stored === "0" || stored === "false") return false;
+    if (stored === "1" || stored === "true") return true;
+  } catch {
+    /* ignore */
+  }
+  return MATERIAL_COLLAB_DEFAULT;
+}
+
+export const MATERIAL_COLLABORATION_ENABLED = typeof window === "undefined"
+  ? MATERIAL_COLLAB_DEFAULT
+  : readMaterialCollabOverride();

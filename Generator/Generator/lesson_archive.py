@@ -122,6 +122,25 @@ def inject_lesson_drawing_assets(html: str, request, slug: str) -> str:
     return html + block
 
 
+_SDK_SNIPPET_RE = re.compile(
+    r'(?:<script[^>]+lesson-material-sdk\.js[^>]*>\s*</script>\s*)'
+    r'|(?:<script id="lesson-material-sdk-js">[\s\S]*?</script>\s*)',
+    re.I,
+)
+
+
+def inject_lesson_material_sdk(html: str) -> str:
+    """Подключает lessonBridge в готовые уроки. Отсутствие SDK не ломает урок."""
+    html = _SDK_SNIPPET_RE.sub("", html)
+    block = (
+        '<script src="/lesson-material-sdk/lesson-material-sdk.js" '
+        'id="lesson-material-sdk-js"></script>\n'
+    )
+    if re.search(r"</body>", html, re.I):
+        return re.sub(r"</body>", block + "</body>", html, count=1, flags=re.I)
+    return html + block
+
+
 def read_lesson_file_html(
     file_path: str,
     base_href: str,
@@ -148,6 +167,7 @@ def read_lesson_file_html(
         html = inject_lesson_content_styles(html, request)
     if request and slug:
         html = inject_lesson_drawing_assets(html, request, slug)
+        html = inject_lesson_material_sdk(html)
     return html
 
 
@@ -339,6 +359,7 @@ def read_archive_html(
         html = inject_lesson_content_styles(html, request)
     if request and slug:
         html = inject_lesson_drawing_assets(html, request, slug)
+        html = inject_lesson_material_sdk(html)
     return html
 
 

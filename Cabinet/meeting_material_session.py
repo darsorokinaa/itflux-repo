@@ -11,13 +11,19 @@ from django.db import transaction
 from django.utils import timezone
 
 from .files_services import is_blocked_media_url, material_file_url, material_view_url
+from .meeting_catalog_lesson import meeting_lesson_content_url
 from .material_adapters import (
+    CONTENT_STATE_ACTIONS,
     EPHEMERAL_ACTIONS,
     EXCLUDED_PRESENT_KINDS,
     NAVIGATION_ACTIONS,
+    SHARED_BUCKET,
     MaterialCollaborationError,
+    event_channel_for_action,
+    fields_for_presentation_mode,
     get_adapter,
     infer_resource_kind,
+    presentation_mode_of,
 )
 from .meeting_material_models import (
     MeetingMaterialCollaborativeScope,
@@ -60,7 +66,7 @@ def broadcast_material_event(meeting_uuid, payload: dict) -> None:
 def _append_meeting(url: str, meeting: VideoMeeting) -> str:
     raw = (url or "").strip()
     # API preview/download не нуждаются в ?meeting= — и query ломает PDF-viewer.
-    if raw.startswith("/api/cabinet/"):
+    if raw.startswith("/api/cabinet/") or raw.startswith("/api/lessons/"):
         return raw
     return append_meeting_query(raw, str(meeting.uuid))
 
@@ -136,7 +142,7 @@ def _safe_open_url_for_user(
     open_url: str,
     material: Material | None,
 ) -> str:
-    url = (open_url or "").strip()
+    url = meeting_lesson_content_url((open_url or "").strip())
     access = resolve_access(user, meeting.schedule_event) if user else None
     for_student = bool(access and access.role == "student")
 
@@ -189,6 +195,11 @@ def serialize_material_session(
         },
         "interactionMode": session.interaction_mode,
         "followPolicy": session.follow_policy,
+        "presentationMode": presentation_mode_of(
+            interaction_mode=session.interaction_mode,
+            follow_policy=session.follow_policy,
+        ),
+        "studentsCanInteract": session.interaction_mode == MeetingMaterialInteractionMode.COLLABORATIVE,
         "controllerUserId": session.controller_id,
         "collaborativeScope": session.collaborative_scope,
         "collaborativeUserIds": list(session.collaborative_user_ids or []),
@@ -211,28 +222,35 @@ def serialize_material_session(
 
 
 def _personalize_student_state(state: dict, user_id: int) -> dict:
-    """Оставляет ученику только свои answers/fields; навигация общая."""
+    """Оставляет ученику свои answers/fields и общий shared-бакет презентации."""
     out = deepcopy(state) if state else {}
     user_key = str(user_id)
     for bucket_name in ("answers", "fields"):
         bucket = out.get(bucket_name)
         if not isinstance(bucket, dict):
             continue
+        shared = bucket.get(SHARED_BUCKET) if isinstance(bucket.get(SHARED_BUCKET), dict) else {}
         # Per-user: {userId: {itemId: row}}
         if user_key in bucket and isinstance(bucket.get(user_key), dict):
-            sample = next(iter(bucket[user_key].values()), None)
-            if isinstance(sample, dict) and ("value" in sample or "author_id" in sample):
+            sample = next(iter(bucket[user_key].values()), None) if bucket[user_key] else None
+            if sample is None or (isinstance(sample, dict) and ("value" in sample or "author_id" in sample)):
                 out[bucket_name] = {user_key: bucket[user_key]}
+                if shared:
+                    out[bucket_name][SHARED_BUCKET] = shared
                 continue
         # Legacy flat: {itemId: {value, author_id}}
         mine = {}
         for item_id, row in bucket.items():
+            if item_id == SHARED_BUCKET:
+                continue
             if not isinstance(row, dict):
                 continue
             if "value" in row or "author_id" in row:
                 if int(row.get("author_id") or 0) == int(user_id):
                     mine[item_id] = row
         out[bucket_name] = {user_key: mine} if mine else {user_key: {}}
+        if shared:
+            out[bucket_name][SHARED_BUCKET] = shared
     return out
 
 
@@ -384,7 +402,7 @@ def open_material_session(
         title = title or material.title
         material_type = material_type or material.material_type
         # Не сохраняем /media/cabinet/my-files/ — только API preview или внешнюю ссылку.
-        open_url = (
+        open_url = meeting_lesson_content_url(
             material_view_url(material, for_student=False)
             or material_file_url(material, for_student=False)
             or (material.external_url or "")
@@ -393,7 +411,9 @@ def open_material_session(
         if not content_text:
             content_text = material.content or ""
         _grant_material_file_access_to_event_students(meeting=meeting, material=material)
-    elif is_blocked_media_url(open_url):
+    else:
+        open_url = meeting_lesson_content_url(open_url)
+    if is_blocked_media_url(open_url):
         raise VideoMeetingError(
             "Файл нельзя открыть напрямую. Прикрепите материал из хранилища и откройте снова.",
             code="blocked_media",
@@ -624,6 +644,88 @@ def set_follow_policy(
     return session
 
 
+def _promote_controller_state_to_shared(session: MeetingMaterialSession) -> None:
+    """При включении презентации копируем ответы ведущего в shared, если shared пуст."""
+    state = session.current_state if isinstance(session.current_state, dict) else {}
+    owner = str(session.controller_id or session.opened_by_id or "")
+    if not owner:
+        return
+    changed = False
+    for key in ("answers", "fields"):
+        bucket = state.get(key)
+        if not isinstance(bucket, dict):
+            continue
+        shared = bucket.get(SHARED_BUCKET)
+        personal = bucket.get(owner)
+        if isinstance(shared, dict) and shared:
+            continue
+        if isinstance(personal, dict) and personal:
+            bucket[SHARED_BUCKET] = deepcopy(personal)
+            changed = True
+    if changed:
+        session.current_state = state
+
+
+def set_presentation_mode(
+    *,
+    meeting: VideoMeeting,
+    user: User,
+    mode: str,
+    session_id=None,
+    collaboration_permission: str | None = None,
+) -> MeetingMaterialSession:
+    """independent | presentation | collaboration — атомарно выставляет interaction_mode + follow_policy."""
+    assert_can_manage_meeting(user, meeting)
+    meeting.refresh_from_db(fields=["status"])
+    if meeting.status != VideoMeeting.Status.LIVE:
+        raise VideoMeetingError("Урок не активен", code="not_live", status=409)
+    value = (mode or "").strip().lower()
+    if value not in ("independent", "presentation", "collaboration"):
+        raise VideoMeetingError("Некорректный режим презентации", code="invalid_mode", status=400)
+
+    session = get_active_material_session(meeting)
+    if session is None or (session_id and session.pk != int(session_id)):
+        raise VideoMeetingError("Нет активной сессии материала", code="no_session", status=404)
+    if not user_is_material_controller(session, user, resolve_access(user, meeting.schedule_event).role):
+        raise VideoMeetingError("Управление материалом у другого ведущего", code="not_controller", status=403)
+
+    interaction_mode, follow_policy = fields_for_presentation_mode(value)
+    prev_mode = presentation_mode_of(
+        interaction_mode=session.interaction_mode,
+        follow_policy=session.follow_policy,
+    )
+    session.interaction_mode = interaction_mode
+    session.follow_policy = follow_policy
+    update_fields = ["interaction_mode", "follow_policy", "updated_at"]
+    if value != "independent":
+        session.independent_user_ids = []
+        update_fields.append("independent_user_ids")
+    if collaboration_permission is not None:
+        from .meeting_material_models import MeetingMaterialCollaborationPermission
+        perm = (collaboration_permission or "").strip().lower()
+        if perm not in MeetingMaterialCollaborationPermission.values:
+            raise VideoMeetingError("Некорректные права совместной работы", code="invalid_permission", status=400)
+        session.collaboration_permission = perm
+        update_fields.append("collaboration_permission")
+    elif value == "collaboration" and not getattr(session, "collaboration_permission", None):
+        session.collaboration_permission = "annotate"
+        update_fields.append("collaboration_permission")
+
+    if prev_mode == "independent" and value in ("presentation", "collaboration"):
+        _promote_controller_state_to_shared(session)
+        update_fields.append("current_state")
+
+    session.save(update_fields=update_fields)
+    logger.info(
+        "material_presentation_mode meeting=%s session=%s mode=%s user=%s",
+        meeting.uuid,
+        session.pk,
+        value,
+        user.pk,
+    )
+    return session
+
+
 def transfer_material_control(
     *,
     meeting: VideoMeeting,
@@ -772,20 +874,31 @@ def apply_material_operation(
 
         if action not in allowed:
             logger.info(
-                "material_op_forbidden meeting=%s session=%s user=%s role=%s action=%s mode=%s",
+                "material_op_forbidden meeting=%s session=%s user=%s role=%s action=%s mode=%s revision=%s",
                 meeting.uuid,
                 session.pk,
                 user.pk,
                 role,
                 action,
-                session.interaction_mode,
+                presentation_mode_of(
+                    interaction_mode=session.interaction_mode,
+                    follow_policy=session.follow_policy,
+                ),
+                session.version,
             )
             raise VideoMeetingError("Действие запрещено", code="forbidden", status=403)
 
-        # Навигация учеником: independent follow / collaborative / персональный whitelist.
+        # Глобальную навигацию ученик не меняет ни в одном режиме.
         if role == "student" and action in NAVIGATION_ACTIONS:
-            if not can_browse and not (session.interaction_mode == "collaborative" and can_collab):
-                raise VideoMeetingError("Навигацией управляет преподаватель", code="nav_locked", status=403)
+            logger.info(
+                "material_nav_rejected meeting=%s session=%s user=%s action=%s revision=%s",
+                meeting.uuid,
+                session.pk,
+                user.pk,
+                action,
+                session.version,
+            )
+            raise VideoMeetingError("Навигацией управляет преподаватель", code="nav_locked", status=403)
 
         # Глобальную позицию меняет только текущий controller (учитель/соучитель).
         if adapter_role == "teacher" and action in NAVIGATION_ACTIONS:
@@ -796,8 +909,37 @@ def apply_material_operation(
                     status=403,
                 )
 
+        if action in NAVIGATION_ACTIONS and base_version is not None:
+            try:
+                incoming = int(base_version)
+            except (TypeError, ValueError):
+                incoming = int(session.version)
+            if incoming < int(session.version):
+                logger.info(
+                    "material_stale_revision meeting=%s session=%s action=%s incoming=%s current=%s sender=%s",
+                    meeting.uuid,
+                    session.pk,
+                    action,
+                    incoming,
+                    session.version,
+                    user.pk,
+                )
+                return {
+                    "duplicate": False,
+                    "stale": True,
+                    "session": session,
+                    "operation": None,
+                    "version": session.version,
+                }
+
         if base_version is not None and int(base_version) > int(session.version) + 50:
             raise VideoMeetingError("Некорректная base_version", code="version_conflict", status=409)
+
+        mode = presentation_mode_of(
+            interaction_mode=session.interaction_mode,
+            follow_policy=session.follow_policy,
+        )
+        content_scope = "shared" if mode in ("presentation", "collaboration") and action in CONTENT_STATE_ACTIONS else "personal"
 
         clean_payload = adapter.validate_payload(action, payload if isinstance(payload, dict) else {})
         try:
@@ -807,6 +949,8 @@ def apply_material_operation(
                 payload=clean_payload,
                 author_id=user.pk,
                 author_role=role,
+                content_scope=content_scope,
+                revision=int(session.version) + 1,
             )
         except MaterialCollaborationError as exc:
             raise VideoMeetingError(exc.message, code=exc.code, status=exc.status) from exc
@@ -824,16 +968,27 @@ def apply_material_operation(
         if new_version % PERSIST_EVERY_N_VERSIONS == 0:
             _persist_work(session)
 
+        channel = event_channel_for_action(action)
+        typed = {
+            "navigation": "material.navigation",
+            "state": "material.state",
+            "annotation": "material.annotation",
+            "pointer": "material.pointer",
+        }.get(channel, "material.operation")
         operation = {
             "type": "material.operation",
+            "channel": channel,
+            "typed_type": typed,
             "session_id": session.pk,
             "operation_id": operation_id,
             "author_id": user.pk,
             "author_role": role,
+            "senderId": user.pk,
             "action": action,
             "payload": clean_payload,
             "base_version": base_version if base_version is not None else new_version - 1,
             "version": new_version,
+            "revision": new_version,
         }
         return {
             "duplicate": False,

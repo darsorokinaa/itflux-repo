@@ -128,7 +128,6 @@ export function mountBoardStrokeWidthControl(
   ensure();
   const observer = new MutationObserver(ensure);
   observer.observe(host, { childList: true, subtree: true });
-  const timers = [40, 160, 500, 1400].map((ms) => window.setTimeout(ensure, ms));
 
   return {
     sync: (width) => {
@@ -136,7 +135,6 @@ export function mountBoardStrokeWidthControl(
     },
     unmount: () => {
       observer.disconnect();
-      timers.forEach((id) => window.clearTimeout(id));
       panel?.destroy();
       panel = null;
     },

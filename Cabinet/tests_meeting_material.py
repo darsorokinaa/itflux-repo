@@ -349,16 +349,13 @@ class MeetingMaterialSessionApiTests(TestCase):
             format="json",
         )
         self.assertEqual(res.status_code, 200, res.content)
-        # Per-user: answers[userId][questionId]
         answers = res.data["materialSession"]["state"]["answers"]
-        user_key = str(self.student_user.pk)
-        self.assertIn(user_key, answers)
-        answer = answers[user_key]["q1"]
+        answer = answers["shared"]["q1"]
         self.assertEqual(answer["value"], "B")
         self.assertEqual(answer["author_id"], self.student_user.pk)
 
-    def test_student_can_answer_in_follow_mode(self):
-        """view_only: ученик следует за слайдами, но может отвечать на текущем."""
+    def test_student_cannot_answer_in_presentation_mode(self):
+        """Презентация: ученик не меняет общее состояние."""
         self.client.force_login(self.teacher)
         open_res = self.client.post(
             f"/api/video-meetings/{self.meeting.uuid}/material-session/",
@@ -370,7 +367,7 @@ class MeetingMaterialSessionApiTests(TestCase):
             format="json",
         )
         session_id = open_res.data["materialSession"]["sessionId"]
-        self.assertEqual(open_res.data["materialSession"]["interactionMode"], "view_only")
+        self.assertEqual(open_res.data["materialSession"]["presentationMode"], "presentation")
         self.client.force_login(self.student_user)
         res = self.client.post(
             f"/api/video-meetings/{self.meeting.uuid}/material-session/operation/",
@@ -382,12 +379,7 @@ class MeetingMaterialSessionApiTests(TestCase):
             },
             format="json",
         )
-        self.assertEqual(res.status_code, 200, res.content)
-        # Ученик в sync видит только свои ответы.
-        sync = self.client.get(f"/api/video-meetings/{self.meeting.uuid}/material-session/")
-        mine = sync.data["materialSession"]["state"]["answers"][str(self.student_user.pk)]
-        self.assertEqual(mine["q2"]["value"], "A")
-        # Навигация по-прежнему запрещена.
+        self.assertEqual(res.status_code, 403)
         nav = self.client.post(
             f"/api/video-meetings/{self.meeting.uuid}/material-session/operation/",
             {
@@ -592,7 +584,7 @@ class MeetingMaterialSessionApiTests(TestCase):
         self.assertEqual(present.status_code, 200, present.content)
         self.assertIsNone(get_active_material_session(self.meeting))
 
-    def test_student_navigation_allowed_in_collaborative(self):
+    def test_student_navigation_blocked_in_collaborative(self):
         open_res = self._open()
         session_id = open_res.data["materialSession"]["sessionId"]
         self.meeting.refresh_from_db()
@@ -603,16 +595,16 @@ class MeetingMaterialSessionApiTests(TestCase):
             format="json",
         )
         self.assertEqual(perm.status_code, 200, perm.content)
-        result = apply_material_operation(
-            meeting=self.meeting,
-            user=self.student_user,
-            action="page_changed",
-            payload={"page": 9},
-            operation_id="nav-student",
-            session_id=session_id,
-        )
-        self.assertFalse(result.get("duplicate"))
-        self.assertEqual(result["session"].current_state.get("page"), 9)
+        with self.assertRaises(VideoMeetingError) as ctx:
+            apply_material_operation(
+                meeting=self.meeting,
+                user=self.student_user,
+                action="page_changed",
+                payload={"page": 9},
+                operation_id="nav-student",
+                session_id=session_id,
+            )
+        self.assertIn(ctx.exception.code, ("forbidden", "nav_locked"))
 
     def test_student_navigation_locked_in_view_only(self):
         open_res = self._open()
@@ -629,7 +621,7 @@ class MeetingMaterialSessionApiTests(TestCase):
             )
         self.assertIn(ctx.exception.code, ("forbidden", "nav_locked", "view_only"))
 
-    def test_independent_follow_allows_student_navigation(self):
+    def test_independent_follow_does_not_let_student_change_shared_page(self):
         from Cabinet.meeting_material_session import set_follow_policy
 
         open_res = self._open()
@@ -641,15 +633,16 @@ class MeetingMaterialSessionApiTests(TestCase):
             session_id=session_id,
         )
         self.meeting.refresh_from_db()
-        result = apply_material_operation(
-            meeting=self.meeting,
-            user=self.student_user,
-            action="page_changed",
-            payload={"page": 4},
-            operation_id="nav-independent-1",
-            session_id=session_id,
-        )
-        self.assertEqual(result["session"].current_state.get("page"), 4)
+        with self.assertRaises(VideoMeetingError) as ctx:
+            apply_material_operation(
+                meeting=self.meeting,
+                user=self.student_user,
+                action="page_changed",
+                payload={"page": 4},
+                operation_id="nav-independent-1",
+                session_id=session_id,
+            )
+        self.assertIn(ctx.exception.code, ("forbidden", "nav_locked"))
 
     def test_return_to_strict_blocks_navigation_again(self):
         from Cabinet.meeting_material_session import set_follow_policy
@@ -719,7 +712,7 @@ class MeetingMaterialSessionApiTests(TestCase):
             session_id=session_id,
         )
         session = MeetingMaterialSession.objects.get(pk=session_id)
-        ann = session.state["annotations"][0]
+        ann = session.current_state["annotations"][0]
         self.assertEqual(ann["points"][0], [0.0, 1.0])
         self.assertEqual(ann["coordSpace"], "content_v1")
         self.assertAlmostEqual(ann["width"], 0.003)
@@ -849,6 +842,14 @@ class MeetingMaterialCollabPermissionTests(MeetingMaterialSessionApiTests):
         )
         self.assertEqual(open_res.status_code, 200, open_res.content)
         session_id = open_res.data["materialSession"]["sessionId"]
+        from Cabinet.meeting_material_session import set_presentation_mode
+
+        set_presentation_mode(
+            meeting=self.meeting,
+            user=self.teacher,
+            mode="collaboration",
+            session_id=session_id,
+        )
         self.meeting.refresh_from_db()
         apply_material_operation(
             meeting=self.meeting,
@@ -859,7 +860,7 @@ class MeetingMaterialCollabPermissionTests(MeetingMaterialSessionApiTests):
             session_id=session_id,
         )
         session = MeetingMaterialSession.objects.get(pk=session_id)
-        bucket = session.current_state["fields"][str(self.student_user.pk)]
+        bucket = session.current_state["fields"]["shared"]
         self.assertEqual(bucket["task-5"]["value"], "42")
         with self.assertRaises(VideoMeetingError):
             apply_material_operation(
@@ -870,6 +871,131 @@ class MeetingMaterialCollabPermissionTests(MeetingMaterialSessionApiTests):
                 operation_id="ans-hack",
                 session_id=session_id,
             )
+
+    def test_presentation_mode_shared_teacher_field(self):
+        self.client.force_login(self.teacher)
+        open_res = self.client.post(
+            f"/api/video-meetings/{self.meeting.uuid}/material-session/",
+            {
+                "resourceKind": "interactive",
+                "title": "Урок",
+                "url": "/lessons/demo/view",
+            },
+            format="json",
+        )
+        session_id = open_res.data["materialSession"]["sessionId"]
+        op = self.client.post(
+            f"/api/video-meetings/{self.meeting.uuid}/material-session/operation/",
+            {
+                "sessionId": session_id,
+                "operationId": "teacher-field-1",
+                "action": "field_changed",
+                "payload": {"fieldId": "task-12-answer", "value": "15"},
+            },
+            format="json",
+        )
+        self.assertEqual(op.status_code, 200, op.content)
+        self.client.force_login(self.student_user)
+        sync = self.client.get(f"/api/video-meetings/{self.meeting.uuid}/material-session/")
+        shared = sync.data["materialSession"]["state"]["fields"]["shared"]
+        self.assertEqual(shared["task-12-answer"]["value"], "15")
+        self.assertEqual(sync.data["materialSession"]["presentationMode"], "presentation")
+
+    def test_student_cannot_navigate_in_collaboration(self):
+        open_res = self._open()
+        session_id = open_res.data["materialSession"]["sessionId"]
+        self.client.force_login(self.teacher)
+        mode = self.client.post(
+            f"/api/video-meetings/{self.meeting.uuid}/material-session/permission/",
+            {"sessionId": session_id, "presentationMode": "collaboration"},
+            format="json",
+        )
+        self.assertEqual(mode.status_code, 200, mode.content)
+        self.assertEqual(mode.data["materialSession"]["presentationMode"], "collaboration")
+        self.client.force_login(self.student_user)
+        nav = self.client.post(
+            f"/api/video-meetings/{self.meeting.uuid}/material-session/operation/",
+            {
+                "sessionId": session_id,
+                "operationId": "collab-nav",
+                "action": "page_changed",
+                "payload": {"page": 8},
+            },
+            format="json",
+        )
+        self.assertEqual(nav.status_code, 403)
+
+    def test_stale_navigation_is_ignored(self):
+        open_res = self._open()
+        session_id = open_res.data["materialSession"]["sessionId"]
+        self.client.force_login(self.teacher)
+        first = self.client.post(
+            f"/api/video-meetings/{self.meeting.uuid}/material-session/operation/",
+            {
+                "sessionId": session_id,
+                "operationId": "nav-new",
+                "action": "page_changed",
+                "payload": {"page": 6},
+                "baseVersion": 1,
+            },
+            format="json",
+        )
+        self.assertEqual(first.status_code, 200)
+        stale = self.client.post(
+            f"/api/video-meetings/{self.meeting.uuid}/material-session/operation/",
+            {
+                "sessionId": session_id,
+                "operationId": "nav-old",
+                "action": "page_changed",
+                "payload": {"page": 4},
+                "baseVersion": 1,
+            },
+            format="json",
+        )
+        self.assertEqual(stale.status_code, 200)
+        self.assertTrue(stale.data.get("stale") or stale.data.get("materialSession", {}).get("state", {}).get("page") == 6)
+        sync = self.client.get(f"/api/video-meetings/{self.meeting.uuid}/material-session/")
+        self.assertEqual(sync.data["materialSession"]["state"]["page"], 6)
+
+    def test_interactive_logical_state_is_shared(self):
+        self.client.force_login(self.teacher)
+        open_res = self.client.post(
+            f"/api/video-meetings/{self.meeting.uuid}/material-session/",
+            {
+                "resourceKind": "interactive",
+                "title": "Интерактив",
+                "url": "/cabinet/interactives/1",
+            },
+            format="json",
+        )
+        self.assertEqual(open_res.status_code, 200, open_res.content)
+        session_id = open_res.data["materialSession"]["sessionId"]
+        op = self.client.post(
+            f"/api/video-meetings/{self.meeting.uuid}/material-session/operation/",
+            {
+                "sessionId": session_id,
+                "operationId": "ix-1",
+                "action": "state_updated",
+                "payload": {
+                    "patch": {
+                        "interactive": {
+                            "type": "quiz",
+                            "started": True,
+                            "index": 2,
+                            "selectedIds": ["a3"],
+                        }
+                    }
+                },
+            },
+            format="json",
+        )
+        self.assertEqual(op.status_code, 200, op.content)
+        self.client.force_login(self.student_user)
+        sync = self.client.get(f"/api/video-meetings/{self.meeting.uuid}/material-session/")
+        ix = sync.data["materialSession"]["state"].get("interactive") or {}
+        self.assertEqual(ix.get("type"), "quiz")
+        self.assertEqual(ix.get("index"), 2)
+        self.assertEqual(ix.get("selectedIds"), ["a3"])
 
 
 class InferResourceKindTests(TestCase):

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  followViewportFrameCss,
   imageIntersectsViewport,
   imageRectAtViewportCenter,
   isNewerViewport,
@@ -104,5 +105,26 @@ describe("boardViewport", () => {
     );
     expect(vp.cssWidth).toBe(320);
     expect(vp.cssHeight).toBe(180);
+  });
+
+  it("follow frame maps the peer screen into the local canvas", () => {
+    const peer = normalizeViewportPayload(
+      { scrollX: 0, scrollY: 0, zoom: 1, width: 400, height: 300, seq: 1, centerX: 200, centerY: 150 },
+      "t",
+    )!;
+    const local = viewportAppStatePatch(peer, { width: 800, height: 600 });
+    const frame = followViewportFrameCss(peer, { ...local, zoom: 1 }, 1)!;
+    expect(frame.width).toBe(398);
+    expect(frame.height).toBe(298);
+    expect(frame.left).toBeCloseTo((800 - 400) / 2 + 1, 5);
+    expect(frame.top).toBeCloseTo((600 - 300) / 2 + 1, 5);
+  });
+
+  it("follow frame is null without peer screen size", () => {
+    const peer = normalizeViewportPayload(
+      { scrollX: 0, scrollY: 0, zoom: 1, seq: 1 },
+      "t",
+    )!;
+    expect(followViewportFrameCss(peer, { scrollX: 0, scrollY: 0, zoom: 1 })).toBeNull();
   });
 });

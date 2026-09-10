@@ -1,11 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import CabinetIcon from "../CabinetIcons";
-import { canFollowPeer, canGoToPeer } from "./boardFollow";
+import { useState } from "react";
 import type { CollabPeer } from "./boardCollab";
-import {
-  COLLAB_UI,
-  classifyCollabConnection,
-} from "../collabConnectionUi";
 
 export type BoardPresencePerson = {
   key: string;
@@ -20,17 +14,11 @@ export type BoardPresencePerson = {
 
 type Props = {
   people: BoardPresencePerson[];
-  selfRole?: string | null;
-  followingName?: string;
   followingClientId?: string | null;
-  compact?: boolean;
-  connectionStatus?: "off" | "connecting" | "open" | "closed" | "error" | "failed";
-  reconnectElapsedMs?: number;
-  onRetry?: () => void;
-  onGoTo: (person: BoardPresencePerson) => void;
+  canSummon?: boolean;
   onFollow: (person: BoardPresencePerson) => void;
   onStopFollow: () => void;
-  onMyArea: () => void;
+  onSummon?: () => void;
 };
 
 export function participantInitials(name: string): string {
@@ -106,224 +94,90 @@ export function peersToPresence(
   return [self, ...others];
 }
 
-function PeerMenu({
-  person,
-  selfRole,
-  followingClientId,
-  onGoTo,
-  onFollow,
-  onStopFollow,
-  onClose,
-}: {
-  person: BoardPresencePerson;
-  selfRole?: string | null;
-  followingClientId?: string | null;
-  onGoTo: (person: BoardPresencePerson) => void;
-  onFollow: (person: BoardPresencePerson) => void;
-  onStopFollow: () => void;
-  onClose: () => void;
-}) {
-  const isFollowingThis = Boolean(person.clientId && followingClientId === person.clientId);
-  const allowGo = !person.isSelf && canGoToPeer(selfRole, person.role);
-  const allowFollow = !person.isSelf && Boolean(person.clientId) && canFollowPeer(selfRole, person.role);
-  const teacherLabel = person.role === "teacher" || person.role === "owner";
-  return (
-    <div className="cb-board-peer-pop" role="menu">
-      <p className="cb-board-peer-pop__name">{person.name}</p>
-      {person.isSelf ? (
-        <p className="cb-board-peer-pop__hint">Это вы</p>
-      ) : null}
-      {allowGo ? (
-        <button
-          type="button"
-          role="menuitem"
-          onClick={() => { onGoTo(person); onClose(); }}
-        >
-          {teacherLabel ? "Перейти к учителю" : "Перейти к ученику"}
-        </button>
-      ) : null}
-      {allowFollow && !isFollowingThis ? (
-        <button
-          type="button"
-          role="menuitem"
-          onClick={() => { onFollow(person); onClose(); }}
-        >
-          {teacherLabel ? "Следить за учителем" : "Следить за учеником"}
-        </button>
-      ) : null}
-      {isFollowingThis ? (
-        <button
-          type="button"
-          role="menuitem"
-          onClick={() => { onStopFollow(); onClose(); }}
-        >
-          Остановить слежение
-        </button>
-      ) : null}
-      {!person.isSelf && !allowGo && !allowFollow ? (
-        <p className="cb-board-peer-pop__hint">{person.online ? "Подключён" : "Не в сети"}</p>
-      ) : null}
-    </div>
-  );
+export function remoteFollowablePeople(people: BoardPresencePerson[]): BoardPresencePerson[] {
+  return people.filter((person) => !person.isSelf && Boolean(person.clientId));
 }
+
+function followTooltip(name: string, followed: boolean): string {
+  const label = String(name || "").trim() || "участником";
+  return followed ? `Вы следите за ${label}` : `Следить за ${label}`;
+}
+
+const MAX_VISIBLE = 4;
 
 export default function BoardCollabControls({
   people,
-  selfRole,
-  followingName,
   followingClientId,
-  compact = false,
-  connectionStatus = "open",
-  reconnectElapsedMs = 0,
-  onRetry,
-  onGoTo,
+  canSummon = false,
   onFollow,
   onStopFollow,
-  onMyArea,
+  onSummon,
 }: Props) {
-  const [openKey, setOpenKey] = useState<string | null>(null);
-  const [listOpen, setListOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const onlineCount = people.filter((p) => p.online !== false).length;
-  const remoteCount = people.filter((p) => !p.isSelf && p.online !== false).length;
-  const connection = useMemo(() => {
-    const transport = connectionStatus === "open"
-      ? "open"
-      : connectionStatus === "failed" || connectionStatus === "error"
-        ? "failed"
-        : connectionStatus === "connecting" && reconnectElapsedMs === 0
-          ? "connecting_initial"
-          : connectionStatus === "off"
-            ? "off"
-            : "reconnecting";
-    return classifyCollabConnection({
-      transport,
-      peerCount: remoteCount,
-      collaborative: true,
-      reconnectElapsedMs,
-    });
-  }, [connectionStatus, reconnectElapsedMs, remoteCount]);
+  const [expanded, setExpanded] = useState(false);
+  const remotes = remoteFollowablePeople(people);
+  if (!remotes.length) return null;
 
-  useEffect(() => {
-    if (!openKey && !listOpen) return undefined;
-    const onDoc = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
-        setOpenKey(null);
-        setListOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [openKey, listOpen]);
+  const self = people.find((person) => person.isSelf) || null;
+  const showSummon = Boolean(canSummon && onSummon && self);
+  const overflow = remotes.length > MAX_VISIBLE;
+  const visible = expanded || !overflow ? remotes : remotes.slice(0, MAX_VISIBLE);
+  const hiddenCount = remotes.length - MAX_VISIBLE;
 
-  const selected = people.find((p) => p.key === openKey) || null;
+  const toggleFollow = (person: BoardPresencePerson) => {
+    if (!person.clientId) return;
+    if (followingClientId === person.clientId) onStopFollow();
+    else onFollow(person);
+  };
 
   return (
-    <div className="cb-board-collab-ui" ref={rootRef}>
-      <div
-        className={`cb-board-collab-ui__status is-${connection.kind}`}
-        role="status"
-        title={connection.label}
-      >
-        {connection.label}
-        {connection.kind === COLLAB_UI.ERROR && onRetry ? (
-          <button type="button" className="cb-board-collab-ui__retry" onClick={onRetry}>
-            Попробовать снова
-          </button>
-        ) : null}
-      </div>
-      {compact ? (
-        <button
-          type="button"
-          className="cb-board-collab-ui__fab"
-          aria-label="Участники"
-          title="Показать всех участников"
-          onClick={() => { setListOpen((v) => !v); setOpenKey(null); }}
-        >
-          <CabinetIcon name="users" />
-          {onlineCount > 1 ? (
-            <span className="cb-board-collab-ui__badge">{onlineCount}</span>
-          ) : null}
-        </button>
-      ) : (
-        <div className="cb-board-collab-ui__avatars" aria-label="Участники доски">
-          {people.slice(0, 6).map((person) => (
+    <div className="cb-board-collab-ui">
+      <div className="cb-board-collab-ui__avatars">
+        {visible.map((person) => {
+          const followed = Boolean(person.clientId && followingClientId === person.clientId);
+          const title = followTooltip(person.name, followed);
+          return (
             <button
               key={person.key}
               type="button"
               className={[
                 "cb-board-editor__avatar",
                 "cb-board-editor__avatar--clickable",
-                person.online === false ? "is-offline" : "",
-                followingClientId && person.clientId === followingClientId ? "is-followed" : "",
+                followed ? "is-followed" : "",
               ].filter(Boolean).join(" ")}
               style={{ backgroundColor: person.color }}
-              title={person.isSelf ? `${person.name} (вы)` : person.name}
-              aria-label={person.name}
-              onClick={() => setOpenKey((prev) => (prev === person.key ? null : person.key))}
+              title={title}
+              aria-label={title}
+              aria-pressed={followed}
+              onClick={() => toggleFollow(person)}
             >
               {person.initials}
             </button>
-          ))}
-        </div>
-      )}
-
-      {listOpen ? (
-        <div className="cb-board-peer-sheet" role="dialog" aria-label="Участники">
-          <p className="cb-board-peer-pop__name">Участники</p>
-          {people.map((person) => (
-            <button
-              key={person.key}
-              type="button"
-              className="cb-board-peer-sheet__row"
-              onClick={() => { setOpenKey(person.key); setListOpen(false); }}
-            >
-              <span className="cb-board-editor__avatar" style={{ backgroundColor: person.color }}>
-                {person.initials}
-              </span>
-              <span>{person.isSelf ? `${person.name} (вы)` : person.name}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {selected ? (
-        <PeerMenu
-          person={selected}
-          selfRole={selfRole}
-          followingClientId={followingClientId || null}
-          onGoTo={onGoTo}
-          onFollow={onFollow}
-          onStopFollow={onStopFollow}
-          onClose={() => setOpenKey(null)}
-        />
-      ) : null}
-
-      {followingName ? (
-        <div className="cb-board-follow-chip">
-          <CabinetIcon name="eye" />
-          <span>{followingName}</span>
+          );
+        })}
+        {overflow && !expanded ? (
           <button
             type="button"
-            className="cb-board-follow-chip__stop"
-            aria-label="Остановить слежение"
-            title="Остановить слежение"
-            onClick={onStopFollow}
+            className="cb-board-collab-ui__more"
+            title={`Ещё ${hiddenCount}`}
+            aria-label={`Ещё ${hiddenCount}`}
+            onClick={() => setExpanded(true)}
           >
-            <CabinetIcon name="close" />
+            +{hiddenCount}
           </button>
-        </div>
-      ) : null}
-
-      <button
-        type="button"
-        className="cb-board-collab-ui__home"
-        title="Вернуться к своей области"
-        aria-label="Вернуться к своей области"
-        onClick={onMyArea}
-      >
-        <CabinetIcon name="pointer" />
-      </button>
+        ) : null}
+        {showSummon && self ? (
+          <button
+            type="button"
+            className="cb-board-editor__avatar cb-board-editor__avatar--clickable cb-board-collab-ui__self"
+            style={{ backgroundColor: self.color }}
+            title="Перенести ко мне"
+            aria-label="Перенести ко мне"
+            onClick={onSummon}
+          >
+            {self.initials}
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

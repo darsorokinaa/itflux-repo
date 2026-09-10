@@ -40,6 +40,7 @@ ACCESS_FREE_START = "free_start"
 ACCESS_STUDENT = "student"
 ACCESS_OWNER = "owner"
 ACCESS_DEMO = "demo"
+ACCESS_MEETING = "meeting_live"
 ACCESS_LOCKED = "locked"
 
 DEFAULT_DEMO_MINUTES = 40
@@ -351,6 +352,8 @@ class LessonAccessService:
             cls.is_authenticated(user)
             and result.standalone_purchase_available
         )
+        if cls._live_meeting_presents_lesson(user, lesson):
+            return cls._meeting_view(result)
         result.access_type = ACCESS_LOCKED
         result.cta = cls._locked_cta(user, lesson, result)
         result.message, result.reason_code = cls._locked_copy(user, lesson, result)
@@ -392,6 +395,30 @@ class LessonAccessService:
         result.reason_code = ""
         result.cta = [{"type": "open", "label": "Открыть урок", "primary": True}]
         return result
+
+    @classmethod
+    def _meeting_view(cls, result: LessonAccessResult) -> LessonAccessResult:
+        """Просмотр на живом занятии: без скачивания и без каталожной покупки."""
+        result.access_type = ACCESS_MEETING
+        result.can_view = True
+        result.can_download = False
+        result.can_save = False
+        result.can_attach = False
+        result.can_assign = False
+        result.can_export = False
+        result.can_purchase = False
+        result.demo_available = False
+        result.demo_active = False
+        result.message = ""
+        result.reason_code = ""
+        result.cta = [{"type": "open", "label": "Открыть урок", "primary": True}]
+        return result
+
+    @classmethod
+    def _live_meeting_presents_lesson(cls, user, lesson) -> bool:
+        from .meeting_catalog_lesson import user_can_view_lesson_in_live_meeting
+
+        return user_can_view_lesson_in_live_meeting(user, lesson)
 
     @classmethod
     def _locked_copy(cls, user, lesson, result: LessonAccessResult) -> tuple[str, str]:

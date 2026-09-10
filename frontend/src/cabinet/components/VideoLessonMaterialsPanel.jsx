@@ -46,9 +46,7 @@ function isRowShowing(row, presented, materialSession) {
 
 function canPresentRow(row) {
   if (!row) return false;
-  if (row.kind === "variant" || row.kind === "board") return true;
-  // Остальные материалы синхронизируются через material session.
-  return row.kind !== "board";
+  return row.kind === "variant" || row.kind === "board";
 }
 
 function MaterialRow({

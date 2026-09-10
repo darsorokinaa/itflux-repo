@@ -1,8 +1,9 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import WheelVisual from "./WheelVisual";
 import { getInteractiveDisplayTitle } from "../interactivesData";
 import { resolveInteractiveAppearance } from "../interactiveAppearance";
 import { formatWheelPoints, getWheelSettings } from "../wheelUtils";
+import { usePlaybackBridge } from "../materials/collab/usePlaybackBridge";
 
 export default function WheelPlayer({
   interactive,
@@ -10,6 +11,8 @@ export default function WheelPlayer({
   bare,
   playing,
   onComplete,
+  collab = null,
+  readOnly = false,
 }) {
   const appearance = useMemo(
     () => appearanceProp || resolveInteractiveAppearance(interactive),
@@ -19,15 +22,38 @@ export default function WheelPlayer({
   const [results, setResults] = useState([]);
   const [finished, setFinished] = useState(false);
   const resultsRef = useRef([]);
+  const { emit, shouldApplyRemote, consumeSkipEmit } = usePlaybackBridge(collab || {});
   const studyMode = bare || playing;
 
+  useEffect(() => {
+    if (!collab?.follow || !shouldApplyRemote(collab.remote)) return;
+    const remote = collab.remote;
+    if (Array.isArray(remote.results)) {
+      resultsRef.current = remote.results;
+      setResults(remote.results);
+    }
+    if (remote.finished != null) setFinished(Boolean(remote.finished));
+  }, [collab?.follow, collab?.remote, shouldApplyRemote]);
+
+  useEffect(() => {
+    if (consumeSkipEmit()) return;
+    emit({
+      type: "wheel",
+      started: true,
+      results,
+      finished,
+    });
+  }, [results, finished, emit, consumeSkipEmit]);
+
   const handleSpinResult = (payload) => {
+    if (readOnly) return;
     const next = [...resultsRef.current, payload];
     resultsRef.current = next;
     setResults(next);
   };
 
   const handleFinish = () => {
+    if (readOnly) return;
     const totalPoints = resultsRef.current.reduce(
       (sum, item) => sum + (item.points_awarded || 0),
       0,
@@ -42,6 +68,7 @@ export default function WheelPlayer({
   };
 
   const restart = () => {
+    if (readOnly) return;
     resultsRef.current = [];
     setResults([]);
     setFinished(false);
@@ -92,6 +119,7 @@ export default function WheelPlayer({
             type="button"
             className="cb-btn cb-btn--outline"
             onClick={handleFinish}
+            disabled={readOnly}
           >
             Завершить
           </button>

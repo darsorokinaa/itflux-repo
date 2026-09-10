@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  catalogLessonSlugFromUrl,
   isLessonWorkspaceSelfMeetingUrl,
+  meetingLessonContentUrl,
   openPresentedMaterial,
   shouldEmbedMaterialInLesson,
 } from "./meetingPresent";
@@ -25,5 +27,21 @@ describe("lesson workspace embed", () => {
 
   it("never navigates the meeting tab to an external URL", () => {
     expect(openPresentedMaterial("https://example.com/file.pdf")).toBe("in-room");
+  });
+});
+
+describe("catalog lesson url in the meeting workspace", () => {
+  it("rewrites preview and spa viewer urls to lesson HTML", () => {
+    expect(catalogLessonSlugFromUrl("/lessons?preview=grafiki-funkci")).toBe("grafiki-funkci");
+    expect(catalogLessonSlugFromUrl("/lessons/grafiki-funkci/view")).toBe("grafiki-funkci");
+    expect(meetingLessonContentUrl("/lessons?preview=grafiki-funkci")).toBe(
+      "/api/lessons/grafiki-funkci/view/",
+    );
+    expect(meetingLessonContentUrl("https://itflux.ru/lessons/grafiki-funkci/view")).toBe(
+      "/api/lessons/grafiki-funkci/view/",
+    );
+    expect(meetingLessonContentUrl("/api/cabinet/files/1/preview/")).toBe(
+      "/api/cabinet/files/1/preview/",
+    );
   });
 });

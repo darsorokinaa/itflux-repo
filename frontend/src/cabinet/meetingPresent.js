@@ -18,6 +18,37 @@ export function shouldEmbedMaterialInLesson(url, { meetingUuid } = {}) {
   return true;
 }
 
+const LESSON_SLUG_RE = /^[A-Za-z0-9][-A-Za-z0-9_]{0,119}$/;
+
+/** Slug каталожного урока из /lessons?preview=… или /lessons/:slug[/view]. */
+export function catalogLessonSlugFromUrl(url) {
+  const raw = String(url || "").trim();
+  if (!raw) return "";
+  try {
+    const abs = raw.startsWith("http")
+      ? new URL(raw)
+      : new URL(raw, "https://local.invalid");
+    const preview = (abs.searchParams.get("preview") || "").trim();
+    if (LESSON_SLUG_RE.test(preview)) return preview;
+    const parts = abs.pathname.split("/").filter(Boolean);
+    const idx = parts.indexOf("lessons");
+    if (idx < 0 || idx + 1 >= parts.length) return "";
+    const slug = parts[idx + 1];
+    if (["view", "archive", "demo", "purchase", "purchases"].includes(slug)) return "";
+    return LESSON_SLUG_RE.test(slug) ? slug : "";
+  } catch {
+    return "";
+  }
+}
+
+/** В комнате открываем HTML урока, а не карточку каталога. */
+export function meetingLessonContentUrl(url) {
+  const raw = String(url || "").trim();
+  const slug = catalogLessonSlugFromUrl(raw);
+  if (!slug) return raw;
+  return `/api/lessons/${encodeURIComponent(slug)}/view/`;
+}
+
 export const MEETING_CALL_CHANNEL = "itflux-meeting-call";
 
 export function appendMeetingParam(url, meetingUuid) {

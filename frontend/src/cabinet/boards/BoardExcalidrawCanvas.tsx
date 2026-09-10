@@ -7,12 +7,15 @@ import {
   type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { CaptureUpdateAction, Excalidraw, mutateElement, useHandleLibrary, viewportCoordsToSceneCoords } from "@excalidraw/excalidraw";
+import { CaptureUpdateAction, Excalidraw, mutateElement, useHandleLibrary } from "@excalidraw/excalidraw";
 import { boardLibraryAdapter } from "./boardLibrary";
+import { isEraserBlockedByImage } from "./boardImageErase";
 import { mountCoalescedPointerReplay, isPointerReplayEvent, isReplayingPenPoints } from "./boardPointerInput";
-import { scheduleOncePerFrame } from "./boardLiveStroke";
+import { flushScheduledFrame, schedulePaintAtFps } from "./boardLiveStroke";
 import { mountBoardPdfToolbar } from "./boardPdfToolbar";
-import { boardPerfMeasure, mountBoardPerfOverlay } from "./boardPerfDev";
+import { boardPerfMeasure } from "./boardPerfDev";
+import { observeBoardHostSize } from "./boardHostSize";
+import { boardSceneCoordsFromClient } from "./boardSceneCoords";
 import {
   applyStrokeWidthToScene,
   clampBoardStrokeWidth,
@@ -71,31 +74,12 @@ const UI_OPTIONS = {
   },
 } as const;
 
-function zoomValue(appState: Record<string, unknown>): number {
-  const z = appState.zoom;
-  if (typeof z === "number" && z > 0) return z;
-  if (z && typeof z === "object" && typeof (z as { value?: number }).value === "number") {
-    return (z as { value: number }).value || 1;
-  }
-  return 1;
-}
-
 function sceneCoordsFromClient(
   clientX: number,
   clientY: number,
   appState: Record<string, unknown>,
 ): { x: number; y: number } {
-  const zoom = zoomValue(appState);
-  return viewportCoordsToSceneCoords(
-    { clientX, clientY },
-    {
-      zoom: { value: zoom },
-      offsetLeft: Number(appState.offsetLeft) || 0,
-      offsetTop: Number(appState.offsetTop) || 0,
-      scrollX: Number(appState.scrollX) || 0,
-      scrollY: Number(appState.scrollY) || 0,
-    },
-  );
+  return boardSceneCoordsFromClient(clientX, clientY, appState);
 }
 
 function commitLiveFreedrawRender(element: {
@@ -146,6 +130,14 @@ function BoardExcalidrawInner({
   const hostReadySentRef = useRef(false);
   const strokeControlRef = useRef<ReturnType<typeof mountBoardStrokeWidthControl> | null>(null);
   const liveFreedrawRafRef = useRef<number | null>(null);
+  const lastLivePaintAtRef = useRef(0);
+  const pendingLiveElementRef = useRef<{
+    points: number[][];
+    pressures?: number[];
+    simulatePressure?: boolean;
+    x: number;
+    y: number;
+  } | null>(null);
 
   useHandleLibrary({
     excalidrawAPI: api as never,
@@ -161,57 +153,24 @@ function BoardExcalidrawInner({
     [onApiReadyRef],
   );
 
-  // Контейнер 0×0 (скрытый iframe / переключение вкладок) — ждём размер и refresh.
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return undefined;
 
-    const tryReady = () => {
-      const rect = host.getBoundingClientRect();
-      if (rect.width < 8 || rect.height < 8) return false;
+    const onUsableSize = () => {
       try {
         apiRef.current?.refresh?.();
       } catch {
         /* ignore */
       }
-      if (!hostReadySentRef.current && apiRef.current) {
+      if (!hostReadySentRef.current && api) {
         hostReadySentRef.current = true;
         onHostReadyRef.current?.();
       }
-      return true;
     };
 
-    if (api && tryReady()) return undefined;
-
-    let ro: ResizeObserver | null = null;
-    if (typeof ResizeObserver !== "undefined") {
-      ro = new ResizeObserver(() => {
-        tryReady();
-      });
-      ro.observe(host);
-    }
-
-    const onVis = () => {
-      if (document.visibilityState === "visible") tryReady();
-    };
-    const onWinResize = () => tryReady();
-    document.addEventListener("visibilitychange", onVis);
-    window.addEventListener("resize", onWinResize);
-    window.addEventListener("orientationchange", onWinResize);
-    const vv = window.visualViewport;
-    vv?.addEventListener("resize", onWinResize);
-
-    // Повторные попытки на случай анимации layout комнаты урока.
-    const timers = [50, 150, 400, 1000].map((ms) => window.setTimeout(() => tryReady(), ms));
-
-    return () => {
-      ro?.disconnect();
-      document.removeEventListener("visibilitychange", onVis);
-      window.removeEventListener("resize", onWinResize);
-      window.removeEventListener("orientationchange", onWinResize);
-      vv?.removeEventListener("resize", onWinResize);
-      timers.forEach((id) => window.clearTimeout(id));
-    };
+    const stop = observeBoardHostSize(host, { onUsableSize });
+    return stop;
   }, [api, onHostReadyRef]);
 
   useEffect(() => {
@@ -239,7 +198,16 @@ function BoardExcalidrawInner({
           pressures?: number[];
           simulatePressure?: boolean;
         } | null;
-        if (!el || el.type !== "freedraw" || !Array.isArray(el.points)) return null;
+        const tool = String((appState.activeTool as { type?: string } | undefined)?.type || "");
+        const isFreedraw = tool === "freedraw" || el?.type === "freedraw";
+        if (!isFreedraw) return null;
+        const toScene = (clientX: number, clientY: number) => {
+          const liveApp = apiRef.current?.getAppState?.() || appState;
+          return sceneCoordsFromClient(clientX, clientY, liveApp);
+        };
+        if (!el || el.type !== "freedraw" || !Array.isArray(el.points)) {
+          return { element: null, toScene };
+        }
         return {
           element: el as {
             x: number;
@@ -249,40 +217,75 @@ function BoardExcalidrawInner({
             pressures?: number[];
             simulatePressure?: boolean;
           },
-          toScene: (clientX: number, clientY: number) => sceneCoordsFromClient(clientX, clientY, appState),
+          toScene,
         };
       },
       onLiveStrokeMutated: (element) => {
-        scheduleOncePerFrame(liveFreedrawRafRef, () => {
+        pendingLiveElementRef.current = element;
+        schedulePaintAtFps(liveFreedrawRafRef, lastLivePaintAtRef, () => {
+          const el = pendingLiveElementRef.current;
+          if (!el) return;
           boardPerfMeasure(() => {
-            commitLiveFreedrawRender(element);
-            const current = apiRef.current;
-            if (!current) return;
-            const elements = current.getSceneElementsIncludingDeleted?.() || current.getSceneElements?.() || [];
-            const appState = current.getAppState?.() || {};
-            onChangeRef.current(elements, appState, (current.getFiles?.() || {}) as SceneFiles);
-            const last = element.points[element.points.length - 1];
+            commitLiveFreedrawRender(el);
+            const last = el.points[el.points.length - 1];
             if (last) {
-              onPointerSceneMoveRef.current?.(element.x + last[0], element.y + last[1], "freedraw");
+              onPointerSceneMoveRef.current?.(el.x + last[0], el.y + last[1], "freedraw");
             }
           });
         });
       },
+      onPenStrokeEnd: () => {
+        flushScheduledFrame(liveFreedrawRafRef, () => {
+          const el = pendingLiveElementRef.current;
+          pendingLiveElementRef.current = null;
+          if (!el) return;
+          commitLiveFreedrawRender(el);
+        });
+      },
     });
     return () => {
+      pendingLiveElementRef.current = null;
       if (liveFreedrawRafRef.current != null && typeof cancelAnimationFrame === "function") {
         cancelAnimationFrame(liveFreedrawRafRef.current);
         liveFreedrawRafRef.current = null;
       }
       unmount();
     };
-  }, [boot.viewModeEnabled, onChangeRef]);
+  }, [boot.viewModeEnabled]);
 
   useEffect(() => {
     const host = hostRef.current;
-    if (!host) return undefined;
-    return mountBoardPerfOverlay(host);
-  }, []);
+    if (!host || boot.viewModeEnabled) return undefined;
+    let blocking = false;
+    const shouldBlock = (event: PointerEvent) => {
+      const current = apiRef.current;
+      if (!current) return false;
+      const app = current.getAppState?.() || {};
+      const { x, y } = sceneCoordsFromClient(event.clientX, event.clientY, app);
+      return isEraserBlockedByImage(app, current.getSceneElements?.() || [], x, y);
+    };
+    const onDown = (event: Event) => {
+      const native = event as PointerEvent;
+      blocking = shouldBlock(native);
+      if (!blocking) return;
+      native.stopPropagation();
+    };
+    const onMoveOrUp = (event: Event) => {
+      if (!blocking) return;
+      (event as PointerEvent).stopPropagation();
+      if (event.type !== "pointermove") blocking = false;
+    };
+    host.addEventListener("pointerdown", onDown, { capture: true });
+    host.addEventListener("pointermove", onMoveOrUp, { capture: true });
+    host.addEventListener("pointerup", onMoveOrUp, { capture: true });
+    host.addEventListener("pointercancel", onMoveOrUp, { capture: true });
+    return () => {
+      host.removeEventListener("pointerdown", onDown, true);
+      host.removeEventListener("pointermove", onMoveOrUp, true);
+      host.removeEventListener("pointerup", onMoveOrUp, true);
+      host.removeEventListener("pointercancel", onMoveOrUp, true);
+    };
+  }, [boot.viewModeEnabled]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -339,17 +342,8 @@ function BoardExcalidrawInner({
     const cb = onPointerSceneMoveRef.current;
     const current = apiRef.current;
     if (!cb || !current) return;
-    const host = hostRef.current;
-    if (!host) return;
-    const canvas = host.querySelector("canvas.excalidraw__canvas") as HTMLCanvasElement | null;
-    const rect = (canvas || host).getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
     const appState = current.getAppState?.() || {};
-    const zoom = zoomValue(appState);
-    const scrollX = Number(appState.scrollX) || 0;
-    const scrollY = Number(appState.scrollY) || 0;
-    const x = (e.clientX - rect.left) / zoom - scrollX;
-    const y = (e.clientY - rect.top) / zoom - scrollY;
+    const { x, y } = boardSceneCoordsFromClient(e.clientX, e.clientY, appState);
     const activeTool = appState.activeTool as { type?: string } | undefined;
     cb(x, y, String(activeTool?.type || "pointer"));
   }, [onPointerSceneMoveRef]);
@@ -358,24 +352,6 @@ function BoardExcalidrawInner({
     // Только холст: клик по тулбару/панелям не должен блокировать remote-sync.
     const target = e.target as HTMLElement | null;
     if (!target?.closest?.("canvas.excalidraw__canvas")) return;
-
-    // Стилус: включить penMode (палец = pan, перо = рисование). Excalidraw
-    // делает это сам, но remote updateScene может сбросить флаги до первого
-    // полного цикла — дублируем явно.
-    if (e.pointerType === "pen") {
-      const current = apiRef.current;
-      const appState = current?.getAppState?.() || {};
-      if (!appState.penMode || !appState.penDetected) {
-        try {
-          current?.updateScene?.({
-            appState: { penMode: true, penDetected: true },
-            captureUpdate: "NEVER",
-          });
-        } catch {
-          /* ignore */
-        }
-      }
-    }
 
     onPointerSceneDownRef.current?.();
   }, [onPointerSceneDownRef]);

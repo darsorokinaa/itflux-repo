@@ -15,6 +15,7 @@ const INBOUND_TYPES = new Set([
   "MEDIA_STATE",
   "VIEWPORT_CHANGED",
   "STATE_SNAPSHOT",
+  "STATE_CHANGED",
 ]);
 
 export function createHtmlLessonBridge({
@@ -58,8 +59,9 @@ export function createHtmlLessonBridge({
 
   return {
     isReady: () => ready,
-    requestState: () => post("REQUEST_STATE"),
     applyRemote: (payload) => post("APPLY_REMOTE", payload),
+    setState: (state) => post("SET_STATE", state),
+    requestState: () => post("REQUEST_STATE"),
     setMode: (mode, permissions) => post("SET_MODE", { mode, permissions }),
     setPermissions: (permissions) => post("SET_PERMISSIONS", { permissions }),
     destroy: () => {
@@ -78,7 +80,13 @@ export function htmlEventToMaterialOp(message) {
     case "NAVIGATION":
       return {
         action: "page_changed",
-        payload: { page: Number(payload.step || payload.page || 1) },
+        payload: {
+          page: Number(payload.step || payload.page || payload.slideIndex || 1),
+          slideId: payload.slideId || payload.slide_id,
+          slideIndex: Number(payload.slideIndex || payload.step || payload.page || 1),
+          stepId: payload.stepId || payload.step_id,
+          anchorId: payload.anchorId || payload.anchor_id,
+        },
       };
     case "ANSWER_CHANGED":
     case "ANSWER_TYPING":
@@ -120,6 +128,12 @@ export function htmlEventToMaterialOp(message) {
             tab: `media:${payload.mediaId || "main"}:${payload.state || "unknown"}`,
           },
         },
+      };
+    case "STATE_SNAPSHOT":
+    case "STATE_CHANGED":
+      return {
+        action: "state_updated",
+        payload: { patch: payload.state || payload.patch || payload },
       };
     default:
       return null;

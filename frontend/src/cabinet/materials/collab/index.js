@@ -1,4 +1,6 @@
-export { applyMaterialOperation, initialMaterialState, isFollowContentAction, isNavigationAction, isDrawAction } from "./applyMaterialOperation";
+export {
+  applyMaterialOperation, initialMaterialState, isFollowContentAction, isNavigationAction, isDrawAction,
+} from "./applyMaterialOperation";
 export { getCapabilitiesForKind, defaultCollabPermissionForKind, emptyCapabilities } from "./capabilities";
 export { canSendMaterialAction, shouldBreakFollowOnLocalNav } from "./permissions";
 export { createHtmlLessonBridge, htmlEventToMaterialOp } from "./htmlLessonBridge";
@@ -16,4 +18,15 @@ export {
   pxWidthToNorm,
   resolveStrokeWidthPx,
 } from "./materialViewportTransform";
+export {
+  PRESENTATION_MODES,
+  SHARED_BUCKET,
+  derivePresentationMode,
+  flattenContentBucket,
+  isFollowNavigationMode,
+  modeToSessionFields,
+  studentsCanInteractInMode,
+} from "./modes";
+export { attachReadyLessonDomBridge } from "./readyLessonAdapter";
+export { playbackSignature, usePlaybackBridge } from "./usePlaybackBridge";
 export * from "./constants";

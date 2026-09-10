@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from typing import Any
 
 
-# Операции навигации: по умолчанию только преподаватель (даже в collaborative).
+# Операции навигации: глобальную позицию меняет только ведущий.
 NAVIGATION_ACTIONS = frozenset({
     "page_changed",
     "scrolled",
@@ -14,6 +15,34 @@ NAVIGATION_ACTIONS = frozenset({
     "tab_changed",
     "viewport_changed",
 })
+
+SHARED_BUCKET = "shared"
+
+# Логическое состояние содержимого (не навигация, не аннотации).
+CONTENT_STATE_ACTIONS = frozenset({
+    "answer_selected",
+    "field_changed",
+    "item_moved",
+    "item_selected",
+    "pair_connected",
+    "pair_disconnected",
+    "cards_flipped",
+    "state_updated",
+    "cell_updated",
+    "sheet_changed",
+    "selection_changed",
+})
+
+ANNOTATION_ACTIONS = frozenset({
+    "annotation_added",
+    "annotation_updated",
+    "annotation_deleted",
+    "text_note_added",
+    "text_note_updated",
+    "text_note_deleted",
+})
+
+PRESENTATION_MODES = ("independent", "presentation", "collaboration")
 
 # Эфемерные действия — не повышают версию и не пишутся в БД.
 EPHEMERAL_ACTIONS = frozenset({
@@ -57,6 +86,7 @@ FOLLOW_MODE_CONTENT_ACTIONS = frozenset({
     "state_updated",
 })
 
+# Навигация из прав ученика исключена: слайдом/страницей управляет ведущий.
 COLLAB_PERMISSION_ACTIONS = {
     "answers_only": FOLLOW_MODE_CONTENT_ACTIONS | frozenset({
         "cursor", "pointer", "student_viewport",
@@ -65,14 +95,43 @@ COLLAB_PERMISSION_ACTIONS = {
         "annotation_added", "annotation_updated", "annotation_deleted",
         "text_note_added", "text_note_updated", "text_note_deleted",
         "cursor", "pointer", "annotation_preview", "student_viewport",
-    }) | NAVIGATION_ACTIONS,
-    "edit_content": CONTENT_ACTIONS | NAVIGATION_ACTIONS | EPHEMERAL_ACTIONS | frozenset({
-        "cell_updated", "sheet_changed", "selection_changed",
     }),
-    "full": CONTENT_ACTIONS | NAVIGATION_ACTIONS | EPHEMERAL_ACTIONS | frozenset({
+    "edit_content": (CONTENT_ACTIONS | EPHEMERAL_ACTIONS | frozenset({
         "cell_updated", "sheet_changed", "selection_changed",
-    }),
+    })) - NAVIGATION_ACTIONS,
+    "full": (CONTENT_ACTIONS | EPHEMERAL_ACTIONS | frozenset({
+        "cell_updated", "sheet_changed", "selection_changed",
+    })) - NAVIGATION_ACTIONS,
 }
+
+
+def presentation_mode_of(*, interaction_mode: str, follow_policy: str) -> str:
+    if (interaction_mode or "") == "collaborative":
+        return "collaboration"
+    if (follow_policy or "") == "independent":
+        return "independent"
+    return "presentation"
+
+
+def fields_for_presentation_mode(mode: str) -> tuple[str, str]:
+    value = (mode or "presentation").strip().lower()
+    if value == "collaboration":
+        return "collaborative", "strict"
+    if value == "independent":
+        return "view_only", "independent"
+    return "view_only", "strict"
+
+
+def event_channel_for_action(action: str) -> str:
+    if action in NAVIGATION_ACTIONS:
+        return "navigation"
+    if action in ANNOTATION_ACTIONS or action == "annotation_preview":
+        return "annotation"
+    if action in ("cursor", "pointer"):
+        return "pointer"
+    if action in EPHEMERAL_ACTIONS:
+        return "ephemeral"
+    return "state"
 
 MAX_ANNOTATIONS = 500
 MAX_POINTS_PER_STROKE = 800
@@ -107,6 +166,7 @@ class MaterialCollaborationAdapter:
             "items": {},
             "pairs": [],
             "notes": [],
+            "interactive": {},
         }
 
     def allowed_actions_for(
@@ -120,24 +180,21 @@ class MaterialCollaborationAdapter:
     ) -> frozenset[str]:
         if role in ("teacher", "staff", "coteacher"):
             return self.supported_actions | EPHEMERAL_ACTIONS
-        # Follow + ответы; навигация — только при independent / collaborative.
-        follow_actions = (FOLLOW_MODE_CONTENT_ACTIONS & self.student_content_actions) | {
-            "cursor",
-            "pointer",
-            "student_viewport",
-        }
-        allowed = set(follow_actions)
+        ephemeral = {"cursor", "pointer", "student_viewport"}
         if interaction_mode == "collaborative" and can_collaborate:
             perm_actions = COLLAB_PERMISSION_ACTIONS.get(
                 (collaboration_permission or "annotate").strip().lower(),
                 COLLAB_PERMISSION_ACTIONS["annotate"],
             )
-            allowed |= set(perm_actions) & (self.supported_actions | EPHEMERAL_ACTIONS | self.student_content_actions)
-            if collaboration_permission in ("edit_content", "full", "annotate"):
-                allowed |= NAVIGATION_ACTIONS & self.supported_actions
-        elif can_browse_independently:
-            allowed |= NAVIGATION_ACTIONS & self.supported_actions
-        return frozenset(allowed & (self.supported_actions | EPHEMERAL_ACTIONS))
+            allowed = set(perm_actions) & (self.supported_actions | EPHEMERAL_ACTIONS | self.student_content_actions)
+            allowed |= ephemeral
+            return frozenset((allowed - NAVIGATION_ACTIONS) & (self.supported_actions | EPHEMERAL_ACTIONS))
+        if can_browse_independently:
+            # Самостоятельно: личные ответы, без глобальной навигации.
+            allowed = (FOLLOW_MODE_CONTENT_ACTIONS & self.student_content_actions) | ephemeral
+            return frozenset(allowed & (self.supported_actions | EPHEMERAL_ACTIONS))
+        # Презентация: ученик только получает состояние (+ опционально viewport).
+        return frozenset({"student_viewport"} & (self.supported_actions | EPHEMERAL_ACTIONS))
 
     def validate_payload(self, action: str, payload: dict) -> dict:
         if not isinstance(payload, dict):
@@ -155,12 +212,24 @@ class MaterialCollaborationAdapter:
         payload: dict,
         author_id: int,
         author_role: str,
+        content_scope: str = "personal",
+        revision: int | None = None,
     ) -> dict:
         next_state = deepcopy(state) if state else self.initial_state()
         handler = getattr(self, f"_apply_{action}", None)
         if handler is None:
             raise MaterialCollaborationError(f"Действие не поддерживается: {action}", code="unsupported_action")
-        handler(next_state, payload=payload, author_id=author_id, author_role=author_role)
+        try:
+            handler(
+                next_state,
+                payload=payload,
+                author_id=author_id,
+                author_role=author_role,
+                content_scope=content_scope,
+                revision=revision,
+            )
+        except TypeError:
+            handler(next_state, payload=payload, author_id=author_id, author_role=author_role)
         return next_state
 
     def _ensure_list(self, state: dict, key: str) -> list:
@@ -177,11 +246,24 @@ class MaterialCollaborationAdapter:
             state[key] = value
         return value
 
-    def _apply_page_changed(self, state, *, payload, author_id, author_role):
-        page = int(payload.get("page") or 1)
+    def _apply_page_changed(self, state, *, payload, author_id, author_role, **_kwargs):
+        page = int(payload.get("page") or payload.get("slideIndex") or payload.get("slide_index") or 1)
         if page < 1 or page > 10_000:
             raise MaterialCollaborationError("Некорректная страница", code="invalid_page")
         state["page"] = page
+        if payload.get("slideId") or payload.get("slide_id"):
+            state["slideId"] = str(payload.get("slideId") or payload.get("slide_id"))[:120]
+        if payload.get("slideIndex") is not None or payload.get("slide_index") is not None:
+            state["slideIndex"] = int(payload.get("slideIndex") or payload.get("slide_index") or page)
+        if payload.get("stepId") or payload.get("step_id"):
+            state["stepId"] = str(payload.get("stepId") or payload.get("step_id"))[:120]
+        if payload.get("anchorId") or payload.get("anchor_id"):
+            state["anchorId"] = str(payload.get("anchorId") or payload.get("anchor_id"))[:120]
+        if payload.get("rotation") is not None:
+            try:
+                state["rotation"] = int(payload.get("rotation") or 0) % 360
+            except (TypeError, ValueError):
+                pass
 
     def _apply_scrolled(self, state, *, payload, author_id, author_role):
         scroll = float(payload.get("scroll") or 0)
@@ -281,13 +363,13 @@ class MaterialCollaborationAdapter:
                 raise MaterialCollaborationError("Нельзя удалить чужую аннотацию", code="forbidden", status=403)
         state["annotations"] = kept
 
-    def _user_answer_bucket(self, state: dict, key: str, author_id: int) -> dict:
+    def _user_answer_bucket(self, state: dict, key: str, author_id: int, content_scope: str = "personal") -> dict:
         """
         Per-user бакет answers/fields: state[key][userId][itemId] = row.
         Старый плоский формат state[key][itemId] = {value, author_id} мигрирует на лету.
         """
         root = self._ensure_dict(state, key)
-        user_key = str(author_id)
+        user_key = SHARED_BUCKET if content_scope == "shared" else str(author_id)
 
         def _is_row(value: Any) -> bool:
             return isinstance(value, dict) and ("value" in value or "author_id" in value)
@@ -315,47 +397,63 @@ class MaterialCollaborationAdapter:
             pass  # уже per-item rows
         return bucket
 
-    def _apply_answer_selected(self, state, *, payload, author_id, author_role):
-        """Ответы хранятся per-user: answers[userId][questionId]."""
+    def _apply_lww_row(self, bucket: dict, item_id: str, row: dict, *, incoming_revision: int | None) -> None:
+        prev = bucket.get(item_id) if isinstance(bucket.get(item_id), dict) else {}
+        prev_rev = int(prev.get("revision") or 0)
+        new_rev = int(incoming_revision if incoming_revision is not None else (row.get("revision") or 0))
+        if prev and incoming_revision is not None and new_rev < prev_rev:
+            return
+        if prev:
+            row.setdefault("attempt", prev.get("attempt") or 1)
+        row["revision"] = max(prev_rev, new_rev)
+        bucket[item_id] = row
+
+    def _apply_answer_selected(self, state, *, payload, author_id, author_role, content_scope="personal", revision=None, **_kwargs):
+        """Ответы: personal per-user или shared bucket в презентации/совместной работе."""
         question_id = str(payload.get("questionId") or payload.get("question_id") or "")[:64]
         if not question_id:
             raise MaterialCollaborationError("questionId обязателен", code="invalid_answer")
         value = payload.get("value")
         if isinstance(value, str):
             value = value[:MAX_FIELD_VALUE_LEN]
-        bucket = self._user_answer_bucket(state, "answers", author_id)
+        bucket = self._user_answer_bucket(state, "answers", author_id, content_scope=content_scope)
         status = str(payload.get("status") or "draft")[:32]
         if status not in ("draft", "submitted", "checked", "needs_revision"):
             status = "draft"
-        prev = bucket.get(question_id) if isinstance(bucket.get(question_id), dict) else {}
-        bucket[question_id] = {
+        incoming = payload.get("revision")
+        if incoming is None:
+            incoming = revision
+        self._apply_lww_row(bucket, question_id, {
             "value": value,
             "author_id": author_id,
             "author_role": author_role,
             "status": status,
             "updated_at": payload.get("updated_at") or payload.get("updatedAt"),
-            "attempt": int(payload.get("attempt") or prev.get("attempt") or 1),
-        }
+            "attempt": int(payload.get("attempt") or 1),
+        }, incoming_revision=incoming)
 
-    def _apply_field_changed(self, state, *, payload, author_id, author_role):
-        """Поля хранятся per-user: fields[userId][fieldId]."""
+    def _apply_field_changed(self, state, *, payload, author_id, author_role, content_scope="personal", revision=None, **_kwargs):
+        """Поля: personal per-user или shared bucket в презентации/совместной работе."""
         field_id = str(payload.get("fieldId") or payload.get("field_id") or "")[:64]
         if not field_id:
             raise MaterialCollaborationError("fieldId обязателен", code="invalid_field")
         value = payload.get("value")
         if isinstance(value, str):
             value = value[:MAX_FIELD_VALUE_LEN]
-        bucket = self._user_answer_bucket(state, "fields", author_id)
+        bucket = self._user_answer_bucket(state, "fields", author_id, content_scope=content_scope)
         status = str(payload.get("status") or "draft")[:32]
         if status not in ("draft", "submitted", "checked", "needs_revision"):
             status = "draft"
-        bucket[field_id] = {
+        incoming = payload.get("revision")
+        if incoming is None:
+            incoming = revision
+        self._apply_lww_row(bucket, field_id, {
             "value": value,
             "author_id": author_id,
             "author_role": author_role,
             "status": status,
             "updated_at": payload.get("updated_at") or payload.get("updatedAt"),
-        }
+        }, incoming_revision=incoming)
 
     def _apply_item_moved(self, state, *, payload, author_id, author_role):
         items = self._ensure_dict(state, "items")
@@ -418,10 +516,48 @@ class MaterialCollaborationAdapter:
             "author_role": author_role,
         }
 
+    def _sanitize_interactive_state(self, value: dict) -> dict:
+        allowed = {
+            "type", "started", "index", "flipped", "phase", "done", "checked", "checkOk",
+            "selectedLeft", "matched", "leftOrder", "rightOrder", "itemOrder", "order",
+            "questionOrder", "optionOrders", "selectedIds", "answered", "isCorrect",
+            "records", "knownIndices", "repeatIndices", "results", "finished", "wrong",
+        }
+        out: dict[str, Any] = {}
+        for key, raw in value.items():
+            if key not in allowed:
+                continue
+            if isinstance(raw, str):
+                out[key] = raw[:240]
+            elif isinstance(raw, bool):
+                out[key] = raw
+            elif isinstance(raw, (int, float)) and not isinstance(raw, bool):
+                out[key] = raw
+            elif isinstance(raw, list):
+                out[key] = raw[:200]
+            elif isinstance(raw, dict):
+                clipped = {}
+                for sub_key, sub_val in list(raw.items())[:200]:
+                    clipped[str(sub_key)[:64]] = sub_val
+                out[key] = clipped
+            elif raw is None:
+                out[key] = None
+        blob = json.dumps(out, default=str)
+        if len(blob) > 24_000:
+            raise MaterialCollaborationError(
+                "Слишком большое состояние интерактива",
+                code="invalid_state",
+                status=413,
+            )
+        return out
+
     def _apply_state_updated(self, state, *, payload, author_id, author_role):
         """Частичное обновление whitelist-ключей (не полная подмена state)."""
         patch = payload.get("patch") if isinstance(payload.get("patch"), dict) else payload
-        allowed_keys = {"answers", "fields", "items", "pairs", "tab", "page", "zoom", "scroll", "scrollX"}
+        allowed_keys = {
+            "answers", "fields", "items", "pairs", "tab", "page", "zoom", "scroll", "scrollX",
+            "interactive", "slideId", "slideIndex", "stepId", "anchorId", "rotation",
+        }
         for key, value in patch.items():
             if key not in allowed_keys:
                 continue
@@ -442,7 +578,10 @@ class MaterialCollaborationAdapter:
                         }
             elif key == "pairs" and isinstance(value, list):
                 state["pairs"] = value[:200]
-            elif key in ("page", "zoom", "scroll", "scrollX", "tab"):
+            elif key == "interactive" and isinstance(value, dict):
+                current = state.get("interactive") if isinstance(state.get("interactive"), dict) else {}
+                state["interactive"] = {**current, **self._sanitize_interactive_state(value)}
+            elif key in ("page", "zoom", "scroll", "scrollX", "tab", "slideId", "slideIndex", "stepId", "anchorId", "rotation"):
                 state[key] = value
 
     def _apply_text_note_added(self, state, *, payload, author_id, author_role):
@@ -590,9 +729,12 @@ class FileMaterialAdapter(PdfMaterialAdapter):
 class EmbedMaterialAdapter(MaterialCollaborationAdapter):
     resource_kind = "embed"
     supported_actions = frozenset({
-        "scrolled", "tab_changed", "annotation_added", "annotation_updated", "annotation_deleted",
+        "page_changed", "tab_changed", "viewport_changed",
+        "field_changed", "answer_selected", "state_updated",
+        "annotation_added", "annotation_updated", "annotation_deleted",
     })
     student_content_actions = frozenset({
+        "field_changed", "answer_selected", "state_updated",
         "annotation_added", "annotation_updated", "annotation_deleted",
     })
 

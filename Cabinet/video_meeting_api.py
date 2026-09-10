@@ -20,6 +20,7 @@ from .meeting_material_session import (
     serialize_material_session,
     set_follow_policy,
     set_interaction_mode,
+    set_presentation_mode,
     transfer_material_control,
 )
 from .meeting_present import (
@@ -550,8 +551,17 @@ class VideoMeetingMaterialPermissionView(APIView):
             session_id = data.get("sessionId") or data.get("session_id")
             follow_policy = data.get("followPolicy") or data.get("follow_policy")
             mode = data.get("mode") or data.get("interactionMode") or data.get("interaction_mode")
+            presentation_mode = data.get("presentationMode") or data.get("presentation_mode")
 
-            if follow_policy:
+            if presentation_mode:
+                session = set_presentation_mode(
+                    meeting=meeting,
+                    user=request.user,
+                    mode=str(presentation_mode),
+                    session_id=session_id,
+                    collaboration_permission=data.get("collaborationPermission") or data.get("collaboration_permission"),
+                )
+            elif follow_policy:
                 session = set_follow_policy(
                     meeting=meeting,
                     user=request.user,
@@ -570,7 +580,7 @@ class VideoMeetingMaterialPermissionView(APIView):
                     collaboration_permission=data.get("collaborationPermission") or data.get("collaboration_permission"),
                 )
             else:
-                raise VideoMeetingError("Укажите mode или followPolicy", code="invalid", status=400)
+                raise VideoMeetingError("Укажите mode, followPolicy или presentationMode", code="invalid", status=400)
         except VideoMeetingError as exc:
             return _error_response(exc)
         serialized = serialize_material_session(session, user=request.user, include_state=True)
@@ -581,6 +591,7 @@ class VideoMeetingMaterialPermissionView(APIView):
                 "session_id": session.pk,
                 "interaction_mode": session.interaction_mode,
                 "follow_policy": session.follow_policy,
+                "presentation_mode": serialized.get("presentationMode"),
                 "controller_user_id": session.controller_id,
                 "collaborative_scope": session.collaborative_scope,
                 "collaborative_user_ids": list(session.collaborative_user_ids or []),
@@ -686,6 +697,7 @@ class VideoMeetingMaterialOperationView(APIView):
         return Response({
             "success": True,
             "duplicate": bool(result.get("duplicate")),
+            "stale": bool(result.get("stale")),
             "ephemeral": bool(result.get("ephemeral")),
             "operation": operation,
             "version": result.get("version"),

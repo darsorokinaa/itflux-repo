@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   MAX_COALESCED_PEN_EXTRAS,
   appendLiveFreedrawSamples,
@@ -8,9 +8,10 @@ import {
   downsampleEvenly,
   isPointerReplayEvent,
   isReplayingPenPoints,
-  isSharpPenTurn,
   mountCoalescedPointerReplay,
   penMovesToInject,
+  pinPointerEventToClient,
+  createPinnedPointerUp,
   withPenPointReplay,
   readCoalescedPointerEvents,
   readPenPressure,
@@ -134,6 +135,14 @@ describe("boardPointerInput", () => {
     expect(extras[extras.length - 1].clientX).toBeLessThan(20);
   });
 
+  it("fills a fast Safari swipe with more than a dozen samples, not 12-step chords", () => {
+    const extras = densifyPenGap({ clientX: 0, clientY: 0 }, { clientX: 200, clientY: 0 });
+    expect(extras.length).toBeGreaterThan(12);
+    expect(extras.length).toBeLessThanOrEqual(48);
+    const step = extras[1].clientX - extras[0].clientX;
+    expect(step).toBeLessThan(8);
+  });
+
   it("densify keeps float coordinates", () => {
     const extras = densifyPenGap(
       { clientX: 1.25, clientY: 2.5 },
@@ -147,34 +156,28 @@ describe("boardPointerInput", () => {
     expect(densifyPenGap({ clientX: 0, clientY: 0 }, { clientX: 1, clientY: 1 })).toEqual([]);
   });
 
-  it("curves a gentle arc off the chord without moving the native endpoint", () => {
-    const prev = { clientX: 0, clientY: 12 };
-    const from = { clientX: 8, clientY: 2 };
-    const to = { clientX: 24, clientY: 0 };
-    expect(isSharpPenTurn(prev, from, to)).toBe(false);
-    const extras = densifyPenGap(from, to, prev);
+  it("stays on the chord when filling a sampling gap", () => {
+    const extras = densifyPenGap(
+      { clientX: 8, clientY: 2 },
+      { clientX: 24, clientY: 0 },
+    );
     expect(extras.length).toBeGreaterThan(2);
-    const chordYAt = (x: number) => {
-      const t = (x - from.clientX) / (to.clientX - from.clientX);
-      return from.clientY + (to.clientY - from.clientY) * t;
-    };
-    expect(extras.some((p) => Math.abs(p.clientY - chordYAt(p.clientX)) > 0.35)).toBe(true);
-    expect(extras.every((p) => p.clientX > from.clientX && p.clientX < to.clientX)).toBe(true);
+    extras.forEach((p) => {
+      const t = (p.clientX - 8) / (24 - 8);
+      const chordY = 2 + (0 - 2) * t;
+      expect(p.clientY).toBeCloseTo(chordY, 10);
+    });
   });
 
   it("stays on the chord for a 180° reversal so hooks are not invented", () => {
-    const prev = { clientX: 0, clientY: 0 };
-    const from = { clientX: 16, clientY: 0 };
-    const to = { clientX: 0, clientY: 0 };
-    expect(isSharpPenTurn(prev, from, to)).toBe(true);
-    const extras = densifyPenGap(from, to, prev);
+    const extras = densifyPenGap({ clientX: 16, clientY: 0 }, { clientX: 0, clientY: 0 });
     expect(extras.length).toBeGreaterThan(0);
     extras.forEach((p) => {
       expect(Math.abs(p.clientY)).toBeLessThan(1e-6);
     });
   });
 
-  it("does not rewrite real coalesced coordinates", () => {
+  it("does not rewrite real coalesced coordinates or invent points between them", () => {
     const last = { clientX: 0, clientY: 0 };
     const native = { clientX: 10, clientY: 10 };
     const coalesced = [
@@ -182,11 +185,11 @@ describe("boardPointerInput", () => {
       { clientX: 7.75, clientY: 8.125 },
       native,
     ];
-    const extras = penMovesToInject({ native, coalesced, last, prev: { clientX: -2, clientY: -1 } });
-    expect(extras).toEqual(expect.arrayContaining([
+    const extras = penMovesToInject({ native, coalesced, last });
+    expect(extras).toEqual([
       { clientX: 3.25, clientY: 4.5 },
       { clientX: 7.75, clientY: 8.125 },
-    ]));
+    ]);
   });
 
   it("smooths pressure with EMA and falls back when the device reports 0", () => {
@@ -197,30 +200,16 @@ describe("boardPointerInput", () => {
     expect(smoothPenPressure(0.7, 0.3)).toBeCloseTo(0.7 * 0.7 + 0.3 * 0.3);
   });
 
-  it("densify of a coarsely sampled circle is closer to the arc than the chords", () => {
-    const r = 40;
-    const samples = Array.from({ length: 8 }, (_, i) => {
-      const a = (i / 8) * Math.PI * 2;
-      return { clientX: Math.cos(a) * r, clientY: Math.sin(a) * r };
+  it("linear densify stays on the chord, not a second smoothing curve", () => {
+    const from = { clientX: 0, clientY: 0 };
+    const to = { clientX: 30, clientY: 40 };
+    const extras = densifyPenGap(from, to);
+    expect(extras.length).toBeGreaterThan(0);
+    extras.forEach((p) => {
+      const cross = (p.clientX - from.clientX) * (to.clientY - from.clientY)
+        - (p.clientY - from.clientY) * (to.clientX - from.clientX);
+      expect(Math.abs(cross)).toBeLessThan(1e-6);
     });
-    const densified: Array<{ clientX: number; clientY: number }> = [];
-    for (let i = 2; i < samples.length; i += 1) {
-      densified.push(...densifyPenGap(samples[i - 1], samples[i], samples[i - 2]));
-    }
-    const radialErr = (pts: Array<{ clientX: number; clientY: number }>) => {
-      let max = 0;
-      for (const p of pts) {
-        max = Math.max(max, Math.abs(Math.hypot(p.clientX, p.clientY) - r));
-      }
-      return max;
-    };
-    expect(densified.length).toBeGreaterThan(8);
-    const sampleKey = (p: { clientX: number; clientY: number }) => `${p.clientX},${p.clientY}`;
-    const sampleKeys = new Set(samples.map(sampleKey));
-    const intermediates = densified.filter((p) => !sampleKeys.has(sampleKey(p)));
-    const chordMidErr = r * (1 - Math.cos(Math.PI / samples.length));
-    expect(intermediates.length).toBeGreaterThan(0);
-    expect(radialErr(intermediates)).toBeLessThan(chordMidErr * 0.85);
   });
 
   it("appends live freedraw samples in place without copying the buffer", () => {
@@ -314,6 +303,196 @@ describe("boardPointerInput", () => {
     host.remove();
   });
 
+  it("queues pen samples until the live freedraw element exists", () => {
+    if (typeof PointerEvent !== "function") return;
+
+    const host = document.createElement("div");
+    const canvas = document.createElement("canvas");
+    canvas.className = "excalidraw__canvas interactive";
+    host.appendChild(canvas);
+    document.body.appendChild(host);
+
+    const points = [[0, 0]];
+    const element = { x: 0, y: 0, type: "freedraw", points, pressures: [0.4] };
+    let live: {
+      element: typeof element | null;
+      toScene: (x: number, y: number) => { x: number; y: number };
+    } | null = {
+      element: null,
+      toScene: (clientX, clientY) => ({ x: clientX, y: clientY }),
+    };
+
+    const unmount = mountCoalescedPointerReplay(host, {
+      getLiveFreedraw: () => live,
+    });
+
+    const fire = (type: string, init: PointerEventInit) => {
+      const event = new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        pointerId: 1,
+        isPrimary: true,
+        buttons: 1,
+        button: 0,
+        ...init,
+      });
+      Object.defineProperty(event, "pointerType", { value: "pen" });
+      Object.defineProperty(event, "buttons", { value: 1 });
+      canvas.dispatchEvent(event);
+    };
+
+    fire("pointerdown", { clientX: 0, clientY: 0, pressure: 0.4 });
+    fire("pointermove", { clientX: 4, clientY: 0, pressure: 0.4 });
+    expect(element.points).toEqual([[0, 0]]);
+
+    live = { element, toScene: (clientX, clientY) => ({ x: clientX, y: clientY }) };
+    fire("pointermove", { clientX: 8, clientY: 0, pressure: 0.4 });
+    expect(element.points).toBe(points);
+    expect(element.points.some((p) => p[0] === 4 && p[1] === 0)).toBe(true);
+    expect(element.points[element.points.length - 1]).toEqual([8, 0]);
+
+    unmount();
+    host.remove();
+  });
+
+  it("flushes queued pen samples on pointerup once the live element exists", () => {
+    if (typeof PointerEvent !== "function") return;
+
+    const host = document.createElement("div");
+    const canvas = document.createElement("canvas");
+    canvas.className = "excalidraw__canvas interactive";
+    host.appendChild(canvas);
+    document.body.appendChild(host);
+
+    const points = [[0, 0]];
+    const element = { x: 0, y: 0, type: "freedraw", points, pressures: [0.4] };
+    let live: {
+      element: typeof element | null;
+      toScene: (x: number, y: number) => { x: number; y: number };
+    } | null = {
+      element: null,
+      toScene: (clientX, clientY) => ({ x: clientX, y: clientY }),
+    };
+
+    const unmount = mountCoalescedPointerReplay(host, {
+      getLiveFreedraw: () => live,
+    });
+
+    const fire = (type: string, init: PointerEventInit) => {
+      const event = new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        pointerId: 1,
+        isPrimary: true,
+        buttons: type === "pointerup" ? 0 : 1,
+        button: 0,
+        ...init,
+      });
+      Object.defineProperty(event, "pointerType", { value: "pen" });
+      if (type !== "pointerup") Object.defineProperty(event, "buttons", { value: 1 });
+      canvas.dispatchEvent(event);
+    };
+
+    fire("pointerdown", { clientX: 0, clientY: 0, pressure: 0.4 });
+    fire("pointermove", { clientX: 5.5, clientY: 1.25, pressure: 0.4 });
+    live = { element, toScene: (clientX, clientY) => ({ x: clientX, y: clientY }) };
+    fire("pointerup", { clientX: 5.5, clientY: 1.25, pressure: 0.4 });
+    expect(element.points).toBe(points);
+    expect(element.points.some((p) => p[0] === 5.5 && p[1] === 1.25)).toBe(true);
+
+    unmount();
+    host.remove();
+  });
+
+  it("pending freedraw (no element yet) still consumes pen moves so Excalidraw throttle cannot drop them", () => {
+    if (typeof PointerEvent !== "function") return;
+
+    const host = document.createElement("div");
+    const canvas = document.createElement("canvas");
+    canvas.className = "excalidraw__canvas interactive";
+    host.appendChild(canvas);
+    document.body.appendChild(host);
+
+    const windowMoves: number[] = [];
+    window.addEventListener("pointermove", () => windowMoves.push(1));
+    const unmount = mountCoalescedPointerReplay(host, {
+      getLiveFreedraw: () => ({
+        element: null,
+        toScene: (clientX, clientY) => ({ x: clientX, y: clientY }),
+      }),
+    });
+
+    const event = new PointerEvent("pointermove", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      pointerId: 1,
+      buttons: 1,
+      clientX: 6.5,
+      clientY: 1.25,
+    });
+    Object.defineProperty(event, "pointerType", { value: "pen" });
+    Object.defineProperty(event, "buttons", { value: 1 });
+    canvas.dispatchEvent(event);
+    expect(windowMoves).toEqual([]);
+
+    unmount();
+    host.remove();
+  });
+
+  it("maps live samples through toScene without rounding", () => {
+    const points = [[0, 0]];
+    const el = { x: 0, y: 0, type: "freedraw" as const, points, pressures: [0.5] };
+    const added = appendLiveFreedrawSamples(el, [
+      { sceneX: 10.25 / 2, sceneY: 4.5 / 2, pressure: 0.5 },
+    ]);
+    expect(added).toBe(1);
+    expect(el.points[1][0]).toBe(5.125);
+    expect(el.points[1][1]).toBe(2.25);
+    expect(el.points).toBe(points);
+  });
+
+  it("does not swallow pen pointermove when the live hook says this is not freedraw", () => {
+    if (typeof PointerEvent !== "function") return;
+
+    const host = document.createElement("div");
+    const canvas = document.createElement("canvas");
+    canvas.className = "excalidraw__canvas interactive";
+    host.appendChild(canvas);
+    document.body.appendChild(host);
+
+    const windowMoves: number[] = [];
+    const onWindowMove = () => windowMoves.push(1);
+    window.addEventListener("pointermove", onWindowMove);
+
+    const unmount = mountCoalescedPointerReplay(host, {
+      getLiveFreedraw: () => null,
+    });
+
+    const event = new PointerEvent("pointermove", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      pointerId: 1,
+      isPrimary: true,
+      buttons: 1,
+      button: 0,
+      clientX: 12,
+      clientY: 8,
+    });
+    Object.defineProperty(event, "pointerType", { value: "pen" });
+    Object.defineProperty(event, "buttons", { value: 1 });
+    canvas.dispatchEvent(event);
+
+    expect(windowMoves.length).toBeGreaterThan(0);
+
+    unmount();
+    window.removeEventListener("pointermove", onWindowMove);
+    host.remove();
+  });
+
   it("replays pen coalesced extras onto canvas and does not replay mouse", () => {
     if (typeof PointerEvent !== "function") return;
 
@@ -394,5 +573,246 @@ describe("boardPointerInput", () => {
 
     unmount();
     host.remove();
+  });
+
+  it("keeps a long coalesced pen stroke on one mutable buffer without rounding", () => {
+    if (typeof PointerEvent !== "function") return;
+
+    const host = document.createElement("div");
+    const canvas = document.createElement("canvas");
+    canvas.className = "excalidraw__canvas interactive";
+    host.appendChild(canvas);
+    document.body.appendChild(host);
+
+    const points = [[0, 0]];
+    const element = { x: 0, y: 0, type: "freedraw", points, pressures: [0.4] };
+    let mutated = 0;
+    const unmount = mountCoalescedPointerReplay(host, {
+      getLiveFreedraw: () => ({
+        element,
+        toScene: (clientX, clientY) => ({ x: clientX, y: clientY }),
+      }),
+      onLiveStrokeMutated: () => {
+        mutated += 1;
+      },
+    });
+
+    const fire = (type: string, init: PointerEventInit & { coalesced?: Array<{ clientX: number; clientY: number }> }) => {
+      const event = new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        pointerId: 1,
+        isPrimary: true,
+        buttons: type === "pointerup" ? 0 : 1,
+        button: 0,
+        ...init,
+      });
+      Object.defineProperty(event, "pointerType", { value: "pen" });
+      if (type !== "pointerup") Object.defineProperty(event, "buttons", { value: 1 });
+      if (init.coalesced) {
+        Object.defineProperty(event, "getCoalescedEvents", { value: () => init.coalesced });
+      }
+      canvas.dispatchEvent(event);
+    };
+
+    fire("pointerdown", { clientX: 0.25, clientY: 0.5, pressure: 0.4 });
+    for (let i = 0; i < 80; i += 1) {
+      const x = (i + 1) * 1.25;
+      const y = Math.sin(i / 6) * 8.25;
+      fire("pointermove", {
+        clientX: x,
+        clientY: y,
+        pressure: 0.4 + (i % 5) * 0.05,
+        coalesced: [
+          { clientX: x - 0.8, clientY: y - 0.4 },
+          { clientX: x - 0.4, clientY: y - 0.2 },
+          { clientX: x, clientY: y },
+        ],
+      });
+    }
+    fire("pointerup", { clientX: 100, clientY: 0, pressure: 0.4 });
+
+    expect(element.points).toBe(points);
+    expect(element.points.length).toBeGreaterThan(160);
+    expect(element.points.some((p) => p[0] !== Math.round(p[0]) || p[1] !== Math.round(p[1]))).toBe(true);
+    expect(mutated).toBe(80);
+
+    unmount();
+    host.remove();
+  });
+
+  it("pins freedraw pointerup to the last sample so a stylus lift does not add a hook", () => {
+    if (typeof PointerEvent !== "function") return;
+
+    const host = document.createElement("div");
+    const canvas = document.createElement("canvas");
+    canvas.className = "excalidraw__canvas interactive";
+    host.appendChild(canvas);
+    document.body.appendChild(host);
+
+    const element = { x: 0, y: 0, type: "freedraw", points: [[0, 0]], pressures: [0.4] };
+    const unmount = mountCoalescedPointerReplay(host, {
+      getLiveFreedraw: () => ({
+        element,
+        toScene: (clientX, clientY) => ({ x: clientX, y: clientY }),
+      }),
+    });
+
+    const fire = (type: string, init: PointerEventInit) => {
+      const event = new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        pointerId: 1,
+        isPrimary: true,
+        buttons: type === "pointerup" ? 0 : 1,
+        button: 0,
+        ...init,
+      });
+      Object.defineProperty(event, "pointerType", { value: "pen" });
+      if (type !== "pointerup") Object.defineProperty(event, "buttons", { value: 1 });
+      canvas.dispatchEvent(event);
+      return event;
+    };
+
+    fire("pointerdown", { clientX: 0, clientY: 0, pressure: 0.4 });
+    fire("pointermove", { clientX: 12.5, clientY: 3.25, pressure: 0.5 });
+    const up = fire("pointerup", { clientX: 40, clientY: 28, pressure: 0.1 });
+    expect(up.clientX).toBe(12.5);
+    expect(up.clientY).toBe(3.25);
+    expect(element.points[element.points.length - 1]).toEqual([12.5, 3.25]);
+
+    unmount();
+    host.remove();
+  });
+
+  it("does not rewrite pointerup when the pen is not drawing freedraw", () => {
+    if (typeof PointerEvent !== "function") return;
+
+    const host = document.createElement("div");
+    const canvas = document.createElement("canvas");
+    canvas.className = "excalidraw__canvas interactive";
+    host.appendChild(canvas);
+    document.body.appendChild(host);
+
+    const unmount = mountCoalescedPointerReplay(host, {
+      getLiveFreedraw: () => null,
+    });
+
+    const fire = (type: string, init: PointerEventInit) => {
+      const event = new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        pointerId: 1,
+        buttons: type === "pointerup" ? 0 : 1,
+        ...init,
+      });
+      Object.defineProperty(event, "pointerType", { value: "pen" });
+      if (type !== "pointerup") Object.defineProperty(event, "buttons", { value: 1 });
+      canvas.dispatchEvent(event);
+      return event;
+    };
+
+    fire("pointerdown", { clientX: 1, clientY: 1 });
+    fire("pointermove", { clientX: 8, clientY: 9 });
+    const up = fire("pointerup", { clientX: 40, clientY: 28 });
+    expect(up.clientX).toBe(40);
+    expect(up.clientY).toBe(28);
+
+    unmount();
+    host.remove();
+  });
+
+  it("pinPointerEventToClient overwrites lift coordinates", () => {
+    if (typeof PointerEvent !== "function") return;
+    const event = new PointerEvent("pointerup", { clientX: 80, clientY: 90, bubbles: true });
+    expect(pinPointerEventToClient(event, { clientX: 3.5, clientY: 4.25, pageX: 3.5, pageY: 4.25 })).toBe(true);
+    expect(event.clientX).toBe(3.5);
+    expect(event.clientY).toBe(4.25);
+  });
+
+  it("createPinnedPointerUp carries last sample coords for WebKit fallback", () => {
+    if (typeof PointerEvent !== "function") return;
+    const native = new PointerEvent("pointerup", {
+      clientX: 80,
+      clientY: 90,
+      pointerId: 7,
+      bubbles: true,
+    });
+    Object.defineProperty(native, "pointerType", { value: "pen" });
+    const replay = createPinnedPointerUp(native, { clientX: 3.5, clientY: 4.25, pageX: 3.5, pageY: 4.25 });
+    expect(replay).toBeTruthy();
+    expect(replay?.type).toBe("pointerup");
+    expect(replay?.clientX).toBe(3.5);
+    expect(replay?.clientY).toBe(4.25);
+    expect(isPointerReplayEvent(replay as never)).toBe(true);
+  });
+
+  it("dispatches a pinned window pointerup when the lift event cannot be overwritten", () => {
+    if (typeof PointerEvent !== "function") return;
+
+    const host = document.createElement("div");
+    const canvas = document.createElement("canvas");
+    canvas.className = "excalidraw__canvas interactive";
+    host.appendChild(canvas);
+    document.body.appendChild(host);
+
+    const element = { x: 0, y: 0, type: "freedraw", points: [[0, 0]], pressures: [0.4] };
+    const unmount = mountCoalescedPointerReplay(host, {
+      getLiveFreedraw: () => ({
+        element,
+        toScene: (clientX, clientY) => ({ x: clientX, y: clientY }),
+      }),
+    });
+
+    const pinned: number[] = [];
+    const onWin = (ev: Event) => {
+      const pe = ev as PointerEvent;
+      if (isPointerReplayEvent(pe as never)) pinned.push(pe.clientX, pe.clientY);
+    };
+    window.addEventListener("pointerup", onWin);
+
+    const orig = Object.defineProperty;
+    const spy = vi.spyOn(Object, "defineProperty").mockImplementation((target, property, attrs) => {
+      // Safari: clientX is a non-writable getter. Only fail the pin overwrite
+      // (configurable:true + value), not PointerEvent construction.
+      if (
+        property === "clientX"
+        && attrs
+        && attrs.configurable === true
+        && Object.prototype.hasOwnProperty.call(attrs, "value")
+      ) {
+        throw new Error("webkit-readonly");
+      }
+      return orig.call(Object, target, property, attrs);
+    });
+
+    const fire = (type: string, init: PointerEventInit) => {
+      const event = new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        pointerId: 1,
+        buttons: type === "pointerup" ? 0 : 1,
+        ...init,
+      });
+      Object.defineProperty(event, "pointerType", { value: "pen" });
+      if (type !== "pointerup") Object.defineProperty(event, "buttons", { value: 1 });
+      canvas.dispatchEvent(event);
+    };
+
+    try {
+      fire("pointerdown", { clientX: 0, clientY: 0, pressure: 0.4 });
+      fire("pointermove", { clientX: 11.5, clientY: 2.25, pressure: 0.5 });
+      fire("pointerup", { clientX: 80, clientY: 90, pressure: 0.1 });
+    } finally {
+      spy.mockRestore();
+      window.removeEventListener("pointerup", onWin);
+      unmount();
+      host.remove();
+    }
+    expect(pinned).toEqual([11.5, 2.25]);
   });
 });

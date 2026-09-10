@@ -24,6 +24,36 @@ export function isBoardTouchShell(win: Window = window): boolean {
 }
 
 /**
+ * Subscribe to compact-shell breakpoints. matchMedia is the source of truth —
+ * not window.resize (which also fires for unrelated layout).
+ */
+export function subscribeBoardCompactShell(
+  onChange: (compact: boolean) => void,
+  win: Window = window,
+): () => void {
+  if (typeof win.matchMedia !== "function") return () => {};
+  const phone = win.matchMedia(BOARD_PHONE_MQ);
+  const landscape = win.matchMedia(BOARD_LANDSCAPE_MQ);
+  const emit = () => onChange(phone.matches || landscape.matches);
+  emit();
+  const onMq = () => emit();
+  if (typeof phone.addEventListener === "function") {
+    phone.addEventListener("change", onMq);
+    landscape.addEventListener("change", onMq);
+    return () => {
+      phone.removeEventListener("change", onMq);
+      landscape.removeEventListener("change", onMq);
+    };
+  }
+  phone.addListener(onMq);
+  landscape.addListener(onMq);
+  return () => {
+    phone.removeListener(onMq);
+    landscape.removeListener(onMq);
+  };
+}
+
+/**
  * Locks page rubber-band scroll while the board is open.
  * Restores previous overflow on release. Does not change Excalidraw scene.
  */

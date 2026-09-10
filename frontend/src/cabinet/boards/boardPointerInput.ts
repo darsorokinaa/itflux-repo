@@ -18,7 +18,8 @@ export const MAX_COALESCED_PEN_EXTRAS = 48;
 
 /** Экранные CSS px: плотнее — плавнее, но выше стоимость replay. */
 export const PEN_GAP_PX = 2.75;
-export const PEN_GAP_MAX_STEPS = 12;
+/** Раньше 12: extras шли в Excalidraw и throttleRAF их резал. Теперь append in-place. */
+export const PEN_GAP_MAX_STEPS = 48;
 
 export const PEN_PRESSURE_EMA_PREV = 0.7;
 export const PEN_PRESSURE_EMA_CURRENT = 0.3;
@@ -152,50 +153,14 @@ export function smoothPenPressure(previous: number | null, current: number): num
   return previous * PEN_PRESSURE_EMA_PREV + cur * PEN_PRESSURE_EMA_CURRENT;
 }
 
-/** Разворот ≥ ~78° — только хорда, иначе крючки на 180°. */
-export function isSharpPenTurn(
-  prev: CoalescedPointerLike,
-  from: CoalescedPointerLike,
-  to: CoalescedPointerLike,
-): boolean {
-  const ix = from.clientX - prev.clientX;
-  const iy = from.clientY - prev.clientY;
-  const ox = to.clientX - from.clientX;
-  const oy = to.clientY - from.clientY;
-  const inLen = Math.hypot(ix, iy);
-  const outLen = Math.hypot(ox, oy);
-  if (inLen < 0.5 || outLen < 0.5) return false;
-  return (ix * ox + iy * oy) / (inLen * outLen) < 0.2;
-}
-
-function samplePenSegment(
-  from: CoalescedPointerLike,
-  to: CoalescedPointerLike,
-  t: number,
-  control: { x: number; y: number } | null,
-): { x: number; y: number } {
-  if (!control) {
-    return {
-      x: from.clientX + (to.clientX - from.clientX) * t,
-      y: from.clientY + (to.clientY - from.clientY) * t,
-    };
-  }
-  const mt = 1 - t;
-  return {
-    x: mt * mt * from.clientX + 2 * mt * t * control.x + t * t * to.clientX,
-    y: mt * mt * from.clientY + 2 * mt * t * control.y + t * t * to.clientY,
-  };
-}
-
 /**
- * Донасыщение разрыва. Без prev — хорда.
- * С prev и плавным поворотом — квадратичная Безье: concavity круга,
- * конечная точка остаётся native (наконечник).
+ * Linear fill of a sampling gap. Used only when the browser did not give
+ * coalesced events (Safari). Does not invent a second smoothing curve —
+ * Excalidraw already strokes through the points we append.
  */
 export function densifyPenGap(
   from: CoalescedPointerLike,
   to: CoalescedPointerLike,
-  prev: CoalescedPointerLike | null = null,
   maxGapPx = PEN_GAP_PX,
   maxSteps = PEN_GAP_MAX_STEPS,
 ): CoalescedPointerLike[] {
@@ -206,28 +171,6 @@ export function densifyPenGap(
   const steps = Math.min(maxSteps, Math.ceil(dist / maxGapPx));
   if (steps <= 1) return [];
 
-  let control: { x: number; y: number } | null = null;
-  if (prev && !isSharpPenTurn(prev, from, to)) {
-    const ix = from.clientX - prev.clientX;
-    const iy = from.clientY - prev.clientY;
-    const inLen = Math.hypot(ix, iy);
-    if (inLen > 0.5) {
-      const dotN = (ix * dx + iy * dy) / (inLen * dist);
-      const cross = ix * dy - iy * dx;
-      const sagitta = Math.min(8, dist * 0.22, dist * 0.38 * Math.max(0, 1 - dotN));
-      if (sagitta > 0.35) {
-        const inv = 1 / dist;
-        const side = cross >= 0 ? -1 : 1;
-        const ox = (-dy * inv) * side * sagitta * 2;
-        const oy = (dx * inv) * side * sagitta * 2;
-        control = {
-          x: from.clientX + dx * 0.5 + ox,
-          y: from.clientY + dy * 0.5 + oy,
-        };
-      }
-    }
-  }
-
   const out: CoalescedPointerLike[] = [];
   const pr0 = typeof from.pressure === "number" ? from.pressure : undefined;
   const pr1 = typeof to.pressure === "number" ? to.pressure : pr0;
@@ -235,10 +178,9 @@ export function densifyPenGap(
   const pageDy = (to.pageY ?? to.clientY) - (from.pageY ?? from.clientY);
   for (let i = 1; i < steps; i += 1) {
     const t = i / steps;
-    const pos = samplePenSegment(from, to, t, control);
     out.push({
-      clientX: pos.x,
-      clientY: pos.y,
+      clientX: from.clientX + dx * t,
+      clientY: from.clientY + dy * t,
       pageX: (from.pageX ?? from.clientX) + pageDx * t,
       pageY: (from.pageY ?? from.clientY) + pageDy * t,
       pressure: pr0 != null && pr1 != null ? pr0 + (pr1 - pr0) * t : pr1,
@@ -251,21 +193,15 @@ export function penMovesToInject(opts: {
   native: CoalescedPointerLike;
   coalesced: CoalescedPointerLike[] | null;
   last: CoalescedPointerLike | null;
-  prev?: CoalescedPointerLike | null;
 }): CoalescedPointerLike[] {
-  let extras = coalescedMovesToInject(opts.native, opts.coalesced);
-  const prev = opts.prev || null;
-  if (!extras.length) {
-    if (opts.last) extras = densifyPenGap(opts.last, opts.native, prev);
-    return extras;
+  const extras = coalescedMovesToInject(opts.native, opts.coalesced);
+  if (extras.length) {
+    return extras.length > MAX_COALESCED_PEN_EXTRAS
+      ? downsampleEvenly(extras, MAX_COALESCED_PEN_EXTRAS)
+      : extras;
   }
-  if (opts.last) {
-    extras = densifyPenGap(opts.last, extras[0], prev).concat(extras);
-  }
-  if (extras.length > MAX_COALESCED_PEN_EXTRAS) {
-    extras = downsampleEvenly(extras, MAX_COALESCED_PEN_EXTRAS);
-  }
-  return extras;
+  if (!opts.last) return [];
+  return densifyPenGap(opts.last, opts.native);
 }
 
 export function findInteractiveBoardCanvas(host: ParentNode): HTMLCanvasElement | null {
@@ -282,6 +218,71 @@ function canvasFromEventTarget(target: EventTarget | null, host: Element): HTMLC
   return findInteractiveBoardCanvas(host);
 }
 
+/** Стилус на pointerup часто прыгает — Excalidraw дописывает эту точку как крючок. */
+export function pinPointerEventToClient(
+  event: PointerEvent,
+  sample: { clientX: number; clientY: number; pageX?: number; pageY?: number },
+): boolean {
+  try {
+    Object.defineProperty(event, "clientX", { value: sample.clientX, configurable: true });
+    Object.defineProperty(event, "clientY", { value: sample.clientY, configurable: true });
+    if (typeof sample.pageX === "number") {
+      Object.defineProperty(event, "pageX", { value: sample.pageX, configurable: true });
+    }
+    if (typeof sample.pageY === "number") {
+      Object.defineProperty(event, "pageY", { value: sample.pageY, configurable: true });
+    }
+    return event.clientX === sample.clientX && event.clientY === sample.clientY;
+  } catch {
+    return false;
+  }
+}
+
+/** Safari/WebKit: clientX часто неперезаписываемый getter — тогда шлём свой pointerup. */
+export function createPinnedPointerUp(
+  native: PointerEvent,
+  sample: { clientX: number; clientY: number; pageX?: number; pageY?: number },
+): PointerEvent | null {
+  if (typeof PointerEvent !== "function") return null;
+  const init: PointerEventInit = {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    pointerId: native.pointerId,
+    pointerType: native.pointerType || "pen",
+    isPrimary: native.isPrimary,
+    clientX: sample.clientX,
+    clientY: sample.clientY,
+    pageX: sample.pageX ?? sample.clientX,
+    pageY: sample.pageY ?? sample.clientY,
+    buttons: 0,
+    button: native.button,
+    pressure: 0,
+    view: native.view ?? (typeof window !== "undefined" ? window : undefined),
+  };
+  try {
+    const replay = new PointerEvent("pointerup", init);
+    Object.defineProperty(replay, ITFLUX_POINTER_REPLAY, { value: true });
+    return replay;
+  } catch {
+    try {
+      const replay = new PointerEvent("pointerup", {
+        bubbles: true,
+        cancelable: true,
+        pointerId: native.pointerId,
+        pointerType: native.pointerType || "pen",
+        clientX: sample.clientX,
+        clientY: sample.clientY,
+        buttons: 0,
+      });
+      Object.defineProperty(replay, ITFLUX_POINTER_REPLAY, { value: true });
+      return replay;
+    } catch {
+      return null;
+    }
+  }
+}
+
 export type LiveFreedrawStroke = {
   x: number;
   y: number;
@@ -292,16 +293,57 @@ export type LiveFreedrawStroke = {
 };
 
 export type LiveFreedrawSession = {
-  element: LiveFreedrawStroke;
+  /** null, пока Excalidraw ещё не создал newElement после pointerdown. */
+  element: LiveFreedrawStroke | null;
   toScene: (clientX: number, clientY: number) => { x: number; y: number };
 };
 
 export type CoalescedPointerReplayOptions = {
   /** Live freedraw из Excalidraw API. Если есть — не dispatch, а in-place points. */
   getLiveFreedraw?: () => LiveFreedrawSession | null;
-  /** Один раз на кадр: invalidate cache / локальный render / persist. */
+  /** Один раз на кадр: invalidate cache / локальный render. */
   onLiveStrokeMutated?: (element: LiveFreedrawStroke) => void;
+  /** pointerup/cancel: сбросить отложенный rAF до actionFinalize. */
+  onPenStrokeEnd?: () => void;
 };
+
+function collectPenClientSamples(
+  extras: CoalescedPointerLike[],
+  native: PointerEvent,
+  startPressure: number | null,
+): Array<{ clientX: number; clientY: number; pressure: number }> {
+  const out: Array<{ clientX: number; clientY: number; pressure: number }> = [];
+  let pressure = startPressure;
+  for (const sample of extras) {
+    pressure = smoothPenPressure(pressure, sample.pressure ?? native.pressure);
+    out.push({ clientX: sample.clientX, clientY: sample.clientY, pressure });
+  }
+  const nativePressure = smoothPenPressure(pressure, native.pressure);
+  out.push({ clientX: native.clientX, clientY: native.clientY, pressure: nativePressure });
+  return out;
+}
+
+function appendClientSamplesToLive(
+  live: LiveFreedrawSession,
+  samples: Array<{ clientX: number; clientY: number; pressure: number }>,
+): number {
+  const element = live.element;
+  if (!element || !Array.isArray(element.points) || !samples.length) return 0;
+  if (!Array.isArray(element.pressures)) element.pressures = [];
+  let added = 0;
+  for (let i = 0; i < samples.length; i += 1) {
+    const sample = samples[i];
+    const scene = live.toScene(sample.clientX, sample.clientY);
+    const dx = scene.x - element.x;
+    const dy = scene.y - element.y;
+    const last = element.points[element.points.length - 1];
+    if (last && last[0] === dx && last[1] === dy) continue;
+    element.points.push([dx, dy]);
+    if (!element.simulatePressure) element.pressures.push(sample.pressure);
+    added += 1;
+  }
+  return added;
+}
 
 /** In-place append. Не копирует points[] на каждую точку. */
 export function appendLiveFreedrawSamples(
@@ -321,22 +363,6 @@ export function appendLiveFreedrawSamples(
     added += 1;
   }
   return added;
-}
-
-function samplesFromPenMoves(
-  moves: CoalescedPointerLike[],
-  native: PointerEvent,
-  startPressure: number | null,
-  toScene: (clientX: number, clientY: number) => { x: number; y: number },
-): Array<{ sceneX: number; sceneY: number; pressure: number }> {
-  const out: Array<{ sceneX: number; sceneY: number; pressure: number }> = [];
-  let pressure = startPressure;
-  for (const sample of moves) {
-    pressure = smoothPenPressure(pressure, sample.pressure ?? native.pressure);
-    const scene = toScene(sample.clientX, sample.clientY);
-    out.push({ sceneX: scene.x, sceneY: scene.y, pressure });
-  }
-  return out;
 }
 
 function createReplayPointerMove(native: PointerEvent, sample: CoalescedPointerLike, pressure: number): PointerEvent | null {
@@ -392,8 +418,6 @@ type PenStrokeState = {
   pageX?: number;
   pageY?: number;
   pressure: number;
-  prevX: number;
-  prevY: number;
 };
 
 /**
@@ -406,13 +430,30 @@ export function mountCoalescedPointerReplay(
   options: CoalescedPointerReplayOptions = {},
 ): () => void {
   let stroke: PenStrokeState | null = null;
+  let queued: Array<{ clientX: number; clientY: number; pressure: number }> = [];
+  const hasLiveHook = typeof options.getLiveFreedraw === "function";
+
+  const applyToLive = (
+    live: LiveFreedrawSession | null,
+    samples: Array<{ clientX: number; clientY: number; pressure: number }>,
+  ): boolean => {
+    if (!live?.element || live.element.type !== "freedraw" || typeof live.toScene !== "function") {
+      return false;
+    }
+    if (!samples.length) return true;
+    appendClientSamplesToLive(live, samples);
+    options.onLiveStrokeMutated?.(live.element);
+    return true;
+  };
 
   const onPointerDown = (event: Event) => {
     const native = event as PointerEvent;
     if (native.pointerType !== "pen") {
       stroke = null;
+      queued = [];
       return;
     }
+    queued = [];
     const pressure = smoothPenPressure(null, native.pressure);
     stroke = {
       pointerId: native.pointerId,
@@ -421,8 +462,6 @@ export function mountCoalescedPointerReplay(
       pageX: native.pageX,
       pageY: native.pageY,
       pressure,
-      prevX: native.clientX,
-      prevY: native.clientY,
     };
   };
 
@@ -434,30 +473,25 @@ export function mountCoalescedPointerReplay(
     if (!canvas) return;
     const coalesced = coalescedEventsOrFallback(native);
     const last = stroke && stroke.pointerId === native.pointerId ? stroke : null;
-    const prev = last
-      ? { clientX: last.prevX, clientY: last.prevY }
-      : null;
     const extras = penMovesToInject({
       native,
       coalesced,
       last,
-      prev,
     });
     boardPerfMarkPoints(extras.length + 1);
+    const samples = collectPenClientSamples(extras, native, last?.pressure ?? null);
+    const lastPressure = samples[samples.length - 1]?.pressure ?? last?.pressure ?? native.pressure;
 
-    const live = options.getLiveFreedraw?.() || null;
-    if (live?.element?.type === "freedraw" && typeof live.toScene === "function") {
-      let pressure = last?.pressure ?? null;
-      const extrasSamples = samplesFromPenMoves(extras, native, pressure, live.toScene);
-      if (extrasSamples.length) pressure = extrasSamples[extrasSamples.length - 1].pressure;
-      const nativePressure = smoothPenPressure(pressure, native.pressure);
-      const nativeScene = live.toScene(native.clientX, native.clientY);
-      appendLiveFreedrawSamples(live.element, extrasSamples.concat({
-        sceneX: nativeScene.x,
-        sceneY: nativeScene.y,
-        pressure: nativePressure,
-      }));
-      options.onLiveStrokeMutated?.(live.element);
+    if (hasLiveHook) {
+      const live = options.getLiveFreedraw?.() || null;
+      // null = не freedraw (выбор, фигуры, ластик) — не перехватываем pointermove.
+      if (!live) return;
+      if (live.element && live.element.type === "freedraw" && !queued.length) {
+        applyToLive(live, samples);
+      } else {
+        for (let i = 0; i < samples.length; i += 1) queued.push(samples[i]);
+        if (applyToLive(live, queued)) queued.length = 0;
+      }
       native.stopPropagation();
       stroke = {
         pointerId: native.pointerId,
@@ -465,9 +499,7 @@ export function mountCoalescedPointerReplay(
         clientY: native.clientY,
         pageX: native.pageX,
         pageY: native.pageY,
-        pressure: nativePressure,
-        prevX: last ? last.clientX : native.clientX,
-        prevY: last ? last.clientY : native.clientY,
+        pressure: lastPressure,
       };
       return;
     }
@@ -487,15 +519,32 @@ export function mountCoalescedPointerReplay(
       clientY: native.clientY,
       pageX: native.pageX,
       pageY: native.pageY,
-      pressure: smoothPenPressure(pressure, native.pressure),
-      prevX: last ? last.clientX : native.clientX,
-      prevY: last ? last.clientY : native.clientY,
+      pressure: lastPressure,
     };
   };
 
   const onPointerUp = (event: Event) => {
     const native = event as PointerEvent;
-    if (stroke && native.pointerId === stroke.pointerId) stroke = null;
+    if (isPointerReplayEvent(native)) return;
+    if (!stroke || native.pointerId !== stroke.pointerId) return;
+    const live = hasLiveHook ? options.getLiveFreedraw?.() || null : null;
+    if (live && queued.length) applyToLive(live, queued);
+    // Только freedraw: фигуры/выбор пером должны видеть реальный pointerup.
+    if (live) {
+      const pinned = pinPointerEventToClient(native, stroke);
+      if (!pinned && typeof window !== "undefined") {
+        const replay = createPinnedPointerUp(native, stroke);
+        native.stopPropagation();
+        queued = [];
+        stroke = null;
+        options.onPenStrokeEnd?.();
+        if (replay) window.dispatchEvent(replay);
+        return;
+      }
+    }
+    queued = [];
+    stroke = null;
+    options.onPenStrokeEnd?.();
   };
 
   host.addEventListener("pointerdown", onPointerDown, { capture: true, passive: true });

@@ -445,7 +445,10 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
         handlers.onPermissionChanged?.(data);
         return;
       }
-      if (data.type === "material.operation") {
+      if (data.type === "material.operation"
+        || data.type === "material.navigation"
+        || data.type === "material.state"
+        || data.type === "material.annotation") {
         const opId = data.operation_id || data.operationId;
         if (markSeen(opId)) return;
         pendingOps.delete(opId);
@@ -458,6 +461,11 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
         return;
       }
       if (data.type === "material.cursor" || data.type === "material.pointer") {
+        const p = data.payload || {};
+        if (p.hidden || p.x == null || p.y == null) {
+          handlers.onCursor?.({ ...data, payload: { ...p, hidden: true } });
+          return;
+        }
         handlers.onCursor?.(data);
         return;
       }
@@ -590,13 +598,15 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
     });
   }, THROTTLE.CURSOR_MS);
 
-  const sendPointerThrottled = throttle((x, y) => {
+  const sendPointerThrottled = throttle((x, y, extra = {}) => {
     send({
       type: "material.pointer",
       action: "pointer",
       session_id: sessionId,
       operation_id: newId(),
-      payload: { x, y },
+      payload: extra.hidden || x == null || y == null
+        ? { hidden: true, page: extra.page }
+        : { x, y, page: extra.page, slideId: extra.slideId },
     });
   }, THROTTLE.POINTER_MS);
 
@@ -694,7 +704,7 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       return { ok, operationId: opId };
     },
     sendCursor: (x, y) => sendCursorThrottled(x, y),
-    sendPointer: (x, y) => sendPointerThrottled(x, y),
+    sendPointer: (x, y, extra) => sendPointerThrottled(x, y, extra || {}),
     sendAnnotationPreview,
     sendStudentViewport: (payload) => sendStudentViewportThrottled(payload),
     reportScreenshare: (payload) => send({

@@ -166,6 +166,17 @@ function elementRect(el: Record<string, unknown>): { x: number; y: number; width
   };
 }
 
+function findElementById(
+  elements: readonly unknown[],
+  id: string,
+): Record<string, unknown> | null {
+  for (const raw of elements) {
+    const el = asRecord(raw);
+    if (el && !el.isDeleted && String(el.id) === id) return el;
+  }
+  return null;
+}
+
 export function findPackedPdfSelection(
   elements: readonly unknown[] | null | undefined,
   selectedIds: unknown,
@@ -178,14 +189,12 @@ export function findPackedPdfSelection(
   );
   if (!selected.size || !Array.isArray(elements)) return null;
 
-  const list = elements.map(asRecord).filter((el): el is Record<string, unknown> => Boolean(el && el.id));
-  for (const el of list) {
-    if (el.isDeleted || !selected.has(String(el.id))) continue;
+  for (const raw of elements) {
+    const el = asRecord(raw);
+    if (!el?.id || el.isDeleted || !selected.has(String(el.id))) continue;
     const meta = getPackedPdfMeta(el);
     if (meta) {
-      const frame = el.frameId
-        ? list.find((item) => String(item.id) === String(el.frameId) && !item.isDeleted)
-        : null;
+      const frame = el.frameId ? findElementById(elements, String(el.frameId)) : null;
       return {
         elementId: String(el.id),
         frameId: frame ? String(frame.id) : (el.frameId ? String(el.frameId) : null),
@@ -198,20 +207,23 @@ export function findPackedPdfSelection(
       };
     }
     if (el.type !== "frame") continue;
-    const child = list.find((item) => !item.isDeleted && String(item.frameId || "") === String(el.id) && getPackedPdfMeta(item));
-    if (!child) continue;
-    const metaFromChild = getPackedPdfMeta(child);
-    if (!metaFromChild) continue;
-    return {
-      elementId: String(child.id),
-      frameId: String(el.id),
-      fileName: metaFromChild.fileName,
-      pageCount: metaFromChild.pageCount,
-      pdfAssetId: metaFromChild.pdfAssetId,
-      pdfUrl: metaFromChild.pdfUrl,
-      unpacked: Boolean(metaFromChild.unpacked),
-      origin: elementRect(el),
-    };
+    for (const itemRaw of elements) {
+      const item = asRecord(itemRaw);
+      if (!item || item.isDeleted) continue;
+      if (String(item.frameId || "") !== String(el.id)) continue;
+      const metaFromChild = getPackedPdfMeta(item);
+      if (!metaFromChild) continue;
+      return {
+        elementId: String(item.id),
+        frameId: String(el.id),
+        fileName: metaFromChild.fileName,
+        pageCount: metaFromChild.pageCount,
+        pdfAssetId: metaFromChild.pdfAssetId,
+        pdfUrl: metaFromChild.pdfUrl,
+        unpacked: Boolean(metaFromChild.unpacked),
+        origin: elementRect(el),
+      };
+    }
   }
   return null;
 }

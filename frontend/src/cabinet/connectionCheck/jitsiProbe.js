@@ -320,6 +320,7 @@ export async function probeJitsiInfrastructure({
           subject: "Проверка связи",
           startWithVideoMuted: true,
           startWithAudioMuted: true,
+          domain,
         }),
         startSilent: true,
       },

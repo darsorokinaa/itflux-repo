@@ -17,7 +17,13 @@ import {
   pxWidthToNorm,
   resolveStrokeWidthPx,
   isContentCoordSpace,
+  PRESENTATION_MODES,
+  derivePresentationMode,
+  flattenContentBucket,
+  isFollowNavigationMode,
+  attachReadyLessonDomBridge,
 } from "../materials/collab";
+import PdfPageViewer from "../materials/collab/PdfPageViewer";
 import SpreadsheetMaterialView from "./SpreadsheetMaterialView";
 import { useAnnotationSession } from "../annotations/AnnotationContext";
 import AnnotationToolbar from "../annotations/AnnotationToolbar";
@@ -187,6 +193,7 @@ export default function SyncedMaterialWorkspace({
   onCloseLocal,
   onCloseForAll,
   onToggleCollaborative,
+  onSetPresentationMode,
   onRetrySync,
   onStatePatch,
   onSendCursor,
@@ -199,6 +206,9 @@ export default function SyncedMaterialWorkspace({
   remoteApplyGuard = null,
   collaborationPermission = "answers_only",
   followingTeacher = true,
+  presentationMode: presentationModeProp = null,
+  materialLoadError = "",
+  materialLoading = false,
   onFollowBreak = null,
   onFollowReturn = null,
   onFollowStatusChange = null,
@@ -230,8 +240,13 @@ export default function SyncedMaterialWorkspace({
   const [customColor, setCustomColor] = useState(prefs.color);
   const [interactive, setInteractive] = useState(null);
   const [interactiveError, setInteractiveError] = useState("");
+  const [interactiveRetry, setInteractiveRetry] = useState(0);
+  const [pdfViewerFailed, setPdfViewerFailed] = useState(false);
+  const [pdfPageCount, setPdfPageCount] = useState(0);
   const [localBrowsingAway, setLocalBrowsingAway] = useState(false);
   const [localPage, setLocalPage] = useState(null);
+  const [localZoom, setLocalZoom] = useState(1);
+  const [htmlBridgeReady, setHtmlBridgeReady] = useState(false);
   const [surfaceSize, setSurfaceSize] = useState({ width: 1, height: 1 });
   const [selectedStudentId, setSelectedStudentId] = useState("");
   const [showStudentViewport, setShowStudentViewport] = useState(true);
@@ -248,15 +263,21 @@ export default function SyncedMaterialWorkspace({
   const capabilities = useMemo(() => getCapabilitiesForKind(isSpreadsheet ? "spreadsheet" : kind), [kind, isSpreadsheet]);
 
   const isCollaborative = interactionMode === "collaborative";
-  const independent = followPolicy === "independent";
-  // strict follow: навигация за учителем, ответы доступны.
-  const followMode = !canManage && !independent && !isCollaborative && !localBrowsingAway;
+  const presentationMode = presentationModeProp || derivePresentationMode({
+    interactionMode,
+    followPolicy: isCollaborative ? "strict" : followPolicy,
+  });
+  const independent = presentationMode === PRESENTATION_MODES.INDEPENDENT;
+  const followNav = isFollowNavigationMode(presentationMode) && !localBrowsingAway;
+  const followMode = !canManage && followNav && presentationMode === PRESENTATION_MODES.PRESENTATION;
   const locked = followMode;
-  const contentLocked = !canManage && !canEditContent && !followMode && !independent && !localBrowsingAway;
-  const canAnswer = canManage || canEditContent || followMode || independent || localBrowsingAway || isCollaborative;
-  // На доске Excalidraw рисование — внутри iframe; overlay «Перо» только мешает стилусу.
+  const contentLocked = !canManage && presentationMode === PRESENTATION_MODES.PRESENTATION && !localBrowsingAway;
+  const canAnswer = canManage
+    || presentationMode === PRESENTATION_MODES.COLLABORATION
+    || independent
+    || localBrowsingAway;
   const showTools = (canManage || (isCollaborative && ["annotate", "edit_content", "full"].includes(collaborationPermission))) && !isBoard;
-  const canNavigate = ((canManage && isController) || independent || isCollaborative || localBrowsingAway) && !isBoard;
+  const canNavigate = ((canManage && isController) || independent || localBrowsingAway) && !isBoard;
   const sessionDriven = Boolean(annotation?.enabled && annotation.target === "material" && showTools);
   const tool = sessionDriven
     ? materialToolFromSession(annotation.tool)
@@ -272,8 +293,10 @@ export default function SyncedMaterialWorkspace({
     [state],
   );
   const teacherPage = Number(state?.page || 1);
-  const page = localBrowsingAway && localPage != null ? localPage : teacherPage;
-  const zoom = Number(state?.zoom || 1);
+  const page = (!canManage && (!followNav || localBrowsingAway) && localPage != null)
+    ? localPage
+    : teacherPage;
+  const zoom = localZoom;
   const scroll = Number(state?.scroll || 0);
 
   const showImage = isImageUrl(url, kind);
@@ -285,19 +308,24 @@ export default function SyncedMaterialWorkspace({
     && (kind === "embed" || kind === "link" || material?.htmlLesson),
   );
 
-  // Teacher page change while browsing away → auto-return to teacher.
   useEffect(() => {
-    if (canManage || !localBrowsingAway) return;
-    setLocalBrowsingAway(false);
-    setLocalPage(null);
-    onFollowStatusChange?.(true);
-    onFollowReturn?.();
-  }, [teacherPage]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (followNav) {
+      setLocalBrowsingAway(false);
+      setLocalPage(null);
+      return;
+    }
+    if (!canManage && localPage == null) setLocalPage(teacherPage);
+  }, [followNav, canManage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setLocalBrowsingAway(false);
     setLocalPage(null);
   }, [material?.openUrl, material?.interactiveId]);
+
+  useEffect(() => {
+    setPdfViewerFailed(false);
+    setPdfPageCount(0);
+  }, [url]);
 
   // Update PDF page via hash without remounting iframe.
   useEffect(() => {
@@ -323,9 +351,21 @@ export default function SyncedMaterialWorkspace({
   }, [page, showPdf, url]);
 
   const breakFollowAndNavigate = useCallback((nextPage) => {
-    if (canManage || isCollaborative || independent) {
+    if (canManage) {
       if (remoteApplyGuard?.isRemote?.()) return;
-      onStatePatch?.({ action: "page_changed", payload: { page: nextPage } });
+      onStatePatch?.({
+        action: "page_changed",
+        payload: { page: nextPage, slideIndex: nextPage },
+      });
+      return;
+    }
+    if (independent || localBrowsingAway || !followNav) {
+      setLocalPage(nextPage);
+      if (!independent && !localBrowsingAway) {
+        setLocalBrowsingAway(true);
+        onFollowStatusChange?.(false);
+        onFollowBreak?.();
+      }
       return;
     }
     if (!localBrowsingAway) {
@@ -334,7 +374,7 @@ export default function SyncedMaterialWorkspace({
       onFollowBreak?.();
     }
     setLocalPage(nextPage);
-  }, [canManage, isCollaborative, independent, localBrowsingAway, onFollowBreak, onFollowStatusChange, onStatePatch, remoteApplyGuard]);
+  }, [canManage, independent, followNav, localBrowsingAway, onFollowBreak, onFollowStatusChange, onStatePatch, remoteApplyGuard]);
 
   const returnToTeacher = useCallback(() => {
     setLocalBrowsingAway(false);
@@ -376,55 +416,92 @@ export default function SyncedMaterialWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [material?.interactiveId, meetingUuid]);
+  }, [material?.interactiveId, meetingUuid, interactiveRetry]);
 
   const patchState = useCallback((action, payload) => {
     if (remoteApplyGuard?.isRemote?.()) return;
     onStatePatch?.({ action, payload });
   }, [onStatePatch, remoteApplyGuard]);
 
-  // HTML lesson postMessage bridge
+  // HTML lesson postMessage + same-origin fallback
   useEffect(() => {
     if (!isHtmlLesson) {
       htmlBridgeRef.current?.destroy?.();
       htmlBridgeRef.current = null;
+      setHtmlBridgeReady(false);
       return undefined;
     }
     const frame = iframeRef.current;
     if (!frame) return undefined;
-    const bridge = createHtmlLessonBridge({
+    const onBridgeEvent = (msg) => {
+      if (remoteApplyGuard?.isRemote?.()) return;
+      if (msg?.type === "READY") {
+        setHtmlBridgeReady(true);
+        return;
+      }
+      const op = htmlEventToMaterialOp(msg);
+      if (!op) return;
+      if (op.action === "field_changed" || op.action === "answer_selected" || op.action === "state_updated") {
+        if (canAnswer) onInteractiveOp?.(op);
+      } else if (op.action === "page_changed") {
+        breakFollowAndNavigate(Number(op.payload?.page) || 1);
+      } else if (canManage || isCollaborative) {
+        patchState(op.action, op.payload);
+      }
+    };
+    const sdkBridge = createHtmlLessonBridge({
       iframe: frame,
-      onEvent: (msg) => {
-        if (remoteApplyGuard?.isRemote?.()) return;
-        const op = htmlEventToMaterialOp(msg);
-        if (!op) return;
-        if (op.action === "field_changed" || op.action === "answer_selected") {
-          onInteractiveOp?.(op);
-        } else if (canManage || isCollaborative) {
-          patchState(op.action, op.payload);
-        } else if (op.action === "page_changed") {
-          breakFollowAndNavigate(Number(op.payload?.page) || 1);
-        }
-      },
+      onEvent: onBridgeEvent,
     });
-    htmlBridgeRef.current = bridge;
-    bridge.requestState();
+    let fallback = null;
+    const attachFallback = () => {
+      if (sdkBridge.isReady()) return;
+      fallback = attachReadyLessonDomBridge(frame, {
+        onEvent: onBridgeEvent,
+        isApplyingRemote: () => Boolean(remoteApplyGuard?.isRemote?.()),
+      });
+    };
+    const timer = window.setTimeout(attachFallback, 400);
+    htmlBridgeRef.current = {
+      isReady: () => sdkBridge.isReady() || Boolean(fallback?.isReady?.()),
+      requestState: () => sdkBridge.requestState(),
+      applyRemote: (payload) => {
+        sdkBridge.applyRemote(payload);
+        fallback?.applyRemote?.(payload);
+      },
+      setMode: (mode, permissions) => {
+        sdkBridge.setMode(mode, permissions);
+        fallback?.setMode?.(mode, permissions);
+      },
+      destroy: () => {
+        window.clearTimeout(timer);
+        sdkBridge.destroy();
+        fallback?.destroy?.();
+      },
+    };
+    sdkBridge.requestState();
     return () => {
-      bridge.destroy();
+      window.clearTimeout(timer);
+      htmlBridgeRef.current?.destroy?.();
       htmlBridgeRef.current = null;
     };
-  }, [isHtmlLesson, url, canManage, isCollaborative, onInteractiveOp, patchState, remoteApplyGuard, breakFollowAndNavigate]);
+  }, [isHtmlLesson, url, canManage, isCollaborative, canAnswer, onInteractiveOp, patchState, remoteApplyGuard, breakFollowAndNavigate]);
 
   useEffect(() => {
     if (!htmlBridgeRef.current || !effectivelyFollowing) return;
     htmlBridgeRef.current.applyRemote({
       page: teacherPage,
-      zoom,
-      scroll,
-      mode: isCollaborative ? "collaborative" : "follow",
+      slideIndex: teacherPage,
+      mode: presentationMode,
       permissions: collaborationPermission,
+      fields: flattenContentBucket(state?.fields, {
+        currentUserId,
+        canManage,
+        presentationMode,
+      }),
     });
-  }, [teacherPage, zoom, scroll, effectivelyFollowing, isCollaborative, collaborationPermission]);
+    htmlBridgeRef.current.setMode?.(presentationMode, collaborationPermission);
+  }, [teacherPage, effectivelyFollowing, presentationMode, collaborationPermission, state?.fields, currentUserId, canManage]);
 
   const materialKindForTransform = showImage ? "image" : showPdf ? "pdf" : kind;
 
@@ -526,7 +603,7 @@ export default function SyncedMaterialWorkspace({
       const p = toNorm(e.clientX, e.clientY);
       if (!p) return;
       setLocalPointer(p);
-      if (canManage) onSendPointer?.(p.x, p.y);
+      if (canManage) onSendPointer?.(p.x, p.y, { page, slideId: state?.slideId });
       else onSendCursor?.(p.x, p.y);
       return;
     }
@@ -632,6 +709,12 @@ export default function SyncedMaterialWorkspace({
     toolsCaptureInput,
   ]);
 
+  const handlePointerLeave = useCallback(() => {
+    if (tool !== "pointer") return;
+    setLocalPointer(null);
+    if (canManage) onSendPointer?.(null, null, { hidden: true, page });
+  }, [canManage, onSendPointer, page, tool]);
+
   const handlePointerUp = useCallback((e) => {
     if (activePointerRef.current != null && e?.pointerId !== activePointerRef.current) return;
     try {
@@ -665,22 +748,20 @@ export default function SyncedMaterialWorkspace({
 
   useEffect(() => {
     const el = stageRef.current;
-    if (!el || !canNavigate) return undefined;
+    if (!el || !canNavigate || followNav) return undefined;
     const onScroll = () => {
       if (remoteApplyGuard?.isRemote?.()) return;
-      const max = Math.max(1, el.scrollHeight - el.clientHeight);
-      patchState("scrolled", { scroll: el.scrollTop / max });
+      // Semantic anchor only — не шлём raw scrollTop как источник истины.
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
-  }, [canNavigate, patchState, remoteApplyGuard]);
+  }, [canNavigate, followNav, remoteApplyGuard]);
 
   useEffect(() => {
     const el = stageRef.current;
-    if (!el || canManage || canNavigate) return;
-    const max = Math.max(1, el.scrollHeight - el.clientHeight);
-    el.scrollTop = scroll * max;
-  }, [scroll, canManage, canNavigate, material?.openUrl, material?.contentText]);
+    if (!el || canManage || followNav) return;
+    // Не применяем raw scrollTop с другого устройства.
+  }, [scroll, canManage, followNav, material?.openUrl, material?.contentText]);
 
   // Student → teacher: report visible content viewport (normalized).
   useEffect(() => {
@@ -836,8 +917,14 @@ export default function SyncedMaterialWorkspace({
   }, [canAnswer, onInteractiveOp, remoteApplyGuard, interactive, material?.interactiveId]);
 
   // Плоский вид answers/fields для текущего пользователя (или все — для учителя).
-  const flatFields = useMemo(() => flattenUserBucket(state?.fields, currentUserId, canManage), [state?.fields, currentUserId, canManage]);
-  const flatAnswers = useMemo(() => flattenUserBucket(state?.answers, currentUserId, canManage), [state?.answers, currentUserId, canManage]);
+  const flatFields = useMemo(
+    () => flattenContentBucket(state?.fields, { currentUserId, canManage, presentationMode }),
+    [state?.fields, currentUserId, canManage, presentationMode],
+  );
+  const flatAnswers = useMemo(
+    () => flattenContentBucket(state?.answers, { currentUserId, canManage, presentationMode }),
+    [state?.answers, currentUserId, canManage, presentationMode],
+  );
 
   // Применить удалённые fields/answers к DOM.
   useEffect(() => {
@@ -930,6 +1017,7 @@ export default function SyncedMaterialWorkspace({
         typeLabel={resourceTypeLabel(isSpreadsheet ? "spreadsheet" : kind)}
         interactionMode={interactionMode}
         followPolicy={followPolicy}
+        presentationMode={presentationMode}
         syncStatus={syncStatus}
         collaborative={isCollaborative}
         collaborationPermission={collaborationPermission}
@@ -937,7 +1025,10 @@ export default function SyncedMaterialWorkspace({
         controllerLabel={controllerLabel}
         localBrowsingAway={localBrowsingAway}
         onToggleCollaborative={onToggleCollaborative}
+        onSetPresentationMode={onSetPresentationMode}
         onConfigurePermissions={onConfigurePermissions}
+        pointerActive={tool === "pointer"}
+        onTogglePointer={canManage ? () => setLocalTool((t) => (t === "pointer" ? "hand" : "pointer")) : null}
         onAllowIndependent={onAllowIndependent}
         onReturnToLeader={canManage ? onReturnToLeader : returnToTeacher}
         onTransferControl={onTransferControl}
@@ -1004,19 +1095,23 @@ export default function SyncedMaterialWorkspace({
               <>
                 <button
                   type="button"
-                  onClick={() => patchState("page_changed", { page: Math.max(1, page - 1) })}
+                  onClick={() => breakFollowAndNavigate(Math.max(1, page - 1))}
                 >
                   ←
                 </button>
-                <span className="vl-collab-tools__page">стр. {page}</span>
+                <span className="vl-collab-tools__page">
+                  стр. {page}{pdfPageCount ? ` / ${pdfPageCount}` : ""}
+                </span>
                 <button
                   type="button"
-                  onClick={() => patchState("page_changed", { page: page + 1 })}
+                  onClick={() => breakFollowAndNavigate(
+                    pdfPageCount ? Math.min(pdfPageCount, page + 1) : page + 1,
+                  )}
                 >
                   →
                 </button>
-                <button type="button" onClick={() => patchState("zoom_changed", { zoom: Math.max(0.5, zoom - 0.25) })}>−</button>
-                <button type="button" onClick={() => patchState("zoom_changed", { zoom: Math.min(3, zoom + 0.25) })}>+</button>
+                <button type="button" onClick={() => setLocalZoom((z) => Math.max(0.5, z - 0.25))}>−</button>
+                <button type="button" onClick={() => setLocalZoom((z) => Math.min(3, z + 0.25))}>+</button>
               </>
             ) : null}
           </div>
@@ -1105,13 +1200,47 @@ export default function SyncedMaterialWorkspace({
             ref={surfaceRef}
           >
             {showInteractive && interactive ? (
-              <div className="vl-synced-interactive">
-                <InteractivePlayer interactive={interactive} bare playing />
+              <div className={`vl-synced-interactive${contentLocked ? " is-content-locked" : ""}`}>
+                <InteractivePlayer
+                  interactive={interactive}
+                  bare
+                  playing
+                  readOnly={contentLocked}
+                  playbackRemote={state?.interactive || null}
+                  playbackFollow={!independent}
+                  playbackPublish={canManage ? !independent : presentationMode === PRESENTATION_MODES.COLLABORATION}
+                  onPlaybackChange={(snapshot) => patchState("state_updated", { patch: { interactive: snapshot } })}
+                />
               </div>
             ) : showInteractive && interactiveError ? (
               <div className="vl-empty">
-                <p className="vl-empty__title">Интерактив недоступен</p>
+                <p className="vl-empty__title">Не удалось загрузить материал</p>
                 <p className="vl-empty__text">{interactiveError}</p>
+                <button
+                  type="button"
+                  className="cb-btn cb-btn--primary cb-btn--sm"
+                  onClick={() => {
+                    setInteractiveError("");
+                    setInteractiveRetry((n) => n + 1);
+                    onRetrySync?.();
+                  }}
+                >
+                  Повторить
+                </button>
+              </div>
+            ) : materialLoadError ? (
+              <div className="vl-empty">
+                <p className="vl-empty__title">Не удалось загрузить материал</p>
+                <p className="vl-empty__text">{materialLoadError}</p>
+                {onRetrySync ? (
+                  <button type="button" className="cb-btn cb-btn--primary cb-btn--sm" onClick={() => onRetrySync()}>
+                    Повторить
+                  </button>
+                ) : null}
+              </div>
+            ) : materialLoading ? (
+              <div className="vl-empty">
+                <p className="vl-empty__title">Учитель открыл материал. Загружаем…</p>
               </div>
             ) : isSpreadsheet ? (
               <SpreadsheetMaterialView
@@ -1133,6 +1262,19 @@ export default function SyncedMaterialWorkspace({
                 className="vl-synced-image"
                 draggable={false}
                 onLoad={() => refreshTransform()}
+              />
+            ) : showPdf && url && !pdfViewerFailed ? (
+              <PdfPageViewer
+                url={frameBaseKey(url)}
+                page={page}
+                rotation={Number(state?.rotation || 0)}
+                onPageCount={setPdfPageCount}
+                onReady={() => refreshTransform()}
+                onRendered={() => refreshTransform()}
+                onError={() => setPdfViewerFailed(true)}
+                canvasRef={(el) => {
+                  mediaRef.current = el;
+                }}
               />
             ) : frameSrc ? (
               <iframe
@@ -1235,6 +1377,9 @@ export default function SyncedMaterialWorkspace({
                 </div>
               );
             })}
+            {contentLocked && !toolsCaptureInput ? (
+              <div className="vl-synced-lock" aria-hidden="true" />
+            ) : null}
             {toolsCaptureInput ? (
               <div
                 ref={hitRef}
@@ -1252,6 +1397,7 @@ export default function SyncedMaterialWorkspace({
                 onPointerUp={handlePointerUp}
                 onPointerCancel={handlePointerUp}
                 onLostPointerCapture={handlePointerUp}
+                onPointerLeave={handlePointerLeave}
                 role="presentation"
               />
             ) : null}
