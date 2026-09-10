@@ -7,9 +7,10 @@ import {
   type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { CaptureUpdateAction, Excalidraw, useHandleLibrary } from "@excalidraw/excalidraw";
+import { CaptureUpdateAction, Excalidraw, mutateElement, useHandleLibrary, viewportCoordsToSceneCoords } from "@excalidraw/excalidraw";
 import { boardLibraryAdapter } from "./boardLibrary";
 import { mountCoalescedPointerReplay, isPointerReplayEvent, isReplayingPenPoints } from "./boardPointerInput";
+import { scheduleOncePerFrame } from "./boardLiveStroke";
 import { mountBoardPdfToolbar } from "./boardPdfToolbar";
 import { boardPerfMeasure, mountBoardPerfOverlay } from "./boardPerfDev";
 import {
@@ -79,6 +80,38 @@ function zoomValue(appState: Record<string, unknown>): number {
   return 1;
 }
 
+function sceneCoordsFromClient(
+  clientX: number,
+  clientY: number,
+  appState: Record<string, unknown>,
+): { x: number; y: number } {
+  const zoom = zoomValue(appState);
+  return viewportCoordsToSceneCoords(
+    { clientX, clientY },
+    {
+      zoom: { value: zoom },
+      offsetLeft: Number(appState.offsetLeft) || 0,
+      offsetTop: Number(appState.offsetTop) || 0,
+      scrollX: Number(appState.scrollX) || 0,
+      scrollY: Number(appState.scrollY) || 0,
+    },
+  );
+}
+
+function commitLiveFreedrawRender(element: {
+  points: number[][];
+  pressures?: number[];
+  simulatePressure?: boolean;
+}): void {
+  const points = element.points;
+  if (!Array.isArray(points)) return;
+  const next: Record<string, unknown> = { points: points.slice() };
+  if (!element.simulatePressure && Array.isArray(element.pressures)) {
+    next.pressures = element.pressures.slice();
+  }
+  mutateElement(element as never, next as never);
+}
+
 function BoardExcalidrawInner({
   boot,
   onChangeRef,
@@ -112,6 +145,7 @@ function BoardExcalidrawInner({
   const hostRef = useRef<HTMLDivElement | null>(null);
   const hostReadySentRef = useRef(false);
   const strokeControlRef = useRef<ReturnType<typeof mountBoardStrokeWidthControl> | null>(null);
+  const liveFreedrawRafRef = useRef<number | null>(null);
 
   useHandleLibrary({
     excalidrawAPI: api as never,
@@ -192,8 +226,57 @@ function BoardExcalidrawInner({
   useEffect(() => {
     const host = hostRef.current;
     if (!host || boot.viewModeEnabled) return undefined;
-    return mountCoalescedPointerReplay(host);
-  }, [boot.viewModeEnabled]);
+    const unmount = mountCoalescedPointerReplay(host, {
+      getLiveFreedraw: () => {
+        const current = apiRef.current;
+        if (!current) return null;
+        const appState = current.getAppState?.() || {};
+        const el = appState.newElement as {
+          type?: string;
+          x?: number;
+          y?: number;
+          points?: number[][];
+          pressures?: number[];
+          simulatePressure?: boolean;
+        } | null;
+        if (!el || el.type !== "freedraw" || !Array.isArray(el.points)) return null;
+        return {
+          element: el as {
+            x: number;
+            y: number;
+            type: string;
+            points: number[][];
+            pressures?: number[];
+            simulatePressure?: boolean;
+          },
+          toScene: (clientX: number, clientY: number) => sceneCoordsFromClient(clientX, clientY, appState),
+        };
+      },
+      onLiveStrokeMutated: (element) => {
+        scheduleOncePerFrame(liveFreedrawRafRef, () => {
+          boardPerfMeasure(() => {
+            commitLiveFreedrawRender(element);
+            const current = apiRef.current;
+            if (!current) return;
+            const elements = current.getSceneElementsIncludingDeleted?.() || current.getSceneElements?.() || [];
+            const appState = current.getAppState?.() || {};
+            onChangeRef.current(elements, appState, (current.getFiles?.() || {}) as SceneFiles);
+            const last = element.points[element.points.length - 1];
+            if (last) {
+              onPointerSceneMoveRef.current?.(element.x + last[0], element.y + last[1], "freedraw");
+            }
+          });
+        });
+      },
+    });
+    return () => {
+      if (liveFreedrawRafRef.current != null && typeof cancelAnimationFrame === "function") {
+        cancelAnimationFrame(liveFreedrawRafRef.current);
+        liveFreedrawRafRef.current = null;
+      }
+      unmount();
+    };
+  }, [boot.viewModeEnabled, onChangeRef]);
 
   useEffect(() => {
     const host = hostRef.current;

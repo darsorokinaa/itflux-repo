@@ -21,7 +21,7 @@ import CabinetIcon from "../CabinetIcons";
 import BoardAccessModal from "../components/BoardAccessModal";
 import ConfirmActionModal from "../components/ConfirmActionModal";
 import BoardExcalidrawCanvas from "../boards/BoardExcalidrawCanvas";
-import { isActiveFreedrawGesture } from "../boards/boardLiveStroke";
+import { isActiveFreedrawGesture, flushScheduledFrame, scheduleOncePerFrame } from "../boards/boardLiveStroke";
 import {
   AUTOSAVE_DEBOUNCE_MS,
   boardElementsVersionSum,
@@ -417,6 +417,10 @@ export default function CabinetBoardEditorPage() {
    * такие применения на время жеста откладываются, а не выполняются сразу.
    */
   const isDrawingGestureRef = useRef(false);
+  const liveStrokeRafRef = useRef<number | null>(null);
+  const liveStrokeOwnedRef = useRef(false);
+  const flushLiveStrokePublishRef = useRef<() => void>(() => {});
+  const syncUiAfterGestureRef = useRef<() => void>(() => {});
   const pendingRemoteOpsQueueRef = useRef<Array<{ ops: BoardSceneOpsPayload; meta: { version?: number } }>>([]);
   const pendingRemoteSceneRef = useRef<{ scene: CollabScene; meta: { fromSaved?: boolean; version?: number; cleared?: boolean; lite?: boolean } } | null>(null);
   const pendingResyncRef = useRef(false);
@@ -1160,6 +1164,14 @@ export default function CabinetBoardEditorPage() {
       setBoardTheme(nextTheme);
     }
   }, []);
+  syncUiAfterGestureRef.current = () => {
+    const app = (apiRef.current?.getAppState?.() || latestSceneRef.current?.appState) as
+      | Record<string, unknown>
+      | undefined;
+    if (!app) return;
+    syncPaperOverlay(app);
+    syncLeftPanels(app);
+  };
 
   /** Применить бумагу от учителя/пира (CSS-оверлей + appState). */
   const applyRemotePaperStyle = useCallback((raw: { style?: string; bgColor?: string } | Record<string, unknown>) => {
@@ -1374,6 +1386,7 @@ export default function CabinetBoardEditorPage() {
 
   const resetCollabTransientState = useCallback(() => {
     isDrawingGestureRef.current = false;
+    liveStrokeOwnedRef.current = false;
     pendingRemoteOpsQueueRef.current = [];
     pendingRemoteSceneRef.current = null;
     pendingResyncRef.current = false;
@@ -1387,6 +1400,10 @@ export default function CabinetBoardEditorPage() {
     if (cursorApplyRafRef.current != null) {
       window.cancelAnimationFrame(cursorApplyRafRef.current);
       cursorApplyRafRef.current = null;
+    }
+    if (liveStrokeRafRef.current != null) {
+      window.cancelAnimationFrame(liveStrokeRafRef.current);
+      liveStrokeRafRef.current = null;
     }
     if (gestureEndBoundRef.current) {
       window.removeEventListener("pointerup", gestureEndBoundRef.current);
@@ -1438,6 +1455,26 @@ export default function CabinetBoardEditorPage() {
     pushLocalEraseScene(els);
   }, [pushLocalEraseScene]);
 
+  const publishLiveStrokeScene = useCallback(() => {
+    const scene = latestSceneRef.current;
+    if (!scene) return;
+    lastElementsVersionSumRef.current = boardElementsVersionSum(scene.elements);
+    markLocalSceneChange();
+    safeSetSaveStatus((s) => (s === "dirty" || s === "saving" ? s : "dirty"));
+    debouncedSaver.schedule();
+    collabRef.current?.publishLive(
+      {
+        elements: scene.elements as unknown[],
+        appState: scene.appState,
+        files: scene.files,
+      },
+      versionRef.current,
+    );
+  }, [debouncedSaver, markLocalSceneChange, safeSetSaveStatus]);
+  flushLiveStrokePublishRef.current = () => {
+    flushScheduledFrame(liveStrokeRafRef, publishLiveStrokeScene);
+  };
+
   const handleChange = useCallback(
     (elements: readonly unknown[], appState: Record<string, unknown>, files: Record<string, unknown>) => {
       const liveFreedraw = isActiveFreedrawGesture(isDrawingGestureRef.current, appState);
@@ -1467,37 +1504,29 @@ export default function CabinetBoardEditorPage() {
       }
 
       if (liveFreedraw) {
-        const nextElements = stampElementOwnership(
-          elements as unknown[],
-          knownElementIdsRef.current,
-          viewerUserIdRef.current,
-          viewerRoleRef.current,
-        );
-        for (const raw of nextElements) {
-          const id = raw && typeof raw === "object" ? (raw as { id?: string }).id : null;
-          if (id) knownElementIdsRef.current.add(id);
+        let nextElements = elements as unknown[];
+        if (!liveStrokeOwnedRef.current) {
+          nextElements = stampElementOwnership(
+            nextElements,
+            knownElementIdsRef.current,
+            viewerUserIdRef.current,
+            viewerRoleRef.current,
+          );
+          for (const raw of nextElements) {
+            const id = raw && typeof raw === "object" ? (raw as { id?: string }).id : null;
+            if (id) knownElementIdsRef.current.add(id);
+          }
+          liveStrokeOwnedRef.current = true;
         }
         const prevScene = latestSceneRef.current;
-        const nextVersionSum = boardElementsVersionSum(nextElements);
         latestSceneRef.current = {
           elements: nextElements,
           appState: prevScene?.appState || sanitizeAppState(appState),
           files: lastFilesRef.current || (files as Record<string, unknown>),
         };
         lastElementsRef.current = nextElements;
-        lastElementsVersionSumRef.current = nextVersionSum;
         lastRawFilesRef.current = files;
-        markLocalSceneChange();
-        safeSetSaveStatus((s) => (s === "dirty" || s === "saving" ? s : "dirty"));
-        debouncedSaver.schedule();
-        collabRef.current?.publishLive(
-          {
-            elements: nextElements,
-            appState: latestSceneRef.current.appState,
-            files: latestSceneRef.current.files,
-          },
-          versionRef.current,
-        );
+        scheduleOncePerFrame(liveStrokeRafRef, publishLiveStrokeScene);
         return;
       }
 
@@ -1619,7 +1648,7 @@ export default function CabinetBoardEditorPage() {
       );
       if (eraseFix.restored) pushLocalEraseScene(nextElements);
     },
-    [debouncedSaver, externalizeAndSyncFiles, markLocalSceneChange, publishLiveScene, pushLocalEraseScene, safeSetSaveStatus, syncPaperOverlay, syncLeftPanels],
+    [debouncedSaver, externalizeAndSyncFiles, markLocalSceneChange, publishLiveScene, publishLiveStrokeScene, pushLocalEraseScene, safeSetSaveStatus, syncPaperOverlay, syncLeftPanels],
   );
 
   // Совместное редактирование с привязанным учеником (WebSocket live + REST persist).
@@ -2782,6 +2811,7 @@ export default function CabinetBoardEditorPage() {
 
   const handlePointerSceneDown = useCallback(() => {
     isDrawingGestureRef.current = true;
+    liveStrokeOwnedRef.current = false;
     // Страховка: pointerup может уйти мимо host (iframe / capture) — слушаем window.
     if (gestureEndBoundRef.current) {
       window.removeEventListener("pointerup", gestureEndBoundRef.current);
@@ -2793,6 +2823,8 @@ export default function CabinetBoardEditorPage() {
       gestureEndBoundRef.current = null;
       if (!isDrawingGestureRef.current) return;
       isDrawingGestureRef.current = false;
+      flushLiveStrokePublishRef.current();
+      syncUiAfterGestureRef.current();
       flushPendingRemoteAppliesRef.current();
       flushPendingEraseScene();
       collabRef.current?.flushLiveNow();
@@ -2814,6 +2846,8 @@ export default function CabinetBoardEditorPage() {
       return;
     }
     isDrawingGestureRef.current = false;
+    flushLiveStrokePublishRef.current();
+    syncUiAfterGestureRef.current();
     flushPendingRemoteAppliesRef.current();
     flushPendingEraseScene();
     if (!collaborative && !canEdit) return;

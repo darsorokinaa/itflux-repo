@@ -1,11 +1,9 @@
 /**
  * Плотная выборка pointer-точек для freehand.
- * Excalidraw 0.18 обрабатывает только последний pointermove кадра и не
- * вызывает getCoalescedEvents — на стилусе сегменты становятся угловатыми.
- * Промежуточные события проигрываем в тот же canvas; формат freedraw не меняем.
- *
- * Мышь/палец не реплеим: у них и так достаточно точек, лишние synthetic
- * pointermove только увеличивают стоимость onChange.
+ * Excalidraw 0.18 не читает getCoalescedEvents и throttleRAF-ит pointermove
+ * (без trailing) — в кадр попадает одно событие, extras/dispatch теряются.
+ * Для pen пишем coalesced/densify прямо в live-element.points (mutable),
+ * render/persist — раз в rAF. Мышь/палец не трогаем.
  */
 
 import { boardPerfMarkInput, boardPerfMarkPoints } from "./boardPerfDev";
@@ -284,6 +282,63 @@ function canvasFromEventTarget(target: EventTarget | null, host: Element): HTMLC
   return findInteractiveBoardCanvas(host);
 }
 
+export type LiveFreedrawStroke = {
+  x: number;
+  y: number;
+  type?: string;
+  points: number[][];
+  pressures?: number[];
+  simulatePressure?: boolean;
+};
+
+export type LiveFreedrawSession = {
+  element: LiveFreedrawStroke;
+  toScene: (clientX: number, clientY: number) => { x: number; y: number };
+};
+
+export type CoalescedPointerReplayOptions = {
+  /** Live freedraw из Excalidraw API. Если есть — не dispatch, а in-place points. */
+  getLiveFreedraw?: () => LiveFreedrawSession | null;
+  /** Один раз на кадр: invalidate cache / локальный render / persist. */
+  onLiveStrokeMutated?: (element: LiveFreedrawStroke) => void;
+};
+
+/** In-place append. Не копирует points[] на каждую точку. */
+export function appendLiveFreedrawSamples(
+  element: LiveFreedrawStroke,
+  samples: Array<{ sceneX: number; sceneY: number; pressure: number }>,
+): number {
+  if (!Array.isArray(element.points) || !samples.length) return 0;
+  if (!Array.isArray(element.pressures)) element.pressures = [];
+  let added = 0;
+  for (const sample of samples) {
+    const dx = sample.sceneX - element.x;
+    const dy = sample.sceneY - element.y;
+    const last = element.points[element.points.length - 1];
+    if (last && last[0] === dx && last[1] === dy) continue;
+    element.points.push([dx, dy]);
+    if (!element.simulatePressure) element.pressures.push(sample.pressure);
+    added += 1;
+  }
+  return added;
+}
+
+function samplesFromPenMoves(
+  moves: CoalescedPointerLike[],
+  native: PointerEvent,
+  startPressure: number | null,
+  toScene: (clientX: number, clientY: number) => { x: number; y: number },
+): Array<{ sceneX: number; sceneY: number; pressure: number }> {
+  const out: Array<{ sceneX: number; sceneY: number; pressure: number }> = [];
+  let pressure = startPressure;
+  for (const sample of moves) {
+    pressure = smoothPenPressure(pressure, sample.pressure ?? native.pressure);
+    const scene = toScene(sample.clientX, sample.clientY);
+    out.push({ sceneX: scene.x, sceneY: scene.y, pressure });
+  }
+  return out;
+}
+
 function createReplayPointerMove(native: PointerEvent, sample: CoalescedPointerLike, pressure: number): PointerEvent | null {
   if (typeof PointerEvent !== "function") return null;
   const base: PointerEventInit = {
@@ -341,8 +396,15 @@ type PenStrokeState = {
   prevY: number;
 };
 
-/** Capture-фаза: промежуточные coalesced / densify → synthetic pointermove на canvas. */
-export function mountCoalescedPointerReplay(host: Element): () => void {
+/**
+ * Capture-фаза: coalesced/densify в live points[].
+ * Не dispatch в Excalidraw: его throttleRAF отбрасывает extras и может
+ * дописать устаревшую первую точку кадра (крючок).
+ */
+export function mountCoalescedPointerReplay(
+  host: Element,
+  options: CoalescedPointerReplayOptions = {},
+): () => void {
   let stroke: PenStrokeState | null = null;
 
   const onPointerDown = (event: Event) => {
@@ -382,6 +444,34 @@ export function mountCoalescedPointerReplay(host: Element): () => void {
       prev,
     });
     boardPerfMarkPoints(extras.length + 1);
+
+    const live = options.getLiveFreedraw?.() || null;
+    if (live?.element?.type === "freedraw" && typeof live.toScene === "function") {
+      let pressure = last?.pressure ?? null;
+      const extrasSamples = samplesFromPenMoves(extras, native, pressure, live.toScene);
+      if (extrasSamples.length) pressure = extrasSamples[extrasSamples.length - 1].pressure;
+      const nativePressure = smoothPenPressure(pressure, native.pressure);
+      const nativeScene = live.toScene(native.clientX, native.clientY);
+      appendLiveFreedrawSamples(live.element, extrasSamples.concat({
+        sceneX: nativeScene.x,
+        sceneY: nativeScene.y,
+        pressure: nativePressure,
+      }));
+      options.onLiveStrokeMutated?.(live.element);
+      native.stopPropagation();
+      stroke = {
+        pointerId: native.pointerId,
+        clientX: native.clientX,
+        clientY: native.clientY,
+        pageX: native.pageX,
+        pageY: native.pageY,
+        pressure: nativePressure,
+        prevX: last ? last.clientX : native.clientX,
+        prevY: last ? last.clientY : native.clientY,
+      };
+      return;
+    }
+
     let pressure = last?.pressure ?? null;
     withPenPointReplay(() => {
       for (const sample of extras) {

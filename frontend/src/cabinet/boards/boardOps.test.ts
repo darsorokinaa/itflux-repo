@@ -134,6 +134,24 @@ describe("boardOps", () => {
     expect(copy.customData).not.toBe(el.customData);
   });
 
+  it("cloneBoardElement does not round or shift existing object geometry", () => {
+    const el = {
+      id: "rect",
+      type: "rectangle",
+      x: 10.25,
+      y: 20.5,
+      width: 30.75,
+      height: 40.125,
+      angle: 0.33,
+    };
+    const copy = cloneBoardElement(el);
+    expect(copy.x).toBe(10.25);
+    expect(copy.y).toBe(20.5);
+    expect(copy.width).toBe(30.75);
+    expect(copy.height).toBe(40.125);
+    expect(copy.angle).toBe(0.33);
+  });
+
   it("mergePublishedSnapshotWithOps updates only changed ids", () => {
     const prev = [
       { id: "keep", version: 1, points: [[0, 0]] },
