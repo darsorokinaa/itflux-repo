@@ -1,16 +1,12 @@
 import {
-  memo,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
-  type ReactNode,
 } from "react";
 import { useSearchParams } from "react-router-dom";
-// @ts-ignore JSX module without d.ts
-import ExamTaskDrawingShell, { ExamTaskDrawingHeaderButton } from "../components/ExamTaskDrawingShell";
 import { getLevelDef } from "../data/levels";
 import {
   GRADES_BY_LEVEL,
@@ -27,25 +23,17 @@ import { fetchCabinetSession } from "../utils/cabinetAuth";
 import { copyGlobalTaskToMyBank, fetchMyTask, fetchMyTasksMeta } from "../utils/teacherTaskBankApi";
 import { useAccessGate } from "../hooks/useAccessGate";
 import "../styles/my-task-bank.css";
-// TEMP: кнопка «Код» временно скрыта
-// import { isInformaticsCodeEditorContext } from "../utils/isOgeInformaticsTask";
-// import type { TaskFileSource } from "../components/InformaticsCodeEditor/types";
-
-import MathContent from "../components/MathContent";
-import { collectTaskFiles, TaskFileAttachments } from "../components/TaskFileAttachment";
-import TaskNoAnswerBadge from "../components/TaskNoAnswerBadge";
+import { collectTaskFiles } from "../components/TaskFileAttachment";
 // @ts-ignore JSX module without d.ts
 import ImageLightbox from "../components/ImageLightbox";
 import {
   AllTasksTagsCatalogSidebar,
-  AllTasksTaskTagsEditor,
   fetchTaskTagsCatalog,
   useCanEditTaskTags,
   type TaskTag,
 } from "../components/AllTasksTagEditor";
 import {
   AllTasksStaffCatalogSidebar,
-  AllTasksStaffEditor,
   createStaffGroup,
   createStaffSubtopic,
   fetchStaffGroups,
@@ -56,35 +44,17 @@ import {
   type StaffSubtopicOption,
   type StaffTaskPatch,
 } from "../components/AllTasksStaffEditor";
+import {
+  AllTasksBankItem,
+  AllTasksGroupItem,
+  EMPTY_STAFF_TASK_LISTS,
+  type BankTask,
+} from "../components/AllTasksBankItem";
 
 // TEMP: кнопка «Код» временно скрыта
 // const InformaticsCodeEditorEntry = lazy(
 //   () => import("../components/InformaticsCodeEditor/InformaticsCodeEditorEntry")
 // );
-
-type BankTask = {
-  id: number;
-  task_number: number | null;
-  task_title: string;
-  task_list_id?: number | null;
-  subtopic: string | null;
-  subtopic_id?: number | null;
-  subdivision?: string | null;
-  text: string;
-  answer?: string | null;
-  file_url?: string | null;
-  attachments?: Array<{ url: string; name?: string | null }>;
-  part_id?: number | null;
-  part_title?: string | null;
-  author?: string | null;
-  tags?: TaskTag[];
-  group_id?: number | null;
-  scope?: string | null;
-  source_label?: string | null;
-  local_number?: number | null;
-  public_code?: string | null;
-  bank_code?: string | null;
-};
 
 type BankResponse = {
   total: number;
@@ -127,19 +97,29 @@ type BankDisplayEntry =
   | { kind: "single"; task: BankTask }
   | { kind: "group"; groupId: number; tasks: BankTask[] };
 
-function toPickDraftTask(task: {
-  id: number;
-  task_number?: number | null;
-  exam_task_number?: number | null;
-  text?: string;
-  text_preview?: string;
-  answer?: string | null;
-  subtopic?: string | null;
-  task_title?: string | null;
-  file_url?: string | null;
-  attachments?: BankTask["attachments"];
-  author?: string | null;
-}): WorkbookTask {
+function toPickDraftTask(
+  task: {
+    id: number;
+    task_number?: number | null;
+    exam_task_number?: number | null;
+    text?: string;
+    text_preview?: string;
+    answer?: string | null;
+    subtopic?: string | null;
+    task_title?: string | null;
+    file_url?: string | null;
+    attachments?: BankTask["attachments"];
+    author?: string | null;
+  },
+  mode?: "workbook" | "variant" | null
+): WorkbookTask {
+  if (mode === "variant") {
+    return {
+      id: task.id,
+      task_number: task.task_number ?? task.exam_task_number ?? null,
+      text: "",
+    };
+  }
   const files = collectTaskFiles(task);
   return {
     id: task.id,
@@ -207,73 +187,6 @@ type FiltersResponse = {
 };
 
 const PER_PAGE = 5000;
-const ALL_TASKS_BOARD_VARIANT_ID = "task-bank";
-
-function isFunctionGraphTask(task: Pick<BankTask, "task_title" | "subtopic" | "task_number">) {
-  const hay = `${task.task_title || ""} ${task.subtopic || ""}`.toLowerCase();
-  return hay.includes("график") && hay.includes("функц");
-}
-
-/** Письменный английский: задания группы идут столбиком, не «условие слева / вопросы справа». */
-function isEnglishWritingSubject(subject: string): boolean {
-  const s = String(subject || "").trim().toLowerCase();
-  return s === "eng" || s === "eng_write";
-}
-
-const LazyVisible = memo(function LazyVisible({
-  minHeight = 140,
-  rootMargin = "600px 0px",
-  children,
-}: {
-  minHeight?: number;
-  rootMargin?: string;
-  children: ReactNode;
-}) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    if (visible) return;
-    const node = ref.current;
-    if (!node) return;
-    if (typeof IntersectionObserver === "undefined") {
-      setVisible(true);
-      return;
-    }
-    const obs = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            setVisible(true);
-            obs.disconnect();
-            return;
-          }
-        }
-      },
-      { rootMargin }
-    );
-    obs.observe(node);
-    return () => obs.disconnect();
-  }, [visible, rootMargin]);
-
-  return (
-    <div
-      ref={ref}
-      className="all-tasks-lazy"
-      style={visible ? undefined : { minHeight }}
-    >
-      {visible ? (
-        children
-      ) : (
-        <div className="all-tasks-lazy__skeleton" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </div>
-      )}
-    </div>
-  );
-});
 
 const DEFAULT_VPR_GRADES = [7, 8, 10];
 
@@ -583,7 +496,7 @@ export default function AllTasksPage() {
           if (prev.some((item) => item.id === task.id)) return prev;
           return [
             ...prev,
-            toPickDraftTask(task),
+            toPickDraftTask(task, "variant"),
           ];
         });
       })
@@ -773,6 +686,52 @@ export default function AllTasksPage() {
       },
     }));
   }, []);
+
+  const openBoardForTask = useCallback((taskId: number) => {
+    setOpenBoardForTaskId(taskId);
+  }, []);
+
+  const consumeBoardOpenRequest = useCallback(() => {
+    setOpenBoardForTaskId(null);
+  }, []);
+
+  const handleCopyToBank = useCallback(
+    async (task: BankTask) => {
+      if (!isTeacher) {
+        openGate({
+          reason: "anonymous",
+          resourceType: "teacher_tasks",
+          requiredPlan: "start",
+          sourcePage: "copy",
+          returnUrl: "/tasks/my",
+        });
+        return;
+      }
+      setCopyBusyId(task.id);
+      setCopyMessage("");
+      try {
+        const copy = await copyGlobalTaskToMyBank(task.id);
+        setCopyMessage(
+          `Скопировано в мой банк: ${copy.public_code || `№${copy.local_number}`}`
+        );
+        setCopyMeta((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            copies_this_period: (prev.copies_this_period || 0) + 1,
+            tasks: (prev.tasks || 0) + 1,
+          };
+        });
+      } catch (err) {
+        if (!openFromError(err, { sourcePage: "copy" })) {
+          setCopyMessage(err instanceof Error ? err.message : "Не удалось скопировать");
+        }
+      } finally {
+        setCopyBusyId(null);
+      }
+    },
+    [isTeacher, openFromError, openGate]
+  );
 
   const subjects = useMemo(() => subjectsFromCatalog(catalog, level), [catalog, level]);
   const levelOptions = catalog;
@@ -1145,7 +1104,7 @@ export default function AllTasksPage() {
         for (const task of tasks) {
           if (existing.has(task.id)) continue;
           existing.add(task.id);
-          next.push(toPickDraftTask(task));
+          next.push(toPickDraftTask(task, pickMode));
         }
         return next;
       });
@@ -1153,21 +1112,18 @@ export default function AllTasksPage() {
     }
     const removeIds = new Set(tasks.map((task) => task.id));
     setPickDraft((prev) => prev.filter((item) => !removeIds.has(item.id)));
-  }, []);
+  }, [pickMode]);
 
   const togglePickTask = useCallback((task: BankTask, checked: boolean) => {
     if (checked) {
       setPickDraft((prev) => {
         if (prev.some((item) => item.id === task.id)) return prev;
-          return [
-            ...prev,
-            toPickDraftTask(task),
-          ];
+        return [...prev, toPickDraftTask(task, pickMode)];
       });
       return;
     }
     setPickDraft((prev) => prev.filter((item) => item.id !== task.id));
-  }, []);
+  }, [pickMode]);
 
   const startWorkbookMode = useCallback(() => {
     setPickDraft([]);
@@ -1203,11 +1159,11 @@ export default function AllTasksPage() {
       for (const task of visibleTasks) {
         if (existing.has(task.id)) continue;
         existing.add(task.id);
-        next.push(toPickDraftTask(task));
+        next.push(toPickDraftTask(task, pickMode));
       }
       return next;
     });
-  }, [visibleTasks]);
+  }, [pickMode, visibleTasks]);
 
   const resetPage = () => setPage(1);
 
@@ -1596,463 +1552,75 @@ export default function AllTasksPage() {
           <ul className="all-tasks-list">
             {displayEntries.map((entry, entryIndex) => {
               if (entry.kind === "group") {
-                const groupNums = entry.tasks
-                  .map((t) => t.task_number)
-                  .filter((n): n is number => n != null);
                 const groupInPick = entry.tasks.every((task) =>
                   pickDraftIds.has(task.id)
                 );
-                const groupHasMissingAnswer = entry.tasks.some(
-                  (t) => !(t.answer && String(t.answer).trim())
-                );
                 return (
-                  <li key={`group-${entry.groupId}`} className="all-tasks-list__item">
-                    <article
-                      className={[
-                        "all-tasks-item",
-                        "all-tasks-item--group",
-                        entry.subdivision === "geom" ? "all-tasks-item--geom" : "",
-                        entry.subdivision === "alg" ? "all-tasks-item--alg" : "",
-                        pickMode && groupInPick ? "all-tasks-item--in-workbook" : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}
-                      data-group-id={entry.groupId}
-                    >
-                      <div className="all-tasks-item__card">
-                        <header className="all-tasks-item__head all-tasks-item__head--group">
-                          <p className="all-tasks-item__meta">
-                            <span className="all-tasks-item__num">Группа заданий</span>
-                            <span className="all-tasks-item__meta-sep" aria-hidden>
-                              ·
-                            </span>
-                            <span>вариант #{entry.groupId}</span>
-                            {groupNums.length ? (
-                              <>
-                                <span className="all-tasks-item__meta-sep" aria-hidden>
-                                  ·
-                                </span>
-                                <span>№{groupNums.join(", ")}</span>
-                              </>
-                            ) : null}
-                            {groupHasMissingAnswer ? (
-                              <TaskNoAnswerBadge />
-                            ) : null}
-                          </p>
-                          <div className="all-tasks-item__actions">
-                            {pickMode ? (
-                              <label className="all-tasks-item__workbook-check">
-                                <input
-                                  type="checkbox"
-                                  checked={groupInPick}
-                                  onChange={(e) =>
-                                    togglePickGroup(entry.tasks, e.target.checked)
-                                  }
-                                />
-                                <span>Добавить группу</span>
-                              </label>
-                            ) : null}
-                          </div>
-                        </header>
-                        <div
-                          className={[
-                            "all-tasks-item__group-body",
-                            isEnglishWritingSubject(subject)
-                              ? "all-tasks-item__group-body--stack"
-                              : "",
-                          ]
-                            .filter(Boolean)
-                            .join(" ")}
-                        >
-                          {(() => {
-                            const renderGroupTask = (t: BankTask) => {
-                              const taskNumber = t.task_number ?? 0;
-                              const taskBoardPersist = boardsByTask[String(t.id)];
-                              const hasTaskBoardDraft = boardPersistHasDraft(taskBoardPersist);
-                              const answerOpen = !!openAnswers[t.id];
-                              const answerHtml = (t.answer || "").trim();
-                              return (
-                                <section
-                                  key={t.id}
-                                  className={[
-                                    "all-tasks-item__group-part",
-                                    isFunctionGraphTask(t) ? "all-tasks-item__group-part--function-graphs" : "",
-                                  ]
-                                    .filter(Boolean)
-                                    .join(" ")}
-                                  data-task-id={t.id}
-                                  data-task-number={t.task_number ?? undefined}
-                                >
-                                  <div className="all-tasks-item__group-part-head">
-                                    <p className="all-tasks-item__meta">
-                                      <span className="all-tasks-item__num">№{taskNumber}</span>
-                                      <span className="all-tasks-item__meta-sep" aria-hidden>
-                                        ·
-                                      </span>
-                                      <span>ID {t.id}</span>
-                                      {t.task_title ? (
-                                        <>
-                                          <span className="all-tasks-item__meta-sep" aria-hidden>
-                                            ·
-                                          </span>
-                                          <span>{t.task_title}</span>
-                                        </>
-                                      ) : null}
-                                      {t.part_title ? (
-                                        <>
-                                          <span className="all-tasks-item__meta-sep" aria-hidden>
-                                            ·
-                                          </span>
-                                          <span>{t.part_title}</span>
-                                        </>
-                                      ) : null}
-                                      {!answerHtml ? (
-                                        <TaskNoAnswerBadge />
-                                      ) : null}
-                                    </p>
-                                    <div className="all-tasks-item__actions">
-                                      <ExamTaskDrawingHeaderButton
-                                        onClick={() => setOpenBoardForTaskId(t.id)}
-                                        hasDraft={hasTaskBoardDraft}
-                                      />
-                                    </div>
-                                  </div>
-                                  {canEditTaskTags ? (
-                                    <AllTasksTaskTagsEditor
-                                      taskId={t.id}
-                                      selected={t.tags || []}
-                                      catalog={tagCatalog}
-                                      onChange={handleTaskTagsChange}
-                                    />
-                                  ) : null}
-                                  <div className="all-tasks-item__content">
-                                    <ExamTaskDrawingShell
-                                      enabled
-                                      taskId={t.id}
-                                      level={level}
-                                      subject={subject}
-                                      variantId={ALL_TASKS_BOARD_VARIANT_ID}
-                                      persistEntry={taskBoardPersist}
-                                      onDrawingPersist={(payload: any) =>
-                                        handleBoardPersist({ taskId: t.id, ...payload })
-                                      }
-                                      openBoardForTaskId={openBoardForTaskId}
-                                      onConsumedBoardOpenRequest={() =>
-                                        setOpenBoardForTaskId(null)
-                                      }
-                                    >
-                                      <LazyVisible minHeight={120}>
-                                        <MathContent
-                                          html={t.text || ""}
-                                          className="all-tasks-item__html"
-                                          plainHtml
-                                          ogeMathChoiceEnhance={subject === "math"}
-                                          progTaskSheet={useProgTaskSheet}
-                                          taskNumber={taskNumber}
-                                        />
-                                        {t.file_url || (t.attachments && t.attachments.length) ? (
-                                          <TaskFileAttachments task={t} />
-                                        ) : null}
-                                        {t.author ? (
-                                          <div className="task-author">{t.author}</div>
-                                        ) : null}
-                                      </LazyVisible>
-                                    </ExamTaskDrawingShell>
-                                  </div>
-                                  {canEditBankTasks ? (
-                                    <AllTasksStaffEditor
-                                      taskId={t.id}
-                                      taskListId={t.task_list_id ?? null}
-                                      groupId={t.group_id ?? entry.groupId}
-                                      subtopicId={t.subtopic_id ?? null}
-                                      answer={t.answer || ""}
-                                      taskLists={filterOptions?.task_numbers ?? []}
-                                      groups={staffGroups}
-                                      subtopics={staffSubtopics}
-                                      showGroup
-                                      onSaved={handleStaffTaskSaved}
-                                    />
-                                  ) : null}
-                                  {answerHtml ? (
-                                    <div className="all-tasks-item__answer-foot">
-                                      <button
-                                        type="button"
-                                        className="all-tasks-item__answer-btn"
-                                        onClick={() => toggleAnswer(t.id)}
-                                        aria-expanded={answerOpen ? "true" : "false"}
-                                      >
-                                        {answerOpen ? "Скрыть ответ" : "Посмотреть ответ"}
-                                      </button>
-                                    </div>
-                                  ) : null}
-                                  {answerOpen ? (
-                                    <div
-                                      className="all-tasks-item__answer"
-                                      role="region"
-                                      aria-live="polite"
-                                      aria-label="Правильный ответ"
-                                    >
-                                      {answerHtml ? (
-                                        <MathContent
-                                          html={answerHtml}
-                                          className="all-tasks-item__html all-tasks-item__html--answer"
-                                          plainHtml
-                                        />
-                                      ) : (
-                                        <p>Ответ не указан.</p>
-                                      )}
-                                    </div>
-                                  ) : null}
-                                </section>
-                              );
-                            };
-
-                            const stackGroupTasks = isEnglishWritingSubject(subject);
-                            const firstTask = entry.tasks[0];
-                            const otherTasks = entry.tasks.slice(1);
-
-                            if (stackGroupTasks) {
-                              return (
-                                <div className="all-tasks-item__group-col">
-                                  {entry.tasks.map((t) => renderGroupTask(t))}
-                                </div>
-                              );
-                            }
-
-                            return (
-                              <>
-                                <div className="all-tasks-item__group-col all-tasks-item__group-col--main">
-                                  {firstTask && renderGroupTask(firstTask)}
-                                </div>
-                                {otherTasks.length > 0 && (
-                                  <div className="all-tasks-item__group-col all-tasks-item__group-col--sub">
-                                    {otherTasks.map((t) => renderGroupTask(t))}
-                                  </div>
-                                )}
-                              </>
-                            );
-                          })()}
-                        </div>
-                      </div>
-                    </article>
-                  </li>
+                  <AllTasksGroupItem
+                    key={`group-${entry.groupId}`}
+                    groupId={entry.groupId}
+                    tasks={entry.tasks}
+                    subdivision={(entry as { subdivision?: string | null }).subdivision}
+                    pickMode={Boolean(pickMode)}
+                    inPick={groupInPick}
+                    onToggleGroup={togglePickGroup}
+                    subject={subject}
+                    level={level}
+                    useProgTaskSheet={useProgTaskSheet}
+                    boardsByTask={boardsByTask}
+                    openAnswers={openAnswers}
+                    openBoardForTaskId={openBoardForTaskId}
+                    boardPersistHasDraft={boardPersistHasDraft}
+                    onOpenBoard={openBoardForTask}
+                    onBoardPersist={handleBoardPersist}
+                    onConsumedBoardOpenRequest={consumeBoardOpenRequest}
+                    canEditTaskTags={canEditTaskTags}
+                    tagCatalog={tagCatalog}
+                    onTaskTagsChange={handleTaskTagsChange}
+                    canEditBankTasks={canEditBankTasks}
+                    taskLists={filterOptions?.task_numbers ?? EMPTY_STAFF_TASK_LISTS}
+                    staffGroups={staffGroups}
+                    staffSubtopics={staffSubtopics}
+                    onStaffSaved={handleStaffTaskSaved}
+                    onToggleAnswer={toggleAnswer}
+                  />
                 );
               }
 
               const t = entry.task;
               const taskNumber = t.task_number ?? entryIndex + 1;
               const taskBoardPersist = boardsByTask[String(t.id)];
-              const hasTaskBoardDraft = boardPersistHasDraft(taskBoardPersist);
-              const answerOpen = !!openAnswers[t.id];
-              const answerHtml = (t.answer || "").trim();
-              const inPick = pickDraftIds.has(t.id);
               return (
-                <li key={t.id} className="all-tasks-list__item">
-                  <article
-                    className={[
-                      "all-tasks-item",
-                      useProgTaskSheet ? "all-tasks-item--prog-sheet" : "",
-                      t.subdivision === "geom" ? "all-tasks-item--geom" : "",
-                      t.subdivision === "alg" ? "all-tasks-item--alg" : "",
-                      isFunctionGraphTask(t) ? "all-tasks-item--function-graphs" : "",
-                      pickMode && inPick ? "all-tasks-item--in-workbook" : "",
-                      isTeacher && t.source_label === "teacher" ? "all-tasks-item--mine" : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                    data-task-id={t.id}
-                    data-task-number={t.task_number ?? undefined}
-                  >
-                    <div className="all-tasks-item__card">
-                      <header className="all-tasks-item__head">
-                        <p className="all-tasks-item__meta">
-                          <span className="all-tasks-item__num">
-                            {t.source_label === "teacher" && t.local_number != null
-                              ? `№${t.local_number}`
-                              : `№${taskNumber}`}
-                          </span>
-                          {isTeacher ? (
-                            <span
-                              className={`mtb-badge ${
-                                t.source_label === "teacher" ? "mtb-badge--mine" : "mtb-badge--platform"
-                              }`}
-                            >
-                              {t.source_label === "teacher" ? "Моя задача" : "Общий банк"}
-                            </span>
-                          ) : null}
-                          {t.public_code ? (
-                            <>
-                              <span className="all-tasks-item__meta-sep" aria-hidden>·</span>
-                              <span>{t.public_code}</span>
-                            </>
-                          ) : null}
-                          <span className="all-tasks-item__meta-sep" aria-hidden>
-                            ·
-                          </span>
-                          <span>ID {t.id}</span>
-                          {t.task_title ? (
-                            <>
-                              <span className="all-tasks-item__meta-sep" aria-hidden>
-                                ·
-                              </span>
-                              <span>{t.task_title}</span>
-                            </>
-                          ) : null}
-                          {t.subtopic ? (
-                            <>
-                              <span className="all-tasks-item__meta-sep" aria-hidden>
-                                ·
-                              </span>
-                              <span>{t.subtopic}</span>
-                            </>
-                          ) : null}
-                          {!answerHtml ? (
-                            <TaskNoAnswerBadge />
-                          ) : null}
-                        </p>
-                        <div className="all-tasks-item__actions">
-                          {pickMode ? (
-                            <label className="all-tasks-item__workbook-check">
-                              <input
-                                type="checkbox"
-                                checked={inPick}
-                                onChange={(e) => togglePickTask(t, e.target.checked)}
-                              />
-                              <span>Добавить</span>
-                            </label>
-                          ) : null}
-                          <ExamTaskDrawingHeaderButton
-                            onClick={() => setOpenBoardForTaskId(t.id)}
-                            hasDraft={hasTaskBoardDraft}
-                          />
-                          {t.source_label !== "teacher" ? (
-                            <button
-                              type="button"
-                              className="all-tasks-item__answer-btn"
-                              disabled={copyBusyId === t.id}
-                              onClick={async () => {
-                                if (!isTeacher) {
-                                  openGate({
-                                    reason: "anonymous",
-                                    resourceType: "teacher_tasks",
-                                    requiredPlan: "start",
-                                    sourcePage: "copy",
-                                    returnUrl: "/tasks/my",
-                                  });
-                                  return;
-                                }
-                                setCopyBusyId(t.id);
-                                setCopyMessage("");
-                                try {
-                                  const copy = await copyGlobalTaskToMyBank(t.id);
-                                  setCopyMessage(`Скопировано в мой банк: ${copy.public_code || `№${copy.local_number}`}`);
-                                  setCopyMeta((prev) => {
-                                    if (!prev) return prev;
-                                    return {
-                                      ...prev,
-                                      copies_this_period: (prev.copies_this_period || 0) + 1,
-                                      tasks: (prev.tasks || 0) + 1,
-                                    };
-                                  });
-                                } catch (err) {
-                                  if (!openFromError(err, { sourcePage: "copy" })) {
-                                    setCopyMessage(err instanceof Error ? err.message : "Не удалось скопировать");
-                                  }
-                                } finally {
-                                  setCopyBusyId(null);
-                                }
-                              }}
-                            >
-                              Скопировать в мой банк
-                            </button>
-                          ) : null}
-                        </div>
-                      </header>
-                      {canEditTaskTags ? (
-                        <AllTasksTaskTagsEditor
-                          taskId={t.id}
-                          selected={t.tags || []}
-                          catalog={tagCatalog}
-                          onChange={handleTaskTagsChange}
-                        />
-                      ) : null}
-                      <div className="all-tasks-item__content">
-                        <ExamTaskDrawingShell
-                          enabled
-                          taskId={t.id}
-                          level={level}
-                          subject={subject}
-                          variantId={ALL_TASKS_BOARD_VARIANT_ID}
-                          persistEntry={taskBoardPersist}
-                          onDrawingPersist={(payload: any) =>
-                            handleBoardPersist({ taskId: t.id, ...payload })
-                          }
-                          openBoardForTaskId={openBoardForTaskId}
-                          onConsumedBoardOpenRequest={() => setOpenBoardForTaskId(null)}
-                        >
-                          <LazyVisible minHeight={120}>
-                            <MathContent
-                              html={t.text || ""}
-                              className="all-tasks-item__html"
-                              plainHtml
-                              ogeMathChoiceEnhance={subject === "math"}
-                              progTaskSheet={useProgTaskSheet}
-                              taskNumber={taskNumber}
-                            />
-                            <TaskFileAttachments task={t} />
-                            {t.author ? (
-                              <div className="task-author">{t.author}</div>
-                            ) : null}
-                          </LazyVisible>
-                        </ExamTaskDrawingShell>
-                      </div>
-                      {canEditBankTasks ? (
-                        <AllTasksStaffEditor
-                          taskId={t.id}
-                          taskListId={t.task_list_id ?? null}
-                          groupId={t.group_id ?? null}
-                          subtopicId={t.subtopic_id ?? null}
-                          answer={t.answer || ""}
-                          taskLists={filterOptions?.task_numbers ?? []}
-                          groups={staffGroups}
-                          subtopics={staffSubtopics}
-                          showGroup
-                          onSaved={handleStaffTaskSaved}
-                        />
-                      ) : null}
-                      {answerHtml ? (
-                        <div className="all-tasks-item__answer-foot">
-                          <button
-                            type="button"
-                            className="all-tasks-item__answer-btn"
-                            onClick={() => toggleAnswer(t.id)}
-                            aria-expanded={answerOpen ? "true" : "false"}
-                          >
-                            {answerOpen ? "Скрыть ответ" : "Посмотреть ответ"}
-                          </button>
-                        </div>
-                      ) : null}
-                      {answerOpen ? (
-                        <div
-                          className="all-tasks-item__answer"
-                          role="region"
-                          aria-live="polite"
-                          aria-label="Правильный ответ"
-                        >
-                          {answerHtml ? (
-                            <MathContent
-                              html={answerHtml}
-                              className="all-tasks-item__html all-tasks-item__html--answer"
-                              plainHtml
-                            />
-                          ) : (
-                            <p>Ответ не указан.</p>
-                          )}
-                        </div>
-                      ) : null}
-                    </div>
-                  </article>
-                </li>
+                <AllTasksBankItem
+                  key={t.id}
+                  task={t}
+                  taskNumber={taskNumber}
+                  pickMode={Boolean(pickMode)}
+                  inPick={pickDraftIds.has(t.id)}
+                  onTogglePick={togglePickTask}
+                  isTeacher={isTeacher}
+                  copyBusy={copyBusyId === t.id}
+                  onCopyToBank={handleCopyToBank}
+                  useProgTaskSheet={useProgTaskSheet}
+                  hasTaskBoardDraft={boardPersistHasDraft(taskBoardPersist)}
+                  onOpenBoard={openBoardForTask}
+                  subject={subject}
+                  level={level}
+                  persistEntry={taskBoardPersist}
+                  openBoardRequested={openBoardForTaskId === t.id}
+                  onBoardPersist={handleBoardPersist}
+                  onConsumedBoardOpenRequest={consumeBoardOpenRequest}
+                  canEditTaskTags={canEditTaskTags}
+                  tagCatalog={tagCatalog}
+                  onTaskTagsChange={handleTaskTagsChange}
+                  canEditBankTasks={canEditBankTasks}
+                  taskLists={filterOptions?.task_numbers ?? EMPTY_STAFF_TASK_LISTS}
+                  staffGroups={staffGroups}
+                  staffSubtopics={staffSubtopics}
+                  onStaffSaved={handleStaffTaskSaved}
+                  answerOpen={!!openAnswers[t.id]}
+                  onToggleAnswer={toggleAnswer}
+                />
               );
             })}
           </ul>

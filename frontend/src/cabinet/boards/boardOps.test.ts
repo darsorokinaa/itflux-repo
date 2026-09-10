@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   applyBoardOps,
+  cloneBoardElement,
   coalesceBoardOps,
   diffBoardElements,
+  mergePublishedSnapshotWithOps,
   shouldPublishFullScene,
 } from "./boardOps";
 
@@ -116,6 +118,34 @@ describe("boardOps", () => {
     };
     expect(el.version).toBe(6);
     expect(el.text).toBe("new");
+  });
+
+  it("cloneBoardElement copies points and pressures without sharing refs", () => {
+    const points = [[0, 0], [1.5, 2.25]];
+    const pressures = [0.2, 0.8];
+    const el = { id: "s", points, pressures, customData: { k: 1 } };
+    const copy = cloneBoardElement(el);
+    expect(copy.points).toEqual(points);
+    expect((copy.points as number[][])[1]).toEqual([1.5, 2.25]);
+    expect(copy.points).not.toBe(points);
+    expect((copy.points as number[][])[0]).not.toBe(points[0]);
+    expect(copy.pressures).toEqual(pressures);
+    expect(copy.pressures).not.toBe(pressures);
+    expect(copy.customData).not.toBe(el.customData);
+  });
+
+  it("mergePublishedSnapshotWithOps updates only changed ids", () => {
+    const prev = [
+      { id: "keep", version: 1, points: [[0, 0]] },
+      { id: "stroke", version: 1, points: [[0, 0]] },
+    ];
+    const nextStroke = { id: "stroke", version: 4, points: [[0, 0], [1, 1], [2, 2]] };
+    const merged = mergePublishedSnapshotWithOps(prev, [
+      { op: "upsert", element: nextStroke },
+    ]);
+    expect(merged).toHaveLength(2);
+    expect(merged?.[0]).toBe(prev[0]);
+    expect(merged?.[1]).toBe(nextStroke);
   });
 
   it("reconnect delete vs modify: higher version wins deterministically", () => {

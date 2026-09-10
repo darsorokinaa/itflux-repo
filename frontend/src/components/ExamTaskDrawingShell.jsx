@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import DrawingPanel, { ERASER_CURSOR_CSS, ExamTaskDrawingHeaderButton } from "./DrawingPanel";
 import { loadExamDrawingOverlay, saveExamDrawingOverlay } from "../utils/examTaskDrawingStorage";
 import { findHitStroke, newStrokeId, redrawAllStrokes, sanitizeStrokes } from "../utils/taskStrokeDrawing";
@@ -31,7 +31,7 @@ function clientToCanvas(canvas, clientX, clientY) {
 /**
  * Оболочка тела карточки задания: контент + canvas (векторные штрихи) + DrawingPanel.
  */
-export default function ExamTaskDrawingShell({
+function ExamTaskDrawingShell({
   enabled,
   taskId,
   level,
@@ -44,6 +44,16 @@ export default function ExamTaskDrawingShell({
   children,
   className = "",
 }) {
+  const onDrawingPersistRef = useRef(onDrawingPersist);
+  onDrawingPersistRef.current = onDrawingPersist;
+  const onConsumedBoardOpenRequestRef = useRef(onConsumedBoardOpenRequest);
+  onConsumedBoardOpenRequestRef.current = onConsumedBoardOpenRequest;
+  const persistDrawing = useCallback((payload) => {
+    onDrawingPersistRef.current?.(payload);
+  }, []);
+  const consumeBoardOpenRequest = useCallback(() => {
+    onConsumedBoardOpenRequestRef.current?.();
+  }, []);
   const narrowPhone = useNarrowPhone();
   const hostRef = useRef(null);
   const canvasRef = useRef(null);
@@ -78,7 +88,7 @@ export default function ExamTaskDrawingShell({
     (next) => {
       setRedoStack([]);
       setStrokes(next);
-      onDrawingPersist?.({
+      persistDrawing({
         overlayV1: {
           strokes: next,
           v: 2,
@@ -88,7 +98,7 @@ export default function ExamTaskDrawingShell({
       });
       saveExamDrawingOverlay(level, subject, variantId, taskId, next);
     },
-    [level, onDrawingPersist, subject, taskId, variantId]
+    [level, persistDrawing, subject, taskId, variantId]
   );
 
   const redraw = useCallback(() => {
@@ -170,14 +180,14 @@ export default function ExamTaskDrawingShell({
       const next = sanitizeStrokes(fromStorage.strokes);
       const id = requestAnimationFrame(() => {
         setStrokes(next);
-        onDrawingPersist?.({ overlayV1: { strokes: next, v: 2, snapshot: null, undoStack: [] } });
+        persistDrawing({ overlayV1: { strokes: next, v: 2, snapshot: null, undoStack: [] } });
       });
       hydratedRef.current = true;
       return () => cancelAnimationFrame(id);
     }
     hydratedRef.current = true;
     return undefined;
-  }, [enabled, level, onDrawingPersist, persistedStrokes?.length, subject, taskId, variantId]);
+  }, [enabled, level, persistDrawing, persistedStrokes?.length, subject, taskId, variantId]);
 
   useEffect(() => {
     setRedoStack([]);
@@ -202,10 +212,10 @@ export default function ExamTaskDrawingShell({
         // дополнительных кликов. Переключиться на курсор можно в панели инструментов.
         setTool("pencil");
       }
-      onConsumedBoardOpenRequest?.();
+      consumeBoardOpenRequest();
     });
     return () => cancelAnimationFrame(id);
-  }, [enabled, onConsumedBoardOpenRequest, openBoardForTaskId, taskId, isBoardVisible, closeBoard]);
+  }, [enabled, consumeBoardOpenRequest, openBoardForTaskId, taskId, isBoardVisible, closeBoard]);
 
   useEffect(() => {
     if (!showCanvasLayer) return undefined;
@@ -228,12 +238,12 @@ export default function ExamTaskDrawingShell({
         if (!hit) return prev;
         setRedoStack([]);
         const next = prev.filter((s) => s.id !== hit.id);
-        onDrawingPersist?.({ overlayV1: { strokes: next, v: 2, snapshot: null, undoStack: [] } });
+        persistDrawing({ overlayV1: { strokes: next, v: 2, snapshot: null, undoStack: [] } });
         saveExamDrawingOverlay(level, subject, variantId, taskId, next);
         return next;
       });
     },
-    [level, onDrawingPersist, subject, taskId, variantId]
+    [level, persistDrawing, subject, taskId, variantId]
   );
 
   const onPointerDown = useCallback(
@@ -364,7 +374,7 @@ export default function ExamTaskDrawingShell({
         setRedoStack([]);
         setStrokes((prev) => {
           const next = [...prev, d];
-          onDrawingPersist?.({ overlayV1: { strokes: next, v: 2, snapshot: null, undoStack: [] } });
+          persistDrawing({ overlayV1: { strokes: next, v: 2, snapshot: null, undoStack: [] } });
           saveExamDrawingOverlay(level, subject, variantId, taskId, next);
           return next;
         });
@@ -375,14 +385,14 @@ export default function ExamTaskDrawingShell({
           setRedoStack([]);
           setStrokes((prev) => {
             const next = [...prev, d];
-            onDrawingPersist?.({ overlayV1: { strokes: next, v: 2, snapshot: null, undoStack: [] } });
+            persistDrawing({ overlayV1: { strokes: next, v: 2, snapshot: null, undoStack: [] } });
             saveExamDrawingOverlay(level, subject, variantId, taskId, next);
             return next;
           });
         }
       }
     },
-    [level, onDrawingPersist, subject, taskId, variantId, tool]
+    [level, persistDrawing, subject, taskId, variantId, tool]
   );
 
   useEffect(() => {
@@ -414,11 +424,11 @@ export default function ExamTaskDrawingShell({
       const popped = prev[prev.length - 1];
       const next = prev.slice(0, -1);
       setRedoStack((r) => [...r, popped]);
-      onDrawingPersist?.({ overlayV1: { strokes: next, v: 2, snapshot: null, undoStack: [] } });
+      persistDrawing({ overlayV1: { strokes: next, v: 2, snapshot: null, undoStack: [] } });
       saveExamDrawingOverlay(level, subject, variantId, taskId, next);
       return next;
     });
-  }, [level, onDrawingPersist, subject, taskId, variantId]);
+  }, [level, persistDrawing, subject, taskId, variantId]);
 
   const handleRedo = useCallback(() => {
     setRedoStack((r) => {
@@ -427,13 +437,13 @@ export default function ExamTaskDrawingShell({
       const nextR = r.slice(0, -1);
       setStrokes((prev) => {
         const next = [...prev, stroke];
-        onDrawingPersist?.({ overlayV1: { strokes: next, v: 2, snapshot: null, undoStack: [] } });
+        persistDrawing({ overlayV1: { strokes: next, v: 2, snapshot: null, undoStack: [] } });
         saveExamDrawingOverlay(level, subject, variantId, taskId, next);
         return next;
       });
       return nextR;
     });
-  }, [level, onDrawingPersist, subject, taskId, variantId]);
+  }, [level, persistDrawing, subject, taskId, variantId]);
 
   const handleClearAll = useCallback(() => {
     if (typeof window !== "undefined" && !window.confirm("Очистить все пометки на этом задании?")) return;
@@ -498,3 +508,5 @@ export default function ExamTaskDrawingShell({
     </div>
   );
 }
+
+export default memo(ExamTaskDrawingShell);

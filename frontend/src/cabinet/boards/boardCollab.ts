@@ -4,10 +4,12 @@ import { filesForLivePublish } from "./boardFiles";
 import { reportClientEvent } from "../../utils/clientTelemetry";
 import { RESUME_TIMING } from "../pwa/pwaResumeLifecycle";
 import { trackRealtimeSocket } from "../pwa/runtimeResources";
+import { boardPerfMarkRealtimePayload } from "./boardPerfDev";
 import {
   applyBoardOps,
   buildLivePublishPayload,
   cloneBoardElement,
+  mergePublishedSnapshotWithOps,
   type BoardSceneOpsPayload,
 } from "./boardOps";
 import {
@@ -408,6 +410,7 @@ export function createBoardCollabSession(
       socket.send(raw);
       outboundTotal += 1;
       notePayload(raw.length, String(payload.type || ""));
+      boardPerfMarkRealtimePayload(payload);
       return true;
     } catch {
       forceReconnect("send-failed");
@@ -1231,7 +1234,12 @@ export function createBoardCollabSession(
     }
     // Снимок, не live-ссылка: Excalidraw мутирует элементы in-place (version++),
     // иначе следующий diff сравнивает массив сам с собой и ops пустые.
-    lastPublishedElements = snapshotElementsForDiff(pendingLive.elements);
+    // На ops не клонируем points всей сцены — только затронутые id.
+    if (built.kind === "ops" && lastPublishedElements?.length) {
+      lastPublishedElements = mergePublishedSnapshotWithOps(lastPublishedElements, built.payload.ops);
+    } else {
+      lastPublishedElements = snapshotElementsForDiff(pendingLive.elements);
+    }
     pendingLive = null;
     lastLiveSentAt = Date.now();
   };

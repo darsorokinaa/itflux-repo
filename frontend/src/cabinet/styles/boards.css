@@ -1091,6 +1091,10 @@ html.cb-board-editor-open body {
   user-select: none;
 }
 
+.cb-board-excalidraw-host {
+  position: relative;
+}
+
 /* Глобальный `canvas { max-width: 100% }` ломает backing-store Excalidraw. */
 .cb-board-excalidraw-host canvas,
 .cb-board-excalidraw-host canvas.excalidraw__canvas {

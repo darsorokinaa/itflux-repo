@@ -54,10 +54,55 @@ export function cloneBoardElement(el: Record<string, unknown>): Record<string, u
   if (Array.isArray(el.points)) {
     copy.points = el.points.map((p) => (Array.isArray(p) ? [p[0], p[1]] : p));
   }
+  if (Array.isArray(el.pressures)) {
+    copy.pressures = el.pressures.slice();
+  }
   if (el.customData && typeof el.customData === "object") {
     copy.customData = { ...(el.customData as Record<string, unknown>) };
   }
   return copy;
+}
+
+/**
+ * Обновить snapshot для следующего diff только по ops — не клонировать
+ * points всех неизменённых элементов на каждый live-кадр.
+ */
+export function mergePublishedSnapshotWithOps(
+  prevSnapshot: unknown[] | null | undefined,
+  ops: BoardElementOp[] | null | undefined,
+): unknown[] | null {
+  if (!Array.isArray(prevSnapshot)) return prevSnapshot ?? null;
+  if (!ops?.length) return prevSnapshot;
+  const map = new Map<string, unknown>();
+  const order: string[] = [];
+  for (const raw of prevSnapshot) {
+    const el = asEl(raw);
+    if (!el?.id) continue;
+    map.set(el.id, raw);
+    order.push(el.id);
+  }
+  for (const op of ops) {
+    if (op.op === "upsert" && op.element && typeof op.element === "object") {
+      const id = String((op.element as { id?: string }).id || "");
+      if (!id) continue;
+      if (!map.has(id)) order.push(id);
+      map.set(id, op.element);
+    } else if (op.op === "delete" && op.id) {
+      const id = String(op.id);
+      const prev = map.get(id);
+      const tomb: El = {
+        ...(prev && typeof prev === "object" ? (prev as El) : { id }),
+        id,
+        isDeleted: true,
+        version: Number(op.version) || 0,
+        versionNonce: Number(op.versionNonce) || 0,
+        updated: Number(op.updated) || Date.now(),
+      };
+      if (!map.has(id)) order.push(id);
+      map.set(id, tomb);
+    }
+  }
+  return order.map((id) => map.get(id)!);
 }
 
 /** Diff previous → next: только изменившиеся/новые/удалённые элементы. */

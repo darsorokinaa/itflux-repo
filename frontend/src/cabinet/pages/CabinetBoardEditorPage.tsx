@@ -21,6 +21,7 @@ import CabinetIcon from "../CabinetIcons";
 import BoardAccessModal from "../components/BoardAccessModal";
 import ConfirmActionModal from "../components/ConfirmActionModal";
 import BoardExcalidrawCanvas from "../boards/BoardExcalidrawCanvas";
+import { isActiveFreedrawGesture } from "../boards/boardLiveStroke";
 import {
   AUTOSAVE_DEBOUNCE_MS,
   boardElementsVersionSum,
@@ -28,6 +29,7 @@ import {
   createDebouncedSaver,
   isBoardPersistableChange,
   isBoardSceneTooLargeError,
+  sanitizeAppState,
   saveStatusLabel,
   shouldBlockUnload,
   shouldRetryPersistAfterVersionConflict,
@@ -1438,8 +1440,11 @@ export default function CabinetBoardEditorPage() {
 
   const handleChange = useCallback(
     (elements: readonly unknown[], appState: Record<string, unknown>, files: Record<string, unknown>) => {
-      syncPaperOverlay(appState);
-      syncLeftPanels(appState);
+      const liveFreedraw = isActiveFreedrawGesture(isDrawingGestureRef.current, appState);
+      if (!liveFreedraw) {
+        syncPaperOverlay(appState);
+        syncLeftPanels(appState);
+      }
       if (applyingCollaboratorsRef.current) return;
       if (applyingRemoteRef.current) return;
       if (restoringEraseRef.current) return;
@@ -1458,6 +1463,41 @@ export default function CabinetBoardEditorPage() {
         lastElementsRef.current = elements;
         lastElementsVersionSumRef.current = boardElementsVersionSum(elements);
         collabRef.current?.resetPublishBase(elements);
+        return;
+      }
+
+      if (liveFreedraw) {
+        const nextElements = stampElementOwnership(
+          elements as unknown[],
+          knownElementIdsRef.current,
+          viewerUserIdRef.current,
+          viewerRoleRef.current,
+        );
+        for (const raw of nextElements) {
+          const id = raw && typeof raw === "object" ? (raw as { id?: string }).id : null;
+          if (id) knownElementIdsRef.current.add(id);
+        }
+        const prevScene = latestSceneRef.current;
+        const nextVersionSum = boardElementsVersionSum(nextElements);
+        latestSceneRef.current = {
+          elements: nextElements,
+          appState: prevScene?.appState || sanitizeAppState(appState),
+          files: lastFilesRef.current || (files as Record<string, unknown>),
+        };
+        lastElementsRef.current = nextElements;
+        lastElementsVersionSumRef.current = nextVersionSum;
+        lastRawFilesRef.current = files;
+        markLocalSceneChange();
+        safeSetSaveStatus((s) => (s === "dirty" || s === "saving" ? s : "dirty"));
+        debouncedSaver.schedule();
+        collabRef.current?.publishLive(
+          {
+            elements: nextElements,
+            appState: latestSceneRef.current.appState,
+            files: latestSceneRef.current.files,
+          },
+          versionRef.current,
+        );
         return;
       }
 

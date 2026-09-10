@@ -9,8 +9,9 @@ import {
 } from "react";
 import { CaptureUpdateAction, Excalidraw, useHandleLibrary } from "@excalidraw/excalidraw";
 import { boardLibraryAdapter } from "./boardLibrary";
-import { mountCoalescedPointerReplay } from "./boardPointerInput";
+import { mountCoalescedPointerReplay, isPointerReplayEvent, isReplayingPenPoints } from "./boardPointerInput";
 import { mountBoardPdfToolbar } from "./boardPdfToolbar";
+import { boardPerfMeasure, mountBoardPerfOverlay } from "./boardPerfDev";
 import {
   applyStrokeWidthToScene,
   clampBoardStrokeWidth,
@@ -196,6 +197,12 @@ function BoardExcalidrawInner({
 
   useEffect(() => {
     const host = hostRef.current;
+    if (!host) return undefined;
+    return mountBoardPerfOverlay(host);
+  }, []);
+
+  useEffect(() => {
+    const host = hostRef.current;
     if (!host || boot.viewModeEnabled) return undefined;
     const control = mountBoardStrokeWidthControl(host, {
       enabled: true,
@@ -245,6 +252,7 @@ function BoardExcalidrawInner({
       : undefined;
 
   const handleHostPointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    if (isPointerReplayEvent(e.nativeEvent as { __itfluxCoalescedReplay?: boolean })) return;
     const cb = onPointerSceneMoveRef.current;
     const current = apiRef.current;
     if (!cb || !current) return;
@@ -347,14 +355,22 @@ function BoardExcalidrawInner({
           return `file-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
         }}
         onChange={(elements, appState, files) => {
-          strokeControlRef.current?.sync(
-            (appState as { currentItemStrokeWidth?: unknown }).currentItemStrokeWidth,
-          );
-          onChangeRef.current(
-            elements as readonly unknown[],
-            appState as unknown as Record<string, unknown>,
-            (files || {}) as SceneFiles,
-          );
+          // Synthetic coalesced/densify moves: Excalidraw уже дописал points.
+          // Persist/WS только на native pointermove — иначе N копий сцены на кадр.
+          if (isReplayingPenPoints()) return;
+          boardPerfMeasure(() => {
+            const tool = (appState as { activeTool?: { type?: string } }).activeTool?.type;
+            if (tool !== "freedraw") {
+              strokeControlRef.current?.sync(
+                (appState as { currentItemStrokeWidth?: unknown }).currentItemStrokeWidth,
+              );
+            }
+            onChangeRef.current(
+              elements as readonly unknown[],
+              appState as unknown as Record<string, unknown>,
+              (files || {}) as SceneFiles,
+            );
+          });
         }}
         onScrollChange={(scrollX, scrollY, zoom) => {
           let zoomNum = 1;
