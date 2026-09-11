@@ -11,6 +11,7 @@ import {
   isOgeRusTask13,
 } from "../../utils/isOgeInformaticsTask";
 import { fetchJournalStudentErrors } from "../../utils/cabinetAuth";
+import { homeworkAttachmentKey } from "../homeworkAttachmentState";
 import HomeworkFromErrorsModal, { taskErrorKey } from "./HomeworkFromErrorsModal";
 
 function statusLabel(status) {
@@ -31,7 +32,7 @@ function AttachmentList({ attachments }) {
   return (
     <ul className="jg-errors-table__files">
       {attachments.map((file) => (
-        <li key={file.url}>
+        <li key={homeworkAttachmentKey(file) || file.url}>
           <a href={file.url} target="_blank" rel="noreferrer">
             {file.filename || "Файл"}
           </a>

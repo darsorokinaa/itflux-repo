@@ -691,6 +691,10 @@
   background: #FFFBEB;
 }
 
+.cb-student-row__status--expired {
+  color: #B45309;
+}
+
 .cb-student-row__actions {
   display: flex;
   align-items: center;

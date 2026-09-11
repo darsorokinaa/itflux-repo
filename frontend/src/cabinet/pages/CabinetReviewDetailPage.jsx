@@ -49,6 +49,16 @@ import {
   extraHomeworkText,
   visibleHomeworkResourceTasks,
 } from "../homeworkTaskDisplay";
+import {
+  appendHomeworkAttachments,
+  homeworkAttachmentKey,
+  isHomeworkAttachmentImage,
+  normalizeHomeworkAttachment,
+  removeHomeworkAttachment,
+  shouldHydrateAttachmentList,
+  writeTaskAttachments,
+  writeTeacherCommentAttachments,
+} from "../homeworkAttachmentState";
 
 const HW_TASK_TYPE_RU = {
   text: "Текст",
@@ -133,8 +143,7 @@ function VerdictBadge({ verdict }) {
 }
 
 function isImageAttachment(file) {
-  const name = String(file?.filename || file?.url || "").toLowerCase();
-  return /\.(png|jpe?g|webp|gif|bmp|heic|heif)$/i.test(name);
+  return isHomeworkAttachmentImage(file);
 }
 
 function AttachmentList({ attachments, emptyLabel = "Файлы не прикреплены" }) {
@@ -144,15 +153,15 @@ function AttachmentList({ attachments, emptyLabel = "Файлы не прикр�
   return (
     <ul className="cb-review-detail__attachments">
       {attachments.map((file) => (
-        <li key={file.url} className={isImageAttachment(file) ? "is-image" : ""}>
+        <li key={homeworkAttachmentKey(file)} className={isImageAttachment(file) ? "is-image" : ""}>
           {isImageAttachment(file) ? (
             <a href={file.url} target="_blank" rel="noreferrer" className="cb-review-detail__file-thumb">
-              <img src={file.url} alt={file.filename || "Изображение"} />
-              <span>{file.filename || "Файл"}</span>
+              <img src={file.url} alt={file.filename || file.name || "Изображение"} />
+              <span>{file.filename || file.name || "Файл"}</span>
             </a>
           ) : (
             <a href={file.url} target="_blank" rel="noreferrer" className="cb-review-detail__file-link">
-              {file.filename || "Файл"}
+              {file.filename || file.name || "Файл"}
             </a>
           )}
         </li>
@@ -170,16 +179,32 @@ function ReviewFeedbackUpload({
   taskNumber,
   enabled,
   initialAttachments,
-  onChange,
+  onAttachmentsChange,
 }) {
   const fileInputRef = useRef(null);
-  const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState(null);
-  const [files, setFiles] = useState(initialAttachments || []);
+  const [files, setFiles] = useState(() => (
+    Array.isArray(initialAttachments) ? initialAttachments : []
+  ));
+  const [deletingKeys, setDeletingKeys] = useState(() => new Set());
+  const hydratedKeyRef = useRef("");
 
   useEffect(() => {
-    setFiles(Array.isArray(initialAttachments) ? initialAttachments : []);
+    const incoming = Array.isArray(initialAttachments) ? initialAttachments : [];
+    const decision = shouldHydrateAttachmentList({
+      incoming,
+      lastHydratedKey: hydratedKeyRef.current,
+    });
+    if (!decision.hydrate) return;
+    hydratedKeyRef.current = decision.key;
+    setFiles(incoming);
   }, [initialAttachments]);
+
+  const applyChange = (updater) => {
+    setFiles((prev) => updater(prev));
+    onAttachmentsChange?.(updater);
+  };
 
   if (!enabled) {
     return <AttachmentList attachments={files} emptyLabel="Файлы не прикреплены" />;
@@ -189,7 +214,7 @@ function ReviewFeedbackUpload({
     const selected = Array.from(e.target.files || []);
     e.target.value = "";
     if (!selected.length) return;
-    setBusy(true);
+    setUploading(true);
     setErr(null);
     const fd = new FormData();
     if (taskNumber != null && String(taskNumber).trim() !== "") {
@@ -203,37 +228,44 @@ function ReviewFeedbackUpload({
       const data = await uploadReviewFeedback(reviewId, fd);
       const uploaded = Array.isArray(data.attachments) && data.attachments.length
         ? data.attachments
-        : (data.url ? [{ url: data.url, filename: data.filename || selected[0].name }] : []);
-      setFiles((prev) => [
-        ...prev,
-        ...uploaded.map((item) => ({
-          url: String(item.url || ""),
-          filename: String(item.filename || "Файл"),
-        })),
-      ]);
-      onChange?.();
+        : (data.url ? [{
+            id: data.id,
+            url: data.url,
+            filename: data.filename || selected[0].name,
+            content_type: data.content_type,
+          }] : []);
+      const canonical = uploaded.map((item, index) => normalizeHomeworkAttachment(item, {
+        contentType: selected[index]?.type || item.content_type,
+      })).filter(Boolean);
+      applyChange((prev) => appendHomeworkAttachments(prev, canonical));
     } catch (ex) {
-      setErr(ex instanceof Error ? ex.message : "Ошибка загрузки");
+      setErr(ex instanceof Error ? ex.message : "Не удалось загрузить файл");
     } finally {
-      setBusy(false);
+      setUploading(false);
     }
   };
 
-  const onDelete = async (fileUrl) => {
-    setBusy(true);
+  const onDelete = async (file) => {
+    const key = homeworkAttachmentKey(file);
+    if (!key || deletingKeys.has(key)) return;
+    setDeletingKeys((prev) => new Set(prev).add(key));
     setErr(null);
     try {
       await deleteReviewFeedback(reviewId, {
-        url: fileUrl,
+        id: file.id,
+        url: file.url,
         taskNumber,
         taskId,
       });
-      setFiles((prev) => prev.filter((f) => f.url !== fileUrl));
-      onChange?.();
+      applyChange((prev) => removeHomeworkAttachment(prev, file));
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : "Не удалось удалить файл");
     } finally {
-      setBusy(false);
+      setDeletingKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
     }
   };
 
@@ -248,32 +280,36 @@ function ReviewFeedbackUpload({
           accept={FEEDBACK_FILE_ACCEPT}
           className="cb-review-detail__file-input"
           onChange={onFileSelect}
-          disabled={busy}
+          disabled={uploading}
         />
         <button
           type="button"
           className="cb-review-detail__btn cb-review-detail__btn--ghost cb-review-detail__btn--compact"
-          disabled={busy}
+          disabled={uploading}
           onClick={() => fileInputRef.current?.click()}
         >
-          {busy ? "Загрузка…" : "Прикрепить файлы"}
+          {uploading ? "Загрузка…" : "Прикрепить файлы"}
         </button>
       </div>
       <p className="cb-review-detail__feedback-hint">Можно несколько фото или файлов</p>
       {files.length > 0 ? (
         <ul className="cb-review-detail__feedback-delete-list">
-          {files.map((file) => (
-            <li key={file.url}>
-              <button
-                type="button"
-                className="cb-review-detail__feedback-delete"
-                disabled={busy}
-                onClick={() => onDelete(file.url)}
-              >
-                Удалить «{file.filename || "файл"}»
-              </button>
-            </li>
-          ))}
+          {files.map((file) => {
+            const key = homeworkAttachmentKey(file);
+            const deleting = deletingKeys.has(key);
+            return (
+              <li key={key}>
+                <button
+                  type="button"
+                  className="cb-review-detail__feedback-delete"
+                  disabled={deleting}
+                  onClick={() => onDelete(file)}
+                >
+                  {deleting ? "Удаление…" : `Удалить «${file.filename || file.name || "файл"}»`}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       ) : null}
       {err ? <p className="cb-inline-error" role="alert">{err}</p> : null}
@@ -344,6 +380,37 @@ export default function CabinetReviewDetailPage() {
       setLoading(false);
     }
   }, [reviewId]);
+
+  const patchReviewAttachments = useCallback((updater, { taskId, taskNumber, comment = false } = {}) => {
+    setReview((prev) => {
+      if (!prev) return prev;
+      const submission = prev.homework_submission && typeof prev.homework_submission === "object"
+        ? prev.homework_submission
+        : {};
+      const result = submission.result_payload && typeof submission.result_payload === "object"
+        ? submission.result_payload
+        : {};
+      const current = comment
+        ? homeworkTeacherCommentAttachments(result)
+        : homeworkTeacherAttachments(result, taskId, taskNumber);
+      const next = typeof updater === "function" ? updater(current) : updater;
+      const nextResult = comment
+        ? writeTeacherCommentAttachments(result, next)
+        : writeTaskAttachments(result, {
+            taskId,
+            taskNumber,
+            attachments: next,
+            teacher: true,
+          });
+      return {
+        ...prev,
+        homework_submission: {
+          ...submission,
+          result_payload: nextResult,
+        },
+      };
+    });
+  }, []);
 
   useEffect(() => {
     load();
@@ -956,7 +1023,10 @@ export default function CabinetReviewDetailPage() {
                           taskNumber={task.number}
                           enabled={isPending}
                           initialAttachments={teacherAttachments}
-                          onChange={load}
+                          onAttachmentsChange={(updater) => patchReviewAttachments(updater, {
+                            taskId: task.id,
+                            taskNumber: task.number,
+                          })}
                         />
                       </div>
                     </article>
@@ -1061,7 +1131,10 @@ export default function CabinetReviewDetailPage() {
                           taskNumber={task.number}
                           enabled={isPending}
                           initialAttachments={teacherAttachments}
-                          onChange={load}
+                          onAttachmentsChange={(updater) => patchReviewAttachments(updater, {
+                            taskId: task.id,
+                            taskNumber: task.number,
+                          })}
                         />
                       </div>
                     </article>
@@ -1095,7 +1168,7 @@ export default function CabinetReviewDetailPage() {
             reviewId={reviewId}
             enabled={isPending}
             initialAttachments={commentAttachments}
-            onChange={load}
+            onAttachmentsChange={(updater) => patchReviewAttachments(updater, { comment: true })}
           />
         </div>
       </section>

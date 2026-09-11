@@ -131,6 +131,19 @@ class HomeworkEditApiTests(TestCase):
         self.assertIsNotNone(history.old_due_at)
         self.assertIsNotNone(history.new_due_at)
 
+    def test_teacher_changes_due_at_from_datetime_local_iso(self):
+        response = self.client.patch(
+            self.url,
+            self._payload(due_at="2026-09-22T20:59:00.000Z"),
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertFalse(response.data.get("unchanged"))
+        self.homework.refresh_from_db()
+        self.assertIsNotNone(self.homework.due_at)
+        local = timezone.localtime(self.homework.due_at)
+        self.assertEqual(local.date().isoformat(), "2026-09-22")
+
     def test_teacher_adds_task(self):
         payload = self._payload(
             tasks=[

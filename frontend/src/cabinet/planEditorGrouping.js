@@ -122,14 +122,13 @@ export function dropIndexFromY(clientY, rects, fromIndex) {
 export function destinationTopic(sessions, fromIndex, toIndex) {
   const next = moveListItem(sessions, fromIndex, toIndex);
   if (!next[toIndex]) return "";
-  const before = next[toIndex - 1];
-  const after = next[toIndex + 1];
-  const beforeKey = topicKeyOf(before);
-  const afterKey = topicKeyOf(after);
+  const moved = next[toIndex];
+  const beforeKey = topicKeyOf(next[toIndex - 1]);
+  const afterKey = topicKeyOf(next[toIndex + 1]);
+  // Topic changes only when the lesson is dropped strictly inside a
+  // homogeneous group. A drop on a group boundary keeps the original topic.
   if (beforeKey && beforeKey === afterKey) return beforeKey;
-  if (afterKey) return afterKey;
-  if (beforeKey) return beforeKey;
-  return topicKeyOf(next[toIndex]);
+  return topicKeyOf(moved);
 }
 
 export function applyReorderWithTopic(sessions, fromIndex, toIndex) {

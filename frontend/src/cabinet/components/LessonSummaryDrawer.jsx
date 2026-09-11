@@ -16,6 +16,8 @@ import {
   filledRecordsCount,
   journalSaveStatusLabel,
 } from "../journal/journalAutosave";
+import { homeworkJournalStatusLabel, wasHomeworkSubmittedLate } from "../journal/homeworkStatus";
+import LateHomeworkMark from "../journal/LateHomeworkMark";
 import { journalEventPk } from "../journal/openLessonSummary";
 import "../styles/journal.css";
 
@@ -62,27 +64,33 @@ function HomeworkResultBlock({ result, showCorrectAnswer = true }) {
   if (!result) return null;
   const tasks = Array.isArray(result.tasks) ? result.tasks : [];
   const scoreLabel = formatPercentScore(result.score_percent);
+  const hasStatus = Boolean(result.status_label || result.status || result.submitted_at || result.is_overdue);
+  const statusText = hasStatus ? homeworkJournalStatusLabel(result) : "";
+  const late = wasHomeworkSubmittedLate(result);
   const hasBody =
     tasks.length > 0
     || Boolean(String(result.answer_text || "").trim())
     || Boolean(result.has_attached_file)
     || Boolean(String(result.teacher_comment || "").trim())
     || result.score_percent != null
-    || Boolean(result.status_label);
+    || Boolean(statusText);
   if (!hasBody) return null;
   return (
     <div className="jl-variant-result">
       <div className="jl-variant-result__head">
         <strong>{result.title || "Домашнее задание"}</strong>
-        <span>
-          {result.status_label || ""}
-          {scoreLabel
-            ? `${result.status_label ? " · " : ""}${
-              result.correct_count != null && result.checked_count != null
-                ? `${result.correct_count}/${result.checked_count} · `
-                : ""
-            }${scoreLabel}`
-            : ""}
+        <span className="jg-status-cell">
+          {statusText}
+          {late ? <LateHomeworkMark /> : null}
+          {scoreLabel ? (
+            <span>
+              {`${statusText || late ? " · " : ""}${
+                result.correct_count != null && result.checked_count != null
+                  ? `${result.correct_count}/${result.checked_count} · `
+                  : ""
+              }${scoreLabel}`}
+            </span>
+          ) : null}
         </span>
       </div>
       {tasks.length ? (

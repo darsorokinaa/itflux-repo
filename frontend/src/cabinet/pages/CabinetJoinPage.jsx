@@ -32,6 +32,7 @@ function JoinedSuccess({ result, homePath }) {
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState("");
   const showTelegram = result?.show_telegram_connect !== false && !result?.telegram_connected;
+  const title = "Вы уже присоединились к этому учителю";
 
   const handleConnectTelegram = async () => {
     setConnecting(true);
@@ -51,7 +52,7 @@ function JoinedSuccess({ result, homePath }) {
       <div className="cabinet-auth-card">
         <div className="cabinet-auth-head">
           <span className="cabinet-auth-badge">Готово</span>
-          <h1 className="cabinet-auth-title">Вы присоединились к платформе</h1>
+          <h1 className="cabinet-auth-title">{title}</h1>
         </div>
 
         <div className="cb-invite-preview">
@@ -111,10 +112,10 @@ export default function CabinetJoinPage() {
   const [switching, setSwitching] = useState(false);
 
   const joinTitle = joined
-    ? "Вы присоединились к платформе"
+    ? "Вы уже присоединились к этому учителю"
     : error
       ? "Приглашение недоступно"
-      : "Присоединиться к классу";
+      : "Подключиться к учителю";
   usePageTitle(joinTitle);
 
   useEffect(() => {
@@ -130,10 +131,19 @@ export default function CabinetJoinPage() {
         if (cancelled) return;
         const user = sess?.authenticated ? sess.user : null;
         setSession(user);
-        if (invite?.status === "accepted") {
+        if (invite?.status === "accepted" || invite?.already_member) {
           setJoined(invite);
           setPreview(null);
           setError("");
+        } else if (invite?.status === "expired" || invite?.status === "cancelled") {
+          setPreview(null);
+          setJoined(null);
+          setError(
+            invite.message
+            || (invite.status === "expired"
+              ? "Срок действия ссылки истёк. Попросите учителя отправить новую ссылку."
+              : "Приглашение недоступно.")
+          );
         } else {
           setPreview(invite);
           setJoined(null);
@@ -211,9 +221,9 @@ export default function CabinetJoinPage() {
         <div className="cabinet-auth-card">
           <div className="cabinet-auth-head">
             <span className="cabinet-auth-badge">Уже есть аккаунт</span>
-            <h1 className="cabinet-auth-title">Вы уже зарегистрированы</h1>
+            <h1 className="cabinet-auth-title">Вы уже присоединились к этому учителю</h1>
             <p className="cabinet-auth-lead">
-              {preview.message || "Войдите в аккаунт, чтобы продолжить."}
+              {preview.message || "Войдите в аккаунт, чтобы перейти в кабинет."}
             </p>
           </div>
           {preview.login_hint ? (
@@ -231,11 +241,14 @@ export default function CabinetJoinPage() {
     );
   }
 
-  if (preview?.status === "wrong_account") {
+  if (preview?.status === "already_linked" || preview?.status === "wrong_account") {
+    const linked = preview.status === "already_linked";
     return (
       <div className="cabinet-auth-page">
         <div className="cabinet-auth-card">
-          <h1 className="cabinet-auth-title">Ссылка для другого аккаунта</h1>
+          <h1 className="cabinet-auth-title">
+            {linked ? "Профиль уже связан с другим аккаунтом" : "Ссылка для другого аккаунта"}
+          </h1>
           <p className="cabinet-auth-error" role="alert">
             {preview.message}
           </p>
@@ -245,7 +258,7 @@ export default function CabinetJoinPage() {
             disabled={switching}
             onClick={handleSwitchAccount}
           >
-            {switching ? "Выходим…" : "Сменить аккаунт"}
+            {switching ? "Выходим…" : "Войти в нужный аккаунт"}
           </button>
         </div>
       </div>
@@ -253,11 +266,18 @@ export default function CabinetJoinPage() {
   }
 
   if (error && !preview) {
+    const expired = /истёк|истекла/i.test(error);
     return (
       <div className="cabinet-auth-page">
         <div className="cabinet-auth-card">
-          <h1 className="cabinet-auth-title">Приглашение недоступно</h1>
-          <p className="cabinet-auth-error" role="alert">{error}</p>
+          <h1 className="cabinet-auth-title">
+            {expired ? "Срок действия ссылки истёк" : "Приглашение недоступно"}
+          </h1>
+          <p className="cabinet-auth-error" role="alert">
+            {expired
+              ? (error.includes("Попросите") ? error : "Срок действия ссылки истёк. Попросите учителя отправить новую ссылку.")
+              : error}
+          </p>
           <Link
             to="/cabinet/login"
             className="cabinet-auth-submit"
@@ -275,11 +295,10 @@ export default function CabinetJoinPage() {
       <div className="cabinet-auth-card">
         <div className="cabinet-auth-head">
           <span className="cabinet-auth-badge">Приглашение</span>
-          <h1 className="cabinet-auth-title">Присоединиться к классу</h1>
+          <h1 className="cabinet-auth-title">Подключиться к учителю</h1>
           <p className="cabinet-auth-lead">
-            {preview?.teacher_name
-              ? `Учитель ${preview.teacher_name} приглашает вас заниматься на платформе.`
-              : "Учитель приглашает вас заниматься на платформе."}
+            Учитель уже добавил вас в класс. Создайте аккаунт, чтобы получить доступ к своему расписанию и материалам.
+            {preview?.teacher_name ? ` Вас приглашает ${preview.teacher_name}.` : ""}
           </p>
         </div>
 
@@ -313,7 +332,7 @@ export default function CabinetJoinPage() {
               disabled={accepting}
               onClick={handleAccept}
             >
-              {accepting ? "Подключаем…" : "Принять приглашение"}
+              {accepting ? "Подключаем…" : "Подключиться к учителю"}
             </button>
           ) : (
             <>
@@ -337,14 +356,14 @@ export default function CabinetJoinPage() {
               className="cabinet-auth-submit"
               style={{ textDecoration: "none", textAlign: "center" }}
             >
-              Зарегистрироваться и принять
+              Создать аккаунт
             </Link>
             <Link
               to={loginHref}
               className="cabinet-auth-link"
               style={{ display: "block", textAlign: "center", marginTop: "12px" }}
             >
-              Уже есть аккаунт — войти
+              У вас уже есть аккаунт? Войти
             </Link>
           </div>
         )}

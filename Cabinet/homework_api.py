@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 import jwt
 from django.conf import settings
 from django.core.files.storage import default_storage
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
@@ -620,7 +621,41 @@ def _storage_path_from_media_url(file_url: str) -> str | None:
     return None
 
 
-def _filter_attachment_list(items, file_url: str):
+def new_attachment_entry(*, file_url: str, filename: str, content_type: str = "") -> dict:
+    mime = (content_type or "").split(";")[0].strip()
+    return {
+        "id": str(uuid.uuid4()),
+        "url": file_url,
+        "filename": filename,
+        "name": filename,
+        "content_type": mime,
+        "uploaded_at": timezone.now().isoformat(),
+    }
+
+
+def public_attachment(entry: dict | None) -> dict:
+    item = entry if isinstance(entry, dict) else {}
+    filename = str(item.get("filename") or item.get("name") or "")
+    return {
+        "id": str(item.get("id") or ""),
+        "url": str(item.get("url") or ""),
+        "filename": filename,
+        "name": filename,
+        "content_type": str(item.get("content_type") or ""),
+    }
+
+
+def _attachment_matches(item: dict, *, attachment_id: str = "", file_url: str = "") -> bool:
+    item_id = str(item.get("id") or "").strip()
+    want_id = str(attachment_id or "").strip()
+    if want_id and item_id:
+        return item_id == want_id
+    if file_url:
+        return _attachment_url_matches(str(item.get("url") or ""), file_url)
+    return False
+
+
+def _filter_attachment_list(items, file_url: str = "", attachment_id: str = ""):
     if not isinstance(items, list):
         return items, None
     kept = []
@@ -629,107 +664,131 @@ def _filter_attachment_list(items, file_url: str):
         if not isinstance(item, dict):
             kept.append(item)
             continue
-        if removed is None and _attachment_url_matches(str(item.get("url") or ""), file_url):
+        if removed is None and _attachment_matches(item, attachment_id=attachment_id, file_url=file_url):
             removed = item
             continue
         kept.append(item)
     return kept, removed
 
 
+def _remove_from_attachment_maps(
+    by_id: dict,
+    by_num: dict,
+    *,
+    attachment_id: str = "",
+    file_url: str = "",
+) -> dict | None:
+    """Удаляет одно вложение по стабильному id (или url для legacy) из обеих карт."""
+    removed_item = None
+    for mapping in (by_id, by_num):
+        for key in list(mapping.keys()):
+            mapping[key], removed = _filter_attachment_list(
+                mapping[key],
+                file_url=file_url,
+                attachment_id=attachment_id,
+            )
+            if removed is not None and removed_item is None:
+                removed_item = removed
+            if not mapping[key]:
+                del mapping[key]
+    return removed_item
+
+
 def _remove_attachment_from_payload(
     payload: dict,
     *,
-    file_url: str,
+    file_url: str = "",
+    attachment_id: str = "",
     task_id: str = "",
     task_number: str = "",
 ) -> bool:
-    removed_any = False
     by_id = dict(payload.get("attachments_by_task_id") or {})
     by_num = dict(payload.get("attachments_by_number") or {})
-
-    if task_id and task_id in by_id:
-        by_id[task_id], removed = _filter_attachment_list(by_id[task_id], file_url)
-        if removed:
-            removed_any = True
-        if not by_id[task_id]:
-            del by_id[task_id]
-
-    if task_number and task_number in by_num:
-        by_num[task_number], removed = _filter_attachment_list(by_num[task_number], file_url)
-        if removed:
-            removed_any = True
-        if not by_num[task_number]:
-            del by_num[task_number]
-
-    if not removed_any:
-        for key, items in list(by_id.items()):
-            filtered, removed = _filter_attachment_list(items, file_url)
-            if removed:
-                removed_any = True
-                if filtered:
-                    by_id[key] = filtered
-                else:
-                    del by_id[key]
-        for key, items in list(by_num.items()):
-            filtered, removed = _filter_attachment_list(items, file_url)
-            if removed:
-                removed_any = True
-                if filtered:
-                    by_num[key] = filtered
-                else:
-                    del by_num[key]
-
+    removed = _remove_from_attachment_maps(
+        by_id,
+        by_num,
+        attachment_id=attachment_id,
+        file_url=file_url,
+    )
     payload["attachments_by_task_id"] = by_id
     payload["attachments_by_number"] = by_num
-    return removed_any
+    return removed is not None
 
 
 def _remove_teacher_attachment_from_payload(
     payload: dict,
     *,
-    file_url: str,
+    file_url: str = "",
+    attachment_id: str = "",
     task_id: str = "",
     task_number: str = "",
 ) -> bool:
-    removed_any = False
     by_id = dict(payload.get("teacher_attachments_by_task_id") or {})
     by_num = dict(payload.get("teacher_attachments_by_number") or {})
-
-    if task_id and task_id in by_id:
-        by_id[task_id], removed = _filter_attachment_list(by_id[task_id], file_url)
-        if removed:
-            removed_any = True
-        if not by_id[task_id]:
-            del by_id[task_id]
-
-    if task_number and task_number in by_num:
-        by_num[task_number], removed = _filter_attachment_list(by_num[task_number], file_url)
-        if removed:
-            removed_any = True
-        if not by_num[task_number]:
-            del by_num[task_number]
-
-    if not removed_any:
-        for key, items in list(by_id.items()):
-            filtered, removed = _filter_attachment_list(items, file_url)
-            if removed:
-                removed_any = True
-                if filtered:
-                    by_id[key] = filtered
-                else:
-                    del by_id[key]
-        for key, items in list(by_num.items()):
-            filtered, removed = _filter_attachment_list(items, file_url)
-            if removed:
-                removed_any = True
-                if filtered:
-                    by_num[key] = filtered
-                else:
-                    del by_num[key]
-
+    removed = _remove_from_attachment_maps(
+        by_id,
+        by_num,
+        attachment_id=attachment_id,
+        file_url=file_url,
+    )
     payload["teacher_attachments_by_task_id"] = by_id
     payload["teacher_attachments_by_number"] = by_num
-    return removed_any
+    return removed is not None
+
+
+def _pop_attachment_from_payload(
+    payload: dict,
+    *,
+    teacher: bool,
+    comment: bool = False,
+    attachment_id: str = "",
+    file_url: str = "",
+) -> dict | None:
+    if comment:
+        items = teacher_comment_attachments(payload)
+        kept, removed = _filter_attachment_list(
+            items,
+            file_url=file_url,
+            attachment_id=attachment_id,
+        )
+        if removed is None:
+            return None
+        payload["teacher_comment_attachments"] = kept
+        return removed
+    by_id_key = "teacher_attachments_by_task_id" if teacher else "attachments_by_task_id"
+    by_num_key = "teacher_attachments_by_number" if teacher else "attachments_by_number"
+    by_id = dict(payload.get(by_id_key) or {})
+    by_num = dict(payload.get(by_num_key) or {})
+    removed = _remove_from_attachment_maps(
+        by_id,
+        by_num,
+        attachment_id=attachment_id,
+        file_url=file_url,
+    )
+    payload[by_id_key] = by_id
+    payload[by_num_key] = by_num
+    return removed
+
+
+def _append_task_attachment(
+    payload: dict,
+    *,
+    teacher: bool,
+    task_id: str,
+    task_number: str,
+    entry: dict,
+) -> dict:
+    id_key = "teacher_attachments_by_task_id" if teacher else "attachments_by_task_id"
+    num_key = "teacher_attachments_by_number" if teacher else "attachments_by_number"
+    by_id = dict(payload.get(id_key) or {})
+    by_num = dict(payload.get(num_key) or {})
+    if task_id:
+        by_id.setdefault(task_id, []).append(dict(entry))
+    if task_number:
+        by_num.setdefault(task_number, []).append(dict(entry))
+    payload[id_key] = by_id
+    payload[num_key] = by_num
+    return payload
 
 
 def append_teacher_feedback_attachment(
@@ -739,21 +798,21 @@ def append_teacher_feedback_attachment(
     task_number: str,
     file_url: str,
     filename: str,
+    content_type: str = "",
+    entry: dict | None = None,
 ) -> dict:
-    by_id = dict(payload.get("teacher_attachments_by_task_id") or {})
-    by_num = dict(payload.get("teacher_attachments_by_number") or {})
-    entry = {
-        "url": file_url,
-        "filename": filename,
-        "uploaded_at": timezone.now().isoformat(),
-    }
-    if task_id:
-        by_id.setdefault(task_id, []).append(entry)
-    if task_number:
-        by_num.setdefault(task_number, []).append(entry)
-    payload["teacher_attachments_by_task_id"] = by_id
-    payload["teacher_attachments_by_number"] = by_num
-    return payload
+    row = dict(entry) if entry else new_attachment_entry(
+        file_url=file_url,
+        filename=filename,
+        content_type=content_type,
+    )
+    return _append_task_attachment(
+        payload,
+        teacher=True,
+        task_id=task_id,
+        task_number=task_number,
+        entry=row,
+    )
 
 
 def teacher_comment_attachments(payload: dict) -> list:
@@ -761,30 +820,74 @@ def teacher_comment_attachments(payload: dict) -> list:
     return list(items) if isinstance(items, list) else []
 
 
-def append_teacher_comment_attachment(payload: dict, *, file_url: str, filename: str) -> dict:
+def append_teacher_comment_attachment(
+    payload: dict,
+    *,
+    file_url: str,
+    filename: str,
+    content_type: str = "",
+    entry: dict | None = None,
+) -> dict:
+    row = dict(entry) if entry else new_attachment_entry(
+        file_url=file_url,
+        filename=filename,
+        content_type=content_type,
+    )
     items = teacher_comment_attachments(payload)
-    items.append({
-        "url": file_url,
-        "filename": filename,
-        "uploaded_at": timezone.now().isoformat(),
-    })
+    items.append(row)
     payload["teacher_comment_attachments"] = items
     return payload
 
 
-def remove_teacher_comment_attachment(payload: dict, *, file_url: str) -> bool:
-    items = teacher_comment_attachments(payload)
-    kept = [item for item in items if str(item.get("url") or "") != str(file_url or "")]
-    if len(kept) == len(items):
-        return False
-    payload["teacher_comment_attachments"] = kept
-    return True
+def remove_teacher_comment_attachment(
+    payload: dict,
+    *,
+    file_url: str = "",
+    attachment_id: str = "",
+) -> bool:
+    return _pop_attachment_from_payload(
+        payload,
+        teacher=True,
+        comment=True,
+        attachment_id=attachment_id,
+        file_url=file_url,
+    ) is not None
 
 
 def _delete_attachment_file(file_url: str):
     rel_path = _storage_path_from_media_url(file_url)
     if rel_path and default_storage.exists(rel_path):
         default_storage.delete(rel_path)
+
+
+def _request_attachment_ref(request) -> tuple[str, str]:
+    data = getattr(request, "data", {}) or {}
+    query = getattr(request, "query_params", {}) or {}
+    attachment_id = str(
+        query.get("id")
+        or query.get("attachment_id")
+        or data.get("id")
+        or data.get("attachment_id")
+        or ""
+    ).strip()
+    file_url = str(query.get("url") or data.get("url") or "").strip()
+    return attachment_id, file_url
+
+
+def _save_uploaded_attachment_file(uploaded, rel_path: str) -> dict:
+    try:
+        if hasattr(uploaded, "seek"):
+            uploaded.seek(0)
+    except Exception:
+        pass
+    saved_path = default_storage.save(rel_path, uploaded)
+    file_url = default_storage.url(saved_path)
+    content_type = str(getattr(uploaded, "content_type", "") or "")
+    return new_attachment_entry(
+        file_url=file_url,
+        filename=_safe_upload_filename(getattr(uploaded, "name", "") or "file"),
+        content_type=content_type,
+    )
 
 
 def _parse_result_body(request):
@@ -976,32 +1079,35 @@ class HomeworkAssignmentSaveDraftView(HomeworkAssignmentBaseView):
         if result is None:
             return Response({"detail": "result required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        submission = _get_or_create_submission(homework, student)
-        if not _submission_student_editable(submission):
-            message = (
-                "Работа уже проверена."
-                if submission.status == SubmissionStatus.CHECKED
-                else "Работа уже отправлена на проверку."
-            )
-            return Response({"error": message}, status=status.HTTP_403_FORBIDDEN)
-        merged = _merge_result_payload(submission.result_payload, result)
-        variant_id = None
-        for task in homework.tasks.filter(is_active=True):
-            variant_id = extract_variant_id(task.description)
-            if variant_id:
-                break
-        if not is_live_meeting_homework(homework):
-            subject = ""
-            try:
-                subject = (build_homework_review_context(homework).get("subject") or "")
-            except Exception:
+        from .homework_submit import get_or_create_locked_submission
+
+        with transaction.atomic():
+            submission = get_or_create_locked_submission(homework, student)
+            if not _submission_student_editable(submission):
+                message = (
+                    "Работа уже проверена."
+                    if submission.status == SubmissionStatus.CHECKED
+                    else "Работа уже отправлена на проверку."
+                )
+                return Response({"error": message}, status=status.HTTP_403_FORBIDDEN)
+            merged = _merge_result_payload(submission.result_payload, result)
+            variant_id = None
+            for task in homework.tasks.filter(is_active=True):
+                variant_id = extract_variant_id(task.description)
+                if variant_id:
+                    break
+            if not is_live_meeting_homework(homework):
                 subject = ""
-            merged = recompute_variant_checked(merged, variant_id, subject=subject) or merged
-        submission.result_payload = merged
-        computed = compute_score_percent(merged)
-        if computed is not None:
-            submission.score = computed
-        submission.save(update_fields=["result_payload", "score", "updated_at"])
+                try:
+                    subject = (build_homework_review_context(homework).get("subject") or "")
+                except Exception:
+                    subject = ""
+                merged = recompute_variant_checked(merged, variant_id, subject=subject) or merged
+            submission.result_payload = merged
+            computed = compute_score_percent(merged)
+            if computed is not None:
+                submission.score = computed
+            submission.save(update_fields=["result_payload", "score", "updated_at"])
         logger.info(
             "homework.save_draft ok student_id=%s homework_id=%s submission_id=%s "
             "teacher_id=%s submitted_at=%s api_status=%s",
@@ -1052,64 +1158,58 @@ class HomeworkAssignmentUploadAnswerView(HomeworkAssignmentBaseView):
 
         task_id = str(request.data.get("task_id") or request.POST.get("task_id") or "").strip()
 
-        submission = _get_or_create_submission(homework, student)
-        if _submission_upload_readonly(submission):
-            return Response(
-                {"error": "Работа уже отправлена на проверку."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        from .homework_submit import get_or_create_locked_submission
 
-        payload = dict(submission.result_payload or {})
-        existing_count = count_task_attachments(
-            payload, task_id=task_id, task_number=task_number, teacher=False
-        )
-        if existing_count + len(uploaded_files) > TASK_ATTACHMENT_MAX_COUNT:
-            return Response(
-                {
-                    "error": f"Слишком много файлов к заданию. Максимум {TASK_ATTACHMENT_MAX_COUNT}.",
-                    "code": "TOO_MANY_FILES",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        by_id = dict(payload.get("attachments_by_task_id") or {})
-        by_num = dict(payload.get("attachments_by_number") or {})
         saved = []
-        for uploaded in uploaded_files:
-            try:
-                if hasattr(uploaded, "seek"):
-                    uploaded.seek(0)
-            except Exception:
-                pass
-            safe_name = _safe_upload_filename(uploaded.name)
-            uid = uuid.uuid4().hex[:12]
-            task_key = task_id or task_number
-            rel_path = (
-                f"cabinet/homework/answers/{homework_id}/{student.pk}/"
-                f"{task_key}_{uid}_{safe_name}"
-            )
-            saved_path = default_storage.save(rel_path, uploaded)
-            file_url = default_storage.url(saved_path)
-            entry = {
-                "url": file_url,
-                "filename": safe_name,
-                "uploaded_at": timezone.now().isoformat(),
-            }
-            if task_id:
-                by_id.setdefault(task_id, []).append(entry)
-            by_num.setdefault(task_number, []).append(entry)
-            saved.append({"url": file_url, "filename": safe_name})
+        with transaction.atomic():
+            submission = get_or_create_locked_submission(homework, student)
+            if _submission_upload_readonly(submission):
+                return Response(
+                    {"error": "Работа уже отправлена на проверку."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
 
-        payload["attachments_by_task_id"] = by_id
-        payload["attachments_by_number"] = by_num
-        submission.result_payload = payload
-        submission.save(update_fields=["result_payload", "updated_at"])
+            payload = dict(submission.result_payload or {})
+            existing_count = count_task_attachments(
+                payload, task_id=task_id, task_number=task_number, teacher=False
+            )
+            if existing_count + len(uploaded_files) > TASK_ATTACHMENT_MAX_COUNT:
+                return Response(
+                    {
+                        "error": f"Слишком много файлов к заданию. Максимум {TASK_ATTACHMENT_MAX_COUNT}.",
+                        "code": "TOO_MANY_FILES",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            task_key = task_id or task_number
+            for uploaded in uploaded_files:
+                safe_name = _safe_upload_filename(uploaded.name)
+                uid = uuid.uuid4().hex[:12]
+                rel_path = (
+                    f"cabinet/homework/answers/{homework_id}/{student.pk}/"
+                    f"{task_key}_{uid}_{safe_name}"
+                )
+                entry = _save_uploaded_attachment_file(uploaded, rel_path)
+                _append_task_attachment(
+                    payload,
+                    teacher=False,
+                    task_id=task_id,
+                    task_number=task_number,
+                    entry=entry,
+                )
+                saved.append(public_attachment(entry))
+
+            submission.result_payload = payload
+            submission.save(update_fields=["result_payload", "updated_at"])
 
         first = saved[0]
         return Response({
             "ok": True,
+            "id": first["id"],
             "url": first["url"],
             "filename": first["filename"],
+            "content_type": first["content_type"],
             "attachments": saved,
         })
 
@@ -1118,44 +1218,34 @@ class HomeworkAssignmentUploadAnswerView(HomeworkAssignmentBaseView):
         if err:
             return err
 
-        file_url = str(
-            request.query_params.get("url")
-            or request.data.get("url")
-            or ""
-        ).strip()
-        if not file_url:
-            return Response({"error": "url required"}, status=status.HTTP_400_BAD_REQUEST)
+        attachment_id, file_url = _request_attachment_ref(request)
+        if not attachment_id and not file_url:
+            return Response({"error": "id required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        task_number = str(
-            request.query_params.get("task_number")
-            or request.data.get("task_number")
-            or ""
-        ).strip()
-        task_id = str(
-            request.query_params.get("task_id")
-            or request.data.get("task_id")
-            or ""
-        ).strip()
+        from .homework_submit import get_or_create_locked_submission
 
-        submission = _get_or_create_submission(homework, student)
-        if _submission_upload_readonly(submission):
-            return Response(
-                {"error": "Работа уже отправлена на проверку."},
-                status=status.HTTP_403_FORBIDDEN,
+        with transaction.atomic():
+            submission = get_or_create_locked_submission(homework, student)
+            if _submission_upload_readonly(submission):
+                return Response(
+                    {"error": "Работа уже отправлена на проверку."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            payload = dict(submission.result_payload or {})
+            removed = _pop_attachment_from_payload(
+                payload,
+                teacher=False,
+                attachment_id=attachment_id,
+                file_url=file_url,
             )
+            if removed is None:
+                return Response({"error": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
 
-        payload = dict(submission.result_payload or {})
-        if not _remove_attachment_from_payload(
-            payload,
-            file_url=file_url,
-            task_id=task_id,
-            task_number=task_number,
-        ):
-            return Response({"error": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
-
-        _delete_attachment_file(file_url)
-        submission.result_payload = payload
-        submission.save(update_fields=["result_payload", "updated_at"])
+            submission.result_payload = payload
+            submission.save(update_fields=["result_payload", "updated_at"])
+            stored_url = str(removed.get("url") or file_url)
+            transaction.on_commit(lambda url=stored_url: _delete_attachment_file(url))
         return Response({"ok": True})
 
 

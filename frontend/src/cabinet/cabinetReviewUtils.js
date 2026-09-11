@@ -1,4 +1,5 @@
 import { homeworkTaskAttachments } from "../utils/cabinetHomework";
+import { normalizeHomeworkAttachmentList } from "./homeworkAttachmentState";
 import {
   computePart1TaskCorrect,
   formatCorrectAnswerPlain,
@@ -131,7 +132,7 @@ export function buildTeacherVariantUrl(reviewCtx) {
 export function homeworkTeacherCommentAttachments(result) {
   if (!result || typeof result !== "object") return [];
   const list = result.teacher_comment_attachments || result.teacherCommentAttachments || [];
-  return Array.isArray(list) ? list : [];
+  return normalizeHomeworkAttachmentList(list);
 }
 
 export function homeworkTeacherAttachments(result, taskId, taskNumber, tasks) {
@@ -141,11 +142,11 @@ export function homeworkTeacherAttachments(result, taskId, taskNumber, tasks) {
   const id = String(taskId);
   const num = String(taskNumber);
   if (byId[id]) {
-    return Array.isArray(byId[id]) ? byId[id] : [];
+    return normalizeHomeworkAttachmentList(byId[id]);
   }
   if (numberCollisionCount(tasks, num) > 1) return [];
   const list = byNum[num] || byNum[String(Number(num))] || [];
-  return Array.isArray(list) ? list : [];
+  return normalizeHomeworkAttachmentList(list);
 }
 
 export { homeworkTaskAttachments };

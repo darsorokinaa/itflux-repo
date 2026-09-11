@@ -56,6 +56,15 @@ import {
   deleteHomeworkAnswer,
 } from "../utils/cabinetHomework";
 import {
+  appendHomeworkAttachments,
+  homeworkAttachmentKey,
+  isHomeworkAttachmentImage,
+  normalizeHomeworkAttachment,
+  removeHomeworkAttachment,
+  shouldHydrateAttachmentList,
+  writeTaskAttachments,
+} from "../cabinet/homeworkAttachmentState";
+import {
   fetchCabinetSession,
   fetchVideoMeetingLiveAnswers,
   isTeacherRole,
@@ -182,21 +191,29 @@ function LessonSolutionUpload({
   enabled,
   allowDelete,
   initialAttachments,
+  onAttachmentsChange,
 }) {
   const FILE_ACCEPT =
     ".kum,.xls,.xlsx,.xlsm,.xlsb,.csv,.tsv,.ods,.ots,.numbers,.png,.jpg,.jpeg,.webp,.gif,.bmp,.heic,.heif,.txt,.pdf,.doc,.docx,.odt,.rtf,.zip,.7z,.rar";
   const fileInputRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
-  const [sentPreviews, setSentPreviews] = useState(initialAttachments || []);
+  const [sentPreviews, setSentPreviews] = useState(() => (
+    Array.isArray(initialAttachments) ? initialAttachments : []
+  ));
   const [pendingItems, setPendingItems] = useState([]);
+  const [deletingKeys, setDeletingKeys] = useState(() => new Set());
   const initialAttachmentsKeyRef = useRef("");
 
   useEffect(() => {
-    const key = JSON.stringify(initialAttachments || []);
-    if (initialAttachmentsKeyRef.current === key) return;
-    initialAttachmentsKeyRef.current = key;
-    setSentPreviews(Array.isArray(initialAttachments) ? initialAttachments : []);
+    const incoming = Array.isArray(initialAttachments) ? initialAttachments : [];
+    const decision = shouldHydrateAttachmentList({
+      incoming,
+      lastHydratedKey: initialAttachmentsKeyRef.current,
+    });
+    if (!decision.hydrate) return;
+    initialAttachmentsKeyRef.current = decision.key;
+    setSentPreviews(incoming);
   }, [initialAttachments]);
 
   const pendingItemsRef = useRef([]);
@@ -288,20 +305,22 @@ function LessonSolutionUpload({
             }
             return parsed;
           })();
-      const imageByName = Object.fromEntries(
-        pendingItems.map((item) => [item.file.name, Boolean(item.file.type?.startsWith("image/"))]),
-      );
       const uploaded = Array.isArray(data.attachments) && data.attachments.length
         ? data.attachments
-        : (data.url ? [{ url: data.url, filename: data.filename || pendingItems[0].file.name }] : []);
-      setSentPreviews((prev) => [
-        ...prev,
-        ...uploaded.map((item) => ({
-          url: String(item.url || ""),
-          filename: String(item.filename || "Файл"),
-          isImage: Boolean(imageByName[item.filename]),
-        })),
-      ]);
+        : (data.url ? [{
+            id: data.id,
+            url: data.url,
+            filename: data.filename || pendingItems[0].file.name,
+            content_type: data.content_type || pendingItems[0].file.type,
+          }] : []);
+      const canonical = uploaded.map((item) => {
+        const pendingMatch = pendingItems.find((p) => p.file.name === item.filename);
+        return normalizeHomeworkAttachment(item, {
+          contentType: pendingMatch?.file?.type || item.content_type,
+        });
+      }).filter(Boolean);
+      setSentPreviews((prev) => appendHomeworkAttachments(prev, canonical));
+      onAttachmentsChange?.((prev) => appendHomeworkAttachments(prev, canonical));
       clearPending();
     } catch (ex) {
       const raw = ex instanceof Error ? ex.message : String(ex || "");
@@ -315,24 +334,23 @@ function LessonSolutionUpload({
     }
   };
 
-  const onDeleteAttachment = async (e, attachmentUrl) => {
+  const onDeleteAttachment = async (e, attachment) => {
     e.stopPropagation();
     e.preventDefault();
-    if (!canDeleteAttachment || !attachmentUrl || busy) return;
-    setBusy(true);
+    const attachmentKey = homeworkAttachmentKey(attachment);
+    if (!canDeleteAttachment || !attachmentKey) return;
+    if (deletingKeys.has(attachmentKey)) return;
+    setDeletingKeys((prev) => new Set(prev).add(attachmentKey));
     setErr(null);
     try {
       const uploadOpts = lessonToken ? { lessonToken } : undefined;
       await deleteHomeworkAnswer(
         assignmentId,
-        { url: attachmentUrl, taskNumber, taskId },
+        { id: attachment.id, url: attachment.url, taskNumber, taskId },
         uploadOpts
       );
-      setSentPreviews((prev) => {
-        const next = prev.filter((p) => p.url !== attachmentUrl);
-        initialAttachmentsKeyRef.current = JSON.stringify(next);
-        return next;
-      });
+      setSentPreviews((prev) => removeHomeworkAttachment(prev, attachment));
+      onAttachmentsChange?.((prev) => removeHomeworkAttachment(prev, attachment));
     } catch (ex) {
       const raw = ex instanceof Error ? ex.message : String(ex || "");
       setErr(
@@ -341,7 +359,11 @@ function LessonSolutionUpload({
           : raw || "Ошибка удаления"
       );
     } finally {
-      setBusy(false);
+      setDeletingKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(attachmentKey);
+        return next;
+      });
     }
   };
 
@@ -406,17 +428,20 @@ function LessonSolutionUpload({
               )}
               <div className="lesson-solution-pending-meta">
                 <span className="lesson-solution-pending-file-name">{item.file.name}</span>
-                <button
-                  type="button"
-                  className="lesson-solution-pending-action lesson-solution-pending-action--ghost"
-                  disabled={busy}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    removePending(item.key);
-                  }}
-                >
-                  Удалить
-                </button>
+                {busy ? (
+                  <span className="lesson-solution-pending-file-name">Загрузка…</span>
+                ) : (
+                  <button
+                    type="button"
+                    className="lesson-solution-pending-action lesson-solution-pending-action--ghost"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removePending(item.key);
+                    }}
+                  >
+                    Удалить
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -447,27 +472,29 @@ function LessonSolutionUpload({
         <div className="lesson-solution-previews">
           <span className="lesson-solution-previews__label">Прикреплено</span>
           <div className="lesson-solution-previews__grid">
-            {sentPreviews.map((p, i) => {
+            {sentPreviews.map((p) => {
               let src = lessonToken && !cabinetMode
                 ? `${p.url}${p.url.includes("?") ? "&" : "?"}t=${encodeURIComponent(lessonToken)}`
                 : p.url;
               src = normalizeMediaUrl(src);
               const isAudio = /\.(mp3|wav|ogg|aac|flac|m4a)$/i.test(p.filename || p.url || "");
+              const itemKey = homeworkAttachmentKey(p);
+              const deleting = deletingKeys.has(itemKey);
               return (
-                <figure key={`${p.url}-${i}`} className="lesson-solution-preview-fig">
+                <figure key={itemKey} className="lesson-solution-preview-fig">
                   {canDeleteAttachment ? (
                     <button
                       type="button"
                       className="lesson-solution-preview-remove"
-                      disabled={busy}
+                      disabled={deleting}
                       aria-label="Удалить файл"
                       title="Удалить файл"
-                      onClick={(e) => onDeleteAttachment(e, p.url)}
+                      onClick={(e) => onDeleteAttachment(e, p)}
                     >
                       ✕
                     </button>
                   ) : null}
-                  {p.isImage ? (
+                  {p.isImage || isHomeworkAttachmentImage(p) ? (
                     <a href={src} target="_blank" rel="noreferrer" className="lesson-solution-preview-link">
                       <img src={src} alt="" className="lesson-solution-thumb" />
                     </a>
@@ -1557,6 +1584,23 @@ function ExamPage() {
     () => (lessonEmbedParams.token ? { lessonToken: lessonEmbedParams.token } : undefined),
     [lessonEmbedParams.token]
   );
+
+  const patchHomeworkTaskAttachments = useCallback((taskId, taskNumber, updater) => {
+    setHwApiRaw((prev) => {
+      if (!prev || typeof prev !== "object") return prev;
+      const result = prev.result && typeof prev.result === "object" ? prev.result : {};
+      const current = homeworkTaskAttachments(result, taskId, taskNumber);
+      const next = typeof updater === "function" ? updater(current) : updater;
+      return {
+        ...prev,
+        result: writeTaskAttachments(result, {
+          taskId,
+          taskNumber,
+          attachments: next,
+        }),
+      };
+    });
+  }, []);
 
   const runHomeworkSave = useCallback(async () => {
     if (!isHomework || !cabinetAssignmentId || !variant) return;
@@ -3276,6 +3320,7 @@ function ExamPage() {
                     cabinetMode={showCabinetPart2SolutionUpload}
                     allowDelete
                     initialAttachments={homeworkTaskAttachments(hwPicked?.result, task.id, task.number, variant?.tasks)}
+                    onAttachmentsChange={(updater) => patchHomeworkTaskAttachments(task.id, task.number, updater)}
                     enabled={
                       (showLessonSolutionUpload || showCabinetPart2SolutionUpload)
                       && (!isHomework || (!hRead && !numLocked(task.number)))
@@ -3398,6 +3443,7 @@ function ExamPage() {
                             cabinetMode={showCabinetPart2SolutionUpload}
                             allowDelete
                             initialAttachments={homeworkTaskAttachments(hwPicked?.result, task.id, task.number, variant?.tasks)}
+                            onAttachmentsChange={(updater) => patchHomeworkTaskAttachments(task.id, task.number, updater)}
                             enabled={
                               (showLessonSolutionUpload || showCabinetPart2SolutionUpload)
                               && (!isHomework || (!hRead && !numLocked(task.number)))
@@ -3513,6 +3559,7 @@ function ExamPage() {
                         cabinetMode={showCabinetPart2SolutionUpload}
                         allowDelete
                         initialAttachments={homeworkTaskAttachments(hwPicked?.result, task.id, task.number, variant?.tasks)}
+                        onAttachmentsChange={(updater) => patchHomeworkTaskAttachments(task.id, task.number, updater)}
                         enabled={
                           (showLessonSolutionUpload || showCabinetPart2SolutionUpload)
                           && (!isHomework || (!hRead && !numLocked(task.number)))

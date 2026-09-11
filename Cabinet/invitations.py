@@ -3,7 +3,7 @@ import secrets
 from datetime import timedelta
 
 from django.contrib.auth.models import User
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from .choices import InvitationStatus, StudentStatus
@@ -16,6 +16,30 @@ class InvitationError(ValueError):
     def __init__(self, message, code="invalid"):
         super().__init__(message)
         self.code = code
+
+
+EXPIRED_INVITE_MESSAGE = (
+    "Срок действия ссылки истёк. Попросите учителя отправить новую ссылку."
+)
+ALREADY_JOINED_LOGIN_MESSAGE = (
+    "Вы уже присоединились к этому учителю. Войдите в аккаунт, чтобы продолжить."
+)
+STUDENT_ALREADY_LINKED_MESSAGE = (
+    "Этот профиль ученика уже связан с другим аккаунтом. "
+    "Войдите в нужный аккаунт или обратитесь к учителю."
+)
+ACCOUNT_ALREADY_BOUND_MESSAGE = (
+    "Этот аккаунт уже привязан к другому профилю ученика у этого учителя."
+)
+WRONG_ACCOUNT_MESSAGE = (
+    "Эта ссылка предназначена для другого аккаунта. "
+    "Выйдите из текущего аккаунта или продолжите под ним, "
+    "если учитель разрешает привязку."
+)
+NAMED_INVITE_MISSING_STUDENT_MESSAGE = (
+    "Приглашение не связано с профилем ученика. "
+    "Попросите учителя отправить новую ссылку."
+)
 
 
 def default_invite_expiry():
@@ -115,10 +139,18 @@ def create_student_invitation(
     if existing_student is not None:
         if existing_student.teacher_id != teacher.id:
             raise ValueError("Ученик принадлежит другому учителю")
-        pre_student = existing_student
+        locked_student = (
+            Student.objects.select_for_update()
+            .filter(pk=existing_student.pk, teacher=teacher)
+            .first()
+        )
+        if locked_student is None:
+            raise ValueError("Ученик не найден")
+        pre_student = locked_student
     if pre_student is None and clean_email:
         pre_student = (
-            Student.objects.filter(teacher=teacher, email__iexact=clean_email)
+            Student.objects.select_for_update()
+            .filter(teacher=teacher, email__iexact=clean_email)
             .exclude(status=StudentStatus.ARCHIVED)
             .order_by("id")
             .first()
@@ -154,7 +186,8 @@ def create_student_invitation(
     invite_pre_student = pre_student
     if pre_student is not None:
         owner_invite = (
-            StudentInvitation.objects.filter(pre_student=pre_student)
+            StudentInvitation.objects.select_for_update()
+            .filter(pre_student=pre_student)
             .order_by("-id")
             .first()
         )
@@ -172,7 +205,11 @@ def create_student_invitation(
                     student_id=pre_student.pk if pre_student else None,
                 )
                 return owner_invite
-            invite_pre_student = None
+            # OneToOne: старый токен ещё держит ученика. Переносим связь на новый,
+            # а не создаём вторую student-запись.
+            owner_invite.pre_student = None
+            owner_invite.save(update_fields=["pre_student", "updated_at"])
+            invite_pre_student = pre_student
 
     logger.info(
         "invitation created teacher=%s email_set=%s pre_student=%s existing_user=%s",
@@ -182,19 +219,37 @@ def create_student_invitation(
         pre_student.user_id if pre_student else None,
     )
 
-    invitation = StudentInvitation.objects.create(
-        token=token,
-        teacher=teacher,
-        group=group,
-        first_name=clean_first,
-        last_name=clean_last,
-        pre_student=invite_pre_student,
-        email=clean_email,
-        direction=direction or "other",
-        grade=grade,
-        message=(message or "").strip(),
-        expires_at=expires_at or default_invite_expiry(),
-    )
+    try:
+        invitation = StudentInvitation.objects.create(
+            token=token,
+            teacher=teacher,
+            group=group,
+            first_name=clean_first,
+            last_name=clean_last,
+            pre_student=invite_pre_student,
+            email=clean_email,
+            direction=direction or "other",
+            grade=grade,
+            message=(message or "").strip(),
+            expires_at=expires_at or default_invite_expiry(),
+        )
+    except IntegrityError:
+        winner = (
+            StudentInvitation.objects.filter(pre_student=pre_student)
+            .order_by("-id")
+            .first()
+            if pre_student is not None
+            else None
+        )
+        if winner is not None:
+            logger.info(
+                "invitation create raced teacher=%s invitation=%s student=%s",
+                teacher.id,
+                winner.pk,
+                pre_student.pk if pre_student else None,
+            )
+            return winner
+        raise
     _emit_invitation_created_events(
         invitation,
         student_created_now=student_created_now,
@@ -310,7 +365,7 @@ def invitation_already_registered_payload(invitation: StudentInvitation) -> dict
         "join_path": invitation_join_path(invitation.token),
         "teacher_id": invitation.teacher_id,
         "login_hint": _login_hint_for_invitation(invitation),
-        "message": "Вы уже зарегистрированы. Войдите в аккаунт, чтобы продолжить.",
+        "message": ALREADY_JOINED_LOGIN_MESSAGE,
     }
 
 
@@ -324,11 +379,21 @@ def invitation_wrong_account_payload(invitation: StudentInvitation) -> dict:
         "group_title": invitation.group.title if invitation.group_id else None,
         "join_path": invitation_join_path(invitation.token),
         "teacher_id": invitation.teacher_id,
-        "message": (
-            "Эта ссылка предназначена для другого аккаунта. "
-            "Выйдите из текущего аккаунта или продолжите под ним, "
-            "если учитель разрешает привязку."
-        ),
+        "message": WRONG_ACCOUNT_MESSAGE,
+    }
+
+
+def invitation_already_linked_payload(invitation: StudentInvitation) -> dict:
+    return {
+        "token": invitation.token,
+        "status": "already_linked",
+        "ok": False,
+        "teacher_name": _teacher_display_name(invitation),
+        "group_id": invitation.group_id,
+        "group_title": invitation.group.title if invitation.group_id else None,
+        "join_path": invitation_join_path(invitation.token),
+        "teacher_id": invitation.teacher_id,
+        "message": STUDENT_ALREADY_LINKED_MESSAGE,
     }
 
 
@@ -401,6 +466,9 @@ def resolve_invitation_for_user(token: str, user=None):
                         payload = invitation_wrong_account_payload(invitation)
                         payload["message"] = "Войдите как ученик, чтобы принять приглашение."
                         return payload
+                    pre = invitation.pre_student
+                    if pre is not None and pre.user_id and pre.user_id != user.id:
+                        return invitation_already_linked_payload(invitation)
                     return invitation_wrong_account_payload(invitation)
                 return invitation_already_registered_payload(invitation)
             payload = invitation_preview_payload(invitation)
@@ -427,6 +495,9 @@ def resolve_invitation_for_user(token: str, user=None):
                 payload["student_id"] = linked.id
                 payload["already_member"] = True
                 return payload
+            pre = invitation.pre_student
+            if pre is not None and pre.user_id and pre.user_id != user.id:
+                return invitation_already_linked_payload(invitation)
             return invitation_wrong_account_payload(invitation)
         return invitation_already_registered_payload(invitation)
 
@@ -436,7 +507,7 @@ def resolve_invitation_for_user(token: str, user=None):
         "ok": False,
         "teacher_name": _teacher_display_name(invitation),
         "message": (
-            "Срок действия приглашения истёк."
+            EXPIRED_INVITE_MESSAGE
             if invitation.status == InvitationStatus.EXPIRED
             else "Приглашение недоступно."
         ),
@@ -488,42 +559,26 @@ def accept_student_invitation(token: str, user: User):
             )
             _emit_invitation_accepted(invitation, student)
             return student, invitation
-        raise InvitationError(
-            "Эта ссылка предназначена для другого аккаунта. "
-            "Выйдите из текущего аккаунта или продолжите под ним, "
-            "если учитель разрешает привязку.",
-            code="wrong_account",
-        )
+        pre = invitation.pre_student
+        if pre is not None and pre.user_id and pre.user_id != user.id:
+            raise InvitationError(STUDENT_ALREADY_LINKED_MESSAGE, code="already_linked")
+        raise InvitationError(WRONG_ACCOUNT_MESSAGE, code="wrong_account")
 
+    if invitation.status == InvitationStatus.EXPIRED:
+        raise InvitationError(EXPIRED_INVITE_MESSAGE, code="expired")
     if invitation.status != InvitationStatus.PENDING:
         raise InvitationError("Приглашение уже использовано или недоступно", code="already_used")
     if invitation.expires_at and invitation.expires_at < timezone.now():
         invitation.status = InvitationStatus.EXPIRED
         invitation.save(update_fields=["status", "updated_at"])
-        raise InvitationError("Приглашение недействительно или истекло", code="expired")
+        raise InvitationError(EXPIRED_INVITE_MESSAGE, code="expired")
 
-    if invitation.pre_student_id and invitation.pre_student and invitation.pre_student.user_id:
-        if invitation.pre_student.user_id == user.id:
-            student = invitation.pre_student
-            invitation.status = InvitationStatus.ACCEPTED
-            invitation.accepted_by = user
-            invitation.accepted_at = timezone.now()
-            invitation.save(update_fields=["status", "accepted_by", "accepted_at", "updated_at"])
-            if invitation.group_id:
-                invitation.group.students.add(student)
-            logger.info(
-                "invitation accepted existing student invitation=%s user=%s student=%s",
-                invitation.pk,
-                user.id,
-                student.pk,
-            )
-            _emit_invitation_accepted(invitation, student)
-            return student, invitation
-        raise InvitationError(
-            "Эта ссылка предназначена для другого аккаунта. "
-            "Выйдите из текущего аккаунта или продолжите под ним, "
-            "если учитель разрешает привязку.",
-            code="wrong_account",
+    pre_student = None
+    if invitation.pre_student_id:
+        pre_student = (
+            Student.objects.select_for_update()
+            .filter(pk=invitation.pre_student_id, teacher=invitation.teacher)
+            .first()
         )
 
     first_name = (profile.name or user.first_name or user.username).strip()
@@ -531,44 +586,70 @@ def accept_student_invitation(token: str, user: User):
     invite_email = (invitation.email or user.email or "").strip().lower()
 
     already_linked = (
-        Student.objects.filter(teacher=invitation.teacher, user=user)
+        Student.objects.select_for_update()
+        .filter(teacher=invitation.teacher, user=user)
         .exclude(status=StudentStatus.ARCHIVED)
         .order_by("id")
         .first()
     )
 
-    # Prefer the pre-created student profile linked to this invitation
-    existing = None
-    if already_linked:
-        existing = already_linked
-    elif invitation.pre_student_id:
-        try:
-            existing = Student.objects.get(
-                pk=invitation.pre_student_id,
-                teacher=invitation.teacher,
-                user__isnull=True,
-            )
-        except Student.DoesNotExist:
-            existing = None
-
-    if existing is None and invite_email:
-        existing = (
-            Student.objects.filter(
-                teacher=invitation.teacher,
-                email__iexact=invite_email,
-                user__isnull=True,
-            )
-            .exclude(status=StudentStatus.ARCHIVED)
-            .first()
-        )
-
-    if existing:
-        student = existing
+    if pre_student is not None and pre_student.user_id:
+        if pre_student.user_id == user.id:
+            student = pre_student
+            created = False
+            existing = student
+        else:
+            raise InvitationError(STUDENT_ALREADY_LINKED_MESSAGE, code="already_linked")
+    elif pre_student is not None:
+        if already_linked is not None and already_linked.pk != pre_student.pk:
+            raise InvitationError(ACCOUNT_ALREADY_BOUND_MESSAGE, code="already_linked")
+        student = pre_student
         created = False
+        existing = student
+    elif already_linked is not None:
+        student = already_linked
+        created = False
+        existing = student
+    else:
+        existing = None
+        if invite_email:
+            existing = (
+                Student.objects.select_for_update()
+                .filter(
+                    teacher=invitation.teacher,
+                    email__iexact=invite_email,
+                    user__isnull=True,
+                )
+                .exclude(status=StudentStatus.ARCHIVED)
+                .order_by("id")
+                .first()
+            )
+        if existing is not None:
+            student = existing
+            created = False
+        elif (invitation.first_name or "").strip():
+            raise InvitationError(NAMED_INVITE_MISSING_STUDENT_MESSAGE, code="invalid")
+        else:
+            student, created = Student.objects.get_or_create(
+                teacher=invitation.teacher,
+                user=user,
+                defaults={
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "email": invite_email or (user.email or "").strip().lower(),
+                    "direction": invitation.direction,
+                    "grade": invitation.grade,
+                    "status": StudentStatus.ACTIVE,
+                },
+            )
+
+    if not created:
         update_fields = []
         if not student.user_id:
             student.user = user
             update_fields.append("user")
+        elif student.user_id != user.id:
+            raise InvitationError(STUDENT_ALREADY_LINKED_MESSAGE, code="already_linked")
         if invite_email and not student.email:
             student.email = invite_email
             update_fields.append("email")
@@ -588,37 +669,10 @@ def accept_student_invitation(token: str, user: User):
             student.status = StudentStatus.ACTIVE
             update_fields.append("status")
         if update_fields:
-            student.save(update_fields=list(dict.fromkeys(update_fields)) + ["updated_at"])
-    else:
-        student, created = Student.objects.get_or_create(
-            teacher=invitation.teacher,
-            user=user,
-            defaults={
-                "first_name": first_name,
-                "last_name": last_name,
-                "email": invite_email or (user.email or "").strip().lower(),
-                "direction": invitation.direction,
-                "grade": invitation.grade,
-                "status": StudentStatus.ACTIVE,
-            },
-        )
-
-    if not created and not existing:
-        update_fields = []
-        if invitation.direction and student.direction != invitation.direction:
-            student.direction = invitation.direction
-            update_fields.append("direction")
-        if invitation.grade and student.grade != invitation.grade:
-            student.grade = invitation.grade
-            update_fields.append("grade")
-        if student.status == StudentStatus.ARCHIVED:
-            student.status = StudentStatus.ACTIVE
-            update_fields.append("status")
-        if not student.user_id:
-            student.user = user
-            update_fields.append("user")
-        if update_fields:
-            student.save(update_fields=update_fields + ["updated_at"])
+            try:
+                student.save(update_fields=list(dict.fromkeys(update_fields)) + ["updated_at"])
+            except IntegrityError as exc:
+                raise InvitationError(ACCOUNT_ALREADY_BOUND_MESSAGE, code="already_linked") from exc
 
     if invitation.group_id:
         invitation.group.students.add(student)

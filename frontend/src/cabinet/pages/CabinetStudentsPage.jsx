@@ -11,6 +11,11 @@ import {
   useSoonToast,
 } from "../CabinetSectionUi";
 import { mapApiGroup, mapApiStudent } from "../cabinetMappers";
+import {
+  latestInviteForStudent,
+  studentConnectionMeta,
+  studentInviteMenuItems,
+} from "../studentInviteStatus";
 import { GroupFormModal, InviteFormModal, StudentFormModal } from "../components/StudentGroupModals";
 import { trackActivationIntent } from "../activationAnalytics";
 import PlanAttachModal from "../components/PlanAttachModal";
@@ -36,6 +41,7 @@ import {
   fetchStudents,
   normalizeCabinetList,
   removeStudentFromGroup,
+  renewInvitation,
   restoreStudent,
   updateGroup,
   updateStudent,
@@ -149,14 +155,8 @@ function inviteStatusMeta(invite) {
   return { text: "Ожидает", mod: "pending" };
 }
 
-function studentStatusMeta(student) {
-  if (student.raw?.status === "paused" || student.status === "warning") {
-    return { text: "На паузе", mod: "paused" };
-  }
-  if (student.raw?.is_registered) {
-    return { text: "Присоединился", mod: "joined" };
-  }
-  return { text: "Ожидает", mod: "pending" };
+function studentStatusMeta(student, invite) {
+  return studentConnectionMeta(student, invite);
 }
 
 function groupExamLabel(group) {
@@ -259,6 +259,7 @@ function SummaryMetrics({ students, groups, attentionCount }) {
 
 function StudentRow({
   student,
+  invite = null,
   dragging,
   onDragStart,
   onDragEnd,
@@ -269,7 +270,7 @@ function StudentRow({
   extraMeta = null,
 }) {
   const tone = avatarTone(student);
-  const status = studentStatusMeta(student);
+  const status = studentStatusMeta(student, invite);
 
   return (
     <div
@@ -322,6 +323,8 @@ function StudentRow({
 function GroupCard({
   group,
   students,
+  invitations = [],
+  copiedInviteId,
   isDragOver,
   draggingId,
   onDragStart,
@@ -341,6 +344,9 @@ function GroupCard({
   onArchiveGroup,
   onArchiveStudent,
   onDeleteStudent,
+  onCopyInvite,
+  onResendInvite,
+  onRenewInvite,
 }) {
   const [expanded, setExpanded] = useState(false);
   const exam = groupExamLabel(group);
@@ -397,16 +403,25 @@ function GroupCard({
           <p className="cb-group-card__empty">Перетащите ученика сюда</p>
         ) : (
           <>
-            {visibleStudents.map((st) => (
+            {visibleStudents.map((st) => {
+              const invite = latestInviteForStudent(st, invitations);
+              return (
               <StudentRow
                 key={st.id}
                 student={st}
+                invite={invite}
                 dragging={draggingId === st.id}
                 onDragStart={onDragStart}
                 onDragEnd={onDragEnd}
                 onOpen={() => onOpenStudent(st)}
                 menuItems={[
                   { label: "Открыть", onClick: () => onOpenStudent(st) },
+                  ...studentInviteMenuItems(st, invite, {
+                    onCopy: onCopyInvite,
+                    onResend: onResendInvite,
+                    onRenew: onRenewInvite,
+                    copiedInviteId,
+                  }),
                   { label: "Задать ДЗ", onClick: () => onAssignHomeworkStudent?.(st) },
                   { label: "Материалы", onClick: () => onAssignMaterialsStudent?.(st) },
                   {
@@ -425,7 +440,8 @@ function GroupCard({
                   },
                 ]}
               />
-            ))}
+              );
+            })}
             {!expanded && hiddenCount > 0 ? (
               <button
                 type="button"
@@ -1249,19 +1265,33 @@ export default function CabinetStudentsPage() {
     if (ok) showToast("Ссылка скопирована — отправьте её ученику повторно");
   };
 
-  const handleRenewInvite = async (invite) => {
+  const handleRenewInvite = async (invite, student) => {
     try {
-      const created = await createInvitation({
-        first_name: invite.first_name || "",
-        last_name: invite.last_name || "",
-        email: invite.email || "",
-        direction: invite.direction || "other",
-        grade: invite.grade ?? null,
-        group_id: invite.group || null,
-        message: invite.message || "",
-      });
+      let created = null;
+      if (invite?.id) {
+        try {
+          created = await renewInvitation(invite.id);
+        } catch (err) {
+          const studentId = invite?.pre_student || student?.id;
+          if (!studentId) throw err;
+          created = null;
+        }
+      }
+      if (!created) {
+        const studentId = invite?.pre_student || student?.id || null;
+        created = await createInvitation({
+          first_name: invite?.first_name || student?.raw?.first_name || "",
+          last_name: invite?.last_name || student?.raw?.last_name || "",
+          email: invite?.email || student?.raw?.email || "",
+          direction: invite?.direction || student?.raw?.direction || "other",
+          grade: invite?.grade ?? student?.raw?.grade ?? null,
+          group_id: invite?.group || student?.groupId || null,
+          message: invite?.message || "",
+          ...(studentId ? { student_id: Number(studentId) } : {}),
+        });
+      }
       if (!created) return;
-      showToast("Новая ссылка создана");
+      showToast("Новая ссылка создана для того же ученика");
       await loadData();
       if (created.join_path) {
         await handleCopyInvite(created);
@@ -1619,6 +1649,8 @@ export default function CabinetStudentsPage() {
                               key={group.id}
                               group={group}
                               students={group.students}
+                              invitations={invitations}
+                              copiedInviteId={copiedInviteId}
                               isDragOver={dropTarget === group.id}
                               draggingId={draggingId}
                               onDragStart={handleDragStart}
@@ -1637,6 +1669,9 @@ export default function CabinetStudentsPage() {
                               onArchiveGroup={() => requestArchiveGroup(group.id)}
                               onArchiveStudent={requestArchiveStudent}
                               onDeleteStudent={requestDeleteStudent}
+                              onCopyInvite={handleCopyInvite}
+                              onResendInvite={handleResendInvite}
+                              onRenewInvite={handleRenewInvite}
                               {...drop}
                             />
                           );
@@ -1672,10 +1707,13 @@ export default function CabinetStudentsPage() {
                   <>
                     {individualStudents.length ? (
                       <div className="cb-students-grid cb-students-grid--col">
-                        {individualStudents.map((st) => (
+                        {individualStudents.map((st) => {
+                          const invite = latestInviteForStudent(st, invitations);
+                          return (
                           <StudentRow
                             key={st.id}
                             student={st}
+                            invite={invite}
                             variant="card"
                             showOpenButton
                             dragging={draggingId === st.id}
@@ -1685,6 +1723,12 @@ export default function CabinetStudentsPage() {
                             extraMeta={formatStudentPlansMeta(enrollmentsByStudent[st.id])}
                             menuItems={[
                               { label: "Редактировать", onClick: () => openEditStudent(st) },
+                              ...studentInviteMenuItems(st, invite, {
+                                onCopy: handleCopyInvite,
+                                onResend: handleResendInvite,
+                                onRenew: handleRenewInvite,
+                                copiedInviteId,
+                              }),
                               { label: "Задать ДЗ", onClick: () => openAssignHomeworkForStudent(st) },
                               { label: "Материалы", onClick: () => openAssignMaterialsForStudent(st) },
                               { label: "План уроков", onClick: () => openAttachPlanForStudent(st) },
@@ -1704,7 +1748,8 @@ export default function CabinetStudentsPage() {
                               },
                             ]}
                           />
-                        ))}
+                          );
+                        })}
                       </div>
                     ) : null}
                     <div className="cb-students-section__actions">

@@ -121,12 +121,12 @@ export default function CabinetAuthPage() {
 
   const authTitle = (
     mode === "register"
-      ? "Регистрация"
+      ? (inviteToken ? "Подключиться к учителю" : "Регистрация")
       : mode === "forgot"
         ? "Восстановление пароля"
         : mode === "reset"
           ? "Новый пароль"
-          : "Вход в аккаунт"
+          : (inviteToken ? "Войти и подключиться" : "Вход в аккаунт")
   );
   usePageTitle(authTitle);
 
@@ -267,7 +267,7 @@ export default function CabinetAuthPage() {
     } catch (err) {
       if (err?.code === "already_registered" || err?.status === 409) {
         setMode("login");
-        setInfo("Вы уже зарегистрированы. Войдите в аккаунт, чтобы продолжить.");
+        setInfo("Вы уже присоединились к этому учителю. Войдите в аккаунт, чтобы продолжить.");
         if (registerForm.email) {
           setLoginForm((prev) => ({ ...prev, login: registerForm.email }));
         }
@@ -363,7 +363,9 @@ export default function CabinetAuthPage() {
                 : parentInviteToken
                   ? "Создайте аккаунт родителя или войдите, чтобы принять приглашение к кабинету ребёнка."
                   : inviteToken
-                    ? "Создайте аккаунт ученика или войдите, чтобы принять приглашение от учителя."
+                    ? (mode === "register"
+                      ? "Учитель уже добавил вас в класс. Создайте аккаунт, чтобы получить доступ к своему расписанию и материалам."
+                      : "У вас уже есть аккаунт? Войдите, чтобы подключиться к учителю.")
                     : referralPreview
                       ? `Зарегистрируйтесь как учитель — получите ${referralPreview.message} бесплатно.`
                       : authLeadForIntent(valueIntent, mode)
@@ -403,7 +405,7 @@ export default function CabinetAuthPage() {
               setInfo("");
             }}
           >
-            Регистрация
+            {inviteToken ? "Создать аккаунт" : "Регистрация"}
           </button>
         </div>
         ) : null}
@@ -597,7 +599,7 @@ export default function CabinetAuthPage() {
               />
             </label>
             <button type="submit" className="cabinet-auth-submit" disabled={submitting}>
-              {submitting ? "Создаём аккаунт…" : "Зарегистрироваться"}
+              {submitting ? "Создаём аккаунт…" : (inviteToken ? "Создать аккаунт" : "Зарегистрироваться")}
             </button>
           </form>
         )}

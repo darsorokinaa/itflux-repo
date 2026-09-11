@@ -122,6 +122,59 @@ async function cabinetFetch(path, options = {}) {
   return data;
 }
 
+function filenameFromDisposition(header, fallback) {
+  if (!header) return fallback;
+  const star = header.match(/filename\*=UTF-8''([^;]+)/i);
+  if (star?.[1]) {
+    try {
+      return decodeURIComponent(star[1]);
+    } catch {
+      /* keep fallback */
+    }
+  }
+  const quoted = header.match(/filename="([^"]+)"/i);
+  return quoted?.[1] || fallback;
+}
+
+async function cabinetDownload(path, fallbackName, { method = "GET", body, json = false } = {}) {
+  await ensureCsrfCookie();
+  const headers = { ...clientVersionHeaders() };
+  const csrf = getCsrfToken();
+  if (csrf) headers["X-CSRFToken"] = csrf;
+  if (json) headers["Content-Type"] = "application/json";
+  const res = await fetch(`${apiBase()}${path}`, {
+    method,
+    credentials: "same-origin",
+    cache: "no-store",
+    headers,
+    body,
+  });
+  if (!res.ok) {
+    let data = null;
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
+    handleClientUpdateRequired(data);
+    const err = new Error(formatApiError(data, "Не удалось скачать файл"));
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  const blob = await res.blob();
+  const name = filenameFromDisposition(res.headers.get("Content-Disposition"), fallbackName);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  return name;
+}
+
 export function fetchCabinetSession() {
   return cabinetFetch("/me/", { method: "GET" });
 }
@@ -723,6 +776,13 @@ export function createInvitation(payload) {
   });
 }
 
+export function renewInvitation(id) {
+  return cabinetFetch(`/invitations/${id}/renew/`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
 export function cancelInvitation(id) {
   return cabinetFetch(`/invitations/${id}/cancel/`, {
     method: "POST",
@@ -730,7 +790,7 @@ export function cancelInvitation(id) {
   });
 }
 
-/** Hard-delete an invitation (any status). Removes unregistered pre-profile student too. */
+/** Hard-delete an invitation (any status). Student profile is kept. */
 export function deleteInvitation(id) {
   return cabinetFetch(`/invitations/${id}/`, { method: "DELETE" });
 }
@@ -1079,7 +1139,11 @@ export function uploadReviewFeedback(reviewId, formData) {
 }
 
 export function deleteReviewFeedback(reviewId, params) {
-  const qs = new URLSearchParams({ url: String(params.url || "").trim() });
+  const qs = new URLSearchParams();
+  const attachmentId = String(params.id || params.attachmentId || "").trim();
+  const fileUrl = String(params.url || "").trim();
+  if (attachmentId) qs.set("id", attachmentId);
+  if (fileUrl) qs.set("url", fileUrl);
   if (params.taskNumber != null && String(params.taskNumber).trim() !== "") {
     qs.set("task_number", String(params.taskNumber));
   }
@@ -1237,6 +1301,43 @@ export function fillLessonPlanDates(planId, payload) {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function downloadLessonPlanExcelTemplate(params = {}) {
+  const qs = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value != null && value !== "") qs.set(key, value);
+  });
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return cabinetDownload(`/lesson-plans/excel-template/${suffix}`, "Шаблон_плана_уроков.xlsx");
+}
+
+export function exportLessonPlanExcelDraft(payload = {}) {
+  return cabinetDownload(
+    "/lesson-plans/excel-export/",
+    "План_уроков.xlsx",
+    { method: "POST", body: JSON.stringify(payload), json: true },
+  );
+}
+
+export function exportLessonPlanExcel(planId, params = {}) {
+  const qs = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value != null && value !== "") qs.set(key, value);
+  });
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return cabinetDownload(
+    `/lesson-plans/${planId}/export-excel/${suffix}`,
+    "План_уроков.xlsx",
+  );
+}
+
+export function previewLessonPlanExcel(formData) {
+  return cabinetFetchMultipart("/lesson-plans/excel-preview/", formData);
+}
+
+export function importLessonPlanExcel(planId, formData) {
+  return cabinetFetchMultipart(`/lesson-plans/${planId}/import-excel/`, formData);
 }
 
 export function updatePlanEnrollment(id, payload) {

@@ -199,6 +199,36 @@ class HomeworkAttemptAndJournalTests(TestCase):
         payload = build_homework_result_payload(homework=self.hw, student=self.student)
         self.assertEqual(payload["status"], "not_submitted")
 
+    def test_late_submission_keeps_submitted_status(self):
+        due = timezone.now() - timedelta(days=2)
+        self.hw.due_at = due
+        self.hw.save(update_fields=["due_at"])
+        HomeworkSubmission.objects.create(
+            homework=self.hw,
+            student=self.student,
+            status=SubmissionStatus.SUBMITTED,
+            submitted_at=due + timedelta(hours=5),
+        )
+        payload = build_homework_result_payload(homework=self.hw, student=self.student)
+        self.assertEqual(payload["status"], "submitted")
+        self.assertEqual(payload["status_label"], "Сдано")
+        self.assertTrue(payload["is_overdue"])
+        self.assertTrue(payload["submitted_late"])
+        feed = build_journal_entries_feed(self.teacher, student_id=self.student.id, homework_only=True)
+        entry = next(e for e in feed["entries"] if e.get("homework_id") == self.hw.id)
+        self.assertEqual(entry["status"], "submitted")
+        self.assertEqual(entry["status_label"], "Сдано")
+        self.assertTrue(entry["submitted_late"])
+
+    def test_unsubmitted_past_due_is_overdue(self):
+        self.hw.due_at = timezone.now() - timedelta(days=1)
+        self.hw.save(update_fields=["due_at"])
+        payload = build_homework_result_payload(homework=self.hw, student=self.student)
+        self.assertEqual(payload["status"], "overdue")
+        self.assertEqual(payload["status_label"], "Просрочено")
+        self.assertTrue(payload["is_overdue"])
+        self.assertFalse(payload["submitted_late"])
+
 
 class ParentJournalVisibilityTests(TestCase):
     def setUp(self):

@@ -80,6 +80,8 @@ describe("interactivesApi adapters", () => {
       title: "X",
       exam: "ОГЭ",
       status: "draft",
+      backgroundImage: "/media/bg.jpg",
+      backgroundImageTone: "dark",
       cards: [{
         front: "f",
         back: "b",
@@ -89,6 +91,21 @@ describe("interactivesApi adapters", () => {
     });
     expect(payload.flashcards[0].front_image_url).toBe("/media/x.png");
     expect(payload.interactive_type).toBe("flashcards");
+    expect(payload.custom_background_image_url).toBe("/media/bg.jpg");
+    expect(payload.custom_background_tone).toBe("dark");
+  });
+
+  it("maps custom background image from API after reload", () => {
+    const mapped = mapApiInteractiveDetail({
+      id: 11,
+      title: "Фон",
+      interactive_type: "flashcards",
+      flashcards: [{ front_text: "a", back_text: "b", order: 0 }],
+      custom_background_image_url: "/media/cabinet/interactives/uploads/1/bg.jpg",
+      custom_background_tone: "dark",
+    });
+    expect(mapped.backgroundImage).toBe("/media/cabinet/interactives/uploads/1/bg.jpg");
+    expect(mapped.backgroundImageTone).toBe("dark");
   });
 
   it("normalizeInteractivesList handles array and paginated shapes", () => {

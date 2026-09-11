@@ -9,6 +9,7 @@ import {
   fetchInteractive,
   publishInteractive,
   updateInteractive,
+  uploadInteractiveImage,
 } from "../../utils/cabinetAuth";
 import ConfirmActionModal from "../components/ConfirmActionModal";
 import InteractiveAssignModal from "../components/InteractiveAssignModal";
@@ -24,7 +25,6 @@ import { CabinetPageShell, useSoonToast } from "../CabinetSectionUi";
 import {
   resolveInteractiveAppearance,
   useInteractiveAppearanceCatalog,
-  compressBackgroundImage,
 } from "../interactiveAppearance";
 import {
   applyBackgroundSlug,
@@ -170,31 +170,57 @@ export default function CabinetInteractiveDetailPage() {
   };
 
   const handleImageUpload = async (file) => {
+    const previous = interactive;
     try {
-      const dataUrl = await compressBackgroundImage(file);
-      persistLocal({
+      const formData = new FormData();
+      formData.append("file", file);
+      const uploaded = await uploadInteractiveImage(formData);
+      const url = String(uploaded?.url || "").trim();
+      if (!url) throw new Error("Сервер не вернул ссылку на файл");
+      const next = {
         ...interactive,
-        backgroundImage: dataUrl,
+        backgroundImage: url,
         backgroundImageTone: interactive.backgroundImageTone || "light",
-      });
+      };
+      setInteractive(next);
+      await persistToApi(next);
     } catch (err) {
+      setInteractive(previous);
       setShareMsg(err?.message || "Не удалось загрузить изображение");
       window.setTimeout(() => setShareMsg(""), 2800);
     }
   };
 
-  const handleImageRemove = () => {
-    persistLocal({
+  const handleImageRemove = async () => {
+    const previous = interactive;
+    const next = {
       ...interactive,
       backgroundImage: null,
-    });
+    };
+    setInteractive(next);
+    try {
+      await persistToApi(next);
+    } catch (err) {
+      setInteractive(previous);
+      setShareMsg(err?.message || "Не удалось убрать фон");
+      window.setTimeout(() => setShareMsg(""), 2800);
+    }
   };
 
-  const handleImageToneChange = (tone) => {
-    persistLocal({
+  const handleImageToneChange = async (tone) => {
+    const previous = interactive;
+    const next = {
       ...interactive,
       backgroundImageTone: tone,
-    });
+    };
+    setInteractive(next);
+    try {
+      await persistToApi(next);
+    } catch (err) {
+      setInteractive(previous);
+      setShareMsg(err?.message || "Не удалось сохранить тон текста");
+      window.setTimeout(() => setShareMsg(""), 2800);
+    }
   };
 
   const handleParams = (params) => {

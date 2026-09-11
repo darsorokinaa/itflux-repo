@@ -105,7 +105,7 @@ def create_student_access_reset(teacher, student: Student, *, request=None) -> d
             "emailed": False,
             "join_path": join_path,
             "url": f"{origin}{join_path}" if origin else join_path,
-            "message": "Ученик ещё не зарегистрирован. Отправьте ему ссылку-приглашение.",
+            "message": "Ученик ещё не подключился. Отправьте ему ссылку-приглашение.",
         }
 
     user = student.user

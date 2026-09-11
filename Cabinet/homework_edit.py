@@ -121,6 +121,17 @@ def _parse_due_at(raw):
     return due
 
 
+def _due_at_values_equal(left, right) -> bool:
+    if left is None and right is None:
+        return True
+    if left is None or right is None:
+        return False
+    try:
+        return abs((left - right).total_seconds()) < 1.0
+    except TypeError:
+        return False
+
+
 def _parse_client_updated_at(raw) -> datetime | None:
     if not raw:
         return None
@@ -518,7 +529,7 @@ def update_issued_homework(
 
     if "due_at" in data:
         new_due_at = _parse_due_at(data.get("due_at"))
-        if new_due_at != old_due_at:
+        if not _due_at_values_equal(new_due_at, old_due_at):
             homework.due_at = new_due_at
             changed_fields.append("due_at")
 

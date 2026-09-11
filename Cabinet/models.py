@@ -1294,6 +1294,20 @@ class Interactive(models.Model):
         related_name="interactives",
         verbose_name="Фон",
     )
+    custom_background_image_url = models.CharField(
+        "Свой фон (картинка)",
+        max_length=1000,
+        blank=True,
+        default="",
+        help_text="URL загруженного учителем фона. Если задан, перекрывает фон из каталога.",
+    )
+    custom_background_tone = models.CharField(
+        "Тон текста на своём фоне",
+        max_length=10,
+        choices=[("dark", "Тёмный"), ("light", "Светлый")],
+        default="light",
+        blank=True,
+    )
     card_style = models.ForeignKey(
         InteractiveCardStyle,
         on_delete=models.SET_NULL,

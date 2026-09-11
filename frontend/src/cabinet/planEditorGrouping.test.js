@@ -87,10 +87,17 @@ describe("moveListItem / dropIndexFromY", () => {
 
 describe("applyReorderWithTopic", () => {
   it("updates topic when a lesson lands inside another topic group", () => {
+    const sessions = [session("A", "1"), session("B", "2"), session("B", "3")];
+    const next = applyReorderWithTopic(sessions, 0, 1);
+    expect(next.map((s) => s.topic)).toEqual(["B", "B", "B"]);
+    expect(next[1].title).toBe("1");
+  });
+
+  it("keeps topic when dropped between different groups", () => {
     const sessions = [session("A", "1"), session("A", "2"), session("B", "3")];
     const next = applyReorderWithTopic(sessions, 0, 2);
-    expect(next.map((s) => s.topic)).toEqual(["A", "B", "B"]);
-    expect(next[2].title).toBe("1");
+    expect(next.map((s) => s.title)).toEqual(["2", "3", "1"]);
+    expect(next.map((s) => s.topic)).toEqual(["A", "B", "A"]);
   });
 
   it("keeps topic when reordering inside the same group", () => {
@@ -144,8 +151,13 @@ describe("lessonsWord", () => {
 });
 
 describe("destinationTopic", () => {
-  it("prefers the surrounding group topic", () => {
+  it("adopts a topic only when both neighbors belong to the same group", () => {
     const sessions = [session("A"), session("B"), session("B")];
-    expect(destinationTopic(sessions, 0, 2)).toBe("B");
+    expect(destinationTopic(sessions, 0, 1)).toBe("B");
+  });
+
+  it("keeps the original topic on a group boundary", () => {
+    const sessions = [session("A"), session("A"), session("B")];
+    expect(destinationTopic(sessions, 0, 2)).toBe("A");
   });
 });

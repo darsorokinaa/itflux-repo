@@ -113,6 +113,34 @@ def generate_plan_dates(start, count, interval=INTERVAL_WEEKLY):
     return dates
 
 
+def iso_plan_date(value):
+    parsed = parse_plan_date(value)
+    return parsed.isoformat() if parsed else ""
+
+
+def apply_sequence_dates(items, start, interval=INTERVAL_WEEKLY, *, from_index=0, preserve_manual=True):
+    """Проставляет даты списку уроков через generate_plan_dates.
+
+    Ручные даты не пересчитываются. Это тот же scheduler, что и у плана,
+    без отдельного Excel-алгоритма «дата + N дней».
+    """
+    if not items or from_index >= len(items):
+        return items
+    start_date = parse_plan_date(start) or parse_plan_date(items[from_index].get("scheduled_date"))
+    dates = generate_plan_dates(start_date, len(items) - from_index, interval)
+    for offset, item in enumerate(items[from_index:]):
+        current = parse_plan_date(item.get("scheduled_date"))
+        if preserve_manual and str(item.get("date_source") or "").lower() == "manual" and current:
+            item["scheduled_date"] = current.isoformat()
+            continue
+        generated = dates[offset] if offset < len(dates) else None
+        if generated is None:
+            continue
+        item["scheduled_date"] = generated.isoformat()
+        item["date_source"] = "automatic"
+    return items
+
+
 def apply_plan_item_dates(plan, start_date, interval=INTERVAL_WEEKLY, *, from_index=0):
     """Проставляет scheduled_date пунктам плана от первой даты.
 

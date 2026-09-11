@@ -1,10 +1,11 @@
 import { useEffect, useId, useState } from "react";
 import {
   backgroundPreviewStyle,
-  compressBackgroundImage,
+  interactiveMediaUrl,
   resolveInteractiveAppearance,
   useInteractiveAppearanceCatalog,
 } from "../interactiveAppearance";
+import { uploadInteractiveImage } from "../../utils/cabinetAuth";
 import {
   INTERACTIVE_SOUND_EVENTS,
   isInteractiveSoundPreviewPlaying,
@@ -33,23 +34,25 @@ function BackgroundOption({ item, selected, onSelect }) {
   );
 }
 
-function CustomBackgroundOption({ selected, imageUrl, inputId }) {
+function CustomBackgroundOption({ selected, imageUrl, inputId, uploading = false }) {
+  const previewUrl = interactiveMediaUrl(imageUrl);
   return (
     <button
       type="button"
       className={`ix-appearance__option ix-appearance__option--custom${selected ? " is-selected" : ""}`}
       onClick={() => document.getElementById(inputId)?.click()}
       aria-pressed={selected}
+      disabled={uploading}
       title="Свой фон"
     >
       <span
         className="ix-appearance__swatch ix-appearance__swatch--custom"
-        style={imageUrl ? { backgroundImage: `url(${imageUrl})` } : undefined}
+        style={previewUrl ? { backgroundImage: `url(${previewUrl})` } : undefined}
       >
-        {!imageUrl ? <span className="ix-appearance__swatch-plus">+</span> : null}
+        {!previewUrl ? <span className="ix-appearance__swatch-plus">{uploading ? "…" : "+"}</span> : null}
         {selected ? <span className="ix-appearance__check" aria-hidden="true">✓</span> : null}
       </span>
-      <span className="ix-appearance__label">Свой фон</span>
+      <span className="ix-appearance__label">{uploading ? "Загрузка…" : "Свой фон"}</span>
     </button>
   );
 }
@@ -174,6 +177,8 @@ export default function AppearanceSettings({
   showSounds = true,
   catalog: catalogProp = null,
   catalogLoading = false,
+  onImageUpload = null,
+  imageUploading = false,
 }) {
   const hook = useInteractiveAppearanceCatalog();
   const catalog = catalogProp || hook.catalog;
@@ -181,9 +186,11 @@ export default function AppearanceSettings({
   const appearance = resolveInteractiveAppearance(data, catalog);
   const [soundError, setSoundError] = useState("");
   const [bgError, setBgError] = useState("");
+  const [bgUploading, setBgUploading] = useState(false);
   const [previewSlug, setPreviewSlug] = useState("");
   const customBgInputId = useId();
   const hasCustomBg = Boolean(data.backgroundImage);
+  const uploadingBg = Boolean(imageUploading || bgUploading);
 
   useEffect(() => () => stopInteractiveSoundPreview(), []);
 
@@ -195,13 +202,26 @@ export default function AppearanceSettings({
   };
 
   const handleCustomBackground = async (file) => {
+    if (!file) return;
     try {
       setBgError("");
-      const dataUrl = await compressBackgroundImage(file);
-      onChange("backgroundImage", dataUrl);
+      setBgUploading(true);
+      let url = "";
+      if (onImageUpload) {
+        url = String(await onImageUpload(file) || "").trim();
+      } else {
+        const formData = new FormData();
+        formData.append("file", file);
+        const uploaded = await uploadInteractiveImage(formData);
+        url = String(uploaded?.url || "").trim();
+      }
+      if (!url) throw new Error("Сервер не вернул ссылку на файл");
+      onChange("backgroundImage", url);
       onChange("backgroundImageTone", data.backgroundImageTone || "light");
     } catch (err) {
       setBgError(err?.message || "Не удалось загрузить фон");
+    } finally {
+      setBgUploading(false);
     }
   };
 
@@ -286,6 +306,7 @@ export default function AppearanceSettings({
               selected={hasCustomBg}
               imageUrl={data.backgroundImage}
               inputId={customBgInputId}
+              uploading={uploadingBg}
             />
           </div>
           <input
@@ -293,6 +314,7 @@ export default function AppearanceSettings({
             type="file"
             accept="image/png,image/jpeg,image/webp,image/gif"
             className="ix-bg-upload-input"
+            disabled={uploadingBg}
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (file) handleCustomBackground(file);

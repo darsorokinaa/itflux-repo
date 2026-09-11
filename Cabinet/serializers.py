@@ -368,6 +368,7 @@ class StudentInvitationCreateSerializer(serializers.Serializer):
         default="other",
     )
     grade = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=11)
+    student_id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
     message = serializers.CharField(required=False, allow_blank=True, max_length=255)
 
 
@@ -1326,6 +1327,8 @@ class InteractiveListSerializer(serializers.ModelSerializer):
             "difficulty",
             "instruction",
             "background",
+            "custom_background_image_url",
+            "custom_background_tone",
             "card_style",
             "sound_pack",
             "sound_enabled",
@@ -1424,6 +1427,8 @@ class InteractiveWriteSerializer(serializers.ModelSerializer):
             "difficulty",
             "instruction",
             "background_slug",
+            "custom_background_image_url",
+            "custom_background_tone",
             "card_style_slug",
             "sound_pack_slug",
             "sound_enabled",
@@ -1437,11 +1442,19 @@ class InteractiveWriteSerializer(serializers.ModelSerializer):
         ]
         extra_kwargs = {
             "title": {"required": False, "allow_blank": True},
+            "custom_background_image_url": {"required": False, "allow_blank": True},
+            "custom_background_tone": {"required": False, "allow_blank": True},
         }
 
     def validate_title(self, value):
         text = (value or "").strip()
         return text or "Без названия"
+
+    def validate_custom_background_tone(self, value):
+        tone = (value or "").strip().lower()
+        if tone in ("", "light", "dark"):
+            return tone or "light"
+        return "light"
 
     def _save_items(self, interactive, validated_data):
         flashcards = validated_data.pop("flashcards", None)

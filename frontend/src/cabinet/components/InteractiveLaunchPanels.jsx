@@ -9,7 +9,7 @@ import {
   getStatusMeta,
   getTypeMeta,
 } from "../interactivesData";
-import { backgroundPreviewStyle } from "../interactiveAppearance";
+import { backgroundPreviewStyle, interactiveMediaUrl } from "../interactiveAppearance";
 import { difficultyLabel } from "../interactivesEditorUtils";
 
 const TIMER_PRESETS = [
@@ -101,6 +101,7 @@ export function VisualStylePicker({
 }) {
   const inputId = "ix-bg-image-upload";
   const isCustom = activeBackgroundSlug === "custom" || Boolean(backgroundImage);
+  const previewUrl = interactiveMediaUrl(backgroundImage);
 
   return (
     <section className={`ix-launch-panel ix-launch-panel--style${compact ? " ix-launch-panel--compact" : ""}`}>
@@ -129,9 +130,9 @@ export function VisualStylePicker({
         >
           <span
             className="ix-visual-theme__preview ix-visual-theme__preview--image"
-            style={backgroundImage ? { backgroundImage: `url(${backgroundImage})` } : undefined}
+            style={previewUrl ? { backgroundImage: `url(${previewUrl})` } : undefined}
           >
-            {!backgroundImage ? "+" : null}
+            {!previewUrl ? "+" : null}
           </span>
           <span className="ix-visual-theme__label">Своя</span>
         </button>

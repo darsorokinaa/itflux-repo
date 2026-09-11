@@ -28,6 +28,7 @@ export default function PlanEditorResourceBlock({
       <div className="cb-pe-resource__head">
         <span className="cb-pe-resource__label">{label}</span>
         <button type="button" className="cb-pe-resource__action" onClick={onAttach}>
+          <CabinetIcon name="plus" />
           {actionLabel}
         </button>
       </div>

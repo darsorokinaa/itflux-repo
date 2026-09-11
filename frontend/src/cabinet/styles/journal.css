@@ -4038,6 +4038,31 @@ button.jg-topic-field--view:disabled {
   color: #1d4ed8;
 }
 
+.jg-status-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.jg-late-hw-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: #b45309;
+  flex-shrink: 0;
+}
+
+.jg-late-hw-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.jl-variant-result__head .jg-late-hw-icon {
+  color: #b45309;
+}
+
 .jg-feed {
   padding-top: 4px;
 }

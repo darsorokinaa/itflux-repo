@@ -218,6 +218,8 @@ class StudentMaterialsLibraryTests(TestCase):
             title="Карточки: квадраты",
             interactive_type="flashcards",
             status="published",
+            custom_background_image_url="/media/cabinet/interactives/uploads/1/bg.jpg",
+            custom_background_tone="dark",
         )
         assignment = InteractiveAssignment.objects.create(
             teacher=self.teacher,
@@ -230,6 +232,9 @@ class StudentMaterialsLibraryTests(TestCase):
         by_interactive = self.client.get(f"/api/cabinet/student/interactives/{interactive.id}/")
         self.assertEqual(by_interactive.status_code, 200, by_interactive.content)
         self.assertEqual(by_interactive.json()["assignment"]["id"], assignment.id)
+        player = by_interactive.json()["interactive"]
+        self.assertEqual(player["backgroundImage"], "/media/cabinet/interactives/uploads/1/bg.jpg")
+        self.assertEqual(player["backgroundImageTone"], "dark")
 
     def test_plan_material_removed_later_stays_in_student_library(self):
         from Cabinet.student_release import _sync_lesson_content

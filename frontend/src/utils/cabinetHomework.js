@@ -5,6 +5,7 @@
  */
 
 import { ensureCsrfCookie } from "./cabinetAuth";
+import { normalizeHomeworkAttachmentList } from "../cabinet/homeworkAttachmentState";
 
 export function getLkPublicBase() {
   const u = (import.meta.env.VITE_LK_PUBLIC_URL || import.meta.env.VITE_LK_URL || "")
@@ -271,13 +272,11 @@ function safeJson(s) {
  * @param {Record<string, number>} scores
  * @param {Record<string, boolean>} [checkedTasks]
  */
-const HOMEWORK_ATTACHMENT_IMAGE_RE = /\.(png|jpe?g|webp|gif|bmp|heic|heif)$/i;
-
 /**
  * @param {unknown} result
  * @param {number|string} taskId
  * @param {number|string} taskNumber
- * @returns {Array<{ url: string, filename: string, isImage: boolean }>}
+ * @returns {Array<{ id: string, url: string, filename: string, content_type: string, isImage: boolean }>}
  */
 export function homeworkTaskAttachments(result, taskId, taskNumber, tasks) {
   const o = typeof result === "string" ? safeJson(result) : result;
@@ -293,16 +292,7 @@ export function homeworkTaskAttachments(result, taskId, taskNumber, tasks) {
     );
   const idKey = String(taskId);
   if (byId && Array.isArray(byId[idKey]) && byId[idKey].length) {
-    return byId[idKey]
-      .map((item) => {
-        if (!item || typeof item !== "object") return null;
-        const row = /** @type {{ url?: string, filename?: string }} */ (item);
-        const url = String(row.url || "").trim();
-        if (!url) return null;
-        const filename = String(row.filename || url.split("/").pop() || "Файл");
-        return { url, filename, isImage: HOMEWORK_ATTACHMENT_IMAGE_RE.test(filename) };
-      })
-      .filter(Boolean);
+    return normalizeHomeworkAttachmentList(byId[idKey]);
   }
   // by_number при одинаковых № заданий неоднозначен
   if (Array.isArray(tasks) && tasks.length > 1) {
@@ -317,21 +307,7 @@ export function homeworkTaskAttachments(result, taskId, taskNumber, tasks) {
     (byNum && byNum[String(taskNumber)]) ||
     (byNum && byNum[String(Number(taskNumber))]) ||
     [];
-  if (!Array.isArray(list)) return [];
-  return list
-    .map((item) => {
-      if (!item || typeof item !== "object") return null;
-      const row = /** @type {{ url?: string, filename?: string }} */ (item);
-      const url = String(row.url || "").trim();
-      if (!url) return null;
-      const filename = String(row.filename || url.split("/").pop() || "Файл");
-      return {
-        url,
-        filename,
-        isImage: HOMEWORK_ATTACHMENT_IMAGE_RE.test(filename) || HOMEWORK_ATTACHMENT_IMAGE_RE.test(url),
-      };
-    })
-    .filter(Boolean);
+  return normalizeHomeworkAttachmentList(list);
 }
 
 /**
@@ -392,7 +368,11 @@ export async function deleteHomeworkAnswer(assignmentId, params, opts) {
   const csrf = readCsrfToken();
   if (csrf) headers["X-CSRFToken"] = csrf;
 
-  const qs = new URLSearchParams({ url: String(params.url || "").trim() });
+  const qs = new URLSearchParams();
+  const attachmentId = String(params.id || params.attachmentId || "").trim();
+  const fileUrl = String(params.url || "").trim();
+  if (attachmentId) qs.set("id", attachmentId);
+  if (fileUrl) qs.set("url", fileUrl);
   if (params.taskNumber != null && String(params.taskNumber).trim() !== "") {
     qs.set("task_number", String(params.taskNumber));
   }

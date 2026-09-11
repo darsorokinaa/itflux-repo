@@ -946,6 +946,8 @@ export default function CabinetInteractiveEditorPage() {
               onChange={onChange}
               catalog={catalog}
               catalogLoading={appearanceCatalogLoading}
+              onImageUpload={onImageUpload}
+              imageUploading={imageUploading}
               compact
               showTitle={false}
               showBackground

@@ -50,16 +50,36 @@ export function generatePlanDates(startIso, count, intervalId = "weekly") {
   return dates;
 }
 
-export function applyPlanDates(sessions, startIso, intervalId = "weekly", fromIndex = 0) {
+export function applyPlanDates(sessions, startIso, intervalId = "weekly", fromIndex = 0, options = {}) {
   if (!Array.isArray(sessions) || !startIso) return sessions;
+  const preserveManual = options.preserveManual !== false;
+  const previousIntervalId = options.previousIntervalId || intervalId;
   const start = fromIndex === 0
-    ? startIso
-    : sessions[fromIndex]?.scheduledDate || startIso;
+    ? calendarDateKey(startIso)
+    : calendarDateKey(sessions[fromIndex]?.scheduledDate) || calendarDateKey(startIso);
+  if (!start) return sessions;
   const dates = generatePlanDates(start, Math.max(0, sessions.length - fromIndex), intervalId);
-  return sessions.map((session, index) => {
-    if (index < fromIndex) return session;
-    return { ...session, scheduledDate: dates[index - fromIndex] || session.scheduledDate || "" };
+  const manual = new Set();
+  if (preserveManual) {
+    for (let index = fromIndex + 1; index < sessions.length; index += 1) {
+      if (sessions[index]?.dateSource === "manual" || isManualDateOverride(sessions, index, previousIntervalId)) {
+        manual.add(index);
+      }
+    }
+  }
+  let changed = false;
+  const next = sessions.map((session, index) => {
+    if (index < fromIndex || manual.has(index)) return session;
+    const nextDate = dates[index - fromIndex] || session.scheduledDate || "";
+    if (calendarDateKey(session.scheduledDate) === calendarDateKey(nextDate)) {
+      if (session.dateSource === "automatic" || !session.dateSource) return session;
+      changed = true;
+      return { ...session, dateSource: "automatic" };
+    }
+    changed = true;
+    return { ...session, scheduledDate: nextDate, dateSource: "automatic" };
   });
+  return changed ? next : sessions;
 }
 
 export function inferPlanDateInterval(sessions) {

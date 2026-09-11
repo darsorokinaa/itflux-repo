@@ -9,6 +9,7 @@ import {
   resolvePart1Verdict,
   taskMaxScore,
 } from "./cabinetReviewUtils";
+import { homeworkAttachmentKey, isHomeworkAttachmentImage } from "./homeworkAttachmentState";
 
 function normalizeMediaUrl(url) {
   if (!url) return "";
@@ -23,8 +24,7 @@ function normalizeMediaUrl(url) {
 }
 
 function isImageFile(file) {
-  const name = String(file?.filename || file?.url || "").toLowerCase();
-  return /\.(png|jpe?g|webp|gif|bmp|heic|heif)$/i.test(name);
+  return isHomeworkAttachmentImage(file);
 }
 
 export function FileLinks({ files, label, emptyLabel }) {
@@ -40,7 +40,7 @@ export function FileLinks({ files, label, emptyLabel }) {
           const normalizedUrl = normalizeMediaUrl(file.url);
           if (isAudio) {
             return (
-              <li key={file.url} className="hw-review-files__item--audio">
+              <li key={homeworkAttachmentKey(file)} className="hw-review-files__item--audio">
                 <audio controls src={normalizedUrl} className="hw-review-audio-player" preload="metadata">
                   Ваш браузер не поддерживает элемент <code>audio</code>.
                 </audio>
@@ -49,7 +49,7 @@ export function FileLinks({ files, label, emptyLabel }) {
           }
           if (isImageFile(file)) {
             return (
-              <li key={file.url} className="hw-review-files__item--image">
+              <li key={homeworkAttachmentKey(file)} className="hw-review-files__item--image">
                 <a href={normalizedUrl} target="_blank" rel="noreferrer" className="hw-review-files__thumb">
                   <img src={normalizedUrl} alt={file.filename || "Изображение"} />
                   <span>{file.filename || "Файл"}</span>
@@ -58,7 +58,7 @@ export function FileLinks({ files, label, emptyLabel }) {
             );
           }
           return (
-            <li key={file.url}>
+            <li key={homeworkAttachmentKey(file)}>
               <a href={normalizedUrl} target="_blank" rel="noreferrer">
                 {file.filename || "Файл"}
               </a>

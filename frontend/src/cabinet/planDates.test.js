@@ -43,6 +43,58 @@ describe("planDates", () => {
     ]);
   });
 
+  it("does not overwrite later lessons that were moved off the generated plan", () => {
+    const sessions = [
+      { scheduledDate: "2026-09-05" },
+      { scheduledDate: "2026-09-12" },
+      { scheduledDate: "2026-09-26" },
+    ];
+    expect(applyPlanDates(sessions, "2026-09-11", "weekly").map((s) => s.scheduledDate)).toEqual([
+      "2026-09-11",
+      "2026-09-18",
+      "2026-09-26",
+    ]);
+  });
+
+  it("keeps an imported manual date even if it matches the old generated slot", () => {
+    const sessions = [
+      { scheduledDate: "2026-09-11" },
+      { scheduledDate: "2026-09-18", dateSource: "manual" },
+      { scheduledDate: "2026-09-25" },
+    ];
+    expect(applyPlanDates(sessions, "2026-09-04", "weekly").map((s) => s.scheduledDate)).toEqual([
+      "2026-09-04",
+      "2026-09-18",
+      "2026-09-18",
+    ]);
+  });
+
+  it("preserves manual dates when the interval changes", () => {
+    const sessions = [
+      { scheduledDate: "2026-09-01" },
+      { scheduledDate: "2026-09-08" },
+      { scheduledDate: "2026-09-22" },
+    ];
+    expect(applyPlanDates(sessions, "2026-09-01", "twice_weekly", 0, { previousIntervalId: "weekly" }).map((s) => s.scheduledDate)).toEqual([
+      "2026-09-01",
+      "2026-09-04",
+      "2026-09-22",
+    ]);
+  });
+
+  it("still shifts following dates when preserveManual is disabled", () => {
+    const sessions = [
+      { scheduledDate: "2026-09-05" },
+      { scheduledDate: "2026-09-19" },
+      { scheduledDate: "2026-10-10" },
+    ];
+    expect(applyPlanDates(sessions, "2026-09-19", "weekly", 1, { preserveManual: false }).map((s) => s.scheduledDate)).toEqual([
+      "2026-09-05",
+      "2026-09-19",
+      "2026-09-26",
+    ]);
+  });
+
   it("infers twice-weekly interval from existing dates", () => {
     expect(inferPlanDateInterval([
       { scheduledDate: "2026-09-01" },

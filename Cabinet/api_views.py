@@ -184,7 +184,7 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         return Response(
-            {"detail": "Новых учеников добавляйте через приглашение."},
+            {"detail": "Новых учеников добавляйте через «Пригласить ученика»."},
             status=status.HTTP_405_METHOD_NOT_ALLOWED,
         )
 
@@ -838,12 +838,6 @@ class StudentInvitationViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins
         return StudentInvitationSerializer
 
     def create(self, request, *args, **kwargs):
-        # Проверяем лимит учеников перед созданием приглашения
-        try:
-            SubscriptionLimitService.raise_if_student_limit_reached(self.get_teacher())
-        except LimitExceeded as exc:
-            return Response(exc.to_dict(), status=status.HTTP_403_FORBIDDEN)
-
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -851,6 +845,24 @@ class StudentInvitationViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins
         group_id = data.get("group_id")
         if group_id:
             group = get_object_or_404(StudentGroup, pk=group_id, teacher=self.get_teacher())
+
+        existing_student = None
+        student_id = data.get("student_id")
+        if student_id:
+            existing_student = (
+                Student.objects.filter(pk=student_id, teacher=self.get_teacher())
+                .exclude(status=StudentStatus.ARCHIVED)
+                .first()
+            )
+            if existing_student is None:
+                return Response({"detail": "Ученик не найден"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Лимит только при создании нового учебного профиля, не при новой ссылке.
+        if existing_student is None:
+            try:
+                SubscriptionLimitService.raise_if_student_limit_reached(self.get_teacher())
+            except LimitExceeded as exc:
+                return Response(exc.to_dict(), status=status.HTTP_403_FORBIDDEN)
 
         try:
             invitation = create_student_invitation(
@@ -862,6 +874,7 @@ class StudentInvitationViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins
                 direction=data.get("direction") or "other",
                 grade=data.get("grade"),
                 message=data.get("message") or "",
+                existing_student=existing_student,
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
@@ -883,21 +896,50 @@ class StudentInvitationViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins
         invitation.save(update_fields=["status", "updated_at"])
         return Response(StudentInvitationSerializer(invitation).data)
 
-    def destroy(self, request, pk=None):
-        """Hard-delete an invitation (any status). Also removes unregistered pre-profile student."""
+    @action(detail=True, methods=["post"], url_path="renew")
+    def renew(self, request, pk=None):
         invitation = get_object_or_404(
             StudentInvitation,
             pk=pk,
             teacher=self.get_teacher(),
         )
-        # Remove unregistered pre-profile student if still unlinked
-        if invitation.pre_student_id:
-            try:
-                pre = invitation.pre_student
-                if pre and pre.user_id is None:
-                    pre.delete()
-            except Exception:
-                pass
+        student = invitation.pre_student
+        if student is None:
+            return Response(
+                {"detail": "У этого приглашения нет профиля ученика. Создайте новую ссылку в карточке ученика."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if student.user_id:
+            return Response(
+                {"detail": "Ученик уже подключён."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            renewed = create_student_invitation(
+                self.get_teacher(),
+                group=invitation.group,
+                first_name=invitation.first_name or student.first_name,
+                last_name=invitation.last_name or student.last_name,
+                email=invitation.email or student.email or "",
+                direction=invitation.direction or student.direction or "other",
+                grade=invitation.grade if invitation.grade is not None else student.grade,
+                message=invitation.message or "",
+                existing_student=student,
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            StudentInvitationSerializer(renewed).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    def destroy(self, request, pk=None):
+        """Удаляет только приглашение. Учебный профиль ученика сохраняется."""
+        invitation = get_object_or_404(
+            StudentInvitation,
+            pk=pk,
+            teacher=self.get_teacher(),
+        )
         invitation.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -976,7 +1018,7 @@ class InvitationAcceptView(APIView):
                 if invitation_row is not None:
                     event_name = (
                         STUDENT_INVITE_WRONG_ACCOUNT
-                        if exc.code == "wrong_account"
+                        if exc.code in ("wrong_account", "already_linked")
                         else STUDENT_INVITE_ACCEPT_FAILED
                     )
                     record_event(
@@ -991,7 +1033,7 @@ class InvitationAcceptView(APIView):
                     )
             except Exception:
                 pass
-            status_code = 409 if exc.code == "wrong_account" else 400
+            status_code = 409 if exc.code in ("wrong_account", "already_linked") else 400
             return Response({"error": str(exc), "code": exc.code}, status=status_code)
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
@@ -1437,6 +1479,150 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         apply_plan_item_dates(plan, start_date, interval)
         plan = self.get_queryset().filter(pk=plan.pk).first() or plan
         return Response(LessonPlanDetailSerializer(plan).data)
+
+    def _plan_excel_settings(self, request, plan=None):
+        data = getattr(request, "data", {}) or {}
+        query = request.query_params
+        title = (data.get("title") or query.get("title") or (plan.title if plan else "") or "").strip()
+        subject = (data.get("subject") or query.get("subject") or (plan.subject if plan else "") or "").strip()
+        direction = (data.get("direction") or query.get("direction") or (plan.direction if plan else "") or "").strip()
+        grade = (data.get("grade") or query.get("grade") or (plan.grade if plan else "") or "").strip()
+        start_date = data.get("start_date") or query.get("start_date") or ""
+        interval = data.get("interval") or query.get("interval") or "weekly"
+        return {
+            "plan_id": plan.pk if plan else "",
+            "title": title,
+            "subject": subject,
+            "direction": direction,
+            "grade": grade,
+            "start_date": start_date,
+            "interval": interval,
+        }
+
+    @action(detail=False, methods=["get"], url_path="excel-template")
+    def excel_template(self, request):
+        from .plan_excel import build_plan_workbook, template_filename, xlsx_response
+
+        settings = self._plan_excel_settings(request)
+        content = build_plan_workbook(settings, [])
+        return xlsx_response(content, template_filename(
+            title=settings["title"],
+            subject=settings["subject"],
+            direction=settings["direction"],
+        ))
+
+    @action(detail=False, methods=["post"], url_path="excel-export")
+    def excel_export_draft(self, request):
+        from .plan_excel import build_plan_workbook, template_filename, xlsx_response
+
+        settings = self._plan_excel_settings(request)
+        items = request.data.get("items") if isinstance(request.data, dict) else []
+        if not isinstance(items, list):
+            items = []
+        content = build_plan_workbook(settings, items)
+        return xlsx_response(content, template_filename(
+            title=settings["title"],
+            subject=settings["subject"],
+            direction=settings["direction"],
+            filled=bool(items),
+        ))
+
+    @action(detail=True, methods=["get"], url_path="export-excel")
+    def export_excel(self, request, pk=None):
+        from .plan_excel import build_plan_workbook, items_from_plan, template_filename, xlsx_response
+
+        plan = self.get_object()
+        if plan.teacher_id != self.get_teacher().id and not is_catalog_lesson_plan(plan):
+            return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
+        settings = self._plan_excel_settings(request, plan)
+        interval = settings.get("interval") or "weekly"
+        content = build_plan_workbook(settings, items_from_plan(plan, interval))
+        return xlsx_response(content, template_filename(
+            title=plan.title,
+            subject=plan.subject,
+            direction=plan.direction,
+            filled=True,
+        ))
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="excel-preview",
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def excel_preview(self, request):
+        from .plan_excel import PlanExcelError, parse_plan_workbook, read_uploaded_bytes
+
+        try:
+            data = read_uploaded_bytes(request.FILES.get("file"))
+            plan = None
+            plan_id = request.data.get("plan_id")
+            if plan_id:
+                plan = self.get_queryset().filter(pk=plan_id).first()
+                if plan and not can_edit_lesson_plan(self.get_teacher(), plan):
+                    plan = None
+            existing = list(plan.items.all()) if plan else []
+            preview = parse_plan_workbook(
+                data,
+                existing_items=existing,
+                start_date=request.data.get("start_date"),
+                interval=request.data.get("interval") or "weekly",
+                mode=request.data.get("mode") or "replace_all",
+            )
+            return Response(preview)
+        except PlanExcelError as exc:
+            return Response({"detail": exc.message, "code": exc.code, "can_import": False}, status=exc.http_status)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="import-excel",
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def import_excel(self, request, pk=None):
+        from .plan_excel import (
+            PlanExcelError,
+            apply_plan_excel_import,
+            parse_plan_workbook,
+            read_uploaded_bytes,
+        )
+
+        plan = self.get_object()
+        if not can_edit_lesson_plan(self.get_teacher(), plan):
+            return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            data = read_uploaded_bytes(request.FILES.get("file"))
+            preview = parse_plan_workbook(
+                data,
+                existing_items=list(plan.items.all()),
+                start_date=request.data.get("start_date"),
+                interval=request.data.get("interval") or "weekly",
+                mode=request.data.get("mode") or "replace_all",
+            )
+            if request.data.get("dry_run") in ("1", "true", "True", True):
+                return Response(preview)
+            summary = apply_plan_excel_import(
+                plan,
+                preview,
+                mode=request.data.get("mode") or preview.get("mode") or "replace_all",
+                teacher=self.get_teacher(),
+            )
+        except PlanExcelError as exc:
+            return Response({"detail": exc.message, "code": exc.code, "can_import": False}, status=exc.http_status)
+        except Exception:
+            import logging
+            logging.getLogger("cabinet.plan_excel").exception("lesson plan excel import failed")
+            return Response(
+                {"detail": "Не удалось импортировать план. Проверьте файл и попробуйте снова."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        plan = self.get_queryset().filter(pk=plan.pk).first() or plan
+        return Response({
+            "summary": summary,
+            "item_dates": summary.get("item_dates") or [],
+            "preview": preview.get("summary"),
+            "plan": LessonPlanDetailSerializer(plan).data,
+        })
 
     @action(detail=True, methods=["post"], url_path="items")
     def add_item(self, request, pk=None):
@@ -2281,10 +2467,12 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
         from .homework_api import (
             TASK_ATTACHMENT_MAX_COUNT,
             _safe_upload_filename,
+            _save_uploaded_attachment_file,
             append_teacher_comment_attachment,
             append_teacher_feedback_attachment,
             collect_request_files,
             count_task_attachments,
+            public_attachment,
             teacher_comment_attachments,
         )
         from .upload_validation import UploadValidationError, validate_uploaded_file
@@ -2322,77 +2510,76 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
         task_id = str(request.data.get("task_id") or request.POST.get("task_id") or "").strip()
         is_comment_attachment = not task_number and not task_id
 
-        submission = HomeworkSubmission.objects.filter(pk=item.source_id).first()
-        if not submission:
-            return Response({"error": "Submission not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        payload = dict(submission.result_payload or {})
-        if is_comment_attachment:
-            existing_count = len(teacher_comment_attachments(payload))
-        else:
-            if not task_number:
-                return Response({"error": "task_number required"}, status=status.HTTP_400_BAD_REQUEST)
-            existing_count = count_task_attachments(
-                payload, task_id=task_id, task_number=task_number, teacher=True
-            )
-        if existing_count + len(uploaded_files) > TASK_ATTACHMENT_MAX_COUNT:
-            return Response(
-                {
-                    "error": f"Слишком много файлов. Максимум {TASK_ATTACHMENT_MAX_COUNT}.",
-                    "code": "TOO_MANY_FILES",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         saved = []
-        for uploaded in uploaded_files:
-            try:
-                if hasattr(uploaded, "seek"):
-                    uploaded.seek(0)
-            except Exception:
-                pass
-            safe_name = _safe_upload_filename(uploaded.name)
-            uid = uuid.uuid4().hex[:12]
-            task_key = "comment" if is_comment_attachment else (task_id or task_number)
-            rel_path = (
-                f"cabinet/homework/review_feedback/{item.pk}/{task_key}_{uid}_{safe_name}"
+        with transaction.atomic():
+            submission = (
+                HomeworkSubmission.objects.select_for_update()
+                .filter(pk=item.source_id)
+                .first()
             )
-            saved_path = default_storage.save(rel_path, uploaded)
-            file_url = default_storage.url(saved_path)
-            if is_comment_attachment:
-                append_teacher_comment_attachment(
-                    payload,
-                    file_url=file_url,
-                    filename=safe_name,
-                )
-            else:
-                append_teacher_feedback_attachment(
-                    payload,
-                    task_id=task_id,
-                    task_number=task_number,
-                    file_url=file_url,
-                    filename=safe_name,
-                )
-            saved.append({"url": file_url, "filename": safe_name})
+            if not submission:
+                return Response({"error": "Submission not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        HomeworkSubmission.objects.filter(pk=submission.pk).update(
-            result_payload=payload,
-            updated_at=timezone.now(),
-        )
+            payload = dict(submission.result_payload or {})
+            if is_comment_attachment:
+                existing_count = len(teacher_comment_attachments(payload))
+            else:
+                if not task_number:
+                    return Response({"error": "task_number required"}, status=status.HTTP_400_BAD_REQUEST)
+                existing_count = count_task_attachments(
+                    payload, task_id=task_id, task_number=task_number, teacher=True
+                )
+            if existing_count + len(uploaded_files) > TASK_ATTACHMENT_MAX_COUNT:
+                return Response(
+                    {
+                        "error": f"Слишком много файлов. Максимум {TASK_ATTACHMENT_MAX_COUNT}.",
+                        "code": "TOO_MANY_FILES",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            for uploaded in uploaded_files:
+                safe_name = _safe_upload_filename(uploaded.name)
+                uid = uuid.uuid4().hex[:12]
+                task_key = "comment" if is_comment_attachment else (task_id or task_number)
+                rel_path = (
+                    f"cabinet/homework/review_feedback/{item.pk}/{task_key}_{uid}_{safe_name}"
+                )
+                entry = _save_uploaded_attachment_file(uploaded, rel_path)
+                if is_comment_attachment:
+                    append_teacher_comment_attachment(payload, entry=entry, file_url="", filename="")
+                else:
+                    append_teacher_feedback_attachment(
+                        payload,
+                        task_id=task_id,
+                        task_number=task_number,
+                        file_url="",
+                        filename="",
+                        entry=entry,
+                    )
+                saved.append(public_attachment(entry))
+
+            submission.result_payload = payload
+            HomeworkSubmission.objects.filter(pk=submission.pk).update(
+                result_payload=payload,
+                updated_at=timezone.now(),
+            )
 
         first = saved[0]
         return Response({
             "ok": True,
+            "id": first["id"],
             "url": first["url"],
             "filename": first["filename"],
+            "content_type": first["content_type"],
             "attachments": saved,
         })
 
     def _delete_review_feedback(self, request, pk=None):
         from .homework_api import (
             _delete_attachment_file,
-            _remove_teacher_attachment_from_payload,
-            remove_teacher_comment_attachment,
+            _pop_attachment_from_payload,
+            _request_attachment_ref,
         )
 
         item = self.get_object()
@@ -2407,13 +2594,9 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        file_url = str(
-            request.query_params.get("url")
-            or request.data.get("url")
-            or ""
-        ).strip()
-        if not file_url:
-            return Response({"error": "url required"}, status=status.HTTP_400_BAD_REQUEST)
+        attachment_id, file_url = _request_attachment_ref(request)
+        if not attachment_id and not file_url:
+            return Response({"error": "id required"}, status=status.HTTP_400_BAD_REQUEST)
 
         task_number = str(
             request.query_params.get("task_number")
@@ -2425,29 +2608,35 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
             or request.data.get("task_id")
             or ""
         ).strip()
+        is_comment_attachment = not task_number and not task_id
 
-        submission = HomeworkSubmission.objects.filter(pk=item.source_id).first()
-        if not submission:
-            return Response({"error": "Submission not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        payload = dict(submission.result_payload or {})
-        if not task_number and not task_id:
-            removed = remove_teacher_comment_attachment(payload, file_url=file_url)
-        else:
-            removed = _remove_teacher_attachment_from_payload(
-                payload,
-                file_url=file_url,
-                task_id=task_id,
-                task_number=task_number,
+        with transaction.atomic():
+            submission = (
+                HomeworkSubmission.objects.select_for_update()
+                .filter(pk=item.source_id)
+                .first()
             )
-        if not removed:
-            return Response({"error": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
+            if not submission:
+                return Response({"error": "Submission not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        _delete_attachment_file(file_url)
-        HomeworkSubmission.objects.filter(pk=submission.pk).update(
-            result_payload=payload,
-            updated_at=timezone.now(),
-        )
+            payload = dict(submission.result_payload or {})
+            removed = _pop_attachment_from_payload(
+                payload,
+                teacher=True,
+                comment=is_comment_attachment,
+                attachment_id=attachment_id,
+                file_url=file_url,
+            )
+            if removed is None:
+                return Response({"error": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
+
+            submission.result_payload = payload
+            HomeworkSubmission.objects.filter(pk=submission.pk).update(
+                result_payload=payload,
+                updated_at=timezone.now(),
+            )
+            stored_url = str(removed.get("url") or file_url)
+            transaction.on_commit(lambda url=stored_url: _delete_attachment_file(url))
         return Response({"ok": True})
 
     def _sync_source(

@@ -868,11 +868,15 @@ def build_homework_result_payload(
 
     attempts = serialize_attempts(submission) if submission else []
     overdue = False
+    submitted_late = False
     if homework.due_at and timezone.now() > homework.due_at:
-        if not submission or not submission.submitted_at or submission.submitted_at > homework.due_at:
+        if not submission or not submission.submitted_at:
             overdue = True
-        if status_key in {"not_submitted"} and homework.due_at < timezone.now():
-            status_key = "overdue"
+            if status_key in {"not_submitted"}:
+                status_key = "overdue"
+        elif submission.submitted_at > homework.due_at:
+            overdue = True
+            submitted_late = True
 
     HOMEWORK_STATUS_LABELS_EXT = {
         **HOMEWORK_STATUS_LABELS,
@@ -913,6 +917,7 @@ def build_homework_result_payload(
         ),
         "attempts": attempts,
         "is_overdue": overdue,
+        "submitted_late": submitted_late,
         "review_type": "manual" if (submission and submission.status in {"submitted", "returned", "needs_revision", "checked"}) else "auto",
         "submission_id": submission.id if submission else None,
     }
@@ -3177,6 +3182,7 @@ def build_journal_entries_feed(
                         "submitted_at": payload.get("submitted_at"),
                         "assigned_at": payload.get("assigned_at"),
                         "is_overdue": bool(payload.get("is_overdue")),
+                        "submitted_late": bool(payload.get("submitted_late")),
                         "review_type": payload.get("review_type"),
                         "attempt_count": payload.get("attempt_count"),
                         "attempts": payload.get("attempts") or [],

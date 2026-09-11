@@ -115,6 +115,44 @@ class InteractiveApiTests(TestCase):
             "/media/cabinet/interactives/uploads/1/card.png",
         )
 
+    def test_patch_saves_custom_background_image(self):
+        interactive = Interactive.objects.create(
+            teacher=self.teacher,
+            title="Без своего фона",
+            interactive_type="flashcards",
+            status="draft",
+        )
+        response = self.client.patch(
+            f"/api/cabinet/interactives/{interactive.pk}/",
+            data={
+                "custom_background_image_url": "/media/cabinet/interactives/uploads/1/bg.jpg",
+                "custom_background_tone": "dark",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertEqual(
+            data["custom_background_image_url"],
+            "/media/cabinet/interactives/uploads/1/bg.jpg",
+        )
+        self.assertEqual(data["custom_background_tone"], "dark")
+        interactive.refresh_from_db()
+        self.assertEqual(
+            interactive.custom_background_image_url,
+            "/media/cabinet/interactives/uploads/1/bg.jpg",
+        )
+        self.assertEqual(interactive.custom_background_tone, "dark")
+
+        cleared = self.client.patch(
+            f"/api/cabinet/interactives/{interactive.pk}/",
+            data={"custom_background_image_url": ""},
+            format="json",
+        )
+        self.assertEqual(cleared.status_code, 200, cleared.content)
+        interactive.refresh_from_db()
+        self.assertEqual(interactive.custom_background_image_url, "")
+
     def test_retrieve_existing_and_missing(self):
         interactive = Interactive.objects.create(
             teacher=self.teacher,

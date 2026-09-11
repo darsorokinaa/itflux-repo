@@ -76,8 +76,11 @@ def _attachment_list(raw) -> list[dict]:
         filename = str(item.get("filename") or url.rsplit("/", 1)[-1] or "Файл")
         out.append(
             {
+                "id": str(item.get("id") or "").strip(),
                 "url": url,
                 "filename": filename,
+                "name": filename,
+                "content_type": str(item.get("content_type") or ""),
                 "uploaded_at": item.get("uploaded_at"),
             }
         )

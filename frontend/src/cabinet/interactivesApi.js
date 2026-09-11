@@ -96,13 +96,15 @@ function mapWheelFromApi(items) {
 }
 
 function appearanceFromApi(api) {
+  const customUrl = String(api.custom_background_image_url || api.backgroundImage || "").trim();
+  const tone = String(api.custom_background_tone || api.backgroundImageTone || "light").trim().toLowerCase();
   return {
     backgroundSlug: api.background?.slug || api.background_slug || DEFAULT_APPEARANCE.backgroundSlug || "light-gray",
     cardStyleSlug: api.card_style?.slug || api.card_style_slug || DEFAULT_APPEARANCE.cardStyleSlug,
     soundPackSlug: api.sound_pack?.slug || api.sound_pack_slug || DEFAULT_APPEARANCE.soundPackSlug,
     soundEnabled: api.sound_enabled !== false,
-    backgroundImage: null,
-    backgroundImageTone: "light",
+    backgroundImage: customUrl || null,
+    backgroundImageTone: tone === "dark" ? "dark" : "light",
   };
 }
 
@@ -269,7 +271,9 @@ export function mergeInteractiveAfterSave(current, apiData) {
   }
   // Preserve local-only fields not returned by API.
   if (current?.params) mapped.params = current.params;
-  if (current?.backgroundImage) {
+  const apiHasCustomBg = Object.prototype.hasOwnProperty.call(apiData || {}, "custom_background_image_url")
+    || Object.prototype.hasOwnProperty.call(apiData || {}, "backgroundImage");
+  if (!apiHasCustomBg && current?.backgroundImage) {
     mapped.backgroundImage = current.backgroundImage;
     mapped.backgroundImageTone = current.backgroundImageTone || mapped.backgroundImageTone;
   }
@@ -302,6 +306,8 @@ export function buildInteractiveWritePayload(interactive, statusOverride) {
     difficulty: interactive.difficulty || "",
     instruction: interactive.instruction || "",
     background_slug: interactive.backgroundSlug || null,
+    custom_background_image_url: normalizeImageUrl(interactive.backgroundImage),
+    custom_background_tone: interactive.backgroundImageTone === "dark" ? "dark" : "light",
     card_style_slug: interactive.cardStyleSlug || null,
     sound_pack_slug: interactive.soundPackSlug || null,
     sound_enabled: interactive.soundEnabled !== false,

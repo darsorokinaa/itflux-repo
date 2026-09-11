@@ -268,7 +268,9 @@ export function StudentFormModal({ student, onClose, onSave, onArchive, onDelete
               onClick={handleResetAccess}
               disabled={accessResetting}
             >
-              {accessResetting ? "Создаём ссылку…" : "Восстановить доступ"}
+              {accessResetting
+                ? "Создаём ссылку…"
+                : (isRegistered ? "Восстановить доступ" : "Отправить приглашение ещё раз")}
             </button>
             {accessReset?.url ? (
               <p className="cb-sch-form__hint" role="status">
@@ -456,11 +458,11 @@ export function InviteFormModal({ group, onClose, onCreate, onScheduleLesson, on
           {studentName ? (
             <p className="cabinet-auth-muted">
               Профиль <strong>{studentName}</strong> создан. Занятие можно поставить в расписание сразу — ждать входа ученика не нужно.
-              Отправьте ссылку, когда будете готовы.
+              Отправьте ссылку, чтобы ученик подключился к своему кабинету.
             </p>
           ) : (
             <p className="cabinet-auth-muted">
-              Отправьте ссылку ученику. После регистрации или входа он автоматически появится в вашем списке
+              Отправьте ссылку ученику. После входа или создания аккаунта он подключится к уже созданному профилю
               {group?.name ? ` в группе «${group.name}»` : ""}.
             </p>
           )}
@@ -525,7 +527,7 @@ export function InviteFormModal({ group, onClose, onCreate, onScheduleLesson, on
       <form className="cb-modal-form" onSubmit={handleSubmit}>
         {error ? <p className="cb-modal-form__error" role="alert">{error}</p> : null}
         <p className="cabinet-auth-muted" style={{ marginBottom: "12px" }}>
-          Введите имя ученика — появится в списке сразу. После входа по ссылке профиль привяжется автоматически.
+          Введите имя ученика — учебный профиль появится в списке сразу. Ссылка нужна, чтобы ученик подключился к учителю.
         </p>
         <div className="cb-plan-editor__grid">
           <label className="cb-field">
@@ -582,7 +584,7 @@ export function InviteFormModal({ group, onClose, onCreate, onScheduleLesson, on
             />
           </label>
         </div>
-        <FormActions onCancel={onClose} submitLabel="Создать профиль и ссылку" saving={saving} />
+        <FormActions onCancel={onClose} submitLabel="Пригласить ученика" saving={saving} />
       </form>
     </CabinetModal>
   );

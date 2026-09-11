@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchJournalEntries } from "../../utils/cabinetAuth";
+import {
+  homeworkJournalStatusLabel,
+  homeworkJournalStatusTone,
+  isUnsubmittedOverdue,
+  wasHomeworkSubmittedLate,
+} from "../journal/homeworkStatus";
+import LateHomeworkMark from "../journal/LateHomeworkMark";
 
 const TYPE_TABS = [
   { key: "", label: "Все" },
@@ -56,7 +63,17 @@ function statusLabelRu(value, fallback = "Запись") {
 }
 
 function entryStatusLabel(entry) {
+  if (entry?.entry_type === "homework") {
+    return homeworkJournalStatusLabel(entry);
+  }
   return statusLabelRu(entry?.status_label || entry?.status || entry?.badge, "Запись");
+}
+
+function entryStatusTone(entry) {
+  if (entry?.entry_type === "homework") {
+    return homeworkJournalStatusTone(entry);
+  }
+  return "info";
 }
 
 function entryIcon(entry) {
@@ -374,10 +391,11 @@ export default function JournalEntriesFeed({
             <tbody>
               {entries.map((entry) => {
                 const action = entryActionLabel(entry);
+                const late = wasHomeworkSubmittedLate(entry);
                 return (
                   <tr
                     key={entry.id}
-                    className={`jg-data-table__row${entry.is_overdue ? " is-overdue" : ""}`}
+                    className={`jg-data-table__row${isUnsubmittedOverdue(entry) ? " is-overdue" : ""}`}
                   >
                     <td>
                       <span className="jg-data-table__type">
@@ -392,13 +410,14 @@ export default function JournalEntriesFeed({
                     <td>
                       <span className="jg-data-table__muted">{formatEntryDate(entry)}</span>
                     </td>
-                      <td>
-                        <span
-                          className={`jg-status-badge jg-status-badge--${entry.is_overdue ? "danger" : "info"}`}
-                        >
+                    <td>
+                      <span className="jg-status-cell">
+                        <span className={`jg-status-badge jg-status-badge--${entryStatusTone(entry)}`}>
                           {entryStatusLabel(entry)}
                         </span>
-                      </td>
+                        {late ? <LateHomeworkMark /> : null}
+                      </span>
+                    </td>
                     <td>
                       {entry.score_percent != null ? `${entry.score_percent}%` : "—"}
                     </td>
@@ -445,7 +464,10 @@ export default function JournalEntriesFeed({
             </header>
             <div className="jg-entry-drawer__meta">
               {selected.student_name ? <p>{selected.student_name}</p> : null}
-              <p>Статус: {entryStatusLabel(selected)}</p>
+              <p className="jg-status-cell">
+                Статус: {entryStatusLabel(selected)}
+                {wasHomeworkSubmittedLate(selected) ? <LateHomeworkMark /> : null}
+              </p>
               {selected.score_percent != null ? <p>Результат: {selected.score_percent}%</p> : null}
               {selected.due_at ? <p>Срок: {new Date(selected.due_at).toLocaleString("ru-RU")}</p> : null}
               {selected.submitted_at ? (

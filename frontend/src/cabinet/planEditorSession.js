@@ -1,7 +1,21 @@
 import { getInteractiveDisplayTitle } from "./interactivesData";
 import { mapApiMaterial, mapApiPlanItem } from "./lessonPlansData";
 import { materialTypeLabel } from "./materialTypeConfig";
+import { calendarDateKey } from "./planDates";
 import { mapApiInteractiveAttachment, materialOpenUrl } from "./planItemAttachments";
+
+let draftSessionSeq = 0;
+
+export function nextDraftSessionKey() {
+  draftSessionSeq += 1;
+  return `draft-${draftSessionSeq}-${Date.now()}`;
+}
+
+export function sessionListKey(session, fallbackIndex = 0) {
+  if (session?.clientKey) return session.clientKey;
+  if (session?.id) return `item-${session.id}`;
+  return `draft-${fallbackIndex}`;
+}
 
 export const EMPTY_PLAN_SESSION = {
   id: null,
@@ -20,12 +34,16 @@ export const EMPTY_PLAN_SESSION = {
   homeworkMaterials: [],
   homeworkInteractives: [],
   scheduledDate: "",
+  dateSource: "",
+  clientKey: "",
 };
 
 export function mapPlanItemToEditorSession(item) {
   const materials = (item.materials || []).map(mapApiMaterial);
+  const id = item.id ?? null;
   return {
-    id: item.id ?? null,
+    id,
+    clientKey: id ? `item-${id}` : nextDraftSessionKey(),
     title: item.title || "",
     topic: item.topic || "",
     subtopic: item.subtopic || "",
@@ -42,12 +60,67 @@ export function mapPlanItemToEditorSession(item) {
     homeworkMaterials: (item.homework_materials || item.homeworkMaterials || []).map(mapApiMaterial),
     homeworkInteractives: (item.homework_interactives || item.homeworkInteractives || [])
       .map(mapApiInteractiveAttachment),
-    scheduledDate: item.scheduled_date || item.scheduledDate || "",
+    scheduledDate: calendarDateKey(item.scheduled_date || item.scheduledDate) || "",
+    dateSource: item.date_source || item.dateSource || "",
   };
 }
 
 export function mapApiItemResponseToSession(data) {
   return mapPlanItemToEditorSession(mapApiPlanItem(data));
+}
+
+export function adoptApiSession(data, local) {
+  const mapped = mapApiItemResponseToSession(data);
+  return {
+    ...mapped,
+    clientKey: local?.clientKey || mapped.clientKey,
+  };
+}
+
+export function keepLocalSessionWithRemoteId(local, remote) {
+  if (!local) return remote;
+  if (!remote?.id || local.id === remote.id) return local;
+  return { ...local, id: remote.id };
+}
+
+/** Latest editor session for a snapshot row — avoids stale dates during long saves. */
+export function resolveLivePlanSession(liveList, snapshotSession, index = 0) {
+  const list = Array.isArray(liveList) ? liveList : [];
+  if (!snapshotSession) return list[index] || null;
+  if (snapshotSession.id) {
+    return list.find((item) => item.id === snapshotSession.id) || null;
+  }
+  if (snapshotSession.clientKey) {
+    return list.find((item) => item.clientKey === snapshotSession.clientKey) || null;
+  }
+  return list[index] || snapshotSession;
+}
+
+export function sessionPersistTitle(session, index) {
+  const title = String(session?.title || "").trim();
+  return title || `Урок ${index + 1}`;
+}
+
+export function sessionHasPersistableContent(session) {
+  if (!session) return false;
+  if (session.id) return true;
+  return Boolean(
+    String(session.title || "").trim()
+    || String(session.topic || "").trim()
+    || String(session.subtopic || "").trim()
+    || String(session.examTask || "").trim()
+    || String(session.goal || "").trim()
+    || String(session.brief || "").trim()
+    || String(session.comment || "").trim()
+    || String(session.materialsNotes || "").trim()
+    || String(session.homeworkDescription || "").trim()
+    || calendarDateKey(session.scheduledDate)
+    || session.lessonMaterials?.length
+    || session.lessonInteractives?.length
+    || session.taskMaterials?.length
+    || session.homeworkMaterials?.length
+    || session.homeworkInteractives?.length
+  );
 }
 
 export function buildPlanItemApiPayload(session, order) {
@@ -69,7 +142,7 @@ export function buildPlanItemApiPayload(session, order) {
     interactive_ids: session.lessonInteractives.map((i) => i.id).filter(Boolean),
     homework_material_ids: session.homeworkMaterials.map((m) => m.id).filter(Boolean),
     homework_interactive_ids: session.homeworkInteractives.map((i) => i.id).filter(Boolean),
-    scheduled_date: session.scheduledDate || null,
+    scheduled_date: calendarDateKey(session.scheduledDate) || null,
   };
 }
 
@@ -176,6 +249,7 @@ export function clonePlanSession(session) {
   return {
     ...session,
     id: null,
+    clientKey: nextDraftSessionKey(),
     lessonMaterials: [...(session.lessonMaterials || [])],
     lessonInteractives: [...(session.lessonInteractives || [])],
     taskMaterials: [...(session.taskMaterials || [])],

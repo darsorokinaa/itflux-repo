@@ -8,32 +8,14 @@ import PlanItemResourcesPicker from "../components/PlanItemResourcesPicker";
 import { getInteractiveDisplayTitle } from "../interactivesData";
 import { fetchHomeworkForEdit, updateHomework } from "../../utils/cabinetAuth";
 import {
+  datetimeLocalToIso,
+  readDatetimeLocalInput,
+  toDateTimeLocalValue,
+} from "../homeworkDueAt";
+import {
   isHomeworkInstructionTask,
   taskDuplicatesAttachment,
 } from "../homeworkTaskDisplay";
-
-function toDateTimeLocalValue(iso) {
-  if (!iso) return "";
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "";
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    const h = String(d.getHours()).padStart(2, "0");
-    const min = String(d.getMinutes()).padStart(2, "0");
-    return `${y}-${m}-${day}T${h}:${min}`;
-  } catch {
-    return "";
-  }
-}
-
-function datetimeLocalToIso(localValue) {
-  if (!localValue) return null;
-  const d = new Date(localValue);
-  if (Number.isNaN(d.getTime())) return localValue;
-  return d.toISOString();
-}
 
 function taskMeta(task) {
   if (task.is_variant) return "Вариант";
@@ -110,6 +92,7 @@ export default function CabinetHomeworkEditPage() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [deadline, setDeadline] = useState("");
+  const deadlineRef = useRef("");
   const [tasks, setTasks] = useState([]);
   const [attachments, setAttachments] = useState([]);
   const [warnings, setWarnings] = useState({
@@ -123,6 +106,11 @@ export default function CabinetHomeworkEditPage() {
   const [returnPath, setReturnPath] = useState("/cabinet/review");
 
   const initialSnapshot = useRef("");
+  deadlineRef.current = deadline;
+  const setDeadlineValue = (value) => {
+    deadlineRef.current = value;
+    setDeadline(value);
+  };
   const dirty = useMemo(() => {
     const snap = JSON.stringify({ title, description, deadline, tasks });
     return Boolean(initialSnapshot.current) && snap !== initialSnapshot.current;
@@ -153,7 +141,7 @@ export default function CabinetHomeworkEditPage() {
       setUpdatedAt(data.updated_at || "");
       setTitle(data.title || "");
       setDescription(data.description || "");
-      setDeadline(toDateTimeLocalValue(data.due_at));
+      setDeadlineValue(toDateTimeLocalValue(data.due_at));
       const nextTasks = Array.isArray(data.tasks) ? data.tasks.map((t, i) => ({
         ...t,
         clientKey: t.id ? `id-${t.id}` : `new-${i}-${t.material_id || t.interactive_id || "x"}`,
@@ -289,7 +277,7 @@ export default function CabinetHomeworkEditPage() {
     return {
       title: title.trim(),
       description: description.trim(),
-      due_at: deadline ? datetimeLocalToIso(deadline) : null,
+      due_at: deadlineRef.current ? datetimeLocalToIso(deadlineRef.current) : null,
       updated_at: updatedAt,
       tasks: tasksPayload,
       ...confirms,
@@ -346,6 +334,8 @@ export default function CabinetHomeworkEditPage() {
 
   const handleSubmit = (event) => {
     event.preventDefault();
+    const typedDeadline = readDatetimeLocalInput(event.currentTarget);
+    if (typedDeadline != null) setDeadlineValue(typedDeadline);
     if (!canEdit) return;
     if (!title.trim()) {
       setError("Укажите название задания");
@@ -470,8 +460,11 @@ export default function CabinetHomeworkEditPage() {
           <span>Срок выполнения</span>
           <input
             type="datetime-local"
+            name="due_at"
             value={deadline}
-            onChange={(e) => setDeadline(e.target.value)}
+            onChange={(e) => setDeadlineValue(e.target.value)}
+            onInput={(e) => setDeadlineValue(e.target.value)}
+            onBlur={(e) => setDeadlineValue(e.target.value)}
             disabled={submitting || !canEdit}
           />
         </label>

@@ -941,6 +941,8 @@ def _interactive_to_player_payload(interactive):
         "exam": interactive.get_exam_type_display() if interactive.exam_type else "без экзамена",
         "topic": interactive.topic or "",
         "backgroundSlug": getattr(interactive.background, "slug", None) or "light-gray",
+        "backgroundImage": interactive.custom_background_image_url or None,
+        "backgroundImageTone": interactive.custom_background_tone or "light",
         "cardStyleSlug": getattr(interactive.card_style, "slug", None) or "classic",
         "soundPackSlug": getattr(interactive.sound_pack, "slug", None) or "soft",
         "soundEnabled": interactive.sound_enabled,

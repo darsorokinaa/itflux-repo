@@ -117,8 +117,8 @@ export function normalizeInteractiveData(raw) {
     cardStyleSlug: raw.cardStyleSlug || raw.card_style_slug || DEFAULT_APPEARANCE.cardStyleSlug,
     soundPackSlug: raw.soundPackSlug || raw.sound_pack_slug || DEFAULT_APPEARANCE.soundPackSlug,
     soundEnabled: raw.soundEnabled !== false && raw.sound_enabled !== false,
-    backgroundImage: raw.backgroundImage || null,
-    backgroundImageTone: raw.backgroundImageTone || "light",
+    backgroundImage: raw.backgroundImage || raw.custom_background_image_url || null,
+    backgroundImageTone: raw.backgroundImageTone || raw.custom_background_tone || "light",
     autoTextBackdrop: params.autoTextBackdrop !== false,
     results: asArray(raw.results),
   };

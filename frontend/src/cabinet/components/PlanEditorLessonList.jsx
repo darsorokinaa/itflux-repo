@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, memo, useEffect, useRef, useState } from "react";
 import CabinetIcon from "../CabinetIcons";
 import CabinetFloatingMenu from "./CabinetFloatingMenu";
 import PlanEditorResourceBlock from "./PlanEditorResourceBlock";
-import { formatPlanDateLabel, formatPlanDateNumeric } from "../planDates";
+import { calendarDateKey, formatPlanDateLabel, formatPlanDateNumeric } from "../planDates";
 import {
   sessionHomeworkAttachmentRows,
   sessionLessonAttachmentRows,
+  sessionListKey,
   sessionResourceSummary,
 } from "../planEditorSession";
 import { lessonsWord, uniquePlanTopics } from "../planEditorGrouping";
@@ -23,50 +24,34 @@ function useMediaQuery(query) {
   return matches;
 }
 
-function CommitOnBlurInput({ value = "", onCommit, onCancel, ...props }) {
+const FocusedDraftInput = forwardRef(function FocusedDraftInput({ value = "", onChange, as = "input", ...props }, ref) {
   const [draft, setDraft] = useState(null);
-  const committedRef = useRef(false);
   const shown = draft == null ? value : draft;
-
-  const commit = () => {
-    if (committedRef.current) return;
-    committedRef.current = true;
-    const next = shown;
-    setDraft(null);
-    if (next !== value) onCommit?.(next);
-  };
+  const Tag = as === "textarea" ? "textarea" : "input";
 
   return (
-    <input
+    <Tag
       {...props}
+      ref={ref}
       value={shown}
       onFocus={(event) => {
-        committedRef.current = false;
         setDraft(value);
         props.onFocus?.(event);
       }}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={(event) => {
-        commit();
-        props.onBlur?.(event);
+      onChange={(event) => {
+        const next = event.target.value;
+        setDraft(next);
+        onChange?.(next);
       }}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          event.currentTarget.blur();
-        }
-        if (event.key === "Escape") {
-          event.preventDefault();
-          committedRef.current = true;
-          setDraft(null);
-          onCancel?.();
-          event.currentTarget.blur();
-        }
-        props.onKeyDown?.(event);
+      onBlur={(event) => {
+        const next = draft == null ? value : draft;
+        setDraft(null);
+        if (next !== value) onChange?.(next);
+        props.onBlur?.(event);
       }}
     />
   );
-}
+});
 
 function DragGrip() {
   return (
@@ -202,7 +187,7 @@ function SessionActionMenu({
   );
 }
 
-export function PlanEditorSessionCard({
+export const PlanEditorSessionCard = memo(function PlanEditorSessionCard({
   session,
   index,
   total,
@@ -238,13 +223,12 @@ export function PlanEditorSessionCard({
   const showTopic = Boolean(topicLine) && topicLine !== displayTitle;
   const dateLabel = formatPlanDateLabel(session.scheduledDate);
   const metaParts = [
-    dateLabel ? (dateOverride ? `${dateLabel} · изменено вручную` : dateLabel) : null,
-    summary.materials > 0 ? `Материалы: ${summary.materials}` : null,
-    `ДЗ: ${summary.homework}`,
+    dateLabel ? (dateOverride ? `${dateLabel} · вручную` : dateLabel) : null,
+    summary.homework === "есть" ? "ДЗ есть" : "ДЗ нет",
   ].filter(Boolean);
 
   const openEditor = () => {
-    if (!expanded) onToggle();
+    if (!expanded) onToggle(index);
     window.requestAnimationFrame(() => titleInputRef.current?.focus());
   };
 
@@ -263,16 +247,21 @@ export function PlanEditorSessionCard({
         <button
           type="button"
           className="cb-pe-session__drag"
-          aria-label="Изменить порядок урока"
+          aria-label="Перетащить урок"
+          title="Перетащить урок"
           onPointerDown={(event) => onHandlePointerDown(index, event)}
           onClick={(event) => event.stopPropagation()}
         >
           <DragGrip />
         </button>
 
-        <span className="cb-pe-session__num" aria-hidden="true">{index + 1}</span>
+        <span className="cb-pe-session__num" aria-hidden="true">
+          <span className="cb-pe-session__num-prefix">Урок </span>
+          {index + 1}
+        </span>
 
-        <button type="button" className="cb-pe-session__summary" onClick={onToggle}>
+        <button type="button" className="cb-pe-session__summary" onClick={() => onToggle(index)}>
+          <span className="cb-pe-session__kicker">Название</span>
           <strong className="cb-pe-session__title">{displayTitle}</strong>
           {showTopic ? <span className="cb-pe-session__topic">{topicLine}</span> : null}
           {metaParts.length ? (
@@ -281,6 +270,18 @@ export function PlanEditorSessionCard({
         </button>
 
         <div className="cb-pe-session__tools">
+          {expanded ? (
+            <button
+              type="button"
+              className="cb-pe-session__collapse"
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggle(index);
+              }}
+            >
+              Свернуть
+            </button>
+          ) : null}
           <button
             type="button"
             className="cb-pe-session__menu-btn"
@@ -316,114 +317,145 @@ export function PlanEditorSessionCard({
 
       {expanded ? (
         <div className="cb-pe-session__body">
-          <div className="cb-pe-session__grid cb-pe-session__grid--2">
-            <label className="cb-pe-field">
-              <span>Название</span>
-              <input
-                ref={titleInputRef}
-                value={session.title}
-                onChange={(e) => onChange(index, "title", e.target.value)}
+          <div className="cb-pe-fg">
+            <h4 className="cb-pe-fg__title">Основное</h4>
+            <div className="cb-pe-session__grid cb-pe-session__grid--2">
+              <label className="cb-pe-field">
+                <span>Название</span>
+                <FocusedDraftInput
+                  ref={titleInputRef}
+                  value={session.title}
+                  onChange={(next) => onChange(index, "title", next)}
+                />
+              </label>
+              <label className="cb-pe-field">
+                <span>Дата занятия</span>
+                <input
+                  type="date"
+                  value={dateDraft != null ? dateDraft : (calendarDateKey(session.scheduledDate) || "")}
+                  onChange={(e) => {
+                    const next = calendarDateKey(e.target.value) || e.target.value;
+                    if (onDateChange) onDateChange(index, next);
+                    else onChange(index, "scheduledDate", next);
+                  }}
+                  onInput={(e) => {
+                    const next = calendarDateKey(e.target.value) || e.target.value;
+                    if (onDateChange) onDateChange(index, next);
+                    else onChange(index, "scheduledDate", next);
+                  }}
+                />
+                {dateOverride && plannedDate ? (
+                  <small className="cb-pe-field__hint cb-pe-date-note">
+                    Плановая дата: {formatPlanDateNumeric(plannedDate)}
+                    {onRestorePlannedDate ? (
+                      <button type="button" className="cb-pe-date-note__restore" onClick={() => onRestorePlannedDate(index)}>
+                        Вернуть плановую
+                      </button>
+                    ) : null}
+                  </small>
+                ) : (
+                  <small className="cb-pe-field__hint cb-pe-field__hint--info">
+                    Индивидуальная дата. Остальные занятия не сдвинутся.
+                  </small>
+                )}
+              </label>
+              <label className="cb-pe-field">
+                <span>Тема</span>
+                <FocusedDraftInput
+                  value={session.topic}
+                  onChange={(next) => onChange(index, "topic", next)}
+                />
+                <small className="cb-pe-field__hint">Тема определяет, в какой группе будет отображаться урок.</small>
+              </label>
+              <label className="cb-pe-field">
+                <span>Подтема</span>
+                <FocusedDraftInput
+                  value={session.subtopic}
+                  onChange={(next) => onChange(index, "subtopic", next)}
+                />
+              </label>
+              <label className="cb-pe-field cb-pe-field--wide">
+                <span>№ задания</span>
+                <FocusedDraftInput
+                  value={session.examTask}
+                  onChange={(next) => onChange(index, "examTask", next)}
+                />
+                <small className="cb-pe-field__hint">Можно указать номер задания экзамена, например 13.</small>
+              </label>
+            </div>
+          </div>
+
+          <div className="cb-pe-fg">
+            <h4 className="cb-pe-fg__title">Содержание урока</h4>
+            <label className="cb-pe-field cb-pe-field--wide">
+              <span>Цель</span>
+              <FocusedDraftInput
+                as="textarea"
+                className="cb-pe-field__compact"
+                rows={2}
+                value={session.goal}
+                onChange={(next) => onChange(index, "goal", next)}
+                placeholder="Цель занятия"
               />
             </label>
-            <label className="cb-pe-field">
-              <span>Дата занятия</span>
-              <input
-                type="date"
-                value={dateDraft != null ? dateDraft : (session.scheduledDate || "")}
-                onChange={(e) => {
-                  if (onDateChange) onDateChange(index, e.target.value);
-                  else onChange(index, "scheduledDate", e.target.value);
-                }}
+            <label className="cb-pe-field cb-pe-field--wide">
+              <span>План</span>
+              <FocusedDraftInput
+                as="textarea"
+                className="cb-pe-field__compact"
+                rows={2}
+                value={session.brief}
+                onChange={(next) => onChange(index, "brief", next)}
+                placeholder="Краткий план"
               />
-              {dateOverride && plannedDate ? (
-                <small className="cb-pe-field__hint cb-pe-date-note">
-                  Плановая дата: {formatPlanDateNumeric(plannedDate)}
-                  {onRestorePlannedDate ? (
-                    <button type="button" className="cb-pe-date-note__restore" onClick={() => onRestorePlannedDate(index)}>
-                      Вернуть плановую
-                    </button>
-                  ) : null}
-                </small>
-              ) : index === 0 ? (
-                <small className="cb-pe-field__hint">Можно поставить другую дату — остальные занятия не сдвинутся</small>
-              ) : (
-                <small className="cb-pe-field__hint">Можно поставить любую дату, даже если она отличается от плана</small>
-              )}
-            </label>
-            <label className="cb-pe-field">
-              <span>Тема</span>
-              <CommitOnBlurInput
-                value={session.topic}
-                onCommit={(next) => onChange(index, "topic", next)}
-              />
-            </label>
-            <label className="cb-pe-field">
-              <span>Подтема</span>
-              <input value={session.subtopic} onChange={(e) => onChange(index, "subtopic", e.target.value)} />
-            </label>
-            <label className="cb-pe-field">
-              <span>№ задания</span>
-              <input value={session.examTask} onChange={(e) => onChange(index, "examTask", e.target.value)} />
             </label>
           </div>
 
-          <label className="cb-pe-field cb-pe-field--wide">
-            <span>Цель</span>
-            <textarea
-              className="cb-pe-field__compact"
-              rows={2}
-              value={session.goal}
-              onChange={(e) => onChange(index, "goal", e.target.value)}
-              placeholder="Цель занятия"
-            />
-          </label>
-
-          <label className="cb-pe-field cb-pe-field--wide">
-            <span>План</span>
-            <textarea
-              className="cb-pe-field__compact"
-              rows={2}
-              value={session.brief}
-              onChange={(e) => onChange(index, "brief", e.target.value)}
-              placeholder="Краткий план"
-            />
-          </label>
-
-          <div className="cb-pe-session__resources">
-            <PlanEditorResourceBlock
-              label="Материалы"
-              emptyLabel="Нет материалов"
-              actionLabel="Прикрепить"
-              rows={sessionLessonAttachmentRows(session)}
-              notes={session.materialsNotes}
-              notesPlaceholder="Заметки к материалам"
-              showNotes={sessionLessonAttachmentRows(session).length > 0 || Boolean(session.materialsNotes?.trim())}
-              onNotesChange={(e) => onChange(index, "materialsNotes", e.target.value)}
-              onAttach={() => onOpenPicker(index, "lesson")}
-              onRemove={(row) => onRemoveAttachment(index, "lesson", row)}
-            />
-            <PlanEditorResourceBlock
-              label="ДЗ"
-              emptyLabel="ДЗ не задано"
-              actionLabel="Настроить"
-              rows={sessionHomeworkAttachmentRows(session)}
-              notes={session.homeworkDescription}
-              notesPlaceholder="Описание ДЗ"
-              alwaysShowNotes
-              onNotesChange={(e) => onChange(index, "homeworkDescription", e.target.value)}
-              onAttach={() => onOpenPicker(index, "homework")}
-              onRemove={(row) => onRemoveAttachment(index, "homework", row)}
-            />
+          <div className="cb-pe-fg">
+            <h4 className="cb-pe-fg__title">Материалы и домашнее задание</h4>
+            <div className="cb-pe-session__resources">
+              <PlanEditorResourceBlock
+                label="Материалы"
+                emptyLabel="Нет материалов"
+                actionLabel="Прикрепить"
+                rows={sessionLessonAttachmentRows(session)}
+                notes={session.materialsNotes}
+                notesPlaceholder="Заметки к материалам"
+                showNotes={sessionLessonAttachmentRows(session).length > 0 || Boolean(session.materialsNotes?.trim())}
+                onNotesChange={(e) => onChange(index, "materialsNotes", e.target.value)}
+                onAttach={() => onOpenPicker(index, "lesson")}
+                onRemove={(row) => onRemoveAttachment(index, "lesson", row)}
+              />
+              <PlanEditorResourceBlock
+                label="Домашнее задание"
+                emptyLabel="ДЗ не задано"
+                actionLabel="Настроить"
+                rows={sessionHomeworkAttachmentRows(session)}
+                notes={session.homeworkDescription}
+                notesPlaceholder="Описание ДЗ"
+                alwaysShowNotes
+                onNotesChange={(e) => onChange(index, "homeworkDescription", e.target.value)}
+                onAttach={() => onOpenPicker(index, "homework")}
+                onRemove={(row) => onRemoveAttachment(index, "homework", row)}
+              />
+            </div>
           </div>
 
           {attaching ? (
             <p className="cb-pe-session__sync">Сохранение вложений…</p>
           ) : null}
 
-          <label className="cb-pe-field cb-pe-field--wide">
-            <span>Комментарий</span>
-            <input value={session.comment} onChange={(e) => onChange(index, "comment", e.target.value)} placeholder="Заметка учителя" />
-          </label>
+          <div className="cb-pe-fg">
+            <h4 className="cb-pe-fg__title">Заметка</h4>
+            <label className="cb-pe-field cb-pe-field--wide">
+              <span>Комментарий учителя</span>
+              <FocusedDraftInput
+                value={session.comment}
+                onChange={(next) => onChange(index, "comment", next)}
+                placeholder="Видно только вам"
+              />
+            </label>
+          </div>
 
           <div className="cb-pe-session__actions">
             {sessionError ? (
@@ -440,7 +472,7 @@ export function PlanEditorSessionCard({
             <button
               type="button"
               className="cb-btn cb-btn--ghost"
-              onClick={onToggle}
+              onClick={() => onToggle(index)}
             >
               Свернуть
             </button>
@@ -449,7 +481,7 @@ export function PlanEditorSessionCard({
       ) : null}
     </article>
   );
-}
+});
 
 export function PlanTopicSection({
   group,
@@ -458,9 +490,7 @@ export function PlanTopicSection({
   onStartRename,
   onCommitRename,
   onCancelRename,
-  onAddLesson,
   onDeleteTopic,
-  children,
 }) {
   const [draft, setDraft] = useState(group.topic);
   const inputRef = useRef(null);
@@ -576,17 +606,19 @@ export function PlanTopicSection({
           ) : null}
         </div>
       </header>
-      <div className="cb-pe-topic__list">
-        {children}
-      </div>
-      <button
-        type="button"
-        className="cb-pe-topic__add"
-        onClick={() => onAddLesson(group.indices[group.indices.length - 1], group.topic)}
-      >
-        <CabinetIcon name="plus" /> Добавить урок
-      </button>
     </section>
+  );
+}
+
+function PlanTopicAddButton({ group, onAddLesson }) {
+  return (
+    <button
+      type="button"
+      className="cb-pe-topic__add"
+      onClick={() => onAddLesson(group.indices[group.indices.length - 1], group.topic)}
+    >
+      <CabinetIcon name="plus" /> Добавить урок
+    </button>
   );
 }
 
@@ -623,10 +655,14 @@ export function PlanSessionsList({
   dateDraftValue,
   plannedDates,
 }) {
-  const topics = uniquePlanTopics(sessions);
+  const topicSignature = sessions.map((session) => String(session?.topic || "").trim()).join("\0");
+  const topicsCacheRef = useRef({ signature: "", list: [] });
+  if (topicsCacheRef.current.signature !== topicSignature) {
+    topicsCacheRef.current = { signature: topicSignature, list: uniquePlanTopics(sessions) };
+  }
+  const topics = topicsCacheRef.current.list;
   const cards = sessions.map((session, index) => (
     <PlanEditorSessionCard
-      key={session.id ? `item-${session.id}` : `draft-${index}`}
       session={session}
       index={index}
       total={sessions.length}
@@ -634,7 +670,7 @@ export function PlanSessionsList({
       topics={topics}
       isDragging={draggingIndex === index}
       isOrigin={draggingIndex === index}
-      onToggle={() => onToggle(index)}
+      onToggle={onToggle}
       onChange={onChange}
       onDateChange={onDateChange}
       onRestorePlannedDate={onRestorePlannedDate}
@@ -651,34 +687,57 @@ export function PlanSessionsList({
       sessionError={sessionErrors[index]}
       dateDraft={dateDraftIndex === index ? dateDraftValue : null}
       plannedDate={plannedDates?.[index] || ""}
-      dateOverride={Boolean(plannedDates?.[index] && session.scheduledDate && plannedDates[index] !== session.scheduledDate && index > 0)}
+      dateOverride={Boolean(
+        plannedDates?.[index]
+        && calendarDateKey(session.scheduledDate)
+        && plannedDates[index] !== calendarDateKey(session.scheduledDate)
+        && index > 0
+      )}
     />
   ));
 
   const withDropLine = (index, node) => (
-    <div key={`wrap-${index}`} className="cb-pe-session-wrap">
+    <div key={sessionListKey(sessions[index], index)} className="cb-pe-session-wrap">
       {dropLineIndex === index ? <div className="cb-pe-drop-line" aria-hidden="true" /> : null}
       {node}
     </div>
   );
 
-  return (
-    <div className="cb-pe-sessions" ref={listRef}>
-      {showTopics ? groups.map((group, groupIndex) => (
+  const nodes = [];
+  if (showTopics) {
+    groups.forEach((group, groupIndex) => {
+      nodes.push(
         <PlanTopicSection
-          key={group.id}
+          key={`head-${group.id}`}
           group={group}
           groupNumber={groups.slice(0, groupIndex + 1).filter((item) => item.topicKey).length || groupIndex + 1}
           renaming={renamingTopicId === group.id}
           onStartRename={() => onStartRenameTopic(group.id)}
           onCommitRename={(next) => onCommitRenameTopic(group, next)}
           onCancelRename={onCancelRenameTopic}
-          onAddLesson={onAddInTopic}
           onDeleteTopic={onDeleteTopic}
-        >
-          {group.indices.map((index) => withDropLine(index, cards[index]))}
-        </PlanTopicSection>
-      )) : sessions.map((_, index) => withDropLine(index, cards[index]))}
+        />,
+      );
+      group.indices.forEach((index) => {
+        nodes.push(withDropLine(index, cards[index]));
+      });
+      nodes.push(
+        <PlanTopicAddButton
+          key={`add-${group.id}`}
+          group={group}
+          onAddLesson={onAddInTopic}
+        />,
+      );
+    });
+  } else {
+    sessions.forEach((_, index) => {
+      nodes.push(withDropLine(index, cards[index]));
+    });
+  }
+
+  return (
+    <div className="cb-pe-sessions" ref={listRef}>
+      {nodes}
       {dropLineIndex === sessions.length ? <div className="cb-pe-drop-line" aria-hidden="true" /> : null}
     </div>
   );

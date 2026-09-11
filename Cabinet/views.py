@@ -233,7 +233,7 @@ def api_register(request):
             return JsonResponse(
                 {
                     "ok": False,
-                    "error": "Вы уже зарегистрированы. Войдите в аккаунт, чтобы продолжить.",
+                    "error": "Вы уже присоединились к этому учителю. Войдите в аккаунт, чтобы продолжить.",
                     "code": "already_registered",
                     "invite": invite_preview,
                 },
