@@ -1,0 +1,26 @@
+/* Кнопка Timeweb — левее сезонной темы, чтобы не наезжала на FAB оформления. */
+html.cb-ai-embed-on {
+  --cb-ai-embed-right: calc(16px + 52px + 12px);
+  --cb-ai-embed-bottom: 20px;
+}
+
+html.cb-ai-embed-on:has(.cb-sch-fab) {
+  --cb-ai-embed-right: calc(16px + 52px + 12px + 52px + 12px);
+}
+
+@media (max-width: 900px) {
+  html.cb-ai-embed-on {
+    --cb-ai-embed-right: calc(12px + 48px + 12px);
+    --cb-ai-embed-bottom: calc(var(--cb-mobile-nav-height, 64px) + 16px);
+  }
+
+  html.cb-ai-embed-on:has(.cb-sch-fab) {
+    --cb-ai-embed-right: calc(12px + 48px + 12px + 48px + 12px);
+  }
+}
+
+html.cb-ai-embed-on .cb-ai-embed-launcher {
+  right: var(--cb-ai-embed-right) !important;
+  bottom: var(--cb-ai-embed-bottom) !important;
+  left: auto !important;
+}

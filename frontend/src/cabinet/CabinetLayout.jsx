@@ -25,7 +25,7 @@ import PwaInstallPrompt from "./pwa/PwaInstallPrompt";
 import { useSeasonalTheme } from "../seasonal/SeasonalThemeProvider";
 import { openSupport } from "./support";
 import { rememberReturnPath } from "../accessGate/accessGate";
-import TimewebAiEmbed from "./TimewebAiEmbed";
+import TimewebAiEmbed, { planHasTimewebAi } from "./TimewebAiEmbed";
 import "../styles/cabinet-dashboard.css";
 import "./styles/teacher-cabinet.css";
 import "../styles/cabinet-mobile-system.css";
@@ -588,7 +588,9 @@ export default function CabinetLayout() {
       </nav>
       <CabinetGuideModal open={guideOpen} onClose={closeGuide} onComplete={completeGuide} />
       <ConnectionCheckHost />
-      <TimewebAiEmbed enabled />
+      <TimewebAiEmbed
+        enabled={!subscription.loading && planHasTimewebAi(subscription.currentPlan)}
+      />
       <ConfirmActionModal
         open={logoutConfirm}
         title="Выйти из аккаунта?"
