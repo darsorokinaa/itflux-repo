@@ -37,7 +37,6 @@ export const CABINET_NAV_GROUPS = [
     label: "Сервисы",
     items: [
       { id: "payments", label: "Оплаты", path: "/cabinet/payments", icon: "wallet" },
-      { id: "ai", label: "ИИ-помощник", path: "/cabinet/ai", icon: "spark" },
       { id: "task-bank", label: "Банк задач", path: "/tasks", icon: "tasks", accent: true, newTab: true },
       { id: "my-task-bank", label: "Мой банк задач", path: "/tasks/my", icon: "cards" },
     ],
@@ -90,7 +89,6 @@ export const CABINET_MORE_GROUPS = [
     items: [
       { id: "notifications", label: "Уведомления", path: null, icon: "bell", action: "notifications" },
       { id: "appearance", label: "Оформление", path: null, icon: "spark", action: "appearance" },
-      { id: "ai", label: "ИИ-помощник", path: "/cabinet/ai", icon: "spark" },
       { id: "settings", label: "Настройки", path: null, icon: "settings", action: "settings" },
     ],
   },
