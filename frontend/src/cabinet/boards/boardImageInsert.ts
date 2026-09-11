@@ -15,7 +15,6 @@ export {
   BOARD_IMAGE_INSERT_ERROR,
 } from "./boardImageMime";
 
-const MAX_BOARD_IMAGE_BYTES = 5 * 1024 * 1024;
 const IMAGE_DECODE_MS = 4000;
 
 export type PreparedBoardImage = {
@@ -171,9 +170,6 @@ export async function prepareBoardImageFile(
 ): Promise<BoardImageInsertOk | BoardImageInsertError> {
   if (!file || file.size <= 0) {
     return { ok: false, reason: "empty", message: BOARD_IMAGE_INSERT_ERROR };
-  }
-  if (file.size > MAX_BOARD_IMAGE_BYTES) {
-    return { ok: false, reason: "size", message: "Изображение слишком большое (макс. 5 МБ)" };
   }
 
   let bytes: Uint8Array;

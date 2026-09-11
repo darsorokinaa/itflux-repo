@@ -6,7 +6,6 @@ import PdfJsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?worker";
 import {
   BOARD_PDF_FORMAT_ERROR,
   BOARD_PDF_INSERT_ERROR,
-  MAX_BOARD_PDF_BYTES,
   MAX_BOARD_PDF_PAGES,
   sniffPdfBytes,
 } from "./boardPdf";
@@ -81,9 +80,6 @@ export async function openBoardPdf(source: Blob | ArrayBuffer): Promise<
   }
   if (!bytes.length) {
     return { ok: false, reason: "empty", message: BOARD_PDF_INSERT_ERROR };
-  }
-  if (bytes.byteLength > MAX_BOARD_PDF_BYTES) {
-    return { ok: false, reason: "size", message: "PDF слишком большой (макс. 20 МБ)" };
   }
   if (!sniffPdfBytes(bytes)) {
     return { ok: false, reason: "format", message: BOARD_PDF_FORMAT_ERROR };

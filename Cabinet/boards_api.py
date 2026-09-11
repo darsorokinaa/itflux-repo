@@ -57,9 +57,6 @@ def _parse_optional_pk(value):
     except (TypeError, ValueError):
         return None
 
-MAX_SCENE_JSON_BYTES = 15 * 1024 * 1024
-MAX_BOARD_IMAGE_BYTES = 5 * 1024 * 1024
-MAX_BOARD_PDF_BYTES = 20 * 1024 * 1024
 MAX_THUMBNAIL_CHARS = 200_000
 DEFAULT_BOARD_TITLE = "Новая доска"
 
@@ -122,7 +119,7 @@ def estimate_json_bytes(payload: Any) -> int:
     try:
         return len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
     except (TypeError, ValueError):
-        return MAX_SCENE_JSON_BYTES + 1
+        return 0
 
 
 def sanitize_app_state(app_state: Any) -> dict:
@@ -372,8 +369,6 @@ def detect_raster_mime(content: bytes) -> str | None:
 
 
 def validate_board_image_bytes(content: bytes, declared_mime: str = "") -> str:
-    if len(content) > MAX_BOARD_IMAGE_BYTES:
-        raise UploadValidationError("Изображение слишком большое (макс. 5 МБ)", "FILE_TOO_LARGE")
     mime = detect_raster_mime(content)
     if not mime:
         raise UploadValidationError(
@@ -392,10 +387,6 @@ def validate_board_image_bytes(content: bytes, declared_mime: str = "") -> str:
 def validate_board_image_upload(uploaded) -> None:
     if not uploaded:
         raise UploadValidationError("Файл не передан", "FILE_REQUIRED")
-
-    size = getattr(uploaded, "size", None)
-    if size is not None and size > MAX_BOARD_IMAGE_BYTES:
-        raise UploadValidationError("Изображение слишком большое (макс. 5 МБ)", "FILE_TOO_LARGE")
 
     name = getattr(uploaded, "name", "") or "file"
     ext = os.path.splitext(name)[1].lower()
@@ -420,7 +411,7 @@ def validate_board_image_upload(uploaded) -> None:
         raise UploadValidationError("Недопустимый тип изображения", "FILE_TYPE_NOT_ALLOWED")
 
     pos = uploaded.tell() if hasattr(uploaded, "tell") else None
-    raw = uploaded.read(MAX_BOARD_IMAGE_BYTES + 1)
+    raw = uploaded.read()
     if hasattr(uploaded, "seek") and pos is not None:
         uploaded.seek(pos)
     elif hasattr(uploaded, "seek"):
@@ -429,11 +420,14 @@ def validate_board_image_upload(uploaded) -> None:
 
     try:
         validate_uploaded_image(uploaded)
-    except UploadValidationError:
-        raise UploadValidationError(
-            "Допустимы только PNG, JPEG и WebP. SVG не поддерживается.",
-            "FILE_TYPE_NOT_ALLOWED",
-        )
+    except UploadValidationError as exc:
+        if exc.code == "FILE_TOO_LARGE":
+            pass
+        else:
+            raise UploadValidationError(
+                "Допустимы только PNG, JPEG и WebP. SVG не поддерживается.",
+                "FILE_TYPE_NOT_ALLOWED",
+            ) from exc
 
 
 def detect_pdf_mime(content: bytes) -> str | None:
@@ -446,8 +440,6 @@ def detect_pdf_mime(content: bytes) -> str | None:
 
 
 def validate_board_pdf_bytes(content: bytes) -> str:
-    if len(content) > MAX_BOARD_PDF_BYTES:
-        raise UploadValidationError("PDF слишком большой (макс. 20 МБ)", "FILE_TOO_LARGE")
     if not detect_pdf_mime(content):
         raise UploadValidationError("Нужен файл в формате PDF", "FILE_TYPE_NOT_ALLOWED")
     return "application/pdf"
@@ -456,10 +448,6 @@ def validate_board_pdf_bytes(content: bytes) -> str:
 def validate_board_pdf_upload(uploaded) -> bytes:
     if not uploaded:
         raise UploadValidationError("Файл не передан", "FILE_REQUIRED")
-
-    size = getattr(uploaded, "size", None)
-    if size is not None and size > MAX_BOARD_PDF_BYTES:
-        raise UploadValidationError("PDF слишком большой (макс. 20 МБ)", "FILE_TOO_LARGE")
 
     if hasattr(uploaded, "seek"):
         uploaded.seek(0)
@@ -1204,18 +1192,6 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
                         scene = persist_large_scene_files(locked, scene, request.user)
                     except serializers.ValidationError as exc:
                         return Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
-                    size = estimate_json_bytes(scene)
-                    if size > MAX_SCENE_JSON_BYTES:
-                        return Response(
-                            {
-                                "detail": (
-                                    "Данные доски слишком большие. "
-                                    "Уменьшите число изображений или их размер."
-                                ),
-                                "code": "SCENE_TOO_LARGE",
-                            },
-                            status=status.HTTP_400_BAD_REQUEST,
-                        )
 
                     saved_scene = scene
                     locked.scene_data = scene

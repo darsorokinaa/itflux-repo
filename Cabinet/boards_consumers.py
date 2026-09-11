@@ -27,7 +27,7 @@ def _ws_log(event: str, *, user=None, board=None, **fields) -> None:
         f" {extra}" if extra else "",
     )
 
-MAX_WS_TEXT_BYTES = 2_000_000
+MAX_WS_TEXT_BYTES = 32 * 1024 * 1024
 CURSOR_MIN_INTERVAL_SEC = 0.035  # ~28 Hz
 SCENE_LIVE_MIN_INTERVAL_SEC = 0.020  # ~50 Hz max relay — не копить очередь
 VIEWPORT_MIN_INTERVAL_SEC = 0.045  # ~22 Hz

@@ -12,6 +12,9 @@ from .journal_models import (
     StudentLessonRecord,
 )
 from .models import (
+    AIConversation,
+    AIMessage,
+    AIPlatformSettings,
     AIRequestLog,
     AIUsage,
     AnonymousUsage,
@@ -924,9 +927,17 @@ class TariffPlanAdmin(admin.ModelAdmin):
                 "monthly_library_promise",
             ),
         }),
-        ("ИИ (скрыто с витрины)", {
-            "classes": ("collapse",),
-            "fields": ("ai_requests_monthly_limit",),
+        ("ИИ-помощник", {
+            "fields": (
+                "is_ai_enabled",
+                "ai_requests_monthly_limit",
+                "ai_images_monthly_limit",
+                "ai_text_requests_daily_limit",
+                "ai_credits_monthly_limit",
+                "ai_max_prompt_chars",
+                "ai_max_output_tokens",
+                "ai_allowed_models",
+            ),
         }),
     )
 
@@ -1017,7 +1028,12 @@ class SubscriptionPlanChangeAdmin(admin.ModelAdmin):
 
 @admin.register(AIUsage)
 class AIUsageAdmin(admin.ModelAdmin):
-    list_display = ("teacher", "period_start", "used_requests", "limit_requests", "updated_at")
+    list_display = (
+        "teacher", "period_start", "period_end",
+        "used_requests", "limit_requests",
+        "used_images", "limit_images",
+        "used_credits", "updated_at",
+    )
     list_filter = ("period_start",)
     search_fields = ("teacher__username", "teacher__email")
     readonly_fields = ("created_at", "updated_at")
@@ -1026,11 +1042,44 @@ class AIUsageAdmin(admin.ModelAdmin):
 
 @admin.register(AIRequestLog)
 class AIRequestLogAdmin(admin.ModelAdmin):
-    list_display = ("teacher", "request_type", "cost_units", "status", "created_at")
-    list_filter = ("status", "request_type")
-    search_fields = ("teacher__username", "teacher__email", "prompt")
-    readonly_fields = ("teacher", "request_type", "prompt", "result", "cost_units", "status", "error_message", "created_at")
+    list_display = (
+        "teacher", "operation_type", "intent", "cost_units",
+        "image_count", "total_tokens", "actual_cost", "status", "created_at",
+    )
+    list_filter = ("status", "operation_type", "intent", "provider")
+    search_fields = ("teacher__username", "teacher__email", "prompt", "idempotency_key")
+    readonly_fields = (
+        "teacher", "conversation", "request_type", "operation_type", "intent",
+        "prompt", "result", "cost_units", "status", "error_message",
+        "model", "input_tokens", "output_tokens", "total_tokens",
+        "image_count", "provider", "provider_request_id",
+        "estimated_cost", "actual_cost", "idempotency_key", "metadata",
+        "created_at", "updated_at",
+    )
     ordering = ("-created_at",)
+
+
+@admin.register(AIConversation)
+class AIConversationAdmin(admin.ModelAdmin):
+    list_display = ("id", "teacher", "title", "updated_at")
+    search_fields = ("teacher__username", "title")
+    readonly_fields = ("id", "created_at", "updated_at")
+
+
+@admin.register(AIMessage)
+class AIMessageAdmin(admin.ModelAdmin):
+    list_display = ("id", "conversation", "role", "created_at")
+    list_filter = ("role",)
+    readonly_fields = ("id", "conversation", "role", "content", "images", "usage_event", "created_at")
+
+
+@admin.register(AIPlatformSettings)
+class AIPlatformSettingsAdmin(admin.ModelAdmin):
+    def has_add_permission(self, request):
+        return not AIPlatformSettings.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 class PromoCodeUsageInline(admin.TabularInline):
@@ -1502,6 +1551,67 @@ def activation_metrics_view(request):
     )
 
 
+@staff_member_required
+def ai_usage_dashboard_view(request):
+    from .ai_analytics import build_ai_report
+    from .ai_service import get_platform_settings
+
+    settings_obj = get_platform_settings()
+    saved = False
+    if request.method == "POST":
+        int_fields = (
+            "rate_limit_per_minute", "image_concurrency", "max_images_per_request",
+            "max_tasks_per_request", "bulk_refuse_above", "context_message_limit",
+            "credit_text", "credit_text_long", "credit_text_bulk",
+            "credit_image", "credit_image_edit", "credit_image_analysis",
+            "provider_daily_token_limit",
+        )
+        dec_fields = (
+            "provider_daily_cost_limit", "provider_monthly_cost_limit",
+            "input_token_cost", "output_token_cost", "image_cost",
+        )
+        for name in int_fields:
+            if name in request.POST and request.POST.get(name) != "":
+                setattr(settings_obj, name, int(request.POST.get(name)))
+        for name in dec_fields:
+            if name in request.POST and request.POST.get(name) != "":
+                setattr(settings_obj, name, request.POST.get(name))
+        settings_obj.is_globally_enabled = request.POST.get("is_globally_enabled") == "on"
+        settings_obj.save()
+        saved = True
+        for slug in ("start", "teacher", "pro", "premium", "school"):
+            plan = TariffPlan.objects.filter(slug=slug).first()
+            if not plan:
+                continue
+            mapping = {
+                "ai_requests_monthly_limit": f"{slug}_text",
+                "ai_images_monthly_limit": f"{slug}_images",
+                "ai_text_requests_daily_limit": f"{slug}_day",
+            }
+            changed = []
+            for field, key in mapping.items():
+                raw = request.POST.get(key)
+                if raw not in (None, ""):
+                    setattr(plan, field, int(raw))
+                    changed.append(field)
+            if changed:
+                plan.save(update_fields=changed + ["updated_at"])
+    report = build_ai_report()
+    plans = list(TariffPlan.objects.filter(is_active=True).order_by("sort_order"))
+    return render(
+        request,
+        "admin/cabinet/ai_usage.html",
+        {
+            **admin.site.each_context(request),
+            "title": "AI / Использование",
+            "report": report,
+            "settings_obj": settings_obj,
+            "plans": plans,
+            "saved": saved,
+        },
+    )
+
+
 _original_admin_get_urls = admin.site.get_urls
 
 
@@ -1511,6 +1621,11 @@ def _admin_urls_with_activation():
             "cabinet/activation/",
             admin.site.admin_view(activation_metrics_view),
             name="cabinet_activation_metrics",
+        ),
+        path(
+            "cabinet/ai-usage/",
+            admin.site.admin_view(ai_usage_dashboard_view),
+            name="cabinet_ai_usage",
         ),
     ]
     return custom + _original_admin_get_urls()

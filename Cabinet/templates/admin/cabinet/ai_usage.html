@@ -1,0 +1,135 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<h1>AI / Использование</h1>
+<p>Сгенерировано: {{ report.generated_at }}{% if saved %} — настройки сохранены.{% endif %}</p>
+<p><a href="{% url 'admin:cabinet_ai_usage' %}">Обновить</a> · <a href="{% url 'admin:cabinet_activation_metrics' %}">Activation</a></p>
+
+<h2>Общая статистика</h2>
+<table>
+  <thead>
+    <tr><th></th><th>Сегодня</th><th>Месяц</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Запросы</td><td>{{ report.today.requests }}</td><td>{{ report.month.requests }}</td></tr>
+    <tr><td>Токены</td><td>{{ report.today.tokens }}</td><td>{{ report.month.tokens }}</td></tr>
+    <tr><td>Изображения</td><td>{{ report.today.images }}</td><td>{{ report.month.images }}</td></tr>
+    <tr><td>Стоимость</td><td>{{ report.today.cost }}</td><td>{{ report.month.cost }}</td></tr>
+    <tr><td>Активные пользователи</td><td>{{ report.today.users }}</td><td>{{ report.month.users }}</td></tr>
+  </tbody>
+</table>
+<p>Средняя стоимость пользователя за месяц: {{ report.avg_cost_per_user }}</p>
+<p>Открывали AI: {{ report.opened_users }} · Отправляли запрос: {{ report.sent_users }}</p>
+<p>Достигли лимита: 50% — {{ report.limit_reach.p50 }}, 80% — {{ report.limit_reach.p80 }}, 100% — {{ report.limit_reach.p100 }}</p>
+<p>Перцентили запросов на пользователя (месяц): median {{ report.percentiles.median }}, p75 {{ report.percentiles.p75 }}, p90 {{ report.percentiles.p90 }}, p95 {{ report.percentiles.p95 }}</p>
+
+<h2>По тарифам</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Тариф</th><th>users</th><th>requests</th><th>images</th><th>cost</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in report.by_plan %}
+    <tr>
+      <td>{{ row.plan }}</td>
+      <td>{{ row.users }}</td>
+      <td>{{ row.requests }}</td>
+      <td>{{ row.images }}</td>
+      <td>{{ row.cost }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Типы запросов</h2>
+<ul>
+  {% for row in report.intents %}
+    <li>{{ row.intent }}: {{ row.n }}</li>
+  {% empty %}
+    <li>Пока нет данных</li>
+  {% endfor %}
+</ul>
+
+<h2>Пользователи</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Пользователь</th><th>Тариф</th>
+      <th>AI-запросов использовано</th><th>доступно</th>
+      <th>Изображений использовано</th><th>доступно</th>
+      <th>Credits</th><th>Стоимость</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in report.users %}
+    <tr>
+      <td>{{ row.user }} {{ row.email }}</td>
+      <td>{{ row.plan }}</td>
+      <td>{{ row.text_used }}</td>
+      <td>{{ row.text_limit }}</td>
+      <td>{{ row.images_used }}</td>
+      <td>{{ row.images_limit }}</td>
+      <td>{{ row.credits }}</td>
+      <td>{{ row.cost }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Настройки (без деплоя)</h2>
+<form method="post">
+  {% csrf_token %}
+  <p>
+    <label>ИИ включён <input type="checkbox" name="is_globally_enabled" {% if settings_obj.is_globally_enabled %}checked{% endif %}></label>
+  </p>
+  <p>
+    Запросов/мин: <input type="number" name="rate_limit_per_minute" value="{{ settings_obj.rate_limit_per_minute }}">
+    Одновременных картинок: <input type="number" name="image_concurrency" value="{{ settings_obj.image_concurrency }}">
+  </p>
+  <p>
+    Макс. картинок в запросе: <input type="number" name="max_images_per_request" value="{{ settings_obj.max_images_per_request }}">
+    Макс. заданий: <input type="number" name="max_tasks_per_request" value="{{ settings_obj.max_tasks_per_request }}">
+    Отказ если заданий больше: <input type="number" name="bulk_refuse_above" value="{{ settings_obj.bulk_refuse_above }}">
+    Контекст (сообщений): <input type="number" name="context_message_limit" value="{{ settings_obj.context_message_limit }}">
+  </p>
+  <p>
+    Кредиты текст/длинный/объём: 
+    <input type="number" name="credit_text" value="{{ settings_obj.credit_text }}">
+    <input type="number" name="credit_text_long" value="{{ settings_obj.credit_text_long }}">
+    <input type="number" name="credit_text_bulk" value="{{ settings_obj.credit_text_bulk }}">
+    Картинка/редакт/анализ:
+    <input type="number" name="credit_image" value="{{ settings_obj.credit_image }}">
+    <input type="number" name="credit_image_edit" value="{{ settings_obj.credit_image_edit }}">
+    <input type="number" name="credit_image_analysis" value="{{ settings_obj.credit_image_analysis }}">
+  </p>
+  <p>
+    Аварийный лимит токенов/день: <input type="number" name="provider_daily_token_limit" value="{{ settings_obj.provider_daily_token_limit }}">
+    Стоимость/день: <input name="provider_daily_cost_limit" value="{{ settings_obj.provider_daily_cost_limit }}">
+    Стоимость/месяц: <input name="provider_monthly_cost_limit" value="{{ settings_obj.provider_monthly_cost_limit }}">
+  </p>
+  <p>
+    Цена 1k in/out: <input name="input_token_cost" value="{{ settings_obj.input_token_cost }}">
+    <input name="output_token_cost" value="{{ settings_obj.output_token_cost }}">
+    Цена картинки: <input name="image_cost" value="{{ settings_obj.image_cost }}">
+  </p>
+
+  <h3>Лимиты тарифов</h3>
+  <table>
+    <thead>
+      <tr><th>Тариф</th><th>Текст / мес</th><th>Картинки / мес</th><th>Текст / день</th></tr>
+    </thead>
+    <tbody>
+      {% for plan in plans %}
+      <tr>
+        <td>{{ plan.name }}</td>
+        <td><input type="number" name="{{ plan.slug }}_text" value="{{ plan.ai_requests_monthly_limit }}"></td>
+        <td><input type="number" name="{{ plan.slug }}_images" value="{{ plan.ai_images_monthly_limit }}"></td>
+        <td><input type="number" name="{{ plan.slug }}_day" value="{{ plan.ai_text_requests_daily_limit }}"></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p><button type="submit">Сохранить настройки</button></p>
+</form>
+{% endblock %}

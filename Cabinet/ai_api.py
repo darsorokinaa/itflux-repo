@@ -1,105 +1,117 @@
-"""
-API для ИИ-помощника.
+"""API ИИ-помощника кабинета учителя.
 
-Endpoints:
-  GET  /api/cabinet/ai/usage/
-  POST /api/cabinet/ai/request/
-
-cost_units (кредиты) по типу запроса:
-  explain / comment / idea        → 1
-  generate_task / feedback        → 2
-  generate_set / adapt_level      → 3
-  bulk_generate / interactive_gen → 5
+GET  /api/cabinet/ai/usage/
+POST /api/cabinet/ai/open/
+GET  /api/cabinet/ai/conversations/
+GET  /api/cabinet/ai/conversations/<uuid>/
+POST /api/cabinet/ai/request/
 """
 
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import AIRequestLog
+from .ai_service import (
+    AIServiceError,
+    list_conversation_payload,
+    open_assistant,
+    run_teacher_request,
+    usage_snapshot,
+)
+from .models import AIConversation
 from .permissions import IsCabinetTeacher
-from .subscription_service import LimitExceeded, SubscriptionLimitService
-
-COST_MAP = {
-    "explain": 1,
-    "comment": 1,
-    "idea": 1,
-    "generate_task": 2,
-    "feedback": 2,
-    "generate_set": 3,
-    "adapt_level": 3,
-    "bulk_generate": 5,
-    "interactive_gen": 5,
-}
+from .subscription_service import LimitExceeded
 
 
 class AIUsageView(APIView):
     permission_classes = [IsCabinetTeacher]
 
     def get(self, request):
-        ai_usage = SubscriptionLimitService.get_ai_usage(request.user)
-        plan = SubscriptionLimitService.get_current_plan(request.user)
+        snap = usage_snapshot(request.user)
+        # Совместимость со старым фронтом.
         return Response({
-            "used": ai_usage.used_requests,
-            "limit": plan.ai_requests_monthly_limit,
-            "period_start": ai_usage.period_start.isoformat(),
-            "period_end": ai_usage.period_end.isoformat(),
-            "remaining": max(0, plan.ai_requests_monthly_limit - ai_usage.used_requests),
+            **snap,
+            "used": snap["text"]["used"],
+            "limit": snap["text"]["limit"],
+            "remaining": snap["text"]["remaining"],
+            "period_start": snap["period_start"],
+            "period_end": snap["period_end"],
+        })
+
+
+class AIOpenView(APIView):
+    permission_classes = [IsCabinetTeacher]
+
+    def post(self, request):
+        payload = open_assistant(request.user, (request.data or {}).get("conversation_id"))
+        return Response(payload)
+
+
+class AIConversationListView(APIView):
+    permission_classes = [IsCabinetTeacher]
+
+    def get(self, request):
+        items = [
+            {
+                "id": str(c.id),
+                "title": c.title or "Новый диалог",
+                "updated_at": c.updated_at.isoformat(),
+            }
+            for c in AIConversation.objects.filter(teacher=request.user).order_by("-updated_at")[:30]
+        ]
+        return Response({"results": items, "usage": usage_snapshot(request.user)})
+
+
+class AIConversationDetailView(APIView):
+    permission_classes = [IsCabinetTeacher]
+
+    def get(self, request, conversation_id):
+        conversation = AIConversation.objects.filter(pk=conversation_id, teacher=request.user).first()
+        if not conversation:
+            return Response({"code": "NOT_FOUND", "message": "Диалог не найден."}, status=404)
+        return Response({
+            **list_conversation_payload(conversation),
+            "usage": usage_snapshot(request.user),
         })
 
 
 class AIRequestView(APIView):
     permission_classes = [IsCabinetTeacher]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def post(self, request):
-        prompt = (request.data.get("prompt") or "").strip()
-        request_type = (request.data.get("request_type") or "explain").strip()
-        cost_units = COST_MAP.get(request_type, 1)
+        data = request.data
+        if hasattr(data, "dict"):
+            data = data.dict()
+        else:
+            data = dict(data)
+        # Никогда не принимаем идентичность/тариф/модель от клиента.
+        for blocked in (
+            "user_id", "teacher_id", "plan", "plan_slug", "limit", "model",
+            "cost", "credits", "ai_requests_monthly_limit",
+        ):
+            data.pop(blocked, None)
 
-        # Проверка лимита
-        try:
-            SubscriptionLimitService.raise_if_ai_limit_reached(request.user, cost_units=cost_units)
-        except LimitExceeded as exc:
-            AIRequestLog.objects.create(
-                teacher=request.user,
-                request_type=request_type,
-                prompt=prompt[:500],
-                cost_units=cost_units,
-                status=AIRequestLog.RequestStatus.BLOCKED,
-                error_message=exc.message,
-            )
-            return Response(exc.to_dict(), status=403)
+        image = request.FILES.get("image")
+        if image:
+            import base64
 
-        # TODO: Заменить на реальный LLM-вызов
-        result = _mock_ai_response(prompt, request_type)
+            raw = image.read()[: 4 * 1024 * 1024]
+            mime = image.content_type or "image/png"
+            data["image_data_url"] = f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+            data["image_attachment"] = True
 
-        # Фиксируем использование
-        SubscriptionLimitService.consume_ai_request(request.user, cost_units=cost_units)
-        ai_usage = SubscriptionLimitService.get_ai_usage(request.user)
-        plan = SubscriptionLimitService.get_current_plan(request.user)
-
-        AIRequestLog.objects.create(
-            teacher=request.user,
-            request_type=request_type,
-            prompt=prompt[:500],
-            result=result[:2000],
-            cost_units=cost_units,
-            status=AIRequestLog.RequestStatus.SUCCESS,
+        idem = (
+            request.headers.get("Idempotency-Key")
+            or request.headers.get("X-Idempotency-Key")
+            or data.get("idempotency_key")
+            or request.headers.get("X-Request-ID")
+            or ""
         )
-
-        return Response({
-            "result": result,
-            "cost_units": cost_units,
-            "usage": {
-                "used": ai_usage.used_requests,
-                "limit": plan.ai_requests_monthly_limit,
-                "remaining": max(0, plan.ai_requests_monthly_limit - ai_usage.used_requests),
-            },
-        })
-
-
-def _mock_ai_response(prompt: str, request_type: str) -> str:
-    """Заглушка ИИ-ответа до подключения реального провайдера."""
-    return (
-        f"[Демо-режим] Запрос типа «{request_type}» обработан. "
-        "Подключите реальный LLM-провайдер в ai_api.py::AIRequestView.post."
-    )
+        try:
+            result = run_teacher_request(request.user, data, idempotency_key=str(idem))
+        except LimitExceeded as exc:
+            return Response(exc.to_dict(), status=403)
+        except AIServiceError as exc:
+            return Response(exc.to_dict(), status=exc.status)
+        return Response(result)

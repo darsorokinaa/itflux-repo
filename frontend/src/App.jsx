@@ -52,8 +52,7 @@ import VideoMeetingPage from "./cabinet/pages/VideoMeetingPage";
 import MeetingCallDock from "./cabinet/components/MeetingCallDock";
 import CabinetMorePage from "./cabinet/pages/CabinetMorePage";
 import CabinetReportsPage from "./cabinet/CabinetReportsPage";
-// TEMP: ИИ-помощник скрыт
-// import CabinetAiPage from "./cabinet/CabinetAiPage";
+import CabinetAiPage from "./cabinet/CabinetAiPage";
 import CabinetUpgradePage from "./cabinet/pages/CabinetUpgradePage";
 import CabinetPaymentsPage from "./cabinet/pages/CabinetPaymentsPage";
 import CabinetJournalPage from "./cabinet/pages/CabinetJournalPage";
@@ -443,8 +442,7 @@ function App() {
             <Route path="library" element={<CabinetLibraryPage />} />
             <Route path="schedule" element={<CabinetSchedulePage />} />
             <Route path="payments" element={<CabinetPaymentsPage />} />
-            {/* TEMP: ИИ-помощник скрыт */}
-            {/* <Route path="ai" element={<CabinetAiPage />} /> */}
+            <Route path="ai" element={<CabinetAiPage />} />
             <Route path="more" element={<CabinetMorePage />} />
             <Route path="upgrade" element={<CabinetUpgradePage />} />
           </Route>

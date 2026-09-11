@@ -369,11 +369,13 @@ else:
     CORS_ALLOW_ALL_ORIGINS = False
     CORS_ALLOWED_ORIGINS = []
 
-# Тело JSON PATCH сцены доски (лимит сцены 15 МБ + обёртка + запас на вложенные поля).
-# Без этого Django по умолчанию рвёт запрос на 2.5 МБ раньше SCENE_TOO_LARGE.
-DATA_UPLOAD_MAX_MEMORY_SIZE = int(
-    os.environ.get("DATA_UPLOAD_MAX_MEMORY_SIZE", str(32 * 1024 * 1024))
-)
+# Тело JSON PATCH сцены доски: без лимита (None), иначе Django рвёт запрос на 2.5 МБ.
+# Переопределение: DATA_UPLOAD_MAX_MEMORY_SIZE=<байты> или none/unlimited.
+_data_upload_raw = os.environ.get("DATA_UPLOAD_MAX_MEMORY_SIZE", "none").strip()
+if _data_upload_raw.lower() in ("", "none", "unlimited"):
+    DATA_UPLOAD_MAX_MEMORY_SIZE = None
+else:
+    DATA_UPLOAD_MAX_MEMORY_SIZE = int(_data_upload_raw)
 
 # Cabinet uploads
 CABINET_MAX_UPLOAD_BYTES = int(os.environ.get("CABINET_MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
@@ -452,3 +454,15 @@ TBANK_FFD_VERSION = (os.environ.get("TBANK_FFD_VERSION") or "1.05").strip()
 TBANK_RECEIPT_EMAIL = (os.environ.get("TBANK_RECEIPT_EMAIL") or "").strip()
 ANON_VARIANTS_MONTHLY_LIMIT = int(os.environ.get("ANON_VARIANTS_MONTHLY_LIMIT", "5"))
 ANON_WORKBOOKS_MONTHLY_LIMIT = int(os.environ.get("ANON_WORKBOOKS_MONTHLY_LIMIT", "3"))
+
+# ИИ-помощник учителя. Секреты только на backend.
+TIMEWEB_AI_AGENT_ID = (os.environ.get("TIMEWEB_AI_AGENT_ID") or "db74a6df-2c29-42a0-a118-c322c0cb37ad").strip()
+TIMEWEB_AI_AGENT_TOKEN = (os.environ.get("TIMEWEB_AI_AGENT_TOKEN") or "").strip()
+TIMEWEB_AI_AGENT_BASE = (
+    os.environ.get("TIMEWEB_AI_AGENT_BASE")
+    or "https://agent.timeweb.cloud/api/v1/cloud-ai/agents"
+).strip().rstrip("/")
+TIMEWEB_AI_GATEWAY_KEY = (os.environ.get("TIMEWEB_AI_GATEWAY_KEY") or "").strip()
+TIMEWEB_AI_GATEWAY_BASE = (os.environ.get("TIMEWEB_AI_GATEWAY_BASE") or "https://api.timeweb.ai/v1").strip().rstrip("/")
+TIMEWEB_AI_TEXT_MODEL = (os.environ.get("TIMEWEB_AI_TEXT_MODEL") or "").strip()
+TIMEWEB_AI_IMAGE_MODEL = (os.environ.get("TIMEWEB_AI_IMAGE_MODEL") or "").strip()

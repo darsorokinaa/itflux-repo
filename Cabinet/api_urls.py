@@ -551,6 +551,13 @@ urlpatterns = [
 
     # ИИ-помощник
     path("ai/usage/", ai_api.AIUsageView.as_view(), name="ai_usage"),
+    path("ai/open/", ai_api.AIOpenView.as_view(), name="ai_open"),
+    path("ai/conversations/", ai_api.AIConversationListView.as_view(), name="ai_conversations"),
+    path(
+        "ai/conversations/<uuid:conversation_id>/",
+        ai_api.AIConversationDetailView.as_view(),
+        name="ai_conversation_detail",
+    ),
     path("ai/request/", ai_api.AIRequestView.as_view(), name="ai_request"),
     path("", include(router.urls)),
 ]

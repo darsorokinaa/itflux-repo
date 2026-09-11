@@ -91,6 +91,12 @@ def count_ai_requests(teacher: User) -> int:
     return int(SubscriptionLimitService.get_ai_usage(teacher).used_requests or 0)
 
 
+def count_ai_images(teacher: User) -> int:
+    from .subscription_service import SubscriptionLimitService
+
+    return int(getattr(SubscriptionLimitService.get_ai_usage(teacher), "used_images", 0) or 0)
+
+
 def count_storage_bytes(teacher: User) -> int:
     try:
         from .files_services import calc_usage_bytes
@@ -127,6 +133,7 @@ class TariffUsageService:
             "variants": int(monthly.variants_created or 0),
             "workbooks": int(monthly.workbooks_created or 0),
             "ai_requests": count_ai_requests(teacher),
+            "ai_images": count_ai_images(teacher),
             "storage_bytes": count_storage_bytes(teacher),
             "teacher_tasks": count_teacher_tasks(teacher),
             "teacher_task_copies": count_teacher_task_copies(teacher),
@@ -266,6 +273,7 @@ class TariffUsageService:
             "variants": counts["variants"],
             "workbooks": counts["workbooks"],
             "ai_requests": counts["ai_requests"],
+            "ai_images": counts.get("ai_images", 0),
             "storage_mb": storage["used"] if storage else 0,
             "teacher_tasks": counts.get("teacher_tasks", 0),
             "teacher_task_copies": counts.get("teacher_task_copies", 0),
@@ -282,6 +290,8 @@ class TariffUsageService:
             "workbooks_monthly": plan.max_workbooks_monthly,
             "storage_mb": plan.max_storage_mb,
             "ai_requests": plan.ai_requests_monthly_limit,
+            "ai_images": getattr(plan, "ai_images_monthly_limit", 0),
+            "ai_text_day": getattr(plan, "ai_text_requests_daily_limit", 0),
             "teacher_tasks": getattr(plan, "max_teacher_tasks", 20),
             "teacher_task_copies_monthly": getattr(plan, "max_teacher_task_copies_monthly", 5),
             "teacher_task_collections": getattr(plan, "max_teacher_task_collections", 2),

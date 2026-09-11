@@ -346,10 +346,10 @@ class InteractiveBoardApiTests(TestCase):
         self.assertEqual(res.status_code, 204)
         self.assertFalse(InteractiveBoard.objects.filter(pk=board.id).exists())
 
-    def test_scene_size_limit(self):
+    def test_large_scene_is_accepted(self):
         board = InteractiveBoard.objects.create(owner=self.teacher, title="Big")
         self._auth(self.teacher)
-        huge = "x" * (16 * 1024 * 1024)
+        huge = "x" * (2 * 1024 * 1024)
         res = self.client.patch(
             f"/api/cabinet/interactive-boards/{board.id}/",
             {
@@ -362,8 +362,10 @@ class InteractiveBoardApiTests(TestCase):
             },
             format="json",
         )
-        self.assertEqual(res.status_code, 400)
-        self.assertEqual(res.json().get("code"), "SCENE_TOO_LARGE")
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertNotEqual(res.json().get("code"), "SCENE_TOO_LARGE")
+        board.refresh_from_db()
+        self.assertEqual(len(board.scene_data.get("appState", {}).get("note", "")), len(huge))
 
     def test_compact_scene_strips_deleted_geometry_keeps_live(self):
         from Cabinet.boards_api import compact_scene_data

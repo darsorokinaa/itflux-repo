@@ -3017,7 +3017,23 @@ class TariffPlan(models.Model):
         choices=CtaType.choices,
         default=CtaType.CHECKOUT,
     )
-    ai_requests_monthly_limit = models.PositiveIntegerField("ИИ-запросы в месяц", default=10)
+    ai_requests_monthly_limit = models.PositiveIntegerField("ИИ-запросы в месяц", default=20)
+    ai_images_monthly_limit = models.PositiveIntegerField("ИИ-изображения в месяц", default=2)
+    ai_text_requests_daily_limit = models.PositiveIntegerField("ИИ-запросы в день", default=5)
+    ai_credits_monthly_limit = models.PositiveIntegerField(
+        "ИИ-кредиты в месяц",
+        default=40,
+        help_text="Внутренний потолок стоимости. 0 — не ограничивать кредитами.",
+    )
+    ai_max_prompt_chars = models.PositiveIntegerField("Макс. длина запроса (символы)", default=8000)
+    ai_max_output_tokens = models.PositiveIntegerField("Макс. длина ответа (токены)", default=2500)
+    ai_allowed_models = models.JSONField(
+        "Разрешённые модели",
+        default=list,
+        blank=True,
+        help_text="Пустой список — модель по умолчанию из настроек платформы.",
+    )
+    is_ai_enabled = models.BooleanField("ИИ включён на тарифе", default=True)
     max_storage_mb = models.PositiveIntegerField("Хранилище МБ", default=512)
     max_teacher_tasks = models.PositiveIntegerField(
         "Лимит задач банка учителя",
@@ -3304,8 +3320,14 @@ class AIUsage(models.Model):
     )
     period_start = models.DateField("Начало периода")
     period_end = models.DateField("Конец периода")
-    used_requests = models.PositiveIntegerField("Использовано запросов", default=0)
-    limit_requests = models.PositiveIntegerField("Лимит запросов", default=10)
+    used_requests = models.PositiveIntegerField("Использовано текстовых запросов", default=0)
+    used_images = models.PositiveIntegerField("Использовано изображений", default=0)
+    used_credits = models.PositiveIntegerField("Использовано кредитов", default=0)
+    used_text_today = models.PositiveIntegerField("Текстовых запросов сегодня", default=0)
+    used_text_today_date = models.DateField("Дата дневного счётчика", null=True, blank=True)
+    limit_requests = models.PositiveIntegerField("Лимит текстовых запросов", default=20)
+    limit_images = models.PositiveIntegerField("Лимит изображений", default=2)
+    limit_credits = models.PositiveIntegerField("Лимит кредитов", default=40)
     created_at = models.DateTimeField("Создан", auto_now_add=True)
     updated_at = models.DateTimeField("Обновлён", auto_now=True)
 
@@ -3323,6 +3345,17 @@ class AIRequestLog(models.Model):
         SUCCESS = "success", "Успешно"
         FAILED = "failed", "Ошибка"
         BLOCKED = "blocked", "Заблокирован"
+        RESERVED = "reserved", "Резерв"
+        CANCELED = "canceled", "Отменён"
+
+    class OperationType(models.TextChoices):
+        TEXT_CHAT = "TEXT_CHAT", "Текстовый запрос"
+        TEXT_LONG_GENERATION = "TEXT_LONG_GENERATION", "Длинная генерация"
+        TEXT_BULK_GENERATION = "TEXT_BULK_GENERATION", "Объёмная генерация"
+        IMAGE_GENERATION = "IMAGE_GENERATION", "Генерация изображения"
+        IMAGE_EDIT = "IMAGE_EDIT", "Редактирование изображения"
+        IMAGE_ANALYSIS = "IMAGE_ANALYSIS", "Анализ изображения"
+        OPEN = "OPEN", "Открытие ассистента"
 
     teacher = models.ForeignKey(
         User,
@@ -3330,21 +3363,169 @@ class AIRequestLog(models.Model):
         related_name="ai_request_logs",
         verbose_name="Учитель",
     )
+    conversation = models.ForeignKey(
+        "AIConversation",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="usage_events",
+        verbose_name="Диалог",
+    )
     request_type = models.CharField("Тип запроса", max_length=64, blank=True)
+    operation_type = models.CharField(
+        "Операция",
+        max_length=32,
+        choices=OperationType.choices,
+        default=OperationType.TEXT_CHAT,
+        db_index=True,
+    )
+    intent = models.CharField("Intent", max_length=64, blank=True, default="", db_index=True)
     prompt = models.TextField("Запрос", blank=True)
     result = models.TextField("Результат", blank=True)
     cost_units = models.PositiveSmallIntegerField("Стоимость (кредиты)", default=1)
     status = models.CharField("Статус", max_length=20, choices=RequestStatus.choices, default=RequestStatus.SUCCESS)
     error_message = models.TextField("Ошибка", blank=True)
+    model = models.CharField("Модель", max_length=128, blank=True, default="")
+    input_tokens = models.PositiveIntegerField("Входящие токены", default=0)
+    output_tokens = models.PositiveIntegerField("Исходящие токены", default=0)
+    total_tokens = models.PositiveIntegerField("Всего токенов", default=0)
+    image_count = models.PositiveSmallIntegerField("Изображений", default=0)
+    provider = models.CharField("Провайдер", max_length=64, blank=True, default="")
+    provider_request_id = models.CharField("ID запроса провайдера", max_length=128, blank=True, default="")
+    estimated_cost = models.DecimalField("Оценка стоимости", max_digits=12, decimal_places=6, default=0)
+    actual_cost = models.DecimalField("Факт. стоимость", max_digits=12, decimal_places=6, default=0)
+    idempotency_key = models.CharField("Ключ идемпотентности", max_length=64, blank=True, default="")
+    metadata = models.JSONField("Метаданные", default=dict, blank=True)
     created_at = models.DateTimeField("Создан", auto_now_add=True)
+    updated_at = models.DateTimeField("Обновлён", auto_now=True)
 
     class Meta:
         verbose_name = "Лог ИИ-запроса"
         verbose_name_plural = "Логи ИИ-запросов"
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["teacher", "created_at"], name="cab_ai_log_teacher_created"),
+            models.Index(fields=["status", "created_at"], name="cab_ai_log_status_created"),
+            models.Index(fields=["operation_type", "created_at"], name="cab_ai_log_op_created"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["teacher", "idempotency_key"],
+                condition=~models.Q(idempotency_key=""),
+                name="cab_ai_log_idem_uniq",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.teacher.username} [{self.get_status_display()}] {self.created_at:%Y-%m-%d %H:%M}"
+
+
+class AIConversation(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    teacher = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="ai_conversations",
+        verbose_name="Учитель",
+    )
+    title = models.CharField("Название", max_length=200, blank=True, default="")
+    summary = models.TextField("Краткое содержание", blank=True, default="")
+    last_opened_at = models.DateTimeField("Последнее открытие", null=True, blank=True)
+    created_at = models.DateTimeField("Создан", auto_now_add=True)
+    updated_at = models.DateTimeField("Обновлён", auto_now=True)
+
+    class Meta:
+        verbose_name = "Диалог ИИ"
+        verbose_name_plural = "Диалоги ИИ"
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["teacher", "-updated_at"], name="cab_ai_conv_teacher_upd"),
+        ]
+
+    def __str__(self):
+        return self.title or f"Диалог {self.id}"
+
+
+class AIMessage(models.Model):
+    class Role(models.TextChoices):
+        USER = "user", "Пользователь"
+        ASSISTANT = "assistant", "Ассистент"
+        SYSTEM = "system", "Система"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    conversation = models.ForeignKey(
+        AIConversation,
+        on_delete=models.CASCADE,
+        related_name="messages",
+        verbose_name="Диалог",
+    )
+    role = models.CharField("Роль", max_length=16, choices=Role.choices)
+    content = models.TextField("Текст", blank=True, default="")
+    images = models.JSONField("Изображения", default=list, blank=True)
+    usage_event = models.ForeignKey(
+        AIRequestLog,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="messages",
+        verbose_name="Событие usage",
+    )
+    created_at = models.DateTimeField("Создан", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Сообщение ИИ"
+        verbose_name_plural = "Сообщения ИИ"
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"{self.role}: {self.content[:40]}"
+
+
+class AIPlatformSettings(models.Model):
+    """Глобальные настройки ИИ, меняются из админки без деплоя."""
+
+    rate_limit_per_minute = models.PositiveSmallIntegerField("Запросов в минуту на пользователя", default=5)
+    image_concurrency = models.PositiveSmallIntegerField("Одновременных генераций изображений", default=2)
+    max_images_per_request = models.PositiveSmallIntegerField("Макс. изображений в одном запросе", default=5)
+    max_tasks_per_request = models.PositiveSmallIntegerField("Макс. заданий в одном запросе", default=12)
+    bulk_refuse_above = models.PositiveIntegerField("Отказ при запросе заданий больше", default=80)
+    context_message_limit = models.PositiveSmallIntegerField("Сообщений контекста", default=12)
+    credit_text = models.PositiveSmallIntegerField("Кредиты: обычный текст", default=1)
+    credit_text_long = models.PositiveSmallIntegerField("Кредиты: длинная генерация", default=2)
+    credit_text_bulk = models.PositiveSmallIntegerField("Кредиты: объёмная генерация", default=3)
+    credit_image = models.PositiveSmallIntegerField("Кредиты: изображение", default=10)
+    credit_image_edit = models.PositiveSmallIntegerField("Кредиты: редактирование изображения", default=10)
+    credit_image_analysis = models.PositiveSmallIntegerField("Кредиты: анализ изображения", default=3)
+    provider_daily_token_limit = models.PositiveIntegerField("Аварийный лимит токенов / день", default=2_000_000)
+    provider_daily_cost_limit = models.DecimalField(
+        "Аварийный лимит стоимости / день", max_digits=12, decimal_places=2, default=150
+    )
+    provider_monthly_cost_limit = models.DecimalField(
+        "Аварийный лимит стоимости / месяц", max_digits=12, decimal_places=2, default=3000
+    )
+    input_token_cost = models.DecimalField(
+        "Стоимость 1k входных токенов", max_digits=10, decimal_places=6, default=0.03
+    )
+    output_token_cost = models.DecimalField(
+        "Стоимость 1k выходных токенов", max_digits=10, decimal_places=6, default=0.12
+    )
+    image_cost = models.DecimalField(
+        "Стоимость одного изображения", max_digits=10, decimal_places=4, default=0.80
+    )
+    is_globally_enabled = models.BooleanField("ИИ включён на платформе", default=True)
+    updated_at = models.DateTimeField("Обновлено", auto_now=True)
+
+    class Meta:
+        verbose_name = "Настройки ИИ платформы"
+        verbose_name_plural = "Настройки ИИ платформы"
+
+    def __str__(self):
+        return "Настройки ИИ"
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
 
 
 class Payment(models.Model):

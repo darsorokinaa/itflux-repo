@@ -345,6 +345,8 @@ def _plan_short(plan, *, promotion=None) -> dict:
     data["limits"] = {
         **data["limits"],
         "ai_requests": plan.ai_requests_monthly_limit,
+        "ai_images": getattr(plan, "ai_images_monthly_limit", 0),
+        "ai_text_day": getattr(plan, "ai_text_requests_daily_limit", 0),
     }
     return data
 

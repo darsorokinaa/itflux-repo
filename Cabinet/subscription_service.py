@@ -16,16 +16,17 @@ from django.utils import timezone
 class LimitExceeded(Exception):
     """Исключение при превышении тарифного лимита."""
 
-    def __init__(self, code: str, message: str, limit: int, current: int, recommended_plan: str = ""):
+    def __init__(self, code: str, message: str, limit: int, current: int, recommended_plan: str = "", extra: dict | None = None):
         super().__init__(message)
         self.code = code
         self.message = message
         self.limit = limit
         self.current = current
         self.recommended_plan = recommended_plan
+        self.extra = extra or {}
 
     def to_dict(self):
-        return {
+        payload = {
             "code": self.code,
             "message": self.message,
             "limit": self.limit,
@@ -33,6 +34,8 @@ class LimitExceeded(Exception):
             "upgrade_required": True,
             "recommended_plan": self.recommended_plan,
         }
+        payload.update(self.extra)
+        return payload
 
 
 def _get_next_plan_slug(current_slug: str) -> str:
@@ -153,24 +156,10 @@ class SubscriptionLimitService:
 
     @staticmethod
     def get_ai_usage(teacher: User):
-        """Возвращает (или создаёт) запись использования ИИ за текущий месяц."""
-        from .models import AIUsage, TariffPlan
-        plan = SubscriptionLimitService.get_current_plan(teacher)
-        period_start, period_end = SubscriptionLimitService.get_current_period()
-        usage, _ = AIUsage.objects.get_or_create(
-            teacher=teacher,
-            period_start=period_start,
-            defaults={
-                "period_end": period_end,
-                "used_requests": 0,
-                "limit_requests": plan.ai_requests_monthly_limit,
-            },
-        )
-        # Синхронизируем лимит если тариф изменился
-        if usage.limit_requests != plan.ai_requests_monthly_limit:
-            usage.limit_requests = plan.ai_requests_monthly_limit
-            usage.save(update_fields=["limit_requests", "updated_at"])
-        return usage
+        """Возвращает (или создаёт) запись использования ИИ за текущий расчётный период."""
+        from .ai_service import get_or_create_usage
+
+        return get_or_create_usage(teacher)
 
     @staticmethod
     def get_usage(teacher: User) -> dict:
@@ -223,8 +212,10 @@ class SubscriptionLimitService:
     @staticmethod
     def can_use_ai(teacher: User, cost_units: int = 1) -> bool:
         plan = SubscriptionLimitService.get_current_plan(teacher)
+        if not getattr(plan, "is_ai_enabled", True):
+            return False
         ai_usage = SubscriptionLimitService.get_ai_usage(teacher)
-        return (ai_usage.used_requests + cost_units) <= plan.ai_requests_monthly_limit
+        return (ai_usage.used_requests + max(1, cost_units and 1)) <= plan.ai_requests_monthly_limit
 
     @staticmethod
     def can_use_notifications(teacher: User) -> bool:
@@ -304,7 +295,8 @@ class SubscriptionLimitService:
     def raise_if_ai_limit_reached(teacher: User, cost_units: int = 1):
         plan = SubscriptionLimitService.get_current_plan(teacher)
         ai_usage = SubscriptionLimitService.get_ai_usage(teacher)
-        if (ai_usage.used_requests + cost_units) > plan.ai_requests_monthly_limit:
+        need = 1
+        if (ai_usage.used_requests + need) > plan.ai_requests_monthly_limit:
             raise LimitExceeded(
                 code="AI_LIMIT_REACHED",
                 message="Лимит ИИ-запросов исчерпан",
@@ -316,10 +308,19 @@ class SubscriptionLimitService:
     @staticmethod
     @transaction.atomic
     def consume_ai_request(teacher: User, cost_units: int = 1):
-        """Увеличивает счётчик использованных ИИ-запросов."""
-        ai_usage = SubscriptionLimitService.get_ai_usage(teacher)
-        ai_usage.used_requests = ai_usage.used_requests + cost_units
-        ai_usage.save(update_fields=["used_requests", "updated_at"])
+        """Увеличивает счётчик использованных текстовых ИИ-запросов."""
+        from django.db.models import F
+
+        from .ai_service import get_or_create_usage
+
+        ai_usage = get_or_create_usage(teacher, for_update=True)
+        type(ai_usage).objects.filter(pk=ai_usage.pk).update(
+            used_requests=F("used_requests") + 1,
+            used_credits=F("used_credits") + max(1, int(cost_units or 1)),
+            used_text_today=F("used_text_today") + 1,
+            updated_at=timezone.now(),
+        )
+        ai_usage.refresh_from_db()
         return ai_usage
 
 

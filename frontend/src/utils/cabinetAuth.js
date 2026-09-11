@@ -1729,10 +1729,31 @@ export function fetchAIUsage() {
   return cabinetFetch("/ai/usage/", { method: "GET" });
 }
 
-export function sendAIRequest(prompt, requestType = "explain") {
+export function openAIAssistant(conversationId) {
+  return cabinetFetch("/ai/open/", {
+    method: "POST",
+    body: JSON.stringify(conversationId ? { conversation_id: conversationId } : {}),
+  });
+}
+
+export function fetchAIConversation(conversationId) {
+  return cabinetFetch(`/ai/conversations/${encodeURIComponent(conversationId)}/`, { method: "GET" });
+}
+
+export function sendAIRequest(prompt, options = {}) {
+  const requestType = typeof options === "string" ? options : options.requestType || "explain";
+  const conversationId = options.conversationId;
+  const confirmImages = options.confirmImages;
+  const idempotencyKey = options.idempotencyKey;
   return cabinetFetch("/ai/request/", {
     method: "POST",
-    body: JSON.stringify({ prompt, request_type: requestType }),
+    headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
+    body: JSON.stringify({
+      prompt,
+      request_type: requestType,
+      conversation_id: conversationId || undefined,
+      confirm_images: confirmImages,
+    }),
   });
 }
 

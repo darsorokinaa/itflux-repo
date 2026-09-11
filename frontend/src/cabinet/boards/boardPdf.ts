@@ -3,7 +3,6 @@
 export const BOARD_PDF_INSERT_ERROR = "Не удалось добавить PDF. Попробуйте другой файл.";
 export const BOARD_PDF_FORMAT_ERROR = "Нужен файл в формате PDF";
 export const BOARD_PDF_UNPACK_ERROR = "Не удалось распаковать страницы PDF.";
-export const MAX_BOARD_PDF_BYTES = 20 * 1024 * 1024;
 export const MAX_BOARD_PDF_PAGES = 40;
 export const ITFLUX_PDF_KEY = "itfluxPdf";
 
