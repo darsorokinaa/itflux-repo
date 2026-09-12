@@ -49,13 +49,12 @@ class HomeworkAttachmentError(Exception):
 
 
 def _max_size() -> int:
-    return int(
-        getattr(
-            settings,
-            "HOMEWORK_ATTACHMENT_MAX_SIZE",
-            getattr(settings, "CABINET_MAX_UPLOAD_BYTES", 100 * 1024 * 1024),
-        )
-    )
+    value = getattr(settings, "HOMEWORK_ATTACHMENT_MAX_SIZE", None)
+    if value is None:
+        value = getattr(settings, "CABINET_MAX_UPLOAD_BYTES", None)
+    if value in (None, 0, "", "none", "unlimited"):
+        return 0
+    return int(value)
 
 
 def _max_count() -> int:
@@ -137,7 +136,7 @@ def _validate_homework_upload(uploaded) -> None:
     validate_uploaded_file(uploaded)
     size = getattr(uploaded, "size", None)
     max_size = _max_size()
-    if size is not None and size > max_size:
+    if max_size > 0 and size is not None and size > max_size:
         mb = max_size // (1024 * 1024)
         raise HomeworkAttachmentError(
             f"Файл слишком большой. Максимум {mb} МБ.",

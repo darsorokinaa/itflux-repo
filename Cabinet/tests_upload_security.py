@@ -38,13 +38,6 @@ class UploadSecurityTests(TestCase):
     def test_allows_video_with_unlisted_video_mime(self):
         validate_uploaded_file(SimpleUploadedFile("lesson.mkv", b"data", content_type="video/unknown"))
 
-    def test_allows_file_up_to_100mb(self):
-        uploaded = SimpleNamespace(name="lesson.mp4", size=100 * 1024 * 1024, content_type="video/mp4")
+    def test_allows_large_file_without_size_limit(self):
+        uploaded = SimpleNamespace(name="lesson.mp4", size=2 * 1024 * 1024 * 1024, content_type="video/mp4")
         validate_uploaded_file(uploaded)
-
-    def test_rejects_file_over_100mb(self):
-        uploaded = SimpleNamespace(name="lesson.mp4", size=100 * 1024 * 1024 + 1, content_type="video/mp4")
-        with self.assertRaises(UploadValidationError) as ctx:
-            validate_uploaded_file(uploaded)
-        self.assertEqual(ctx.exception.code, "FILE_TOO_LARGE")
-        self.assertIn("100", ctx.exception.message)

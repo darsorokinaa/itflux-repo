@@ -4,7 +4,15 @@ import os
 
 from django.conf import settings
 
-MAX_UPLOAD_BYTES = int(getattr(settings, "CABINET_MAX_UPLOAD_BYTES", 100 * 1024 * 1024))
+def get_max_upload_bytes():
+    value = getattr(settings, "CABINET_MAX_UPLOAD_BYTES", None)
+    if value in (None, 0, "", "none", "unlimited"):
+        return None
+    return int(value)
+
+
+# None = без лимита размера. Для совместимости со старыми импортами.
+MAX_UPLOAD_BYTES = get_max_upload_bytes()
 
 # .ts не включаем: это TypeScript в code-allowlist, а не MPEG-TS.
 VIDEO_UPLOAD_EXTENSIONS = frozenset({
@@ -129,8 +137,9 @@ def validate_uploaded_file(uploaded) -> None:
         raise UploadValidationError("Файл не передан", "FILE_REQUIRED")
 
     size = getattr(uploaded, "size", None)
-    if size is not None and size > MAX_UPLOAD_BYTES:
-        mb = MAX_UPLOAD_BYTES // (1024 * 1024)
+    limit = get_max_upload_bytes()
+    if limit and size is not None and size > limit:
+        mb = max(1, limit // (1024 * 1024))
         raise UploadValidationError(f"Файл слишком большой (макс. {mb} МБ)", "FILE_TOO_LARGE")
 
     name = getattr(uploaded, "name", "") or "file"

@@ -377,17 +377,27 @@ if _data_upload_raw.lower() in ("", "none", "unlimited"):
 else:
     DATA_UPLOAD_MAX_MEMORY_SIZE = int(_data_upload_raw)
 
-# Cabinet uploads
-CABINET_MAX_UPLOAD_BYTES = int(os.environ.get("CABINET_MAX_UPLOAD_BYTES", str(100 * 1024 * 1024)))
+def _env_optional_bytes(name, default="none"):
+    raw = os.environ.get(name, default)
+    text = str(raw if raw is not None else "").strip().lower()
+    if text in ("", "none", "unlimited", "0"):
+        return None
+    return int(text)
+
+
+# Cabinet uploads: None / 0 / unlimited — без лимита на размер файла.
+CABINET_MAX_UPLOAD_BYTES = _env_optional_bytes("CABINET_MAX_UPLOAD_BYTES", "none")
 CABINET_FILE_STORAGE_QUOTA_BYTES = int(
     os.environ.get("CABINET_FILE_STORAGE_QUOTA_BYTES", str(1024 * 1024 * 1024))
 )
 CABINET_FILE_TRASH_DAYS = int(os.environ.get("CABINET_FILE_TRASH_DAYS", "30"))
 
 # Homework attachments (централизованные лимиты; fallback на cabinet upload)
-HOMEWORK_ATTACHMENT_MAX_SIZE = int(
-    os.environ.get("HOMEWORK_ATTACHMENT_MAX_SIZE", str(CABINET_MAX_UPLOAD_BYTES))
-)
+_homework_size_raw = os.environ.get("HOMEWORK_ATTACHMENT_MAX_SIZE")
+if _homework_size_raw is None:
+    HOMEWORK_ATTACHMENT_MAX_SIZE = CABINET_MAX_UPLOAD_BYTES
+else:
+    HOMEWORK_ATTACHMENT_MAX_SIZE = _env_optional_bytes("HOMEWORK_ATTACHMENT_MAX_SIZE")
 HOMEWORK_ATTACHMENT_MAX_COUNT = int(os.environ.get("HOMEWORK_ATTACHMENT_MAX_COUNT", "20"))
 HOMEWORK_ALLOWED_ATTACHMENT_TYPES = None  # None → upload_validation.ALLOWED_UPLOAD_*
 
