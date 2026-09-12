@@ -13,7 +13,38 @@
   - теги из справочника TagOption (несколько штук на задачу);
   - автора задачи (колонка author / автор или AUTHOR_DEFAULT);
   - тему программы (колонка theme / тема): ищет или создаёт TaskList
-    для SUBJECT+LEVEL, затем к нему привязывает subtopic.
+    для SUBJECT+LEVEL, затем к нему привязывает subtopic;
+  - общий банк (scope=global) или банк учителя (scope=teacher):
+    колонки scope/банк и teacher/банк_учителя или SCOPE_DEFAULT/TEACHER_DEFAULT.
+
+Заголовки таблицы (первая строка Excel):
+
+  Обязательные:
+    task_template     HTML/текст условия
+    theme             тема программы (или колонка номера, если задан COL_TASK_NUMBER)
+
+  Опциональные:
+    subtopic          подтема внутри темы
+    answer            ответ
+    created_by        кто добавил (иначе CREATED_BY_DEFAULT)
+    author            автор (иначе AUTHOR_DEFAULT)
+    tags              теги через ; , | или перевод строки
+    audio_url         ссылки на аудио
+    files / img       ссылки на файлы и картинки (если включены COL_FILES / COL_IMAGES)
+
+  Банк (новые):
+    scope / банк / bank
+        global | общий | общий банк   → общий банк
+        teacher | учитель | банк учителя → личный банк учителя
+        Если колонки нет — берётся SCOPE_DEFAULT.
+    teacher / owner / банк_учителя / bank_code
+        username, email, id пользователя или код банка (например K7M4P).
+        Нужна, если scope=teacher и не задан TEACHER_DEFAULT.
+    status / статус
+        ready | готово | draft | черновик | archived | архив
+        Для банка учителя: ready → is_active=true, иначе false.
+    exam_part / часть
+        1 или 2; если пусто — из части темы (TaskList.part).
 
 Тема программы (Generator_tasklist):
   В Excel колонка theme / тема / Theme с названием, например:
@@ -29,6 +60,7 @@
 import json
 import os
 import re
+import secrets
 import zipfile
 import hashlib
 from pathlib import Path
@@ -109,6 +141,27 @@ COL_TAGS = None  # например "tags" / "теги"
 # Теги по умолчанию для ВСЕХ задач этого импорта (slug или подпись из справочника).
 # Пример: TAGS = ["novice"]  или  TAGS = ["difficulty:expert", "есть-в-егэ"]
 TAGS = []
+
+# Банк: "global" (общий) или "teacher" (личный банк учителя).
+# Если в Excel есть колонка scope/банк — она перекрывает это значение построчно.
+SCOPE_DEFAULT = "global"
+
+# Учитель по умолчанию, если scope=teacher и в строке нет колонки teacher.
+# Можно: username, email, id пользователя или публичный код банка (K7M4P).
+TEACHER_DEFAULT = ""
+
+# Колонка банка (опционально). Если None — ищем сами: scope / банк / bank.
+COL_SCOPE = None  # например "scope"
+
+# Колонка учителя / кода банка (опционально).
+# Если None — ищем сами: teacher / owner / банк_учителя / bank_code.
+COL_TEACHER = None  # например "teacher"
+
+# Колонка статуса (опционально): ready / draft / archived.
+COL_STATUS = None  # например "status"
+
+# Колонка части экзамена (опционально): 1 или 2.
+COL_EXAM_PART = None  # например "exam_part"
 
 # Предмет и уровень для поиска/создания TaskList.
 SUBJECT = "algebra"
@@ -740,14 +793,317 @@ def attach_task_tags(cur, task_id: int, tag_option_ids: list[int]) -> None:
         )
 
 
+BANK_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+BANK_CODE_LENGTH = 5
+BANK_CODE_RE = re.compile(rf"^[{BANK_CODE_ALPHABET}]{{{BANK_CODE_LENGTH}}}$", re.IGNORECASE)
+
+_teacher_cache: dict[str, int | None] = {}
+_exam_part_cache: dict[int, int | None] = {}
+
+
+def generate_bank_code() -> str:
+    return "".join(secrets.choice(BANK_CODE_ALPHABET) for _ in range(BANK_CODE_LENGTH))
+
+
+def normalize_scope(raw: str | None) -> str:
+    value = " ".join(str(raw or "").strip().lower().replace("_", " ").split())
+    if value in {
+        "teacher",
+        "учитель",
+        "банка учителя",
+        "банк учителя",
+        "личный",
+        "личный банк",
+        "mine",
+        "my",
+        "my bank",
+        "teacher bank",
+    }:
+        return "teacher"
+    if value in {
+        "global",
+        "общий",
+        "общий банк",
+        "public",
+        "pub",
+        "g",
+    }:
+        return "global"
+    if not value:
+        return "global"
+    raise ValueError(f"неизвестный банк/scope: «{raw}»")
+
+
+def normalize_status(raw: str | None) -> str:
+    value = " ".join(str(raw or "").strip().lower().replace("_", " ").split())
+    if value in {"draft", "черновик", "черн"}:
+        return "draft"
+    if value in {"archived", "archive", "архив"}:
+        return "archived"
+    if value in {"", "ready", "готово", "готов", "готова"}:
+        return "ready"
+    raise ValueError(f"неизвестный статус: «{raw}»")
+
+
+def parse_exam_part(raw: str | None) -> int | None:
+    value = str(raw or "").strip().lower().replace("часть", "").replace("part", "").strip()
+    if not value or value in {"nan", "none", "null"}:
+        return None
+    if value in {"1", "i", "первая"}:
+        return 1
+    if value in {"2", "ii", "вторая"}:
+        return 2
+    try:
+        n = int(float(value.replace(",", ".")))
+    except (TypeError, ValueError):
+        return None
+    return n if n in (1, 2) else None
+
+
+def exam_part_from_title(title: str | None) -> int | None:
+    text = (title or "").strip().lower()
+    if not text:
+        return None
+    if re.search(r"часть\s*2|part\s*2|\bii\b", text) or text in ("2", "вторая"):
+        return 2
+    if re.search(r"часть\s*1|part\s*1", text) or text in ("1", "первая"):
+        return 1
+    return None
+
+
+def resolve_exam_part_for_tasklist(cur, task_list_id: int | None) -> int | None:
+    if not task_list_id:
+        return None
+    if task_list_id in _exam_part_cache:
+        return _exam_part_cache[task_list_id]
+    cur.execute(
+        """
+        SELECT p.part_title
+        FROM "Generator_tasklist" tl
+        LEFT JOIN "Generator_part" p ON p.id = tl.part_id
+        WHERE tl.id = %s
+        LIMIT 1
+        """,
+        (task_list_id,),
+    )
+    row = cur.fetchone()
+    part = exam_part_from_title(row[0] if row else None)
+    _exam_part_cache[task_list_id] = part
+    return part
+
+
+def resolve_teacher_id(cur, raw: str) -> int | None:
+    """
+    Находит учителя по id, username, email или коду банка (K7M4P).
+    Требует Cabinet_profile.role = teacher.
+    """
+    token = " ".join(str(raw or "").strip().split())
+    if not token or token.lower() in {"nan", "none", "null"}:
+        return None
+
+    cache_key = token.casefold()
+    if cache_key in _teacher_cache:
+        return _teacher_cache[cache_key]
+
+    teacher_id = None
+
+    if token.isdigit():
+        cur.execute(
+            """
+            SELECT u.id
+            FROM auth_user u
+            JOIN "Cabinet_profile" p ON p.user_id = u.id
+            WHERE u.id = %s
+              AND p.role = 'teacher'
+            LIMIT 1
+            """,
+            (int(token),),
+        )
+        row = cur.fetchone()
+        teacher_id = int(row[0]) if row else None
+    elif BANK_CODE_RE.match(token.replace(" ", "").replace("-", "")):
+        code = token.replace(" ", "").replace("-", "").upper()
+        cur.execute(
+            """
+            SELECT b.teacher_id
+            FROM "Generator_teachertaskbank" b
+            JOIN auth_user u ON u.id = b.teacher_id
+            JOIN "Cabinet_profile" p ON p.user_id = u.id
+            WHERE upper(b.public_code) = %s
+              AND p.role = 'teacher'
+            LIMIT 1
+            """,
+            (code,),
+        )
+        row = cur.fetchone()
+        teacher_id = int(row[0]) if row else None
+    else:
+        cur.execute(
+            """
+            SELECT u.id
+            FROM auth_user u
+            JOIN "Cabinet_profile" p ON p.user_id = u.id
+            WHERE p.role = 'teacher'
+              AND (
+                lower(u.username) = lower(%s)
+                OR lower(u.email) = lower(%s)
+              )
+            ORDER BY u.id
+            LIMIT 1
+            """,
+            (token, token),
+        )
+        row = cur.fetchone()
+        teacher_id = int(row[0]) if row else None
+
+    _teacher_cache[cache_key] = teacher_id
+    return teacher_id
+
+
+def get_or_create_teacher_bank(cur, teacher_id: int, now: datetime) -> tuple[int, str]:
+    cur.execute(
+        """
+        SELECT id, public_code
+        FROM "Generator_teachertaskbank"
+        WHERE teacher_id = %s
+        LIMIT 1
+        """,
+        (teacher_id,),
+    )
+    row = cur.fetchone()
+    if row:
+        return int(row[0]), str(row[1])
+
+    for _ in range(32):
+        code = generate_bank_code()
+        cur.execute("SAVEPOINT create_teacher_bank")
+        try:
+            cur.execute(
+                """
+                INSERT INTO "Generator_teachertaskbank"
+                    (teacher_id, public_code, next_task_number, next_variant_number, created_at)
+                VALUES (%s, %s, 1, 1, %s)
+                RETURNING id, public_code
+                """,
+                (teacher_id, code, now),
+            )
+            created = cur.fetchone()
+            cur.execute("RELEASE SAVEPOINT create_teacher_bank")
+            print(f"    [bank] создан банк учителя {created[1]} (teacher_id={teacher_id})")
+            return int(created[0]), str(created[1])
+        except Exception:
+            cur.execute("ROLLBACK TO SAVEPOINT create_teacher_bank")
+            cur.execute(
+                """
+                SELECT id, public_code
+                FROM "Generator_teachertaskbank"
+                WHERE teacher_id = %s
+                LIMIT 1
+                """,
+                (teacher_id,),
+            )
+            existing = cur.fetchone()
+            if existing:
+                return int(existing[0]), str(existing[1])
+            continue
+    raise RuntimeError(f"Не удалось создать банк для teacher_id={teacher_id}")
+
+
+def allocate_teacher_task_number(cur, teacher_id: int, now: datetime) -> tuple[int, str]:
+    get_or_create_teacher_bank(cur, teacher_id, now)
+    cur.execute(
+        """
+        SELECT id, public_code, next_task_number
+        FROM "Generator_teachertaskbank"
+        WHERE teacher_id = %s
+        FOR UPDATE
+        """,
+        (teacher_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        raise RuntimeError(f"Банк учителя не найден после создания (teacher_id={teacher_id})")
+    number = int(row[2])
+    cur.execute(
+        """
+        UPDATE "Generator_teachertaskbank"
+        SET next_task_number = %s
+        WHERE id = %s
+        """,
+        (number + 1, row[0]),
+    )
+    return number, str(row[1])
+
+
+def resolve_row_bank(
+    cur,
+    *,
+    scope_raw: str,
+    teacher_raw: str,
+    status_raw: str,
+    exam_part_raw: str,
+    task_list_id: int | None,
+) -> dict:
+    scope = normalize_scope(scope_raw or SCOPE_DEFAULT)
+    status = normalize_status(status_raw)
+    exam_part = parse_exam_part(exam_part_raw)
+    if exam_part is None:
+        exam_part = resolve_exam_part_for_tasklist(cur, task_list_id)
+
+    owner_teacher_id = None
+    if scope == "teacher":
+        token = teacher_raw or TEACHER_DEFAULT
+        if not token:
+            raise ValueError(
+                "для банка учителя нужен teacher (колонка teacher/банк_учителя "
+                "или TEACHER_DEFAULT в конфиге)"
+            )
+        owner_teacher_id = resolve_teacher_id(cur, token)
+        if owner_teacher_id is None:
+            raise ValueError(
+                f"учитель не найден: «{token}» "
+                "(нужен username / email / id / код банка, роль teacher)"
+            )
+        is_active = status == "ready"
+    else:
+        is_active = IS_ACTIVE
+
+    return {
+        "scope": scope,
+        "owner_teacher_id": owner_teacher_id,
+        "status": status,
+        "exam_part": exam_part,
+        "is_active": is_active,
+    }
+
+
 def insert_task(cur, payload: dict, now: datetime) -> int:
+    scope = payload.get("scope") or "global"
+    owner_teacher_id = payload.get("owner_teacher_id")
+    local_number = None
+    if scope == "teacher":
+        if not owner_teacher_id:
+            raise ValueError("scope=teacher, но owner_teacher_id пустой")
+        local_number, bank_code = allocate_teacher_task_number(cur, owner_teacher_id, now)
+        payload["_bank_code"] = bank_code
+        payload["_local_number"] = local_number
+    else:
+        owner_teacher_id = None
+        local_number = None
+
+    status = payload.get("status") or "ready"
+    is_active = payload.get("is_active")
+    if is_active is None:
+        is_active = status == "ready" if scope == "teacher" else IS_ACTIVE
+
     cur.execute(
         """
         INSERT INTO "Generator_task"
-            (task_template, files, answer, author, added_at, created_by,
+            (task_template, files, answer, author, added_at, updated_at, created_by,
              max_score, is_active, vpr_advanced, vpr_basic, truth_table_enabled,
-             task_id, subtopic_id)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             task_id, subtopic_id, scope, owner_teacher_id, local_number, status,
+             exam_part)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
         """,
         (
@@ -756,14 +1112,20 @@ def insert_task(cur, payload: dict, now: datetime) -> int:
             payload.get("answer", ""),
             payload.get("author") or None,
             now,
+            now,
             payload.get("created_by") or CREATED_BY_DEFAULT,
             MAX_SCORE,
-            IS_ACTIVE,
+            is_active,
             False,
             False,
             False,
             payload["task_list_id"],
             payload["subtopic_id"],
+            scope,
+            owner_teacher_id,
+            local_number,
+            status,
+            payload.get("exam_part"),
         ),
     )
     task_id = cur.fetchone()[0]
@@ -821,10 +1183,56 @@ def main():
         COL_SUBTOPIC,
         aliases=["subtopic", "подтема", "Subtopic", "sub_topic", "подтемы"],
     )
+    scope_col = resolve_optional_column(
+        df,
+        COL_SCOPE,
+        aliases=["scope", "банк", "bank", "task_scope", "область"],
+    )
+    teacher_col = resolve_optional_column(
+        df,
+        COL_TEACHER,
+        aliases=[
+            "teacher",
+            "owner",
+            "банк_учителя",
+            "bank_code",
+            "teacher_bank",
+            "owner_teacher",
+            "учитель",
+        ],
+    )
+    status_col = resolve_optional_column(
+        df,
+        COL_STATUS,
+        aliases=["status", "статус", "task_status"],
+    )
+    exam_part_col = resolve_optional_column(
+        df,
+        COL_EXAM_PART,
+        aliases=["exam_part", "часть", "часть_экзамена"],
+    )
     if theme_col and theme_col != COL_THEME:
         print(f"Тема из Excel: колонка «{theme_col}»")
     if subtopic_col and COL_SUBTOPIC and subtopic_col != COL_SUBTOPIC:
         print(f"Подтема из Excel: колонка «{subtopic_col}»")
+    try:
+        default_scope = normalize_scope(SCOPE_DEFAULT)
+    except ValueError as e:
+        raise SystemExit(f"SCOPE_DEFAULT: {e}") from e
+    print(
+        f"Банк по умолчанию: {default_scope}"
+        + (f"  |  колонка «{scope_col}»" if scope_col else "")
+    )
+    if default_scope == "teacher" or teacher_col:
+        print(
+            "Учитель: "
+            + (f"колонка «{teacher_col}»" if teacher_col else "колонки нет")
+            + (f", TEACHER_DEFAULT=«{TEACHER_DEFAULT}»" if TEACHER_DEFAULT else "")
+        )
+    if status_col:
+        print(f"Статус: колонка «{status_col}»")
+    if exam_part_col:
+        print(f"Часть экзамена: колонка «{exam_part_col}»")
     if TAGS:
         print(f"Теги по умолчанию (TAGS): {TAGS}")
     if tags_col:
@@ -856,6 +1264,11 @@ def main():
             f"Подтема: колонка «{COL_SUBTOPIC}» не найдена — "
             "задачи будут без subtopic_id"
         )
+    if default_scope == "teacher" and not TEACHER_DEFAULT and not teacher_col:
+        raise SystemExit(
+            "Для банка учителя задайте TEACHER_DEFAULT (username/email/id/код банка) "
+            "или добавьте в Excel колонку teacher / банк_учителя / bank_code."
+        )
 
     conn = psycopg2.connect(**DB)
     cur = conn.cursor()
@@ -868,6 +1281,8 @@ def main():
         print()
 
     ok = 0
+    ok_global = 0
+    ok_teacher = 0
     err = 0
     skip = 0
     merged_rows = 0
@@ -879,7 +1294,7 @@ def main():
         print(f"all.json: индекс вариантов (png): {len(all_json_index)} записей")
 
     def _flush_pending() -> None:
-        nonlocal pending_question, ok, err
+        nonlocal pending_question, ok, ok_global, ok_teacher, err
 
         if not pending_question:
             return
@@ -887,6 +1302,10 @@ def main():
         try:
             insert_task(cur, pending_question, now)
             ok += 1
+            if pending_question.get("scope") == "teacher":
+                ok_teacher += 1
+            else:
+                ok_global += 1
         except Exception as e:
             conn.rollback()
             print(f"  [DB ERR] отложенная строка {pending_question['row']}: {e}")
@@ -974,6 +1393,20 @@ def main():
                     )
                     skip += 1
                     continue
+
+        try:
+            bank_fields = resolve_row_bank(
+                cur,
+                scope_raw=_cell_str(row, scope_col) if scope_col else "",
+                teacher_raw=_cell_str(row, teacher_col) if teacher_col else "",
+                status_raw=_cell_str(row, status_col) if status_col else "",
+                exam_part_raw=_cell_str(row, exam_part_col) if exam_part_col else "",
+                task_list_id=task_list_id,
+            )
+        except ValueError as e:
+            print(f"  [skip] строка {row_number}: {e}")
+            skip += 1
+            continue
 
         # --- files + audio: один или несколько файлов ---
         # В БД поле files одно. Поэтому обычные files_urls и audio_url объединяем,
@@ -1083,6 +1516,7 @@ def main():
                     "task_list_id": task_list_id,
                     "subtopic_id": subtopic_id,
                     "tag_option_ids": tag_option_ids,
+                    **bank_fields,
                 }
                 continue
 
@@ -1110,10 +1544,15 @@ def main():
                     "task_list_id": task_list_id,
                     "subtopic_id": subtopic_id,
                     "tag_option_ids": tag_option_ids,
+                    **bank_fields,
                 },
                 now,
             )
             ok += 1
+            if bank_fields.get("scope") == "teacher":
+                ok_teacher += 1
+            else:
+                ok_global += 1
 
         except Exception as e:
             conn.rollback()
@@ -1128,7 +1567,8 @@ def main():
     conn.close()
 
     print(
-        f"\nГотово! Вставлено: {ok}, пропущено: {skip}, ошибок: {err}, "
+        f"\nГотово! Вставлено: {ok} (общий банк: {ok_global}, банк учителя: {ok_teacher}), "
+        f"пропущено: {skip}, ошибок: {err}, "
         f"склеено строк: {merged_rows}, из all.json: {all_json_merged}"
     )
 
