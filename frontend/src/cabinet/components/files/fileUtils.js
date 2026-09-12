@@ -11,10 +11,16 @@ export const KIND_OPTIONS = [
 ];
 
 export const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"]);
-export const VIDEO_EXTS = new Set([".mp4", ".webm", ".mov"]);
+export const VIDEO_EXTS = new Set([
+  ".mp4", ".webm", ".mov", ".qt",
+  ".avi", ".mkv", ".m4v", ".mpeg", ".mpg", ".mpe", ".mpv", ".m2v",
+  ".wmv", ".flv", ".3gp", ".3g2", ".ogv",
+  ".mts", ".m2ts", ".vob", ".f4v", ".asf",
+]);
 export const AUDIO_EXTS = new Set([".mp3", ".wav", ".ogg", ".m4a"]);
-export const TEXT_EXTS = new Set([".txt", ".md", ".csv", ".json", ".xml", ".css", ".py"]);
+export const TEXT_EXTS = new Set([".txt", ".md", ".csv", ".tsv", ".json", ".xml", ".css", ".py"]);
 export const PDF_EXTS = new Set([".pdf"]);
+const DOWNLOAD_ONLY_EXTS = new Set([".djvu", ".djv", ".epub", ".pages", ".key"]);
 
 export function formatBytes(n) {
   const bytes = Number(n) || 0;
@@ -55,6 +61,7 @@ export function previewKind(item) {
   if (!item || item.kind === "folder") return "folder";
   const ext = normalizeExt(item);
   const mime = (item.mime_type || "").toLowerCase();
+  if (DOWNLOAD_ONLY_EXTS.has(ext) || mime.includes("djvu")) return "file";
   if (IMAGE_EXTS.has(ext) || mime.startsWith("image/")) return "image";
   if (PDF_EXTS.has(ext) || mime === "application/pdf") return "pdf";
   if (VIDEO_EXTS.has(ext) || mime.startsWith("video/")) return "video";

@@ -79,6 +79,41 @@ class MyFilesApiTests(TestCase):
         ids = [i["id"] for i in listing.json()["items"] if i["kind"] == "file"]
         self.assertIn(file_id, ids)
 
+    def test_teacher_and_student_upload_video_table_and_document_types(self):
+        cases = (
+            ("lesson.mkv", "video/x-matroska", "video"),
+            ("table.ods", "application/vnd.oasis.opendocument.spreadsheet", "documents"),
+            ("notes.odt", "application/vnd.oasis.opendocument.text", "documents"),
+        )
+        self._auth(self.teacher)
+        for name, mime, kind in cases:
+            with self.subTest(role="teacher", name=name):
+                res = self.client.post(
+                    "/api/cabinet/files/upload/",
+                    {"file": SimpleUploadedFile(name, b"payload", content_type=mime)},
+                    format="multipart",
+                )
+                self.assertEqual(res.status_code, 201, res.content)
+                listing = self.client.get("/api/cabinet/files/", {"kind": kind})
+                self.assertEqual(listing.status_code, 200)
+                names = [i["name"] for i in listing.json()["items"] if i["kind"] == "file"]
+                self.assertIn(name, names)
+
+        self._auth(self.student_user)
+        for name, mime, kind in cases:
+            student_name = f"s-{name}"
+            with self.subTest(role="student", name=student_name):
+                res = self.client.post(
+                    "/api/cabinet/student/files/upload/",
+                    {"file": SimpleUploadedFile(student_name, b"payload", content_type=mime)},
+                    format="multipart",
+                )
+                self.assertEqual(res.status_code, 201, res.content)
+                listing = self.client.get("/api/cabinet/student/files/", {"kind": kind})
+                self.assertEqual(listing.status_code, 200)
+                names = [i["name"] for i in listing.json()["items"] if i["kind"] == "file"]
+                self.assertIn(student_name, names)
+
     def test_other_teacher_cannot_see_or_download(self):
         res = self._upload(self.teacher)
         file_id = res.json()["id"]

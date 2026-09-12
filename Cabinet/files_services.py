@@ -41,7 +41,13 @@ from .models import (
     Student,
     StudentGroup,
 )
-from .upload_validation import UploadValidationError, validate_uploaded_file
+from .upload_validation import (
+    DOCUMENT_UPLOAD_EXTENSIONS,
+    SPREADSHEET_UPLOAD_EXTENSIONS,
+    VIDEO_UPLOAD_EXTENSIONS,
+    UploadValidationError,
+    validate_uploaded_file,
+)
 
 
 class FileServiceError(Exception):
@@ -941,9 +947,9 @@ def serialize_file(file_obj: CabinetFile, *, include_relations: bool = False, tr
 
 
 KIND_FILTERS = {
-    "documents": [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".rtf", ".csv"],
+    "documents": sorted(DOCUMENT_UPLOAD_EXTENSIONS | SPREADSHEET_UPLOAD_EXTENSIONS),
     "images": [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"],
-    "video": [".mp4", ".webm", ".mov"],
+    "video": sorted(VIDEO_UPLOAD_EXTENSIONS),
     "audio": [".mp3", ".wav", ".ogg", ".m4a"],
     "archives": [".zip", ".rar", ".7z", ".tar", ".gz"],
     "code": [".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".c", ".cpp", ".h", ".cs", ".html", ".css", ".json", ".xml", ".md", ".sql", ".sh"],

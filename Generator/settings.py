@@ -378,7 +378,7 @@ else:
     DATA_UPLOAD_MAX_MEMORY_SIZE = int(_data_upload_raw)
 
 # Cabinet uploads
-CABINET_MAX_UPLOAD_BYTES = int(os.environ.get("CABINET_MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
+CABINET_MAX_UPLOAD_BYTES = int(os.environ.get("CABINET_MAX_UPLOAD_BYTES", str(100 * 1024 * 1024)))
 CABINET_FILE_STORAGE_QUOTA_BYTES = int(
     os.environ.get("CABINET_FILE_STORAGE_QUOTA_BYTES", str(1024 * 1024 * 1024))
 )

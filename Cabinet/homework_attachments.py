@@ -53,7 +53,7 @@ def _max_size() -> int:
         getattr(
             settings,
             "HOMEWORK_ATTACHMENT_MAX_SIZE",
-            getattr(settings, "CABINET_MAX_UPLOAD_BYTES", 20 * 1024 * 1024),
+            getattr(settings, "CABINET_MAX_UPLOAD_BYTES", 100 * 1024 * 1024),
         )
     )
 

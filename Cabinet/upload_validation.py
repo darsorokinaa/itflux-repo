@@ -4,21 +4,40 @@ import os
 
 from django.conf import settings
 
-MAX_UPLOAD_BYTES = int(getattr(settings, "CABINET_MAX_UPLOAD_BYTES", 20 * 1024 * 1024))
+MAX_UPLOAD_BYTES = int(getattr(settings, "CABINET_MAX_UPLOAD_BYTES", 100 * 1024 * 1024))
+
+# .ts не включаем: это TypeScript в code-allowlist, а не MPEG-TS.
+VIDEO_UPLOAD_EXTENSIONS = frozenset({
+    ".mp4", ".webm", ".mov", ".qt",
+    ".avi", ".mkv", ".m4v", ".mpeg", ".mpg", ".mpe", ".mpv", ".m2v",
+    ".wmv", ".flv", ".3gp", ".3g2", ".ogv",
+    ".mts", ".m2ts", ".vob", ".f4v", ".asf",
+})
+
+SPREADSHEET_UPLOAD_EXTENSIONS = frozenset({
+    ".xls", ".xlsx", ".xlsm", ".xlsb", ".xltx", ".xlt",
+    ".csv", ".tsv", ".ods", ".ots", ".numbers",
+})
+
+DOCUMENT_UPLOAD_EXTENSIONS = frozenset({
+    ".pdf", ".doc", ".docx", ".docm", ".dot", ".dotx",
+    ".ppt", ".pptx", ".pptm", ".pps", ".ppsx",
+    ".txt", ".rtf",
+    ".odt", ".ott", ".odp", ".otp",
+    ".pages", ".key", ".epub", ".djvu", ".djv",
+})
 
 ALLOWED_UPLOAD_EXTENSIONS = frozenset({
-    # documents
-    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".rtf", ".csv",
     # images (без SVG — XSS при inline-preview)
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic", ".heif",
-    # audio / video
-    ".mp3", ".wav", ".ogg", ".m4a", ".mp4", ".webm", ".mov",
+    # audio
+    ".mp3", ".wav", ".ogg", ".m4a",
     # archives
     ".zip", ".rar", ".7z", ".tar", ".gz",
     # code as download-only text (без html/js/sh)
     ".py", ".ts", ".java", ".c", ".cpp", ".h", ".cs",
     ".css", ".json", ".xml", ".md", ".sql",
-})
+}) | DOCUMENT_UPLOAD_EXTENSIONS | SPREADSHEET_UPLOAD_EXTENSIONS | VIDEO_UPLOAD_EXTENSIONS
 
 ALLOWED_UPLOAD_CONTENT_TYPES = frozenset({
     "application/pdf",
@@ -26,16 +45,46 @@ ALLOWED_UPLOAD_CONTENT_TYPES = frozenset({
     "image/heic", "image/heif",
     "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-word.document.macroenabled.12",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
     "application/vnd.ms-excel",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel.sheet.macroenabled.12",
+    "application/vnd.ms-excel.sheet.binary.macroenabled.12",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.template",
     "application/vnd.ms-powerpoint",
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    "text/plain", "text/csv", "text/rtf", "application/rtf",
+    "application/vnd.ms-powerpoint.presentation.macroenabled.12",
+    "application/vnd.openxmlformats-officedocument.presentationml.slideshow",
+    "application/vnd.oasis.opendocument.text",
+    "application/vnd.oasis.opendocument.text-template",
+    "application/vnd.oasis.opendocument.spreadsheet",
+    "application/vnd.oasis.opendocument.spreadsheet-template",
+    "application/vnd.oasis.opendocument.presentation",
+    "application/vnd.oasis.opendocument.presentation-template",
+    "application/vnd.apple.pages",
+    "application/x-iwork-pages-sffpages",
+    "application/vnd.apple.numbers",
+    "application/x-iwork-numbers-sffnumbers",
+    "application/vnd.apple.keynote",
+    "application/x-iwork-keynote-sffkey",
+    "application/epub+zip",
+    "image/vnd.djvu", "image/x-djvu", "image/vnd.djvu+multipage",
+    "text/plain", "text/csv", "text/tab-separated-values", "text/tsv",
+    "text/rtf", "application/rtf", "application/csv",
     "application/zip", "application/x-zip-compressed",
     "application/x-rar-compressed", "application/vnd.rar",
     "application/x-7z-compressed", "application/gzip", "application/x-tar",
     "audio/mpeg", "audio/wav", "audio/ogg", "audio/mp4", "audio/x-m4a",
     "video/mp4", "video/webm", "video/quicktime",
+    "video/x-msvideo", "video/avi", "video/msvideo",
+    "video/x-matroska", "video/matroska",
+    "video/x-m4v", "video/mpeg", "video/mpg", "video/x-mpeg",
+    "video/x-ms-wmv", "video/x-ms-asf",
+    "video/x-flv", "video/x-f4v",
+    "video/3gpp", "video/3gpp2", "video/ogg",
+    "video/mp2t", "video/vnd.dlna.mpeg-tts",
+    "video/dvd", "video/x-ms-vob",
     "application/json", "application/xml", "text/xml", "text/css",
     "text/markdown",
     "application/octet-stream",
@@ -59,11 +108,13 @@ ALLOWED_IMAGE_CONTENT_TYPES = frozenset({
     "image/png", "image/jpeg", "image/gif", "image/webp",
 })
 
+_NON_IMAGE_PREVIEW_EXTS = frozenset({".djvu", ".djv", ".epub"})
+
 PREVIEWABLE_EXTENSIONS = frozenset({
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
-    ".pdf", ".txt", ".md", ".csv", ".json", ".xml", ".css", ".py",
-    ".mp3", ".wav", ".ogg", ".m4a", ".mp4", ".webm",
-})
+    ".pdf", ".txt", ".md", ".csv", ".tsv", ".json", ".xml", ".css", ".py",
+    ".mp3", ".wav", ".ogg", ".m4a",
+}) | VIDEO_UPLOAD_EXTENSIONS
 
 
 class UploadValidationError(Exception):
@@ -97,7 +148,9 @@ def validate_uploaded_file(uploaded) -> None:
 
     content_type = (getattr(uploaded, "content_type", "") or "").split(";", 1)[0].strip().lower()
     if content_type and content_type not in ALLOWED_UPLOAD_CONTENT_TYPES:
-        raise UploadValidationError("Недопустимый тип содержимого файла", "FILE_TYPE_NOT_ALLOWED")
+        video_ok = content_type.startswith("video/") and ext in VIDEO_UPLOAD_EXTENSIONS
+        if not video_ok:
+            raise UploadValidationError("Недопустимый тип содержимого файла", "FILE_TYPE_NOT_ALLOWED")
 
 
 def validate_uploaded_image(uploaded) -> None:
@@ -120,7 +173,9 @@ def is_previewable(extension: str, mime_type: str = "") -> bool:
     ext = (extension or "").lower()
     if not ext.startswith(".") and ext:
         ext = f".{ext}"
+    mime = (mime_type or "").lower()
+    if ext in _NON_IMAGE_PREVIEW_EXTS or "djvu" in mime:
+        return False
     if ext in PREVIEWABLE_EXTENSIONS:
         return True
-    mime = (mime_type or "").lower()
     return mime.startswith(("image/", "audio/", "video/", "text/")) or mime == "application/pdf"
