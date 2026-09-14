@@ -11,7 +11,9 @@ def forwards_migrate_payload_attachments(apps, schema_editor):
     HomeworkSubmission = apps.get_model("Cabinet", "HomeworkSubmission")
     from Cabinet.homework_task_files import migrate_submission_payload_attachments
     from Cabinet.models import HomeworkSubmission as LiveSubmission
+    import logging
 
+    logger = logging.getLogger(__name__)
     for row in HomeworkSubmission.objects.all().iterator():
         live = LiveSubmission.objects.filter(pk=row.pk).first()
         if live is None:
@@ -28,7 +30,10 @@ def forwards_migrate_payload_attachments(apps, schema_editor):
             )
         ):
             continue
-        migrate_submission_payload_attachments(live)
+        try:
+            migrate_submission_payload_attachments(live)
+        except Exception:
+            logger.exception("homework attachment migrate skipped submission_id=%s", live.pk)
 
 
 class Migration(migrations.Migration):
@@ -43,12 +48,12 @@ class Migration(migrations.Migration):
             name='HomeworkAttachment',
             fields=[
                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-                ('task_key', models.CharField(db_index=True, help_text='Стабильный id задания варианта или PK HomeworkTask. Не номер и не URL.', max_length=64, verbose_name='Идентификатор задания')),
-                ('task_number', models.CharField(blank=True, max_length=32, verbose_name='Номер задания (метаданные)')),
+                ('task_key', models.CharField(db_index=True, help_text='Стабильный id задания варианта или PK HomeworkTask. Не номер и не URL.', max_length=255, verbose_name='Идентификатор задания')),
+                ('task_number', models.CharField(blank=True, max_length=64, verbose_name='Номер задания (метаданные)')),
                 ('owner_role', models.CharField(choices=[('student', 'Ученик'), ('teacher', 'Учитель')], max_length=16, verbose_name='Роль владельца')),
                 ('attachment_type', models.CharField(choices=[('student_answer', 'Ответ ученика'), ('teacher_comment', 'Комментарий учителя'), ('teacher_checked_file', 'Проверенный файл'), ('notebook_source', 'Исходник тетради'), ('notebook_export', 'Экспорт тетради'), ('other', 'Другое')], default='student_answer', max_length=32, verbose_name='Тип вложения')),
-                ('file', models.FileField(blank=True, null=True, upload_to=Cabinet.models.homework_attachment_upload_to, verbose_name='Файл')),
-                ('original_filename', models.CharField(blank=True, max_length=255, verbose_name='Исходное имя')),
+                ('file', models.FileField(blank=True, max_length=1024, null=True, upload_to=Cabinet.models.homework_attachment_upload_to, verbose_name='Файл')),
+                ('original_filename', models.CharField(blank=True, max_length=512, verbose_name='Исходное имя')),
                 ('mime_type', models.CharField(blank=True, max_length=128, verbose_name='MIME')),
                 ('file_size', models.BigIntegerField(default=0, verbose_name='Размер')),
                 ('checksum', models.CharField(blank=True, max_length=64, verbose_name='SHA-256')),
@@ -73,7 +78,7 @@ class Migration(migrations.Migration):
             name='HomeworkNotebook',
             fields=[
                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-                ('task_key', models.CharField(db_index=True, max_length=64, verbose_name='Идентификатор задания')),
+                ('task_key', models.CharField(db_index=True, max_length=255, verbose_name='Идентификатор задания')),
                 ('owner_role', models.CharField(choices=[('student', 'Ученик'), ('teacher', 'Учитель')], max_length=16, verbose_name='Роль владельца')),
                 ('status', models.CharField(choices=[('draft', 'Черновик'), ('submitted', 'Отправлено'), ('returned', 'Отправлено ученику')], default='draft', max_length=20, verbose_name='Статус')),
                 ('version', models.PositiveIntegerField(default=1, verbose_name='Версия draft')),
@@ -94,7 +99,7 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
                 ('page_number', models.PositiveIntegerField(default=1, verbose_name='Номер страницы')),
-                ('background_file', models.FileField(blank=True, null=True, upload_to=Cabinet.models.homework_notebook_page_background_upload_to, verbose_name='Растр фона')),
+                ('background_file', models.FileField(blank=True, max_length=1024, null=True, upload_to=Cabinet.models.homework_notebook_page_background_upload_to, verbose_name='Растр фона')),
                 ('page_type', models.CharField(choices=[('attachment', 'Файл'), ('pdf_page', 'Страница PDF'), ('blank', 'Пустой лист')], default='blank', max_length=20, verbose_name='Тип страницы')),
                 ('pdf_page_number', models.PositiveIntegerField(blank=True, null=True, verbose_name='Страница PDF')),
                 ('width', models.PositiveIntegerField(default=1000, verbose_name='Логическая ширина')),
@@ -118,7 +123,7 @@ class Migration(migrations.Migration):
                 ('version', models.PositiveIntegerField(verbose_name='Версия')),
                 ('reason', models.CharField(choices=[('autosave', 'Автосохранение'), ('student_submit', 'Сдача ученика'), ('teacher_return', 'Проверка учителя'), ('manual_save', 'Ручное сохранение')], default='manual_save', max_length=32, verbose_name='Причина')),
                 ('snapshot', models.JSONField(blank=True, default=dict, verbose_name='Снимок')),
-                ('export_file', models.FileField(blank=True, null=True, upload_to=Cabinet.models.homework_notebook_export_upload_to, verbose_name='PDF-снимок')),
+                ('export_file', models.FileField(blank=True, max_length=1024, null=True, upload_to=Cabinet.models.homework_notebook_export_upload_to, verbose_name='PDF-снимок')),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('created_by', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='homework_notebook_revisions', to=settings.AUTH_USER_MODEL, verbose_name='Автор')),
                 ('notebook', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='revisions', to='Cabinet.homeworknotebook', verbose_name='Тетрадь')),

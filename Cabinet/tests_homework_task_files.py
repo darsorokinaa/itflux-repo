@@ -503,6 +503,28 @@ class HomeworkAttachmentMigrationAndEndpointTests(TestCase):
         ).json()
         self.assertEqual(grouped["tasks"]["1"]["student"][0]["filename"], "x.jpg")
 
+    def test_migrate_keeps_long_filename_and_path(self):
+        from Cabinet.homework_task_files import migrate_submission_payload_attachments
+
+        long_name = ("решение_ученика_" * 6) + ".jpg"
+        long_path = "/media/cabinet/homework/attachments/" + ("subdir/" * 8) + long_name
+        submission = HomeworkSubmission.objects.create(
+            homework=self.homework,
+            student=self.student,
+            result_payload={
+                "attachments_by_task_id": {
+                    "101": [{"url": long_path, "filename": long_name, "content_type": "image/jpeg"}],
+                }
+            },
+        )
+        report = migrate_submission_payload_attachments(submission)
+        self.assertEqual(report["created"], 1)
+        row = HomeworkAttachment.objects.get(submission=submission)
+        self.assertTrue(row.original_filename.endswith(".jpg"))
+        self.assertLessEqual(len(row.original_filename), 512)
+        self.assertLessEqual(len(row.legacy_url), 1024)
+        self.assertEqual(row.task_key, "101")
+
     def test_migrate_dual_map_without_id_keeps_one_row(self):
         from Cabinet.homework_task_files import migrate_submission_payload_attachments
 

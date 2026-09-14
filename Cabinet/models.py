@@ -2029,11 +2029,11 @@ class HomeworkAttachment(models.Model):
     )
     task_key = models.CharField(
         "Идентификатор задания",
-        max_length=64,
+        max_length=255,
         db_index=True,
         help_text="Стабильный id задания варианта или PK HomeworkTask. Не номер и не URL.",
     )
-    task_number = models.CharField("Номер задания (метаданные)", max_length=32, blank=True)
+    task_number = models.CharField("Номер задания (метаданные)", max_length=64, blank=True)
     uploaded_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -2056,10 +2056,11 @@ class HomeworkAttachment(models.Model):
     file = models.FileField(
         "Файл",
         upload_to=homework_attachment_upload_to,
+        max_length=1024,
         blank=True,
         null=True,
     )
-    original_filename = models.CharField("Исходное имя", max_length=255, blank=True)
+    original_filename = models.CharField("Исходное имя", max_length=512, blank=True)
     mime_type = models.CharField("MIME", max_length=128, blank=True)
     file_size = models.BigIntegerField("Размер", default=0)
     checksum = models.CharField("SHA-256", max_length=64, blank=True)
@@ -2103,7 +2104,7 @@ class HomeworkNotebook(models.Model):
         related_name="notebooks",
         verbose_name="Задание ДЗ",
     )
-    task_key = models.CharField("Идентификатор задания", max_length=64, db_index=True)
+    task_key = models.CharField("Идентификатор задания", max_length=255, db_index=True)
     created_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -2173,6 +2174,7 @@ class HomeworkNotebookPage(models.Model):
     background_file = models.FileField(
         "Растр фона",
         upload_to=homework_notebook_page_background_upload_to,
+        max_length=1024,
         blank=True,
         null=True,
     )
@@ -2225,6 +2227,7 @@ class HomeworkNotebookRevision(models.Model):
     export_file = models.FileField(
         "PDF-снимок",
         upload_to=homework_notebook_export_upload_to,
+        max_length=1024,
         blank=True,
         null=True,
     )

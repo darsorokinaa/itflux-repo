@@ -344,6 +344,10 @@ def _legacy_task_key_for_number(submission: HomeworkSubmission, number: str) -> 
     return num, "number_as_key"
 
 
+def _clip(value, limit: int) -> str:
+    return str(value or "")[:limit]
+
+
 def migrate_submission_payload_attachments(submission: HomeworkSubmission) -> dict:
     """Создаёт HomeworkAttachment из JSON. Каждое вложение сохраняется, ничего не удаляется."""
     payload = submission.result_payload if isinstance(submission.result_payload, dict) else {}
@@ -419,23 +423,31 @@ def migrate_submission_payload_attachments(submission: HomeworkSubmission) -> di
                 submission=submission,
                 homework_id=submission.homework_id,
                 homework_task=resolve_homework_task(submission.homework, resolved_key),
-                task_key=resolved_key,
-                task_number=task_number,
+                task_key=_clip(resolved_key, 255),
+                task_number=_clip(task_number, 64),
                 uploaded_by=None,
                 owner_role=owner_role,
                 attachment_type=attachment_type,
-                original_filename=filename,
-                mime_type=str(item.get("content_type") or ""),
-                storage_path=storage_path,
-                legacy_url=url,
+                original_filename=_clip(filename, 255),
+                mime_type=_clip(item.get("content_type") or "", 128),
+                storage_path=_clip(storage_path, 512),
+                legacy_url=_clip(url, 1024),
             )
-            if storage_path and default_storage.exists(storage_path):
+            file_max = min(HomeworkAttachment._meta.get_field("file").max_length or 100, 1024)
+            if storage_path and len(storage_path) <= file_max and default_storage.exists(storage_path):
                 row.file.name = storage_path
                 try:
                     row.file_size = default_storage.size(storage_path)
                 except Exception:
                     row.file_size = 0
-            row.save()
+            try:
+                row.save()
+            except Exception:
+                row.file = None
+                row.task_key = _clip(resolved_key, 64)
+                row.task_number = _clip(task_number, 32)
+                row.original_filename = _clip(filename, 255)
+                row.save()
             existing_ids.add(str(row.id))
             if url:
                 existing_urls.add((owner_role, url))
