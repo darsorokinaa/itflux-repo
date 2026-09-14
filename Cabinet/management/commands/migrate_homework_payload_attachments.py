@@ -1,7 +1,8 @@
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
+from django.db import connection
 
 from Cabinet.homework_task_files import migrate_submission_payload_attachments
-from Cabinet.models import HomeworkSubmission
+from Cabinet.models import HomeworkAttachment, HomeworkSubmission
 
 
 class Command(BaseCommand):
@@ -12,6 +13,11 @@ class Command(BaseCommand):
         parser.add_argument("--dry-run", action="store_true")
 
     def handle(self, *args, **options):
+        table = HomeworkAttachment._meta.db_table
+        if table not in connection.introspection.table_names():
+            raise CommandError(
+                f"Таблица {table} ещё не создана. Сначала выполните: python manage.py migrate"
+            )
         qs = HomeworkSubmission.objects.all().order_by("id")
         if options.get("submission_id"):
             qs = qs.filter(pk=options["submission_id"])
