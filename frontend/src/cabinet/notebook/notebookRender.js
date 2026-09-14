@@ -10,11 +10,24 @@ export function strokeSize(obj) {
 
 function drawSmoothStroke(ctx, points, { pressure = false, baseWidth = 3 } = {}) {
   if (!points || points.length < 2) return;
+  if (pressure) {
+    for (let i = 1; i < points.length; i += 1) {
+      const a = points[i - 1];
+      const b = points[i];
+      const p = b.pressure ?? a.pressure ?? 0.5;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.lineWidth = baseWidth * (0.32 + 1.15 * p);
+      ctx.stroke();
+    }
+    return;
+  }
   ctx.beginPath();
   ctx.moveTo(points[0].x, points[0].y);
   if (points.length === 2) {
     ctx.lineTo(points[1].x, points[1].y);
-    ctx.lineWidth = pressure ? baseWidth * (0.4 + 0.8 * (points[1].pressure ?? 0.5)) : baseWidth;
+    ctx.lineWidth = baseWidth;
     ctx.stroke();
     return;
   }
@@ -25,12 +38,7 @@ function drawSmoothStroke(ctx, points, { pressure = false, baseWidth = 3 } = {})
   }
   const last = points[points.length - 1];
   ctx.lineTo(last.x, last.y);
-  if (pressure) {
-    const avg = points.reduce((sum, pt) => sum + (pt.pressure ?? 0.5), 0) / points.length;
-    ctx.lineWidth = baseWidth * (0.45 + 0.9 * avg);
-  } else {
-    ctx.lineWidth = baseWidth;
-  }
+  ctx.lineWidth = baseWidth;
   ctx.stroke();
 }
 

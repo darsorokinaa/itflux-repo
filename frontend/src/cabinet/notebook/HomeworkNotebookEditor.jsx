@@ -84,14 +84,15 @@ export default function HomeworkNotebookEditor({
   const dirtyRef = useRef(false);
   const docRef = useRef(doc);
   const saveTimer = useRef(null);
-  const saveSeq = useRef(0);
-  const saveAbort = useRef(null);
+  const saveInFlight = useRef(false);
+  const saveAgain = useRef(false);
+  const saveWaiters = useRef([]);
+  const saveSnapshot = useRef(false);
   const pdfCache = useRef(new Map());
   const stageRef = useRef(null);
   const prevToolRef = useRef(TOOL.PEN);
   const clipboardRef = useRef([]);
 
-  docRef.current = doc;
   const readOnly = Boolean(doc?.readonly || publishedMode || publishedPayload);
   const pages = doc?.pages || [];
   const page = pages[pageIndex] || pages[0];
@@ -105,14 +106,19 @@ export default function HomeworkNotebookEditor({
 
   const load = useCallback(async () => {
     if (publishedPayload?.document) {
-      setDoc({ ...publishedPayload.document, readonly: true });
+      const next = { ...publishedPayload.document, readonly: true };
+      docRef.current = next;
+      setDoc(next);
       return;
     }
     const data = await fetchHomeworkNotebook(notebookId);
     if (data.published && data.document) {
-      setDoc({ ...data.document, readonly: true, published: true });
+      const next = { ...data.document, readonly: true, published: true };
+      docRef.current = next;
+      setDoc(next);
       return;
     }
+    docRef.current = data;
     setDoc(data);
     setSaveState("saved");
   }, [notebookId, publishedPayload]);
@@ -134,58 +140,107 @@ export default function HomeworkNotebookEditor({
 
   const flushSave = useCallback(async (nextDoc = docRef.current, { snapshot = false } = {}) => {
     if (readOnly || !nextDoc?.id) return nextDoc;
+    if (nextDoc) {
+      docRef.current = {
+        ...nextDoc,
+        version: docRef.current?.version ?? nextDoc.version,
+      };
+    }
+    saveAgain.current = true;
+    if (snapshot) saveSnapshot.current = true;
+    if (saveInFlight.current) {
+      return new Promise((resolve, reject) => {
+        saveWaiters.current.push({ resolve, reject });
+      });
+    }
+    saveInFlight.current = true;
     clearTimeout(saveTimer.current);
-    const seq = ++saveSeq.current;
-    saveAbort.current?.abort();
-    const controller = new AbortController();
-    saveAbort.current = controller;
     setSaveState("saving");
+    const finishWaiters = (ok, value) => {
+      const waiters = saveWaiters.current.splice(0);
+      waiters.forEach((waiter) => (ok ? waiter.resolve(value) : waiter.reject(value)));
+    };
     try {
-      const saved = await saveHomeworkNotebook(nextDoc.id, {
-        version: nextDoc.version,
-        pages: persistPages(nextDoc.pages),
-        reason: snapshot ? "manual_save" : "autosave",
-        snapshot,
-      }, { signal: controller.signal });
-      if (seq !== saveSeq.current) return saved;
-      dirtyRef.current = false;
-      setDoc((prev) => (prev ? { ...prev, version: saved.version } : saved));
-      setSaveState("saved");
-      setError("");
-      return { ...nextDoc, version: saved.version };
-    } catch (err) {
-      if (err.name === "AbortError") return nextDoc;
-      if (err.code === "version_conflict" && err.data?.document) {
-        setDoc(err.data.document);
-        setError("Тетрадь изменилась в другой вкладке. Загружена новая версия.");
-        setSaveState("saved");
-        dirtyRef.current = false;
-        historyRef.current.clear();
-        syncHistoryButtons();
-        return err.data.document;
+      let attempts = 0;
+      while (saveAgain.current && attempts < 6) {
+        saveAgain.current = false;
+        attempts += 1;
+        const payload = docRef.current;
+        if (!payload?.id) break;
+        try {
+          const saved = await saveHomeworkNotebook(payload.id, {
+            version: payload.version,
+            pages: persistPages(payload.pages),
+            reason: saveSnapshot.current ? "manual_save" : "autosave",
+            snapshot: saveSnapshot.current,
+          });
+          const merged = { ...(docRef.current || payload), version: saved.version };
+          docRef.current = merged;
+          setDoc((prev) => (prev ? { ...prev, version: saved.version } : merged));
+          if (saveAgain.current) continue;
+          dirtyRef.current = Boolean(saveTimer.current);
+          saveSnapshot.current = false;
+          if (!dirtyRef.current) {
+            setSaveState("saved");
+            setError((prev) => (prev && /вкладк/i.test(prev) ? "" : prev));
+          }
+          finishWaiters(true, merged);
+          return merged;
+        } catch (err) {
+          if (err.code === "version_conflict") {
+            const serverVersion = Number(err.data?.current_version ?? err.data?.document?.version);
+            if (Number.isFinite(serverVersion)) {
+              docRef.current = { ...(docRef.current || payload), version: serverVersion };
+              saveAgain.current = true;
+              continue;
+            }
+          }
+          setSaveState("error");
+          setError(err.message && /вкладк/i.test(err.message)
+            ? "Не удалось сохранить. Попробуйте ещё раз."
+            : (err.message || "Ошибка сохранения"));
+          finishWaiters(false, err);
+          throw err;
+        }
       }
       setSaveState("error");
-      setError(err.message || "Ошибка сохранения");
-      throw err;
+      setError("Не удалось сохранить тетрадь. Попробуйте ещё раз.");
+      finishWaiters(true, docRef.current);
+      return docRef.current;
+    } finally {
+      saveInFlight.current = false;
+      if (saveAgain.current) {
+        saveTimer.current = setTimeout(() => {
+          flushSave(docRef.current).catch(() => {});
+        }, 0);
+      }
     }
   }, [readOnly]);
 
   const scheduleSave = useCallback((nextDoc) => {
     if (readOnly || !nextDoc?.id) return;
     dirtyRef.current = true;
+    docRef.current = {
+      ...nextDoc,
+      version: docRef.current?.version ?? nextDoc.version,
+    };
     setSaveState("saving");
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      flushSave(nextDoc).catch(() => {});
+      flushSave(docRef.current).catch(() => {});
     }, 800);
   }, [flushSave, readOnly]);
 
   const applyDoc = (nextDoc, { history = null, save = true } = {}) => {
+    const stamped = {
+      ...nextDoc,
+      version: docRef.current?.version ?? nextDoc.version,
+    };
     if (history) historyRef.current.push(history);
-    setDoc(nextDoc);
-    docRef.current = nextDoc;
+    docRef.current = stamped;
+    setDoc(stamped);
     syncHistoryButtons();
-    if (save) scheduleSave(nextDoc);
+    if (save) scheduleSave(stamped);
   };
 
   const commitObjects = (nextObjects, historyType = "UPDATE_ANNOTATION") => {
@@ -441,8 +496,9 @@ export default function HomeworkNotebookEditor({
     try {
       await flushSave().catch(() => {});
       const data = file
-        ? await addHomeworkNotebookPage(doc.id, { page_type: "attachment" }, file)
-        : await addHomeworkNotebookPage(doc.id, kind);
+        ? await addHomeworkNotebookPage(docRef.current.id, { page_type: "attachment" }, file)
+        : await addHomeworkNotebookPage(docRef.current.id, kind);
+      docRef.current = data.document;
       setDoc(data.document);
       setPageIndex((data.document.pages || []).length - 1);
       setSaveState("saved");
@@ -457,7 +513,8 @@ export default function HomeworkNotebookEditor({
     if (readOnly || !page || pages.length <= 1) return;
     setBusy(true);
     try {
-      const data = await deleteHomeworkNotebookPage(doc.id, page.id);
+      const data = await deleteHomeworkNotebookPage(docRef.current.id, page.id);
+      docRef.current = data.document;
       setDoc(data.document);
       setPageIndex((idx) => Math.max(0, idx - 1));
     } catch (err) {

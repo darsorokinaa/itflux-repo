@@ -7,7 +7,10 @@ import {
   handleAtPoint,
   hitRotateHandle,
   hitTest,
+  isStylusPointer,
   moveObject,
+  pointerEventSamples,
+  pointerPressure,
   rectsIntersect,
   scaleAnnotation,
   smoothStroke,
@@ -25,18 +28,27 @@ function cursorForTool(tool, { grabbing, spacePan, editingText } = {}) {
   return "crosshair";
 }
 
-function pressureOf(event) {
-  if (event.pointerType === "pen" && Number.isFinite(event.pressure) && event.pressure > 0) {
-    return event.pressure;
-  }
-  return 0.5;
+function pressureOf(event, fallback = 0.5) {
+  return pointerPressure(event, fallback);
 }
 
-function maybePushPoint(points, point) {
+function pagePointFromEvent(event, canvas, page, { clamp = true } = {}) {
+  return {
+    ...clientToPage(event, canvas, page, { clamp }),
+    pressure: pressureOf(event),
+  };
+}
+
+function maybePushPoint(points, point, minDistance = 0.35) {
   const last = points[points.length - 1];
-  if (!last || Math.hypot(point.x - last.x, point.y - last.y) >= 1.15) {
+  if (!last || Math.hypot(point.x - last.x, point.y - last.y) >= minDistance) {
     points.push(point);
+    return true;
   }
+  last.x = point.x;
+  last.y = point.y;
+  last.pressure = point.pressure ?? last.pressure;
+  return false;
 }
 
 export default function NotebookCanvas({
@@ -96,6 +108,25 @@ export default function NotebookCanvas({
     schedulePaint();
   }, [objects, selectedIds, page, textDraft, editingText]);
 
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return undefined;
+    const block = (event) => {
+      if (event.pointerType === "pen" || event.pointerType === "touch") event.preventDefault();
+    };
+    const blockTouch = (event) => event.preventDefault();
+    canvas.addEventListener("pointerdown", block, { passive: false });
+    canvas.addEventListener("pointermove", block, { passive: false });
+    canvas.addEventListener("touchstart", blockTouch, { passive: false });
+    canvas.addEventListener("touchmove", blockTouch, { passive: false });
+    return () => {
+      canvas.removeEventListener("pointerdown", block);
+      canvas.removeEventListener("pointermove", block);
+      canvas.removeEventListener("touchstart", blockTouch);
+      canvas.removeEventListener("touchmove", blockTouch);
+    };
+  }, [page]);
+
   useEffect(() => () => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
   }, []);
@@ -122,7 +153,9 @@ export default function NotebookCanvas({
     const session = sessionRef.current;
     if (session?.pointerType === "pen" && event.pointerType === "touch") return;
     const canvas = canvasRef.current;
-    const point = clientToPage(event, canvas, page);
+    const stylus = isStylusPointer(event);
+    if (stylus || event.pointerType === "touch") event.preventDefault();
+    const point = pagePointFromEvent(event, canvas, page, { clamp: !stylus });
     const currentTool = spacePan || event.button === 1 ? TOOL.HAND : toolRef.current;
     if (textDraft && currentTool !== TOOL.TEXT) finishText(true);
 
@@ -250,7 +283,7 @@ export default function NotebookCanvas({
       return;
     }
 
-    if (event.pointerType === "touch" && [TOOL.PEN, TOOL.MARKER, TOOL.LINE, TOOL.ARROW, TOOL.RECT, TOOL.ELLIPSE].includes(currentTool)) {
+    if (event.pointerType === "touch" && !stylus && [TOOL.PEN, TOOL.MARKER, TOOL.LINE, TOOL.ARROW, TOOL.RECT, TOOL.ELLIPSE].includes(currentTool)) {
       sessionRef.current = {
         mode: "pan",
         pointerId: event.pointerId,
@@ -289,8 +322,13 @@ export default function NotebookCanvas({
   const pointerMove = (event) => {
     const session = sessionRef.current;
     if (!session || session.pointerId !== event.pointerId) return;
+    if (session.pointerType === "pen" || event.pointerType === "touch") event.preventDefault();
     const canvas = canvasRef.current;
-    const point = clientToPage(event, canvas, page);
+    const stylus = session.pointerType === "pen" || isStylusPointer(event);
+    const samples = session.mode === "draw" && (session.tool === TOOL.PEN || session.tool === TOOL.MARKER)
+      ? pointerEventSamples(event)
+      : [event];
+    const point = pagePointFromEvent(samples[samples.length - 1] || event, canvas, page, { clamp: !stylus });
     if (session.mode === "pan") {
       onPanDelta?.({
         dx: event.clientX - session.lastClient.x,
@@ -360,9 +398,13 @@ export default function NotebookCanvas({
     if (session.mode === "draw") {
       session.shift = event.shiftKey;
       session.alt = event.altKey;
-      const live = { ...point, pressure: pressureOf(event) };
       if (session.tool === TOOL.PEN || session.tool === TOOL.MARKER) {
-        maybePushPoint(session.points, live);
+        const minDistance = session.pointerType === "pen" ? 0.22 : 0.7;
+        samples.forEach((sample) => {
+          const live = pagePointFromEvent(sample, canvas, page, { clamp: session.pointerType !== "pen" });
+          live.pressure = pressureOf(sample, session.points[session.points.length - 1]?.pressure ?? 0.5);
+          maybePushPoint(session.points, live, minDistance);
+        });
         draftRef.current = {
           id: "draft",
           type: session.tool,
@@ -374,7 +416,7 @@ export default function NotebookCanvas({
           opacity: session.tool === TOOL.MARKER ? (opacity ?? 0.28) : 1,
         };
       } else if (session.tool === TOOL.LINE || session.tool === TOOL.ARROW) {
-        const end = constrainLine(session.start, live, session.shift);
+        const end = constrainLine(session.start, point, session.shift);
         draftRef.current = {
           id: "draft",
           type: session.tool,
@@ -388,7 +430,7 @@ export default function NotebookCanvas({
           width: strokeWidth,
         };
       } else if (session.tool === TOOL.RECT || session.tool === TOOL.ELLIPSE) {
-        const box = constrainBox(session.start, live, { shift: session.shift, alt: session.alt });
+        const box = constrainBox(session.start, point, { shift: session.shift, alt: session.alt });
         draftRef.current = session.tool === TOOL.RECT
           ? {
             id: "draft",
@@ -450,7 +492,11 @@ export default function NotebookCanvas({
     let created = null;
     const id = crypto.randomUUID?.() || `ann-${Date.now()}`;
     if (session.tool === TOOL.PEN || session.tool === TOOL.MARKER) {
-      const points = smoothStroke([...(session.points || []), point], Math.max(0, Number(smoothing) || 0));
+      const last = pagePointFromEvent(event, canvas, page, { clamp: session.pointerType !== "pen" });
+      last.pressure = pressureOf(event, session.points[session.points.length - 1]?.pressure ?? 0.5);
+      maybePushPoint(session.points, last, session.pointerType === "pen" ? 0.18 : 0.7);
+      const refine = session.pointerType === "pen" ? 0 : Math.max(0, Number(smoothing) || 0);
+      const points = refine ? smoothStroke(session.points, refine) : session.points;
       if (points.length < 2) {
         draftRef.current = null;
         schedulePaint();
@@ -518,7 +564,7 @@ export default function NotebookCanvas({
         className="hw-notebook-canvas"
         width={width}
         height={height}
-        style={{ cursor: cursorForTool(tool, { grabbing, spacePan, editingText: editor }) }}
+        style={{ cursor: cursorForTool(tool, { grabbing, spacePan, editingText: editor }), touchAction: "none" }}
         onPointerDown={pointerDown}
         onPointerMove={pointerMove}
         onPointerUp={pointerUp}

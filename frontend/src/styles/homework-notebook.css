@@ -124,6 +124,9 @@ body:has(.hw-notebook) .cb-ai-embed-launcher {
 
 .hw-notebook-canvas {
   touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .hw-notebook-text-editor {

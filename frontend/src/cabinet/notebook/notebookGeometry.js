@@ -10,16 +10,41 @@ export function emptyPageState() {
   return { version: 1, objects: [] };
 }
 
-export function clientToPage(event, canvas, page) {
+export function clientToPage(event, canvas, page, { clamp = true } = {}) {
   const rect = canvas.getBoundingClientRect();
   const width = page?.width || PAGE_WIDTH;
   const height = page?.height || PAGE_HEIGHT;
-  const x = ((event.clientX - rect.left) / rect.width) * width;
-  const y = ((event.clientY - rect.top) / rect.height) * height;
+  const x = ((event.clientX - rect.left) / Math.max(1, rect.width)) * width;
+  const y = ((event.clientY - rect.top) / Math.max(1, rect.height)) * height;
+  if (!clamp) return { x, y };
   return {
     x: Math.max(0, Math.min(width, x)),
     y: Math.max(0, Math.min(height, y)),
   };
+}
+
+export function pointerEventSamples(event) {
+  const native = event?.nativeEvent || event;
+  try {
+    const extra = (typeof event?.getCoalescedEvents === "function" && event.getCoalescedEvents())
+      || (typeof native?.getCoalescedEvents === "function" && native.getCoalescedEvents());
+    if (extra && extra.length) return extra;
+  } catch {
+    /* ignore */
+  }
+  return event ? [event] : [];
+}
+
+export function pointerPressure(event, fallback = 0.5) {
+  if (event?.pointerType === "pen") {
+    const value = Number(event.pressure);
+    if (Number.isFinite(value) && value > 0) return Math.min(1, value);
+  }
+  return fallback;
+}
+
+export function isStylusPointer(event) {
+  return event?.pointerType === "pen";
 }
 
 export function smoothStroke(points, iterations = 1) {
