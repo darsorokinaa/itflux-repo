@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import uuid
 from copy import deepcopy
 
@@ -19,17 +20,22 @@ from rest_framework.views import APIView
 
 from .choices import (
     HomeworkAttachmentOwnerRole,
+    HomeworkAttachmentType,
     HomeworkNotebookPageType,
     HomeworkNotebookRevisionReason,
     HomeworkNotebookStatus,
 )
 from .homework_task_files import (
     COMMENT_TASK_KEY,
+    create_task_attachments,
     file_response_for_attachment,
+    grouped_task_attachments,
     serialize_homework_task_attachment,
+    soft_delete_attachment,
     user_can_view_submission,
     user_can_write_student_files,
     user_can_write_teacher_files,
+    HomeworkTaskFileError,
 )
 from .models import (
     HomeworkAttachment,
@@ -318,7 +324,7 @@ def create_revision(
     )
     if export_bytes:
         revision.export_file.save(
-            export_name or f"notebook-{notebook.id}.pdf",
+            export_name or "notebook.pdf",
             ContentFile(export_bytes),
             save=False,
         )
@@ -349,6 +355,9 @@ def apply_page_payloads(notebook: HomeworkNotebook, pages_payload: list) -> None
             item["id"] = obj_id
             cleaned_objects.append(item)
         state = {"version": int(state.get("version") or 1), "objects": cleaned_objects}
+        viewport = raw.get("state", {}).get("viewport") if isinstance(raw.get("state"), dict) else None
+        if isinstance(viewport, dict):
+            state["viewport"] = viewport
         width = int(raw.get("width") or DEFAULT_PAGE_WIDTH)
         height = int(raw.get("height") or DEFAULT_PAGE_HEIGHT)
         page_type = str(raw.get("page_type") or "").strip() or HomeworkNotebookPageType.BLANK
@@ -406,9 +415,9 @@ def objects_to_svg(state: dict, width: int, height: int) -> str:
         if not isinstance(obj, dict):
             continue
         kind = str(obj.get("type") or "")
-        color = str(obj.get("color") or "#d32f2f")
-        stroke = float(obj.get("width") or obj.get("strokeWidth") or 3)
-        opacity = float(obj.get("opacity") or (0.35 if kind == "marker" else 1))
+        color = str(obj.get("stroke") or obj.get("color") or "#d32f2f")
+        stroke = float(obj.get("strokeWidth") or obj.get("width") or 3)
+        opacity = float(obj.get("opacity") if obj.get("opacity") is not None else (0.28 if kind == "marker" else 1))
         if kind in ("pen", "marker", "eraser"):
             points = obj.get("points") or []
             if len(points) < 2:
@@ -513,6 +522,119 @@ def export_notebook_pdf(notebook: HomeworkNotebook) -> bytes:
     from weasyprint import HTML
 
     return HTML(string=html, base_url=".").write_pdf()
+
+
+def pdf_from_page_images(uploaded_files: list) -> bytes:
+    import base64
+
+    sections = []
+    for uploaded in uploaded_files:
+        data = uploaded.read()
+        if hasattr(uploaded, "seek"):
+            try:
+                uploaded.seek(0)
+            except Exception:
+                pass
+        mime = str(getattr(uploaded, "content_type", "") or "image/jpeg").split(";")[0].strip() or "image/jpeg"
+        b64 = base64.b64encode(data).decode("ascii")
+        sections.append(
+            f'<section class="page"><img src="data:{mime};base64,{b64}" alt="" /></section>'
+        )
+    html = f"""<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@page {{ size: A4; margin: 0; }}
+html, body {{ margin: 0; padding: 0; }}
+.page {{
+  position: relative;
+  width: 210mm;
+  height: 297mm;
+  page-break-after: always;
+  overflow: hidden;
+  background: #fff;
+}}
+.page img {{ position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }}
+</style></head><body>{''.join(sections)}</body></html>"""
+    from weasyprint import HTML
+
+    return HTML(string=html, base_url=".").write_pdf()
+
+
+def _replace_previous_notebook_exports(notebook: HomeworkNotebook, *, actor) -> None:
+    previous = HomeworkAttachment.objects.filter(
+        submission=notebook.submission,
+        task_key=notebook.task_key,
+        owner_role=notebook.owner_role,
+        attachment_type=HomeworkAttachmentType.NOTEBOOK_EXPORT,
+        is_deleted=False,
+    )
+    for attachment in previous:
+        soft_delete_attachment(attachment, actor=actor)
+
+
+def complete_notebook_with_export(
+    notebook: HomeworkNotebook,
+    *,
+    user,
+    uploaded_pages: list | None = None,
+    export_file=None,
+) -> tuple[HomeworkNotebook, HomeworkNotebookRevision, HomeworkAttachment | None]:
+    pages = list(uploaded_pages or [])
+    export_bytes = None
+    export_name = ""
+    attach_file = export_file
+    if attach_file is None and len(pages) == 1:
+        attach_file = pages[0]
+    elif attach_file is None and len(pages) > 1:
+        export_bytes = pdf_from_page_images(pages)
+        export_name = "checked.pdf"
+        attach_file = ContentFile(export_bytes, name=export_name)
+        attach_file.content_type = "application/pdf"
+    if attach_file is not None and export_bytes is None:
+        raw = attach_file.read()
+        if hasattr(attach_file, "seek"):
+            try:
+                attach_file.seek(0)
+            except Exception:
+                pass
+        export_bytes = raw
+        export_name = os.path.basename(getattr(attach_file, "name", "") or "") or "checked.jpg"
+        if len(export_name) > 48:
+            ext = os.path.splitext(export_name)[1] or ".jpg"
+            export_name = f"checked{ext}"
+
+    reason = HomeworkNotebookRevisionReason.STUDENT_SUBMIT
+    new_status = HomeworkNotebookStatus.SUBMITTED
+    if notebook.owner_role == HomeworkAttachmentOwnerRole.TEACHER:
+        reason = HomeworkNotebookRevisionReason.TEACHER_RETURN
+        new_status = HomeworkNotebookStatus.RETURNED
+
+    with transaction.atomic():
+        locked = HomeworkNotebook.objects.select_for_update().select_related("submission").get(pk=notebook.pk)
+        revision = create_revision(
+            locked,
+            user=user,
+            reason=reason,
+            export_bytes=export_bytes,
+            export_name=export_name or "notebook.pdf",
+        )
+        locked.status = new_status
+        if locked.owner_role == HomeworkAttachmentOwnerRole.TEACHER:
+            locked.published_revision = revision
+        locked.save(update_fields=["status", "published_revision", "updated_at"])
+        attachment = None
+        if attach_file is not None:
+            _replace_previous_notebook_exports(locked, actor=user)
+            created = create_task_attachments(
+                submission=locked.submission,
+                uploaded_files=[attach_file],
+                task_key=locked.task_key,
+                user=user,
+                teacher=locked.owner_role == HomeworkAttachmentOwnerRole.TEACHER,
+                attachment_type=HomeworkAttachmentType.NOTEBOOK_EXPORT,
+            )
+            attachment = created[0] if created else None
+        return locked, revision, attachment
 
 
 def _submission_or_404(submission_id: int):
@@ -659,10 +781,36 @@ class HomeworkNotebookPageCreateView(APIView):
         if not notebook or not user_can_edit_notebook(request.user, notebook):
             return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
         kind = str(request.data.get("page_type") or "blank").strip()
+        uploaded = request.FILES.get("file")
         with transaction.atomic():
             locked = HomeworkNotebook.objects.select_for_update().get(pk=notebook.pk)
             created_pages = []
-            if kind == "blank":
+            if uploaded:
+                try:
+                    validate_uploaded_file(uploaded)
+                except UploadValidationError as exc:
+                    return Response({"error": exc.message, "code": exc.code}, status=400)
+                name = (uploaded.name or "").lower()
+                mime = (getattr(uploaded, "content_type", "") or "").lower()
+                if mime in NOTEBOOK_PDF_TYPES or name.endswith(".pdf"):
+                    try:
+                        created = create_task_attachments(
+                            submission=locked.submission,
+                            uploaded_files=[uploaded],
+                            task_key=locked.task_key,
+                            user=request.user,
+                            teacher=locked.owner_role == HomeworkAttachmentOwnerRole.TEACHER,
+                            attachment_type=HomeworkAttachmentType.NOTEBOOK_SOURCE,
+                        )
+                    except HomeworkTaskFileError as exc:
+                        return Response({"error": exc.message, "code": exc.code}, status=exc.status_code)
+                    created_pages = _add_pages_from_attachment(locked, created[0])
+                else:
+                    page = create_blank_page(locked)
+                    page.page_type = HomeworkNotebookPageType.ATTACHMENT
+                    page.background_file.save(uploaded.name or "page.jpg", uploaded, save=True)
+                    created_pages = [page]
+            elif kind == "blank":
                 created_pages = [create_blank_page(locked)]
             elif kind == "duplicate":
                 source_id = str(request.data.get("page_id") or "")
@@ -789,7 +937,7 @@ class HomeworkNotebookSubmitView(APIView):
                 user=request.user,
                 reason=reason,
                 export_bytes=export_bytes,
-                export_name=f"notebook-{locked.id}.pdf",
+                export_name="notebook.pdf",
             )
             locked.status = new_status
             if notebook.owner_role == HomeworkAttachmentOwnerRole.TEACHER:
@@ -800,6 +948,70 @@ class HomeworkNotebookSubmitView(APIView):
                 "ok": True,
                 "notebook": serialize_notebook(locked),
                 "revision": serialize_revision(revision),
+            }
+        )
+
+
+class HomeworkNotebookCompleteView(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+
+    def post(self, request, notebook_id):
+        notebook = _notebook_or_404(notebook_id)
+        if not notebook or not user_can_edit_notebook(request.user, notebook):
+            return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
+        pages_payload = request.data.get("pages")
+        if isinstance(pages_payload, str):
+            import json
+
+            try:
+                pages_payload = json.loads(pages_payload)
+            except json.JSONDecodeError:
+                return Response({"error": "pages must be JSON"}, status=status.HTTP_400_BAD_REQUEST)
+        if isinstance(pages_payload, list):
+            try:
+                version = int(request.data.get("version"))
+            except (TypeError, ValueError):
+                return Response({"error": "version required"}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                notebook = save_notebook_document(
+                    notebook,
+                    version=version,
+                    pages=pages_payload,
+                    user=request.user,
+                    reason=HomeworkNotebookRevisionReason.MANUAL_SAVE,
+                    snapshot=False,
+                )
+            except NotebookConflict as exc:
+                return Response(
+                    {"error": exc.message, "code": exc.code, **exc.extra},
+                    status=exc.status_code,
+                )
+            except NotebookError as exc:
+                return Response({"error": exc.message, "code": exc.code}, status=exc.status_code)
+        uploaded_pages = list(request.FILES.getlist("pages") or request.FILES.getlist("page"))
+        export_file = request.FILES.get("file")
+        try:
+            locked, revision, attachment = complete_notebook_with_export(
+                notebook,
+                user=request.user,
+                uploaded_pages=uploaded_pages,
+                export_file=export_file,
+            )
+        except HomeworkTaskFileError as exc:
+            return Response({"error": exc.message, "code": exc.code}, status=exc.status_code)
+        except Exception:
+            logger.exception("notebook complete failed notebook=%s", notebook.id)
+            return Response({"error": "Не удалось сформировать файл проверки."}, status=500)
+        return Response(
+            {
+                "ok": True,
+                "notebook": serialize_notebook(locked),
+                "revision": serialize_revision(revision),
+                "attachment": serialize_homework_task_attachment(attachment) if attachment else None,
+                "task_attachments": grouped_task_attachments(locked.submission),
+                "task_id": locked.task_key,
+                "submission_id": locked.submission_id,
             }
         )
 

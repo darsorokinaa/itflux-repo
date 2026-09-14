@@ -133,6 +133,11 @@ urlpatterns = [
         name="homework_notebook_page_delete",
     ),
     path(
+        "api/homework/notebooks/<uuid:notebook_id>/complete/",
+        homework_notebooks.HomeworkNotebookCompleteView.as_view(),
+        name="homework_notebook_complete",
+    ),
+    path(
         "api/homework/notebooks/<uuid:notebook_id>/submit/",
         homework_notebooks.HomeworkNotebookSubmitView.as_view(),
         name="homework_notebook_submit",

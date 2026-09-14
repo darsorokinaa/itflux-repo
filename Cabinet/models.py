@@ -1989,7 +1989,7 @@ def homework_notebook_export_upload_to(instance, filename):
     ident = instance.id or uuid.uuid4()
     notebook = getattr(instance, "notebook", None)
     submission_id = getattr(notebook, "submission_id", None) or "pending"
-    return f"cabinet/homework/notebooks/{submission_id}/{ident}/{name}"
+    return f"cab/nb/{submission_id}/{ident}/{name}"
 
 
 def homework_notebook_page_background_upload_to(instance, filename):
@@ -1998,7 +1998,7 @@ def homework_notebook_page_background_upload_to(instance, filename):
     name = sanitize_filename(filename)
     ident = instance.id or uuid.uuid4()
     notebook_id = getattr(instance, "notebook_id", None) or "pending"
-    return f"cabinet/homework/notebook-pages/{notebook_id}/{ident}/{name}"
+    return f"cab/nb-p/{notebook_id}/{ident}/{name}"
 
 
 class HomeworkAttachment(models.Model):

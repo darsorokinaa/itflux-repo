@@ -56,6 +56,7 @@ import {
   normalizeHomeworkAttachment,
   removeHomeworkAttachment,
 } from "../homeworkAttachmentState";
+import HomeworkNotebookEditor from "../notebook/HomeworkNotebookEditor";
 import { deleteHomeworkAttachment, openHomeworkNotebook } from "../notebook/notebookApi";
 
 const HW_TASK_TYPE_RU = {
@@ -66,10 +67,11 @@ const HW_TASK_TYPE_RU = {
   external_link: "Ссылка",
 };
 
-function TeacherNotebookActions({ submissionId, taskId, enabled }) {
+function TeacherNotebookActions({ submissionId, taskId, enabled, onComplete }) {
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [notebookId, setNotebookId] = useState(null);
   if (!submissionId || taskId == null) return null;
   return (
     <div className="hw-notebook-actions">
@@ -85,7 +87,7 @@ function TeacherNotebookActions({ submissionId, taskId, enabled }) {
                 ownerRole: "teacher",
                 seed: true,
               });
-              navigate(`/cabinet/notebook/${notebook.id}`);
+              setNotebookId(notebook.id);
             } catch (ex) {
               setErr(ex instanceof Error ? ex.message : "Не удалось открыть тетрадь");
             } finally {
@@ -103,6 +105,16 @@ function TeacherNotebookActions({ submissionId, taskId, enabled }) {
         Открыть проверенную работу
       </button>
       {err ? <p className="cb-inline-error" role="alert">{err}</p> : null}
+      {notebookId ? (
+        <HomeworkNotebookEditor
+          notebookId={notebookId}
+          onClose={() => setNotebookId(null)}
+          onComplete={(payload) => {
+            if (payload.attachment) onComplete?.(payload);
+            setNotebookId(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1066,6 +1078,13 @@ export default function CabinetReviewDetailPage() {
                           submissionId={submission?.id}
                           taskId={task.id}
                           enabled={isPending}
+                          onComplete={(payload) => {
+                            if (!payload.attachment) return;
+                            patchReviewAttachments((list) => appendHomeworkAttachments(list, [payload.attachment]), {
+                              taskId: task.id,
+                              taskNumber: task.number,
+                            });
+                          }}
                         />
                       </div>
                       <div className="cb-review-detail__task-files">
@@ -1135,6 +1154,13 @@ export default function CabinetReviewDetailPage() {
                           submissionId={submission?.id}
                           taskId={task.id}
                           enabled={isPending}
+                          onComplete={(payload) => {
+                            if (!payload.attachment) return;
+                            patchReviewAttachments((list) => appendHomeworkAttachments(list, [payload.attachment]), {
+                              taskId: task.id,
+                              taskNumber: task.number,
+                            });
+                          }}
                         />
                       </div>
                       <div className="cb-review-detail__score-row">

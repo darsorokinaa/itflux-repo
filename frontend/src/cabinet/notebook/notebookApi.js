@@ -78,25 +78,41 @@ export async function fetchHomeworkNotebook(notebookId) {
   return parseJson(res);
 }
 
-export async function saveHomeworkNotebook(notebookId, payload) {
+export async function saveHomeworkNotebook(notebookId, payload, { signal } = {}) {
   await ensureCsrfCookie();
   const res = await fetch(`/api/homework/notebooks/${notebookId}/`, {
     method: "PUT",
     credentials: "include",
     headers: csrfHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
+    signal,
   });
   return parseJson(res);
 }
 
-export async function addHomeworkNotebookPage(notebookId, body) {
+export async function addHomeworkNotebookPage(notebookId, body, file) {
   await ensureCsrfCookie();
-  const res = await fetch(`/api/homework/notebooks/${notebookId}/pages/`, {
-    method: "POST",
-    credentials: "include",
-    headers: csrfHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify(body),
-  });
+  let res;
+  if (file) {
+    const fd = new FormData();
+    Object.entries(body || {}).forEach(([key, value]) => {
+      if (value != null) fd.append(key, String(value));
+    });
+    fd.append("file", file);
+    res = await fetch(`/api/homework/notebooks/${notebookId}/pages/`, {
+      method: "POST",
+      body: fd,
+      credentials: "include",
+      headers: csrfHeaders(),
+    });
+  } else {
+    res = await fetch(`/api/homework/notebooks/${notebookId}/pages/`, {
+      method: "POST",
+      credentials: "include",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(body),
+    });
+  }
   return parseJson(res);
 }
 
@@ -104,6 +120,17 @@ export async function deleteHomeworkNotebookPage(notebookId, pageId) {
   await ensureCsrfCookie();
   const res = await fetch(`/api/homework/notebooks/${notebookId}/pages/${pageId}/`, {
     method: "DELETE",
+    credentials: "include",
+    headers: csrfHeaders(),
+  });
+  return parseJson(res);
+}
+
+export async function completeHomeworkNotebook(notebookId, formData) {
+  await ensureCsrfCookie();
+  const res = await fetch(`/api/homework/notebooks/${notebookId}/complete/`, {
+    method: "POST",
+    body: formData,
     credentials: "include",
     headers: csrfHeaders(),
   });

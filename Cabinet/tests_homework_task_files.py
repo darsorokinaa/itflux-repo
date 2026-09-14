@@ -454,6 +454,54 @@ class HomeworkNotebookTests(TestCase):
         )
         self.assertIn(resp.status_code, (403, 404))
 
+    def test_complete_creates_task_attachment_without_replacing_source(self):
+        teacher_nb = self.teacher_client.post(
+            f"/api/homework/submissions/{self.submission.pk}/notebooks/",
+            {"task_id": "A", "owner_role": "teacher", "seed_from_attachments": True},
+            format="json",
+        )
+        self.assertIn(teacher_nb.status_code, (200, 201), teacher_nb.content)
+        doc = teacher_nb.json()
+        source_ids = list(
+            HomeworkAttachment.objects.filter(
+                submission=self.submission, is_deleted=False
+            ).values_list("id", flat=True)
+        )
+        export = SimpleUploadedFile("page-1.jpg", JPG_A, content_type="image/jpeg")
+        done = self.teacher_client.post(
+            f"/api/homework/notebooks/{doc['id']}/complete/",
+            {"version": doc["version"], "pages": export},
+            format="multipart",
+        )
+        self.assertEqual(done.status_code, 200, done.content)
+        payload = done.json()
+        self.assertTrue(payload.get("attachment"))
+        self.assertEqual(payload["task_id"], "A")
+        self.assertEqual(payload["attachment"]["task_id"], "A")
+        self.assertEqual(payload["attachment"]["attachment_type"], "notebook_export")
+        teacher_files = (payload.get("task_attachments") or {}).get("tasks", {}).get("A", {}).get("teacher") or []
+        self.assertTrue(any(item["id"] == payload["attachment"]["id"] for item in teacher_files))
+        for source_id in source_ids:
+            self.assertTrue(
+                HomeworkAttachment.objects.filter(pk=source_id, is_deleted=False).exists(),
+                "исходный файл ученика не должен удаляться",
+            )
+        again = self.teacher_client.post(
+            f"/api/homework/notebooks/{doc['id']}/complete/",
+            {
+                "version": payload["notebook"]["version"],
+                "pages": SimpleUploadedFile("page-1.jpg", JPG_B, content_type="image/jpeg"),
+            },
+            format="multipart",
+        )
+        self.assertEqual(again.status_code, 200, again.content)
+        exports = HomeworkAttachment.objects.filter(
+            submission=self.submission,
+            attachment_type="notebook_export",
+            is_deleted=False,
+        )
+        self.assertEqual(exports.count(), 1)
+
 
 class HomeworkAttachmentMigrationAndEndpointTests(TestCase):
     def setUp(self):

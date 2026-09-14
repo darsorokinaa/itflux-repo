@@ -56,6 +56,7 @@ import {
   deleteHomeworkAnswer,
 } from "../utils/cabinetHomework";
 import { deleteHomeworkAttachment, openHomeworkNotebook, uploadSubmissionTaskAttachment } from "../cabinet/notebook/notebookApi";
+import HomeworkNotebookEditor from "../cabinet/notebook/HomeworkNotebookEditor";
 import {
   appendHomeworkAttachments,
   homeworkAttachmentKey,
@@ -203,6 +204,7 @@ function LessonSolutionUpload({
   const [pendingItems, setPendingItems] = useState([]);
   const [deletingKeys, setDeletingKeys] = useState(() => new Set());
   const [notebookBusy, setNotebookBusy] = useState(false);
+  const [openNotebookId, setOpenNotebookId] = useState(null);
 
   const pendingItemsRef = useRef([]);
   pendingItemsRef.current = pendingItems;
@@ -215,6 +217,21 @@ function LessonSolutionUpload({
 
   const canDeleteAttachment =
     allowDelete && (cabinetMode || homeworkMode) && !!assignmentId && enabled;
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("homework-notebook-complete");
+      if (!raw) return;
+      const payload = JSON.parse(raw);
+      if (String(payload.taskId) !== String(taskId) || String(payload.submissionId) !== String(submissionId)) return;
+      sessionStorage.removeItem("homework-notebook-complete");
+      if (payload.attachment) {
+        onAttachmentsChange?.((prev) => appendHomeworkAttachments(prev, [payload.attachment]));
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [taskId, submissionId, onAttachmentsChange]);
 
   if (!enabled && !(Array.isArray(sentPreviews) && sentPreviews.length) && !submissionId) return null;
   if (!cabinetMode && !lessonToken && !enabled) return null;
@@ -378,6 +395,7 @@ function LessonSolutionUpload({
   };
 
   return (
+    <>
     <div className="lesson-solution-upload" onClick={(e) => e.stopPropagation()}>
       <div className="lesson-solution-upload__head">
         <span className="lesson-solution-upload__label">
@@ -488,7 +506,7 @@ function LessonSolutionUpload({
               setNotebookBusy(true);
               try {
                 const notebook = await openHomeworkNotebook(submissionId, taskId, { ownerRole: "student" });
-                navigate(`/cabinet/notebook/${notebook.id}`);
+                setOpenNotebookId(notebook.id);
               } catch (ex) {
                 setErr(ex instanceof Error ? ex.message : "Не удалось открыть тетрадь");
               } finally {
@@ -562,6 +580,19 @@ function LessonSolutionUpload({
         </div>
       ) : null}
     </div>
+    {openNotebookId ? (
+      <HomeworkNotebookEditor
+        notebookId={openNotebookId}
+        onClose={() => setOpenNotebookId(null)}
+        onComplete={(payload) => {
+          if (payload.attachment) {
+            onAttachmentsChange?.((prev) => appendHomeworkAttachments(prev, [payload.attachment]));
+          }
+          setOpenNotebookId(null);
+        }}
+      />
+    ) : null}
+    </>
   );
 }
 

@@ -1,69 +1,41 @@
-import { useEffect, useRef } from "react";
-import { clientToPage, hitTest, newObjectId } from "./notebookGeometry";
+import { useEffect, useRef, useState } from "react";
+import {
+  annotationBounds,
+  clientToPage,
+  constrainBox,
+  constrainLine,
+  handleAtPoint,
+  hitRotateHandle,
+  hitTest,
+  moveObject,
+  rectsIntersect,
+  scaleAnnotation,
+  smoothStroke,
+} from "./notebookGeometry";
+import { TOOL } from "./notebookModel";
+import { drawNotebookScene } from "./notebookRender";
 
-function drawArrowHead(ctx, x1, y1, x2, y2, color) {
-  const angle = Math.atan2(y2 - y1, x2 - x1);
-  const size = 14;
-  ctx.beginPath();
-  ctx.moveTo(x2, y2);
-  ctx.lineTo(x2 - size * Math.cos(angle - 0.4), y2 - size * Math.sin(angle - 0.4));
-  ctx.lineTo(x2 - size * Math.cos(angle + 0.4), y2 - size * Math.sin(angle + 0.4));
-  ctx.closePath();
-  ctx.fillStyle = color;
-  ctx.fill();
+function cursorForTool(tool, { grabbing, spacePan, editingText } = {}) {
+  if (editingText) return "text";
+  if (grabbing) return "grabbing";
+  if (spacePan || tool === TOOL.HAND) return "grab";
+  if (tool === TOOL.TEXT) return "text";
+  if (tool === TOOL.SELECT) return "default";
+  if (tool === TOOL.ERASER) return "cell";
+  return "crosshair";
 }
 
-export function drawNotebookObjects(ctx, objects, { selectedId, pageWidth, pageHeight } = {}) {
-  ctx.clearRect(0, 0, pageWidth, pageHeight);
-  for (const obj of objects || []) {
-    const color = obj.color || "#d32f2f";
-    const width = obj.width || obj.strokeWidth || 3;
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.fillStyle = color;
-    ctx.lineWidth = width;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.globalAlpha = obj.type === "marker" ? 0.35 : (obj.opacity || 1);
-    if (obj.type === "pen" || obj.type === "marker" || obj.type === "eraser") {
-      const pts = obj.points || [];
-      if (pts.length > 1) {
-        ctx.beginPath();
-        ctx.moveTo(pts[0].x, pts[0].y);
-        pts.slice(1).forEach((pt) => ctx.lineTo(pt.x, pt.y));
-        ctx.stroke();
-      }
-    } else if (obj.type === "line") {
-      ctx.beginPath();
-      ctx.moveTo(obj.x1, obj.y1);
-      ctx.lineTo(obj.x2, obj.y2);
-      ctx.stroke();
-    } else if (obj.type === "arrow") {
-      ctx.beginPath();
-      ctx.moveTo(obj.x1, obj.y1);
-      ctx.lineTo(obj.x2, obj.y2);
-      ctx.stroke();
-      drawArrowHead(ctx, obj.x1, obj.y1, obj.x2, obj.y2, color);
-    } else if (obj.type === "rect" || obj.type === "rectangle") {
-      ctx.strokeRect(obj.x, obj.y, obj.w || 0, obj.h || 0);
-    } else if (obj.type === "ellipse" || obj.type === "circle") {
-      ctx.beginPath();
-      ctx.ellipse(obj.cx || obj.x || 0, obj.cy || obj.y || 0, Math.abs(obj.rx || obj.w || 20), Math.abs(obj.ry || obj.h || 20), 0, 0, Math.PI * 2);
-      ctx.stroke();
-    } else if (obj.type === "text") {
-      ctx.globalAlpha = 1;
-      ctx.font = `${obj.fontSize || 24}px sans-serif`;
-      ctx.fillText(obj.text || "", obj.x || 0, obj.y || 0);
-    }
-    if (selectedId && obj.id === selectedId) {
-      ctx.globalAlpha = 1;
-      ctx.setLineDash([6, 4]);
-      ctx.strokeStyle = "#2563eb";
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect((obj.x ?? obj.x1 ?? (obj.cx || 0) - 20) - 6, (obj.y ?? obj.y1 ?? (obj.cy || 0) - 20) - 18, 80, 40);
-      ctx.setLineDash([]);
-    }
-    ctx.restore();
+function pressureOf(event) {
+  if (event.pointerType === "pen" && Number.isFinite(event.pressure) && event.pressure > 0) {
+    return event.pressure;
+  }
+  return 0.5;
+}
+
+function maybePushPoint(points, point) {
+  const last = points[points.length - 1];
+  if (!last || Math.hypot(point.x - last.x, point.y - last.y) >= 1.15) {
+    points.push(point);
   }
 }
 
@@ -73,165 +45,516 @@ export default function NotebookCanvas({
   tool,
   color,
   strokeWidth,
+  opacity,
   fontSize,
-  selectedId,
-  onChangeObjects,
-  onSelect,
-  readOnly,
+  smoothing = 1,
+  eraserMode = "stroke",
+  selectedIds,
+  onSelectIds,
+  onObjectsCommit,
+  spacePan = false,
+  readOnly = false,
+  editingText,
+  onEditingText,
+  onPanDelta,
 }) {
   const canvasRef = useRef(null);
-  const drawingRef = useRef(null);
+  const objectsRef = useRef(objects || []);
+  const selectedRef = useRef(selectedIds || []);
+  const toolRef = useRef(tool);
+  const sessionRef = useRef(null);
+  const draftRef = useRef(null);
+  const marqueeRef = useRef(null);
+  const rafRef = useRef(0);
+  const [textDraft, setTextDraft] = useState(null);
 
-  useEffect(() => {
+  objectsRef.current = sessionRef.current ? objectsRef.current : (objects || []);
+  selectedRef.current = selectedIds || [];
+  toolRef.current = tool;
+
+  const paint = () => {
+    rafRef.current = 0;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
-    drawNotebookObjects(ctx, objects, {
-      selectedId,
+    drawNotebookScene(ctx, objectsRef.current, {
+      selectedIds: selectedRef.current,
       pageWidth: page?.width || 1000,
       pageHeight: page?.height || 1414,
+      draft: draftRef.current,
+      marquee: marqueeRef.current,
+      hideTextId: textDraft?.id || editingText?.id || null,
     });
-  }, [objects, selectedId, page]);
+  };
+
+  const schedulePaint = () => {
+    if (rafRef.current) return;
+    rafRef.current = requestAnimationFrame(paint);
+  };
+
+  useEffect(() => {
+    schedulePaint();
+  }, [objects, selectedIds, page, textDraft, editingText]);
+
+  useEffect(() => () => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+  }, []);
+
+  const commitObjects = (next, historyType) => {
+    onObjectsCommit?.(next, historyType);
+  };
+
+  const finishText = (keep) => {
+    const current = textDraft || editingText;
+    if (!current) return;
+    const value = keep ? String(current.text || "").trimEnd() : "";
+    const next = objectsRef.current.filter((obj) => obj.id !== current.id);
+    if (value) {
+      next.push({ ...current, text: current.text, updatedAt: new Date().toISOString() });
+    }
+    commitObjects(next, current._created ? "ADD_ANNOTATION" : "UPDATE_ANNOTATION");
+    setTextDraft(null);
+    onEditingText?.(null);
+  };
 
   const pointerDown = (event) => {
-    if (readOnly) return;
+    if (event.button === 2) return;
+    const session = sessionRef.current;
+    if (session?.pointerType === "pen" && event.pointerType === "touch") return;
     const canvas = canvasRef.current;
-    canvas?.setPointerCapture?.(event.pointerId);
     const point = clientToPage(event, canvas, page);
-    if (tool === "select") {
-      const hit = [...(objects || [])].reverse().find((obj) => hitTest(obj, point));
-      onSelect?.(hit?.id || null);
-      drawingRef.current = hit ? { mode: "move", id: hit.id, last: point } : null;
+    const currentTool = spacePan || event.button === 1 ? TOOL.HAND : toolRef.current;
+    if (textDraft && currentTool !== TOOL.TEXT) finishText(true);
+
+    if (currentTool === TOOL.HAND || event.button === 1) {
+      sessionRef.current = {
+        mode: "pan",
+        pointerId: event.pointerId,
+        pointerType: event.pointerType,
+        lastClient: { x: event.clientX, y: event.clientY },
+      };
+      canvas?.setPointerCapture?.(event.pointerId);
       return;
     }
-    if (tool === "eraser") {
-      const next = (objects || []).filter((obj) => !hitTest(obj, point, 16));
-      onChangeObjects(next);
+    if (readOnly) return;
+    canvas?.setPointerCapture?.(event.pointerId);
+
+    if (currentTool === TOOL.SELECT) {
+      const selected = selectedRef.current;
+      const currentObjects = objectsRef.current;
+      if (selected.length === 1) {
+        const obj = currentObjects.find((item) => item.id === selected[0]);
+        if (obj) {
+          const box = annotationBounds(obj);
+          if ((obj.type === "rect" || obj.type === "ellipse" || obj.type === "text") && hitRotateHandle(box, point)) {
+            sessionRef.current = {
+              mode: "rotate",
+              pointerId: event.pointerId,
+              origin: currentObjects,
+              id: obj.id,
+              center: { x: box.x + box.w / 2, y: box.y + box.h / 2 },
+              startAngle: Math.atan2(point.y - (box.y + box.h / 2), point.x - (box.x + box.w / 2)),
+              startRotation: obj.rotation || 0,
+            };
+            return;
+          }
+          const handle = handleAtPoint({ x: box.x - 6, y: box.y - 6, w: box.w + 12, h: box.h + 12 }, point, 12);
+          if (handle) {
+            sessionRef.current = {
+              mode: "resize",
+              pointerId: event.pointerId,
+              origin: currentObjects,
+              id: obj.id,
+              handle,
+              shift: event.shiftKey,
+            };
+            return;
+          }
+        }
+      }
+      const hit = [...currentObjects].reverse().find((obj) => hitTest(obj, point));
+      let nextSelected = selected;
+      if (hit) {
+        if (event.shiftKey) {
+          nextSelected = selected.includes(hit.id)
+            ? selected.filter((id) => id !== hit.id)
+            : [...selected, hit.id];
+        } else if (!selected.includes(hit.id)) {
+          nextSelected = [hit.id];
+        }
+        onSelectIds?.(nextSelected);
+        sessionRef.current = {
+          mode: event.altKey ? "duplicate-drag" : "move",
+          pointerId: event.pointerId,
+          origin: currentObjects,
+          ids: nextSelected.length ? nextSelected : [hit.id],
+          startPoint: point,
+          duplicated: false,
+        };
+      } else {
+        if (!event.shiftKey) onSelectIds?.([]);
+        sessionRef.current = {
+          mode: "marquee",
+          pointerId: event.pointerId,
+          start: point,
+          additive: event.shiftKey,
+        };
+        marqueeRef.current = { x: point.x, y: point.y, w: 0, h: 0 };
+        schedulePaint();
+      }
       return;
     }
-    if (tool === "text") {
-      const text = window.prompt("Текст", "");
-      if (!text) return;
-      onChangeObjects([
-        ...(objects || []),
-        {
-          id: newObjectId(),
-          type: "text",
-          text,
-          x: point.x,
-          y: point.y,
-          color,
-          fontSize,
-        },
-      ]);
+
+    if (currentTool === TOOL.ERASER) {
+      const pad = eraserMode === "object" ? 18 : 14;
+      const hit = [...objectsRef.current].reverse().find((obj) => hitTest(obj, point, pad));
+      const removed = new Set();
+      if (hit) {
+        removed.add(hit.id);
+        objectsRef.current = objectsRef.current.filter((obj) => obj.id !== hit.id);
+        onSelectIds?.([]);
+        schedulePaint();
+      }
+      sessionRef.current = { mode: "erase", pointerId: event.pointerId, pointerType: event.pointerType, removed };
       return;
     }
-    drawingRef.current = { mode: tool, start: point, points: [point] };
+
+    if (currentTool === TOOL.TEXT) {
+      const hit = [...objectsRef.current].reverse().find((obj) => obj.type === "text" && hitTest(obj, point));
+      if (hit) {
+        setTextDraft({ ...hit, _created: false });
+        onEditingText?.(hit);
+        onSelectIds?.([hit.id]);
+        return;
+      }
+      const created = {
+        id: crypto.randomUUID?.() || `text-${Date.now()}`,
+        type: "text",
+        pageId: page.id,
+        x: point.x,
+        y: point.y,
+        w: 180,
+        text: "",
+        stroke: color,
+        color,
+        fontSize,
+        opacity: 1,
+        strokeWidth: 1,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        _created: true,
+      };
+      setTextDraft(created);
+      onEditingText?.(created);
+      onSelectIds?.([created.id]);
+      return;
+    }
+
+    if (event.pointerType === "touch" && [TOOL.PEN, TOOL.MARKER, TOOL.LINE, TOOL.ARROW, TOOL.RECT, TOOL.ELLIPSE].includes(currentTool)) {
+      sessionRef.current = {
+        mode: "pan",
+        pointerId: event.pointerId,
+        pointerType: "touch",
+        lastClient: { x: event.clientX, y: event.clientY },
+      };
+      return;
+    }
+
+    const start = { ...point, pressure: pressureOf(event) };
+    sessionRef.current = {
+      mode: "draw",
+      tool: currentTool,
+      pointerId: event.pointerId,
+      pointerType: event.pointerType,
+      start,
+      points: [start],
+      shift: event.shiftKey,
+      alt: event.altKey,
+    };
+    if (currentTool === TOOL.PEN || currentTool === TOOL.MARKER) {
+      draftRef.current = {
+        id: "draft",
+        type: currentTool,
+        points: [start],
+        stroke: color,
+        color,
+        strokeWidth,
+        width: strokeWidth,
+        opacity: currentTool === TOOL.MARKER ? (opacity ?? 0.28) : 1,
+      };
+      schedulePaint();
+    }
   };
 
   const pointerMove = (event) => {
-    const draft = drawingRef.current;
-    if (!draft || readOnly) return;
+    const session = sessionRef.current;
+    if (!session || session.pointerId !== event.pointerId) return;
     const canvas = canvasRef.current;
     const point = clientToPage(event, canvas, page);
-    if (draft.mode === "move" && draft.id) {
-      const dx = point.x - draft.last.x;
-      const dy = point.y - draft.last.y;
-      draft.last = point;
-      onChangeObjects((objects || []).map((obj) => {
-        if (obj.id !== draft.id) return obj;
-        const moved = { ...obj };
-        if (moved.points) moved.points = moved.points.map((pt) => ({ x: pt.x + dx, y: pt.y + dy }));
-        if (moved.x != null) moved.x += dx;
-        if (moved.y != null) moved.y += dy;
-        if (moved.x1 != null) {
-          moved.x1 += dx; moved.y1 += dy; moved.x2 += dx; moved.y2 += dy;
-        }
-        if (moved.cx != null) { moved.cx += dx; moved.cy += dy; }
-        return moved;
-      }));
+    if (session.mode === "pan") {
+      onPanDelta?.({
+        dx: event.clientX - session.lastClient.x,
+        dy: event.clientY - session.lastClient.y,
+      });
+      session.lastClient = { x: event.clientX, y: event.clientY };
       return;
     }
-    if (draft.mode === "pen" || draft.mode === "marker") {
-      draft.points = [...draft.points, point];
-      const preview = {
-        id: "draft",
-        type: draft.mode,
-        points: draft.points,
-        color,
-        width: strokeWidth,
+    if (session.mode === "erase") {
+      const hit = [...objectsRef.current].reverse().find((obj) => hitTest(obj, point, 14));
+      if (hit && !session.removed?.has(hit.id)) {
+        session.removed = session.removed || new Set();
+        session.removed.add(hit.id);
+        objectsRef.current = objectsRef.current.filter((obj) => obj.id !== hit.id);
+        schedulePaint();
+      }
+      return;
+    }
+    if (session.mode === "move" || session.mode === "duplicate-drag") {
+      let origin = session.origin;
+      if (session.mode === "duplicate-drag" && !session.duplicated) {
+        const clones = origin.filter((obj) => session.ids.includes(obj.id)).map((obj) => ({
+          ...JSON.parse(JSON.stringify(obj)),
+          id: crypto.randomUUID?.() || `dup-${Date.now()}-${Math.random()}`,
+        }));
+        origin = [...origin, ...clones];
+        session.ids = clones.map((obj) => obj.id);
+        session.duplicated = true;
+        session.origin = origin;
+        onSelectIds?.(session.ids);
+      }
+      const dx = point.x - session.startPoint.x;
+      const dy = point.y - session.startPoint.y;
+      objectsRef.current = origin.map((obj) => (
+        session.ids.includes(obj.id) ? moveObject(obj, dx, dy) : obj
+      ));
+      schedulePaint();
+      return;
+    }
+    if (session.mode === "resize") {
+      const originObj = session.origin.find((obj) => obj.id === session.id);
+      objectsRef.current = session.origin.map((obj) => (
+        obj.id === session.id ? scaleAnnotation(originObj, session.handle, point, { shift: event.shiftKey || session.shift }) : obj
+      ));
+      schedulePaint();
+      return;
+    }
+    if (session.mode === "rotate") {
+      const angle = Math.atan2(point.y - session.center.y, point.x - session.center.x);
+      const degrees = ((angle - session.startAngle) * 180) / Math.PI;
+      objectsRef.current = session.origin.map((obj) => (
+        obj.id === session.id ? { ...obj, rotation: session.startRotation + degrees } : obj
+      ));
+      schedulePaint();
+      return;
+    }
+    if (session.mode === "marquee") {
+      marqueeRef.current = {
+        x: Math.min(session.start.x, point.x),
+        y: Math.min(session.start.y, point.y),
+        w: Math.abs(point.x - session.start.x),
+        h: Math.abs(point.y - session.start.y),
       };
-      const ctx = canvas.getContext("2d");
-      drawNotebookObjects(ctx, [...(objects || []), preview], {
-        pageWidth: page.width,
-        pageHeight: page.height,
-      });
+      schedulePaint();
+      return;
+    }
+    if (session.mode === "draw") {
+      session.shift = event.shiftKey;
+      session.alt = event.altKey;
+      const live = { ...point, pressure: pressureOf(event) };
+      if (session.tool === TOOL.PEN || session.tool === TOOL.MARKER) {
+        maybePushPoint(session.points, live);
+        draftRef.current = {
+          id: "draft",
+          type: session.tool,
+          points: session.points,
+          stroke: color,
+          color,
+          strokeWidth,
+          width: strokeWidth,
+          opacity: session.tool === TOOL.MARKER ? (opacity ?? 0.28) : 1,
+        };
+      } else if (session.tool === TOOL.LINE || session.tool === TOOL.ARROW) {
+        const end = constrainLine(session.start, live, session.shift);
+        draftRef.current = {
+          id: "draft",
+          type: session.tool,
+          x1: session.start.x,
+          y1: session.start.y,
+          x2: end.x,
+          y2: end.y,
+          stroke: color,
+          color,
+          strokeWidth,
+          width: strokeWidth,
+        };
+      } else if (session.tool === TOOL.RECT || session.tool === TOOL.ELLIPSE) {
+        const box = constrainBox(session.start, live, { shift: session.shift, alt: session.alt });
+        draftRef.current = session.tool === TOOL.RECT
+          ? {
+            id: "draft",
+            type: "rect",
+            x: box.w < 0 ? box.x + box.w : box.x,
+            y: box.h < 0 ? box.y + box.h : box.y,
+            w: Math.abs(box.w),
+            h: Math.abs(box.h),
+            stroke: color,
+            color,
+            strokeWidth,
+            width: strokeWidth,
+          }
+          : {
+            id: "draft",
+            type: "ellipse",
+            cx: box.x + box.w / 2,
+            cy: box.y + box.h / 2,
+            rx: Math.abs(box.w) / 2,
+            ry: Math.abs(box.h) / 2,
+            stroke: color,
+            color,
+            strokeWidth,
+            width: strokeWidth,
+          };
+      }
+      schedulePaint();
     }
   };
 
   const pointerUp = (event) => {
-    const draft = drawingRef.current;
-    drawingRef.current = null;
-    if (!draft || readOnly || draft.mode === "move") return;
+    const session = sessionRef.current;
+    if (!session || session.pointerId !== event.pointerId) return;
+    sessionRef.current = null;
     const canvas = canvasRef.current;
     const point = clientToPage(event, canvas, page);
-    const start = draft.start || point;
-    let created = null;
-    if (draft.mode === "pen" || draft.mode === "marker") {
-      created = {
-        id: newObjectId(),
-        type: draft.mode,
-        points: [...(draft.points || []), point],
-        color,
-        width: strokeWidth,
-      };
-    } else if (draft.mode === "line" || draft.mode === "arrow") {
-      created = {
-        id: newObjectId(),
-        type: draft.mode,
-        x1: start.x,
-        y1: start.y,
-        x2: point.x,
-        y2: point.y,
-        color,
-        width: strokeWidth,
-      };
-    } else if (draft.mode === "rect") {
-      created = {
-        id: newObjectId(),
-        type: "rect",
-        x: start.x,
-        y: start.y,
-        w: point.x - start.x,
-        h: point.y - start.y,
-        color,
-        width: strokeWidth,
-      };
-    } else if (draft.mode === "ellipse") {
-      created = {
-        id: newObjectId(),
-        type: "ellipse",
-        cx: (start.x + point.x) / 2,
-        cy: (start.y + point.y) / 2,
-        rx: Math.abs(point.x - start.x) / 2,
-        ry: Math.abs(point.y - start.y) / 2,
-        color,
-        width: strokeWidth,
-      };
+    if (session.mode === "pan") return;
+    if (session.mode === "erase") {
+      if (session.removed?.size) commitObjects(objectsRef.current, "DELETE_ANNOTATION");
+      return;
     }
-    if (created) onChangeObjects([...(objects || []), created]);
+    if (session.mode === "move" || session.mode === "duplicate-drag" || session.mode === "resize" || session.mode === "rotate") {
+      commitObjects(objectsRef.current, session.mode === "resize" ? "RESIZE_ANNOTATION" : "MOVE_ANNOTATIONS");
+      draftRef.current = null;
+      schedulePaint();
+      return;
+    }
+    if (session.mode === "marquee") {
+      const box = marqueeRef.current;
+      marqueeRef.current = null;
+      if (box && box.w > 3 && box.h > 3) {
+        const hits = objectsRef.current.filter((obj) => rectsIntersect(annotationBounds(obj), box)).map((obj) => obj.id);
+        onSelectIds?.(session.additive ? [...new Set([...(selectedRef.current || []), ...hits])] : hits);
+      }
+      schedulePaint();
+      return;
+    }
+    if (session.mode !== "draw") return;
+    let created = null;
+    const id = crypto.randomUUID?.() || `ann-${Date.now()}`;
+    if (session.tool === TOOL.PEN || session.tool === TOOL.MARKER) {
+      const points = smoothStroke([...(session.points || []), point], Math.max(0, Number(smoothing) || 0));
+      if (points.length < 2) {
+        draftRef.current = null;
+        schedulePaint();
+        return;
+      }
+      created = {
+        id,
+        type: session.tool,
+        pageId: page.id,
+        points,
+        stroke: color,
+        color,
+        strokeWidth,
+        width: strokeWidth,
+        opacity: session.tool === TOOL.MARKER ? (opacity ?? 0.28) : 1,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+    } else if (session.tool === TOOL.LINE || session.tool === TOOL.ARROW) {
+      const end = constrainLine(session.start, point, session.shift);
+      created = {
+        id,
+        type: session.tool,
+        pageId: page.id,
+        x1: session.start.x,
+        y1: session.start.y,
+        x2: end.x,
+        y2: end.y,
+        stroke: color,
+        color,
+        strokeWidth,
+        width: strokeWidth,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+    } else if (session.tool === TOOL.RECT || session.tool === TOOL.ELLIPSE) {
+      created = { ...draftRef.current, id, pageId: page.id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      if (!created || Math.abs(created.w || created.rx || 0) < 2) created = null;
+    }
+    draftRef.current = null;
+    if (created) commitObjects([...objectsRef.current, created], "ADD_ANNOTATION");
+    else schedulePaint();
   };
 
+  const onDoubleClick = (event) => {
+    if (readOnly) return;
+    const point = clientToPage(event, canvasRef.current, page);
+    const hit = [...objectsRef.current].reverse().find((obj) => obj.type === "text" && hitTest(obj, point));
+    if (hit) {
+      setTextDraft({ ...hit, _created: false });
+      onEditingText?.(hit);
+      onSelectIds?.([hit.id]);
+    }
+  };
+
+  const grabbing = sessionRef.current?.mode === "pan" || sessionRef.current?.mode === "move";
+  const width = page?.width || 1000;
+  const height = page?.height || 1414;
+  const editor = textDraft || editingText;
+
   return (
-    <canvas
-      ref={canvasRef}
-      className="hw-notebook-canvas"
-      width={page?.width || 1000}
-      height={page?.height || 1414}
-      onPointerDown={pointerDown}
-      onPointerMove={pointerMove}
-      onPointerUp={pointerUp}
-      onPointerLeave={pointerUp}
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        className="hw-notebook-canvas"
+        width={width}
+        height={height}
+        style={{ cursor: cursorForTool(tool, { grabbing, spacePan, editingText: editor }) }}
+        onPointerDown={pointerDown}
+        onPointerMove={pointerMove}
+        onPointerUp={pointerUp}
+        onPointerCancel={pointerUp}
+        onDoubleClick={onDoubleClick}
+        onContextMenu={(event) => event.preventDefault()}
+      />
+      {editor ? (
+        <textarea
+          className="hw-notebook-text-editor"
+          autoFocus
+          value={editor.text || ""}
+          style={{
+            left: `${((editor.x || 0) / width) * 100}%`,
+            top: `${(((editor.y || 0) - (editor.fontSize || 24)) / height) * 100}%`,
+            width: `${Math.max(12, (editor.w || 180) / width) * 100}%`,
+            fontSize: `calc(${((editor.fontSize || 24) / width) * 100}cqi)`,
+            color: editor.stroke || editor.color || "#111827",
+          }}
+          onChange={(event) => {
+            const next = { ...editor, text: event.target.value, w: Math.max(80, event.target.value.length * (editor.fontSize || 24) * 0.56) };
+            setTextDraft(next);
+            onEditingText?.(next);
+          }}
+          onPointerDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              setTextDraft(null);
+              onEditingText?.(null);
+            }
+          }}
+          onBlur={() => finishText(true)}
+        />
+      ) : null}
+    </>
   );
 }

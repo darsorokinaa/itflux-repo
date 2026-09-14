@@ -199,6 +199,8 @@ def grouped_task_attachments(submission: HomeworkSubmission | None) -> dict:
     rows = _active_qs(submission).order_by("created_at", "id")
     comment = []
     for row in rows:
+        if row.attachment_type == HomeworkAttachmentType.NOTEBOOK_SOURCE:
+            continue
         item = serialize_homework_task_attachment(row)
         if row.task_key == COMMENT_TASK_KEY:
             comment.append(item)
@@ -217,6 +219,8 @@ def payload_maps_from_rows(submission: HomeworkSubmission) -> dict:
     teacher_by_id: dict[str, list] = defaultdict(list)
     comments: list[dict] = []
     for row in _active_qs(submission).order_by("created_at", "id"):
+        if row.attachment_type == HomeworkAttachmentType.NOTEBOOK_SOURCE:
+            continue
         entry = public_attachment_from_row(row)
         if row.task_key == COMMENT_TASK_KEY:
             comments.append(entry)
@@ -549,7 +553,12 @@ def count_task_db_attachments(
     teacher: bool,
 ) -> int:
     role = HomeworkAttachmentOwnerRole.TEACHER if teacher else HomeworkAttachmentOwnerRole.STUDENT
-    return _active_qs(submission).filter(task_key=task_key, owner_role=role).count()
+    return (
+        _active_qs(submission)
+        .filter(task_key=task_key, owner_role=role)
+        .exclude(attachment_type=HomeworkAttachmentType.NOTEBOOK_SOURCE)
+        .count()
+    )
 
 
 def create_task_attachments(
@@ -562,6 +571,7 @@ def create_task_attachments(
     teacher: bool,
     comment: bool = False,
     rel_prefix: str = "",
+    attachment_type: str | None = None,
 ) -> list[HomeworkAttachment]:
     task_key = str(task_key or "").strip()
     if comment:
@@ -593,12 +603,14 @@ def create_task_attachments(
             if teacher or comment
             else HomeworkAttachmentOwnerRole.STUDENT
         )
-        if comment:
-            attachment_type = HomeworkAttachmentType.TEACHER_COMMENT
+        if attachment_type:
+            chosen_type = attachment_type
+        elif comment:
+            chosen_type = HomeworkAttachmentType.TEACHER_COMMENT
         elif teacher:
-            attachment_type = HomeworkAttachmentType.TEACHER_CHECKED_FILE
+            chosen_type = HomeworkAttachmentType.TEACHER_CHECKED_FILE
         else:
-            attachment_type = HomeworkAttachmentType.STUDENT_ANSWER
+            chosen_type = HomeworkAttachmentType.STUDENT_ANSWER
         row = HomeworkAttachment(
             submission=submission,
             homework=homework,
@@ -607,7 +619,7 @@ def create_task_attachments(
             task_number=str(task_number or ""),
             uploaded_by=user if getattr(user, "is_authenticated", False) else None,
             owner_role=owner_role,
-            attachment_type=attachment_type,
+            attachment_type=chosen_type,
             original_filename=filename,
             mime_type=mime,
             file_size=size,
