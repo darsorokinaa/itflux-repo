@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { CircleHelp, Maximize, Minus, Plus, X } from "lucide-react";
 import { openMaterialPdf } from "../materials/collab/pdfjsLoader";
@@ -119,6 +120,17 @@ export default function HomeworkNotebookEditor({
   useEffect(() => {
     load().catch((err) => setError(err.message || "Не удалось открыть тетрадь"));
   }, [load]);
+
+  useEffect(() => {
+    const { body } = document;
+    body.classList.add("hw-notebook-open");
+    const prevOverflow = body.style.overflow;
+    body.style.overflow = "hidden";
+    return () => {
+      body.classList.remove("hw-notebook-open");
+      body.style.overflow = prevOverflow;
+    };
+  }, []);
 
   const flushSave = useCallback(async (nextDoc = docRef.current, { snapshot = false } = {}) => {
     if (readOnly || !nextDoc?.id) return nextDoc;
@@ -462,14 +474,15 @@ export default function HomeworkNotebookEditor({
   ]), []);
 
   if (!doc) {
-    return (
+    return createPortal(
       <div className="hw-notebook">
         <p className="hw-notebook__status">{error || "Загрузка…"}</p>
-      </div>
+      </div>,
+      document.body,
     );
   }
 
-  return (
+  return createPortal(
     <div className="hw-notebook">
       <header className="hw-notebook__bar">
         <button type="button" className="hw-nb-ghost" onClick={handleClose} aria-label="Закрыть">
@@ -663,7 +676,8 @@ export default function HomeworkNotebookEditor({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

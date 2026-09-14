@@ -1,16 +1,30 @@
-body:has(.hw-notebook) .support-fab {
+body.hw-notebook-open {
+  overflow: hidden;
+}
+
+body.hw-notebook-open .support-fab,
+body.hw-notebook-open .seasonal-appearance-fab-dock,
+body.hw-notebook-open .cabinet-sidebar,
+body.hw-notebook-open .cb-layout__sidebar,
+body.hw-notebook-open .cb-mobile-nav,
+body.hw-notebook-open .st-mobile-nav,
+body.hw-notebook-open .cb-ai-embed-launcher,
+body:has(.hw-notebook) .support-fab,
+body:has(.hw-notebook) .seasonal-appearance-fab-dock,
+body:has(.hw-notebook) .cb-ai-embed-launcher {
   display: none !important;
 }
 
 .hw-notebook {
   position: fixed;
   inset: 0;
-  z-index: 2000;
+  z-index: 12000;
   display: flex;
   flex-direction: column;
   width: auto;
   height: auto;
   overflow: hidden;
+  isolation: isolate;
   background: #F4F6F8;
   color: #111827;
   font-family: "SF Pro Text", "Inter", system-ui, sans-serif;
@@ -366,6 +380,7 @@ body:has(.hw-notebook) .support-fab {
   box-shadow: 0 1px 3px rgba(17, 24, 39, 0.06);
 }
 
+.hw-notebook .hw-nb-done,
 .hw-nb-done {
   height: 36px;
   padding: 0 16px;
@@ -373,9 +388,13 @@ body:has(.hw-notebook) .support-fab {
   border-radius: 999px;
   background: #2563EB;
   color: #fff;
+  -webkit-text-fill-color: #fff;
   font-weight: 600;
   font-size: 13px;
+  line-height: 36px;
   cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
 }
 
 .hw-nb-done:disabled { opacity: 0.45; }
