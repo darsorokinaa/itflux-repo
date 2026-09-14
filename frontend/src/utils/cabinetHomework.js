@@ -152,16 +152,22 @@ export function pickHomeworkFields(data, fallbackId) {
   const st =
     d.status || d.assignment_status || d.state || d.homework_status || d.homeworkStatus || "";
   const result = d.result ?? d.data ?? d.payload ?? d.answers ?? null;
+  const taskAttachments = d.task_attachments ?? d.taskAttachments ?? result?.task_attachments ?? null;
+  const mergedResult = result && typeof result === "object"
+    ? { ...result, task_attachments: taskAttachments || result.task_attachments }
+    : result;
   let revisionTaskIds = d.revision_task_ids || d.revisionTaskIds || d.revisionTasks || [];
   if (!Array.isArray(revisionTaskIds)) revisionTaskIds = [];
   revisionTaskIds = revisionTaskIds.map((x) => String(x).trim()).filter(Boolean);
   return {
     id: String(d.id ?? d.assignment_id ?? d.assignmentId ?? fallbackId),
     status: normalizeHomeworkStatus(String(st)),
-    result,
+    result: mergedResult,
     revisionTaskIds,
     deadline: d.deadline ?? d.deadline_at ?? d.deadlineAt ?? null,
     variantId: d.variant_id ?? d.variantId ?? d.variant_id ?? null,
+    submissionId: d.submission_id ?? d.submissionId ?? null,
+    taskAttachments: d.task_attachments ?? d.taskAttachments ?? result?.task_attachments ?? null,
     raw: d,
   };
 }
@@ -282,32 +288,30 @@ export function homeworkTaskAttachments(result, taskId, taskNumber, tasks) {
   const o = typeof result === "string" ? safeJson(result) : result;
   if (!o || typeof o !== "object") return [];
   const r = /** @type {Record<string, unknown>} */ (o);
+  const grouped = r.task_attachments && typeof r.task_attachments === "object"
+    ? /** @type {Record<string, any>} */ (r.task_attachments)
+    : null;
+  const idKey = String(taskId ?? "");
+  if (grouped?.tasks && idKey && grouped.tasks[idKey]) {
+    return normalizeHomeworkAttachmentList(grouped.tasks[idKey].student || []);
+  }
   const byId =
     /** @type {Record<string, unknown[]>|undefined} */ (
       r.attachments_by_task_id || r.attachmentsByTaskId
     );
-  const byNum =
-    /** @type {Record<string, unknown[]>|undefined} */ (
-      r.attachments_by_number || r.attachmentsByNumber
-    );
-  const idKey = String(taskId);
-  if (byId && Array.isArray(byId[idKey]) && byId[idKey].length) {
+  if (idKey && byId && Array.isArray(byId[idKey]) && byId[idKey].length) {
     return normalizeHomeworkAttachmentList(byId[idKey]);
   }
-  // by_number при одинаковых № заданий неоднозначен
-  if (Array.isArray(tasks) && tasks.length > 1) {
-    const numKey = String(taskNumber);
-    const collisions = tasks.reduce(
-      (n, t) => (String(t?.number) === numKey ? n + 1 : n),
-      0,
-    );
-    if (collisions > 1) return [];
+  const numKey = String(taskNumber ?? "");
+  if (numKey && numKey !== idKey) {
+    if (grouped?.tasks?.[numKey]) {
+      return normalizeHomeworkAttachmentList(grouped.tasks[numKey].student || []);
+    }
+    if (byId && Array.isArray(byId[numKey]) && byId[numKey].length) {
+      return normalizeHomeworkAttachmentList(byId[numKey]);
+    }
   }
-  const list =
-    (byNum && byNum[String(taskNumber)]) ||
-    (byNum && byNum[String(Number(taskNumber))]) ||
-    [];
-  return normalizeHomeworkAttachmentList(list);
+  return [];
 }
 
 /**

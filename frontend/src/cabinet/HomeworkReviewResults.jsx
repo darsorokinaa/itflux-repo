@@ -1,7 +1,9 @@
+import MathContent from "../components/MathContent";
 import {
   buildStudentHomeworkReviewRows,
   computeHomeworkReviewSummary,
   formatHomeworkVerdict,
+  hasOfficialTaskAnswer,
   homeworkTaskAnswer,
   homeworkTaskComment,
   homeworkTaskScore,
@@ -25,6 +27,11 @@ function normalizeMediaUrl(url) {
 
 function isImageFile(file) {
   return isHomeworkAttachmentImage(file);
+}
+
+function ReviewMathAnswer({ html, empty = "—" }) {
+  if (!hasOfficialTaskAnswer(html)) return empty;
+  return <MathContent html={String(html)} className="hw-review-table__math" plainHtml />;
 }
 
 export function FileLinks({ files, label, emptyLabel }) {
@@ -161,8 +168,12 @@ function Part1Table({ rows }) {
               <tr key={row.taskId}>
                 <td className="hw-review-table__ord">{index + 1}</td>
                 <td>{row.number}</td>
-                <td className="hw-review-table__pre">{row.answer || "—"}</td>
-                <td className="hw-review-table__pre">{row.correctAnswer || "—"}</td>
+                <td className="hw-review-table__pre">
+                  <ReviewMathAnswer html={row.answer} />
+                </td>
+                <td>
+                  <ReviewMathAnswer html={row.correctAnswer} />
+                </td>
                 <td>
                   <FileLinks files={row.studentFiles} emptyLabel="—" />
                 </td>
@@ -210,8 +221,12 @@ function Part2Table({ rows }) {
               <tr key={row.taskId}>
                 <td className="hw-review-table__ord">{index + 1}</td>
                 <td>{row.number}</td>
-                <td className="hw-review-table__pre">{row.answer || "—"}</td>
-                <td className="hw-review-table__pre">{row.correctAnswer || "—"}</td>
+                <td className="hw-review-table__pre">
+                  <ReviewMathAnswer html={row.answer} />
+                </td>
+                <td>
+                  <ReviewMathAnswer html={row.correctAnswer} />
+                </td>
                 <td>
                   <FileLinks files={row.studentFiles} emptyLabel="—" />
                 </td>

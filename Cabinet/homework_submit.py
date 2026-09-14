@@ -158,6 +158,10 @@ def submit_homework_for_student(
             except Exception:
                 subject = ""
             merged = recompute_variant_checked(merged, variant_id, subject=subject) or merged
+        from .homework_task_files import ensure_payload_migrated, overlay_payload_attachments
+
+        ensure_payload_migrated(submission)
+        merged = overlay_payload_attachments(submission, merged)
         submission.result_payload = merged
         computed = compute_score_percent(merged)
         if computed is not None:
@@ -173,6 +177,25 @@ def submit_homework_for_student(
         save_submission_files(submission, uploaded_files)
     else:
         submission.save()
+
+    try:
+        from .choices import HomeworkAttachmentOwnerRole, HomeworkNotebookRevisionReason, HomeworkNotebookStatus
+        from .homework_notebooks import create_revision
+        from .models import HomeworkNotebook
+
+        for notebook in HomeworkNotebook.objects.filter(
+            submission=submission,
+            owner_role=HomeworkAttachmentOwnerRole.STUDENT,
+        ):
+            create_revision(
+                notebook,
+                user=getattr(student, "user", None),
+                reason=HomeworkNotebookRevisionReason.STUDENT_SUBMIT,
+            )
+            notebook.status = HomeworkNotebookStatus.SUBMITTED
+            notebook.save(update_fields=["status", "updated_at"])
+    except Exception:
+        pass
 
     review_item = _ensure_review_item(submission)
     is_resubmit = old_status in (SubmissionStatus.RETURNED, SubmissionStatus.NEEDS_REVISION)

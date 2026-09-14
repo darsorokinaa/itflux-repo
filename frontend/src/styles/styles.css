@@ -5051,6 +5051,21 @@ input.tasks-page-subtopic-num-input::-webkit-inner-spin-button {
     word-break: break-word;
 }
 
+.hw-review-table__math {
+    max-width: 28rem;
+    overflow-x: auto;
+    line-height: 1.45;
+    word-break: break-word;
+}
+
+.hw-review-table__math mjx-container {
+    max-width: 100%;
+}
+
+.hw-review-table__math mjx-container[display="true"] {
+    margin: 0.2em 0;
+}
+
 .hw-review-table__ord {
     width: 3.25rem;
     white-space: nowrap;

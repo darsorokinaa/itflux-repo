@@ -2462,18 +2462,16 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
         if request.method == "DELETE":
             return self._delete_review_feedback(request, pk)
 
-        import uuid
-
         from .homework_api import (
             TASK_ATTACHMENT_MAX_COUNT,
-            _safe_upload_filename,
-            _save_uploaded_attachment_file,
-            append_teacher_comment_attachment,
-            append_teacher_feedback_attachment,
             collect_request_files,
-            count_task_attachments,
-            public_attachment,
-            teacher_comment_attachments,
+        )
+        from .homework_task_files import (
+            COMMENT_TASK_KEY,
+            HomeworkTaskFileError,
+            create_task_attachments,
+            ensure_payload_migrated,
+            serialize_homework_task_attachment,
         )
         from .upload_validation import UploadValidationError, validate_uploaded_file
 
@@ -2509,6 +2507,7 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
         ).strip()
         task_id = str(request.data.get("task_id") or request.POST.get("task_id") or "").strip()
         is_comment_attachment = not task_number and not task_id
+        task_key = COMMENT_TASK_KEY if is_comment_attachment else (task_id or task_number)
 
         saved = []
         with transaction.atomic():
@@ -2519,51 +2518,20 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
             )
             if not submission:
                 return Response({"error": "Submission not found."}, status=status.HTTP_404_NOT_FOUND)
-
-            payload = dict(submission.result_payload or {})
-            if is_comment_attachment:
-                existing_count = len(teacher_comment_attachments(payload))
-            else:
-                if not task_number:
-                    return Response({"error": "task_number required"}, status=status.HTTP_400_BAD_REQUEST)
-                existing_count = count_task_attachments(
-                    payload, task_id=task_id, task_number=task_number, teacher=True
+            ensure_payload_migrated(submission)
+            try:
+                rows = create_task_attachments(
+                    submission=submission,
+                    uploaded_files=uploaded_files,
+                    task_key=task_key,
+                    task_number=task_number,
+                    user=request.user,
+                    teacher=True,
+                    comment=is_comment_attachment,
                 )
-            if existing_count + len(uploaded_files) > TASK_ATTACHMENT_MAX_COUNT:
-                return Response(
-                    {
-                        "error": f"Слишком много файлов. Максимум {TASK_ATTACHMENT_MAX_COUNT}.",
-                        "code": "TOO_MANY_FILES",
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            for uploaded in uploaded_files:
-                safe_name = _safe_upload_filename(uploaded.name)
-                uid = uuid.uuid4().hex[:12]
-                task_key = "comment" if is_comment_attachment else (task_id or task_number)
-                rel_path = (
-                    f"cabinet/homework/review_feedback/{item.pk}/{task_key}_{uid}_{safe_name}"
-                )
-                entry = _save_uploaded_attachment_file(uploaded, rel_path)
-                if is_comment_attachment:
-                    append_teacher_comment_attachment(payload, entry=entry, file_url="", filename="")
-                else:
-                    append_teacher_feedback_attachment(
-                        payload,
-                        task_id=task_id,
-                        task_number=task_number,
-                        file_url="",
-                        filename="",
-                        entry=entry,
-                    )
-                saved.append(public_attachment(entry))
-
-            submission.result_payload = payload
-            HomeworkSubmission.objects.filter(pk=submission.pk).update(
-                result_payload=payload,
-                updated_at=timezone.now(),
-            )
+            except HomeworkTaskFileError as exc:
+                return Response({"error": exc.message, "code": exc.code}, status=exc.status_code)
+            saved = [serialize_homework_task_attachment(row) for row in rows]
 
         first = saved[0]
         return Response({
@@ -2572,14 +2540,16 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
             "url": first["url"],
             "filename": first["filename"],
             "content_type": first["content_type"],
+            "task_id": first.get("task_id"),
             "attachments": saved,
         })
 
     def _delete_review_feedback(self, request, pk=None):
-        from .homework_api import (
-            _delete_attachment_file,
-            _pop_attachment_from_payload,
-            _request_attachment_ref,
+        from .homework_api import _request_attachment_ref
+        from .homework_task_files import (
+            ensure_payload_migrated,
+            find_attachment_for_delete,
+            soft_delete_attachment,
         )
 
         item = self.get_object()
@@ -2598,18 +2568,6 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
         if not attachment_id and not file_url:
             return Response({"error": "id required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        task_number = str(
-            request.query_params.get("task_number")
-            or request.data.get("task_number")
-            or ""
-        ).strip()
-        task_id = str(
-            request.query_params.get("task_id")
-            or request.data.get("task_id")
-            or ""
-        ).strip()
-        is_comment_attachment = not task_number and not task_id
-
         with transaction.atomic():
             submission = (
                 HomeworkSubmission.objects.select_for_update()
@@ -2618,25 +2576,16 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
             )
             if not submission:
                 return Response({"error": "Submission not found."}, status=status.HTTP_404_NOT_FOUND)
-
-            payload = dict(submission.result_payload or {})
-            removed = _pop_attachment_from_payload(
-                payload,
-                teacher=True,
-                comment=is_comment_attachment,
+            ensure_payload_migrated(submission)
+            attachment = find_attachment_for_delete(
+                submission,
                 attachment_id=attachment_id,
                 file_url=file_url,
+                teacher=True,
             )
-            if removed is None:
+            if attachment is None:
                 return Response({"error": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
-
-            submission.result_payload = payload
-            HomeworkSubmission.objects.filter(pk=submission.pk).update(
-                result_payload=payload,
-                updated_at=timezone.now(),
-            )
-            stored_url = str(removed.get("url") or file_url)
-            transaction.on_commit(lambda url=stored_url: _delete_attachment_file(url))
+            soft_delete_attachment(attachment, actor=request.user)
         return Response({"ok": True})
 
     def _sync_source(
@@ -2652,77 +2601,83 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
     ):
         if item.source_type != "homework":
             return
-        submission = HomeworkSubmission.objects.filter(pk=item.source_id).first()
-        if not submission:
-            return
+        with transaction.atomic():
+            submission = (
+                HomeworkSubmission.objects.select_for_update()
+                .filter(pk=item.source_id)
+                .first()
+            )
+            if not submission:
+                return
 
-        submission.status = SubmissionStatus.CHECKED if checked else SubmissionStatus.RETURNED
-        submission.teacher_comment = comment or ""
-        update_fields = ["status", "teacher_comment", "updated_at"]
-        payload = dict(submission.result_payload or {})
-        changed_payload = False
+            submission.status = SubmissionStatus.CHECKED if checked else SubmissionStatus.RETURNED
+            submission.teacher_comment = comment or ""
+            update_fields = ["status", "teacher_comment", "updated_at"]
+            payload = dict(submission.result_payload or {})
+            changed_payload = False
 
-        if isinstance(scores, dict) and scores:
-            merged = dict(payload.get("scores") or {})
-            for key, value in scores.items():
-                try:
-                    merged[str(key)] = float(value)
-                except (TypeError, ValueError):
-                    continue
-            payload["scores"] = merged
-            changed_payload = True
-        if isinstance(checked_tasks, dict) and checked_tasks:
-            merged = dict(payload.get("checked") or {})
-            for key, value in checked_tasks.items():
-                merged[str(key)] = bool(value)
-            payload["checked"] = merged
-            changed_payload = True
-        if isinstance(comments_by_task_id, dict) and comments_by_task_id:
-            payload["comments_by_task_id"] = {
-                str(key): str(value).strip()
-                for key, value in comments_by_task_id.items()
-                if str(value).strip()
-            }
-            changed_payload = True
-        if comment:
-            payload["teacher_comment"] = comment
-            payload["review_comment"] = comment
-            changed_payload = True
-
-        if isinstance(manual_stats, dict):
-            cleaned = {}
-            for key in ("correct", "incorrect", "total", "unsolved"):
-                raw = manual_stats.get(key)
-                if raw is None or raw == "":
-                    continue
-                try:
-                    cleaned[key] = max(0, int(raw))
-                except (TypeError, ValueError):
-                    continue
-            if cleaned:
-                payload["manual_stats"] = cleaned
+            if isinstance(scores, dict) and scores:
+                merged = dict(payload.get("scores") or {})
+                for key, value in scores.items():
+                    try:
+                        merged[str(key)] = float(value)
+                    except (TypeError, ValueError):
+                        continue
+                payload["scores"] = merged
                 changed_payload = True
-                total = cleaned.get("total") or 0
-                correct = cleaned.get("correct") or 0
-                if total > 0:
-                    submission.score = round(correct * 100 / total, 2)
-                    update_fields.append("score")
+            if isinstance(checked_tasks, dict) and checked_tasks:
+                merged = dict(payload.get("checked") or {})
+                for key, value in checked_tasks.items():
+                    merged[str(key)] = bool(value)
+                payload["checked"] = merged
+                changed_payload = True
+            if isinstance(comments_by_task_id, dict) and comments_by_task_id:
+                payload["comments_by_task_id"] = {
+                    str(key): str(value).strip()
+                    for key, value in comments_by_task_id.items()
+                    if str(value).strip()
+                }
+                changed_payload = True
+            if comment:
+                payload["teacher_comment"] = comment
+                payload["review_comment"] = comment
+                changed_payload = True
 
-        if changed_payload:
-            from .homework_api import compute_score_percent
+            if isinstance(manual_stats, dict):
+                cleaned = {}
+                for key in ("correct", "incorrect", "total", "unsolved"):
+                    raw = manual_stats.get(key)
+                    if raw is None or raw == "":
+                        continue
+                    try:
+                        cleaned[key] = max(0, int(raw))
+                    except (TypeError, ValueError):
+                        continue
+                if cleaned:
+                    payload["manual_stats"] = cleaned
+                    changed_payload = True
+                    total = cleaned.get("total") or 0
+                    correct = cleaned.get("correct") or 0
+                    if total > 0:
+                        submission.score = round(correct * 100 / total, 2)
+                        update_fields.append("score")
 
-            submission.result_payload = payload
-            if "score" not in update_fields:
-                computed = compute_score_percent(payload)
-                if computed is not None:
-                    submission.score = computed
-                    update_fields.append("score")
-            update_fields.append("result_payload")
+            if changed_payload:
+                from .homework_api import compute_score_percent
+                from .homework_task_files import overlay_payload_attachments
 
-        # unique update_fields
-        seen = set()
-        update_fields = [f for f in update_fields if not (f in seen or seen.add(f))]
-        submission.save(update_fields=update_fields)
+                payload = overlay_payload_attachments(submission, payload)
+                submission.result_payload = payload
+                if "score" not in update_fields:
+                    computed = compute_score_percent(payload)
+                    if computed is not None:
+                        submission.score = computed
+                        update_fields.append("score")
+                update_fields.append("result_payload")
+
+            seen = set()
+            update_fields = [f for f in update_fields if not (f in seen or seen.add(f))]
+            submission.save(update_fields=update_fields)
         try:
             from .homework_attempts import snapshot_on_review
 

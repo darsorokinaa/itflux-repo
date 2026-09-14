@@ -1660,6 +1660,16 @@ class HomeworkSubmissionSerializer(serializers.ModelSerializer):
             obj._serialized_attached_files = cached
         return cached
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        from .homework_task_files import ensure_payload_migrated, overlay_payload_attachments
+
+        ensure_payload_migrated(instance)
+        payload = overlay_payload_attachments(instance, data.get("result_payload") or {})
+        data["result_payload"] = payload
+        data["task_attachments"] = payload.get("task_attachments") or {"tasks": {}, "comment": []}
+        return data
+
 
 class ReviewItemSerializer(serializers.ModelSerializer):
     source_type_label = serializers.CharField(source="get_source_type_display", read_only=True)

@@ -404,6 +404,11 @@ def serialize_assignment_payload(*, homework: Homework, submission: HomeworkSubm
             break
 
     result = submission.result_payload if submission and submission.result_payload else None
+    if submission is not None:
+        from .homework_task_files import ensure_payload_migrated, overlay_payload_attachments
+
+        ensure_payload_migrated(submission)
+        result = overlay_payload_attachments(submission, result)
     score = float(submission.score) if submission and submission.score is not None else None
     if score is None and result:
         computed = compute_score_percent(result)
@@ -413,8 +418,10 @@ def serialize_assignment_payload(*, homework: Homework, submission: HomeworkSubm
     return {
         "id": homework.id,
         "assignment_id": homework.id,
+        "submission_id": submission.pk if submission else None,
         "status": submission_api_status(submission),
         "result": result,
+        "task_attachments": (result or {}).get("task_attachments") if result else {"tasks": {}, "comment": []},
         "revision_task_ids": [],
         "deadline": homework.due_at.isoformat() if homework.due_at else None,
         "deadline_at": homework.due_at.isoformat() if homework.due_at else None,
@@ -577,9 +584,14 @@ def _merge_result_payload(
     existing: dict | None,
     new: dict | None,
 ) -> dict:
-    """Частичный save-draft не затирает уже сохранённые ответы и вложения."""
+    """Частичный save-draft не затирает уже сохранённые ответы.
+
+    Карты вложений клиент передать не может — они живут в HomeworkAttachment.
+    """
+    from .homework_task_files import strip_client_attachment_maps
+
     prev = existing if isinstance(existing, dict) else {}
-    incoming = new if isinstance(new, dict) else {}
+    incoming = strip_client_attachment_maps(new if isinstance(new, dict) else {})
     if not prev:
         return dict(incoming)
     if not incoming:
@@ -1103,6 +1115,10 @@ class HomeworkAssignmentSaveDraftView(HomeworkAssignmentBaseView):
                 except Exception:
                     subject = ""
                 merged = recompute_variant_checked(merged, variant_id, subject=subject) or merged
+            from .homework_task_files import ensure_payload_migrated, overlay_payload_attachments
+
+            ensure_payload_migrated(submission)
+            merged = overlay_payload_attachments(submission, merged)
             submission.result_payload = merged
             computed = compute_score_percent(merged)
             if computed is not None:
@@ -1153,14 +1169,19 @@ class HomeworkAssignmentUploadAnswerView(HomeworkAssignmentBaseView):
         task_number = str(
             request.data.get("task_number") or request.POST.get("task_number") or ""
         ).strip()
-        if not task_number:
-            return Response({"error": "task_number required"}, status=status.HTTP_400_BAD_REQUEST)
-
         task_id = str(request.data.get("task_id") or request.POST.get("task_id") or "").strip()
+        task_key = task_id or task_number
+        if not task_key:
+            return Response({"error": "task_id required"}, status=status.HTTP_400_BAD_REQUEST)
 
         from .homework_submit import get_or_create_locked_submission
+        from .homework_task_files import (
+            HomeworkTaskFileError,
+            create_task_attachments,
+            ensure_payload_migrated,
+            serialize_homework_task_attachment,
+        )
 
-        saved = []
         with transaction.atomic():
             submission = get_or_create_locked_submission(homework, student)
             if _submission_upload_readonly(submission):
@@ -1168,41 +1189,20 @@ class HomeworkAssignmentUploadAnswerView(HomeworkAssignmentBaseView):
                     {"error": "Работа уже отправлена на проверку."},
                     status=status.HTTP_403_FORBIDDEN,
                 )
-
-            payload = dict(submission.result_payload or {})
-            existing_count = count_task_attachments(
-                payload, task_id=task_id, task_number=task_number, teacher=False
-            )
-            if existing_count + len(uploaded_files) > TASK_ATTACHMENT_MAX_COUNT:
-                return Response(
-                    {
-                        "error": f"Слишком много файлов к заданию. Максимум {TASK_ATTACHMENT_MAX_COUNT}.",
-                        "code": "TOO_MANY_FILES",
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            task_key = task_id or task_number
-            for uploaded in uploaded_files:
-                safe_name = _safe_upload_filename(uploaded.name)
-                uid = uuid.uuid4().hex[:12]
-                rel_path = (
-                    f"cabinet/homework/answers/{homework_id}/{student.pk}/"
-                    f"{task_key}_{uid}_{safe_name}"
-                )
-                entry = _save_uploaded_attachment_file(uploaded, rel_path)
-                _append_task_attachment(
-                    payload,
-                    teacher=False,
-                    task_id=task_id,
+            ensure_payload_migrated(submission)
+            try:
+                rows = create_task_attachments(
+                    submission=submission,
+                    uploaded_files=uploaded_files,
+                    task_key=task_key,
                     task_number=task_number,
-                    entry=entry,
+                    user=request.user,
+                    teacher=False,
                 )
-                saved.append(public_attachment(entry))
+            except HomeworkTaskFileError as exc:
+                return Response({"error": exc.message, "code": exc.code}, status=exc.status_code)
 
-            submission.result_payload = payload
-            submission.save(update_fields=["result_payload", "updated_at"])
-
+        saved = [serialize_homework_task_attachment(row) for row in rows]
         first = saved[0]
         return Response({
             "ok": True,
@@ -1210,6 +1210,8 @@ class HomeworkAssignmentUploadAnswerView(HomeworkAssignmentBaseView):
             "url": first["url"],
             "filename": first["filename"],
             "content_type": first["content_type"],
+            "task_id": first["task_id"],
+            "submission_id": submission.pk,
             "attachments": saved,
         })
 
@@ -1223,6 +1225,11 @@ class HomeworkAssignmentUploadAnswerView(HomeworkAssignmentBaseView):
             return Response({"error": "id required"}, status=status.HTTP_400_BAD_REQUEST)
 
         from .homework_submit import get_or_create_locked_submission
+        from .homework_task_files import (
+            ensure_payload_migrated,
+            find_attachment_for_delete,
+            soft_delete_attachment,
+        )
 
         with transaction.atomic():
             submission = get_or_create_locked_submission(homework, student)
@@ -1231,21 +1238,16 @@ class HomeworkAssignmentUploadAnswerView(HomeworkAssignmentBaseView):
                     {"error": "Работа уже отправлена на проверку."},
                     status=status.HTTP_403_FORBIDDEN,
                 )
-
-            payload = dict(submission.result_payload or {})
-            removed = _pop_attachment_from_payload(
-                payload,
-                teacher=False,
+            ensure_payload_migrated(submission)
+            attachment = find_attachment_for_delete(
+                submission,
                 attachment_id=attachment_id,
                 file_url=file_url,
+                teacher=False,
             )
-            if removed is None:
+            if attachment is None:
                 return Response({"error": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
-
-            submission.result_payload = payload
-            submission.save(update_fields=["result_payload", "updated_at"])
-            stored_url = str(removed.get("url") or file_url)
-            transaction.on_commit(lambda url=stored_url: _delete_attachment_file(url))
+            soft_delete_attachment(attachment, actor=request.user)
         return Response({"ok": True})
 
 

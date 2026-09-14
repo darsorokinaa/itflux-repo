@@ -311,3 +311,36 @@ class NotificationStatus(models.TextChoices):
     SENT = "sent", "Отправлено"
     FAILED = "failed", "Ошибка"
     SKIPPED = "skipped", "Пропущено"
+
+
+class HomeworkAttachmentOwnerRole(models.TextChoices):
+    STUDENT = "student", "Ученик"
+    TEACHER = "teacher", "Учитель"
+
+
+class HomeworkAttachmentType(models.TextChoices):
+    STUDENT_ANSWER = "student_answer", "Ответ ученика"
+    TEACHER_COMMENT = "teacher_comment", "Комментарий учителя"
+    TEACHER_CHECKED_FILE = "teacher_checked_file", "Проверенный файл"
+    NOTEBOOK_SOURCE = "notebook_source", "Исходник тетради"
+    NOTEBOOK_EXPORT = "notebook_export", "Экспорт тетради"
+    OTHER = "other", "Другое"
+
+
+class HomeworkNotebookStatus(models.TextChoices):
+    DRAFT = "draft", "Черновик"
+    SUBMITTED = "submitted", "Отправлено"
+    RETURNED = "returned", "Отправлено ученику"
+
+
+class HomeworkNotebookPageType(models.TextChoices):
+    ATTACHMENT = "attachment", "Файл"
+    PDF_PAGE = "pdf_page", "Страница PDF"
+    BLANK = "blank", "Пустой лист"
+
+
+class HomeworkNotebookRevisionReason(models.TextChoices):
+    AUTOSAVE = "autosave", "Автосохранение"
+    STUDENT_SUBMIT = "student_submit", "Сдача ученика"
+    TEACHER_RETURN = "teacher_return", "Проверка учителя"
+    MANUAL_SAVE = "manual_save", "Ручное сохранение"

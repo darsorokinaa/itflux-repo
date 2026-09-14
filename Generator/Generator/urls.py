@@ -7,6 +7,8 @@ from django.views.static import serve
 from . import views
 from . import seasonal_theme_api
 from Cabinet import homework_api
+from Cabinet import homework_notebooks
+from Cabinet import homework_task_files
 from Cabinet.subscription_api import PaymentWebhookView
 from Cabinet.views import api_teacher_application, api_teacher_community_feedback
 
@@ -89,6 +91,71 @@ urlpatterns = [
         "api/homework/assignment/<int:homework_id>/",
         homework_api.HomeworkAssignmentDetailView.as_view(),
         name="homework_assignment_detail",
+    ),
+    path(
+        "api/homework/submissions/<int:submission_id>/attachments/",
+        homework_task_files.HomeworkSubmissionAttachmentsView.as_view(),
+        name="homework_submission_task_attachments",
+    ),
+    path(
+        "api/homework/submissions/<int:submission_id>/tasks/<str:task_id>/attachments/",
+        homework_task_files.HomeworkSubmissionTaskAttachmentsView.as_view(),
+        name="homework_submission_task_attachment_upload",
+    ),
+    path(
+        "api/homework/submissions/<int:submission_id>/notebooks/",
+        homework_notebooks.HomeworkNotebookCollectionView.as_view(),
+        name="homework_submission_notebooks",
+    ),
+    path(
+        "api/homework/submissions/<int:submission_id>/tasks/<str:task_id>/published-notebook/",
+        homework_notebooks.HomeworkNotebookPublishedView.as_view(),
+        name="homework_published_notebook",
+    ),
+    path(
+        "api/homework/attachments/<uuid:attachment_id>/file/",
+        homework_task_files.HomeworkAttachmentFileView.as_view(),
+        name="homework_attachment_file",
+    ),
+    path(
+        "api/homework/attachments/<uuid:attachment_id>/",
+        homework_task_files.HomeworkAttachmentDetailView.as_view(),
+        name="homework_attachment_detail",
+    ),
+    path(
+        "api/homework/notebooks/<uuid:notebook_id>/pages/",
+        homework_notebooks.HomeworkNotebookPageCreateView.as_view(),
+        name="homework_notebook_pages",
+    ),
+    path(
+        "api/homework/notebooks/<uuid:notebook_id>/pages/<uuid:page_id>/",
+        homework_notebooks.HomeworkNotebookPageDeleteView.as_view(),
+        name="homework_notebook_page_delete",
+    ),
+    path(
+        "api/homework/notebooks/<uuid:notebook_id>/submit/",
+        homework_notebooks.HomeworkNotebookSubmitView.as_view(),
+        name="homework_notebook_submit",
+    ),
+    path(
+        "api/homework/notebooks/<uuid:notebook_id>/export/",
+        homework_notebooks.HomeworkNotebookExportView.as_view(),
+        name="homework_notebook_export",
+    ),
+    path(
+        "api/homework/notebooks/<uuid:notebook_id>/",
+        homework_notebooks.HomeworkNotebookDetailView.as_view(),
+        name="homework_notebook_detail",
+    ),
+    path(
+        "api/homework/notebook-pages/<uuid:page_id>/background/",
+        homework_notebooks.HomeworkNotebookPageBackgroundView.as_view(),
+        name="homework_notebook_page_background",
+    ),
+    path(
+        "api/homework/notebook-revisions/<uuid:revision_id>/export/",
+        homework_notebooks.HomeworkNotebookRevisionExportView.as_view(),
+        name="homework_notebook_revision_export",
     ),
     path(
         "api/lesson/homework/assignment/<int:aid>/save-draft/",

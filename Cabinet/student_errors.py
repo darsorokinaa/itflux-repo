@@ -234,6 +234,32 @@ def _enrich_error_row(
             number_unique=number_unique,
         )
     )
+    from .choices import HomeworkAttachmentOwnerRole
+    from .homework_task_files import serialize_homework_task_attachment
+    from .models import HomeworkAttachment
+
+    db_student = [
+        serialize_homework_task_attachment(row)
+        for row in HomeworkAttachment.objects.filter(
+            submission=submission,
+            task_key=str(task_id),
+            owner_role=HomeworkAttachmentOwnerRole.STUDENT,
+            is_deleted=False,
+        ).order_by("created_at", "id")
+    ]
+    db_teacher = [
+        serialize_homework_task_attachment(row)
+        for row in HomeworkAttachment.objects.filter(
+            submission=submission,
+            task_key=str(task_id),
+            owner_role=HomeworkAttachmentOwnerRole.TEACHER,
+            is_deleted=False,
+        ).order_by("created_at", "id")
+    ]
+    if db_student:
+        attachments = db_student
+    if db_teacher:
+        teacher_attachments = db_teacher
 
     overall_comment = (
         (submission.teacher_comment or "").strip()

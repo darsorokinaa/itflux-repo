@@ -74,6 +74,18 @@ describe("homeworkTaskAnswer legacy number keys", () => {
     expect(byNum[8].answer).toBe("109");
     expect(byNum[8].verdict).toBe(true);
   });
+
+  it("keeps latex markup in the official answer for review tables", () => {
+    const latex = "\\[x=-\\frac{\\pi}{2}+2\\pi n, \\qquad n\\in\\mathbb Z.\\]";
+    const review = buildStudentHomeworkReviewRows(
+      [{ id: 313, number: 13, answer: latex, part: 2 }],
+      { by_task_id: {} },
+      "ege",
+      "math",
+    );
+    expect(review.part2).toHaveLength(1);
+    expect(review.part2[0].correctAnswer).toBe(latex);
+  });
 });
 
 describe("homeworkResultToUiState + payload", () => {

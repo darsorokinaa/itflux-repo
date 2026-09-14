@@ -55,14 +55,13 @@ import {
   uploadHomeworkAnswer,
   deleteHomeworkAnswer,
 } from "../utils/cabinetHomework";
+import { deleteHomeworkAttachment, openHomeworkNotebook, uploadSubmissionTaskAttachment } from "../cabinet/notebook/notebookApi";
 import {
   appendHomeworkAttachments,
   homeworkAttachmentKey,
   isHomeworkAttachmentImage,
   normalizeHomeworkAttachment,
   removeHomeworkAttachment,
-  shouldHydrateAttachmentList,
-  writeTaskAttachments,
 } from "../cabinet/homeworkAttachmentState";
 import {
   fetchCabinetSession,
@@ -186,6 +185,7 @@ function LessonSolutionUpload({
   taskId,
   lessonToken,
   assignmentId,
+  submissionId,
   homeworkMode,
   cabinetMode,
   enabled,
@@ -193,28 +193,16 @@ function LessonSolutionUpload({
   initialAttachments,
   onAttachmentsChange,
 }) {
+  const navigate = useNavigate();
   const FILE_ACCEPT =
     ".kum,.xls,.xlsx,.xlsm,.xlsb,.csv,.tsv,.ods,.ots,.numbers,.png,.jpg,.jpeg,.webp,.gif,.bmp,.heic,.heif,.txt,.pdf,.doc,.docx,.odt,.rtf,.zip,.7z,.rar";
   const fileInputRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
-  const [sentPreviews, setSentPreviews] = useState(() => (
-    Array.isArray(initialAttachments) ? initialAttachments : []
-  ));
+  const sentPreviews = Array.isArray(initialAttachments) ? initialAttachments : [];
   const [pendingItems, setPendingItems] = useState([]);
   const [deletingKeys, setDeletingKeys] = useState(() => new Set());
-  const initialAttachmentsKeyRef = useRef("");
-
-  useEffect(() => {
-    const incoming = Array.isArray(initialAttachments) ? initialAttachments : [];
-    const decision = shouldHydrateAttachmentList({
-      incoming,
-      lastHydratedKey: initialAttachmentsKeyRef.current,
-    });
-    if (!decision.hydrate) return;
-    initialAttachmentsKeyRef.current = decision.key;
-    setSentPreviews(incoming);
-  }, [initialAttachments]);
+  const [notebookBusy, setNotebookBusy] = useState(false);
 
   const pendingItemsRef = useRef([]);
   pendingItemsRef.current = pendingItems;
@@ -228,7 +216,7 @@ function LessonSolutionUpload({
   const canDeleteAttachment =
     allowDelete && (cabinetMode || homeworkMode) && !!assignmentId && enabled;
 
-  if (!enabled && !(Array.isArray(sentPreviews) && sentPreviews.length)) return null;
+  if (!enabled && !(Array.isArray(sentPreviews) && sentPreviews.length) && !submissionId) return null;
   if (!cabinetMode && !lessonToken && !enabled) return null;
 
   const clearPending = () => {
@@ -291,20 +279,30 @@ function LessonSolutionUpload({
     try {
       const uploadOpts = lessonToken ? { lessonToken } : undefined;
       const useNativeHomeworkUpload = (cabinetMode || homeworkMode) && assignmentId;
-      const data = useNativeHomeworkUpload
-        ? await uploadHomeworkAnswer(assignmentId, fd, uploadOpts)
-        : await (async () => {
-            const res = await fetch("/api/lesson/attachment/", {
-              method: "POST",
-              body: fd,
-              credentials: "include",
-            });
-            const parsed = await res.json().catch(() => ({}));
-            if (!res.ok || (Object.prototype.hasOwnProperty.call(parsed, "ok") && !parsed.ok)) {
-              throw new Error(parsed.error || "Не удалось загрузить файл");
-            }
-            return parsed;
-          })();
+      let data;
+      if (submissionId && taskId != null && (cabinetMode || homeworkMode)) {
+        const nativeFd = new FormData();
+        if (taskNumber != null && String(taskNumber).trim() !== "") {
+          nativeFd.append("task_number", String(taskNumber));
+        }
+        pendingItems.forEach((item) => {
+          nativeFd.append("file", item.file, item.file.name || "file");
+        });
+        data = await uploadSubmissionTaskAttachment(submissionId, taskId, nativeFd);
+      } else if (useNativeHomeworkUpload) {
+        data = await uploadHomeworkAnswer(assignmentId, fd, uploadOpts);
+      } else {
+        const res = await fetch("/api/lesson/attachment/", {
+          method: "POST",
+          body: fd,
+          credentials: "include",
+        });
+        const parsed = await res.json().catch(() => ({}));
+        if (!res.ok || (Object.prototype.hasOwnProperty.call(parsed, "ok") && !parsed.ok)) {
+          throw new Error(parsed.error || "Не удалось загрузить файл");
+        }
+        data = parsed;
+      }
       const uploaded = Array.isArray(data.attachments) && data.attachments.length
         ? data.attachments
         : (data.url ? [{
@@ -319,8 +317,9 @@ function LessonSolutionUpload({
           contentType: pendingMatch?.file?.type || item.content_type,
         });
       }).filter(Boolean);
-      setSentPreviews((prev) => appendHomeworkAttachments(prev, canonical));
-      onAttachmentsChange?.((prev) => appendHomeworkAttachments(prev, canonical));
+      onAttachmentsChange?.((prev) => appendHomeworkAttachments(prev, canonical), {
+        submissionId: data.submission_id,
+      });
       clearPending();
     } catch (ex) {
       const raw = ex instanceof Error ? ex.message : String(ex || "");
@@ -344,12 +343,23 @@ function LessonSolutionUpload({
     setErr(null);
     try {
       const uploadOpts = lessonToken ? { lessonToken } : undefined;
-      await deleteHomeworkAnswer(
-        assignmentId,
-        { id: attachment.id, url: attachment.url, taskNumber, taskId },
-        uploadOpts
-      );
-      setSentPreviews((prev) => removeHomeworkAttachment(prev, attachment));
+      if (attachment.id) {
+        try {
+          await deleteHomeworkAttachment(attachment.id);
+        } catch {
+          await deleteHomeworkAnswer(
+            assignmentId,
+            { id: attachment.id, url: attachment.url, taskNumber, taskId },
+            uploadOpts
+          );
+        }
+      } else {
+        await deleteHomeworkAnswer(
+          assignmentId,
+          { id: attachment.id, url: attachment.url, taskNumber, taskId },
+          uploadOpts
+        );
+      }
       onAttachmentsChange?.((prev) => removeHomeworkAttachment(prev, attachment));
     } catch (ex) {
       const raw = ex instanceof Error ? ex.message : String(ex || "");
@@ -467,6 +477,38 @@ function LessonSolutionUpload({
       ) : null}
 
       {err ? <span className="lesson-solution-upload-error">{err}</span> : null}
+
+      {submissionId && taskId != null ? (
+        <div className="hw-notebook-actions">
+          <button
+            type="button"
+            disabled={notebookBusy}
+            onClick={async (e) => {
+              e.stopPropagation();
+              setNotebookBusy(true);
+              try {
+                const notebook = await openHomeworkNotebook(submissionId, taskId, { ownerRole: "student" });
+                navigate(`/cabinet/notebook/${notebook.id}`);
+              } catch (ex) {
+                setErr(ex instanceof Error ? ex.message : "Не удалось открыть тетрадь");
+              } finally {
+                setNotebookBusy(false);
+              }
+            }}
+          >
+            {notebookBusy ? "Открытие…" : "Открыть тетрадь"}
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`/cabinet/notebook/published/${submissionId}/${encodeURIComponent(String(taskId))}`);
+            }}
+          >
+            Открыть проверенную работу
+          </button>
+        </div>
+      ) : null}
 
       {sentPreviews.length > 0 ? (
         <div className="lesson-solution-previews">
@@ -1585,20 +1627,25 @@ function ExamPage() {
     [lessonEmbedParams.token]
   );
 
-  const patchHomeworkTaskAttachments = useCallback((taskId, taskNumber, updater) => {
+  const patchHomeworkTaskAttachments = useCallback((taskId, _taskNumber, updater, extra) => {
     setHwApiRaw((prev) => {
       if (!prev || typeof prev !== "object") return prev;
       const result = prev.result && typeof prev.result === "object" ? prev.result : {};
-      const current = homeworkTaskAttachments(result, taskId, taskNumber);
+      const grouped = result.task_attachments || prev.task_attachments || { tasks: {}, comment: [] };
+      const current = homeworkTaskAttachments({ ...result, task_attachments: grouped }, taskId);
       const next = typeof updater === "function" ? updater(current) : updater;
-      return {
+      const tasks = { ...(grouped.tasks || {}) };
+      const bucket = { student: [], teacher: [], ...(tasks[String(taskId)] || {}) };
+      bucket.student = next;
+      tasks[String(taskId)] = bucket;
+      const task_attachments = { ...grouped, tasks };
+      const patched = {
         ...prev,
-        result: writeTaskAttachments(result, {
-          taskId,
-          taskNumber,
-          attachments: next,
-        }),
+        task_attachments,
+        result: { ...result, task_attachments },
       };
+      if (extra?.submissionId) patched.submission_id = extra.submissionId;
+      return patched;
     });
   }, []);
 
@@ -3316,11 +3363,12 @@ function ExamPage() {
                     taskId={task.id}
                     lessonToken={lessonEmbedParams.token}
                     assignmentId={cabinetAssignmentId}
+                    submissionId={hwApiRaw?.submission_id || hwPicked?.submissionId}
                     homeworkMode={isHomework}
                     cabinetMode={showCabinetPart2SolutionUpload}
                     allowDelete
                     initialAttachments={homeworkTaskAttachments(hwPicked?.result, task.id, task.number, variant?.tasks)}
-                    onAttachmentsChange={(updater) => patchHomeworkTaskAttachments(task.id, task.number, updater)}
+                    onAttachmentsChange={(updater, extra) => patchHomeworkTaskAttachments(task.id, task.number, updater, extra)}
                     enabled={
                       (showLessonSolutionUpload || showCabinetPart2SolutionUpload)
                       && (!isHomework || (!hRead && !numLocked(task.number)))
@@ -3439,11 +3487,12 @@ function ExamPage() {
                             taskId={task.id}
                             lessonToken={lessonEmbedParams.token}
                             assignmentId={cabinetAssignmentId}
+                    submissionId={hwApiRaw?.submission_id || hwPicked?.submissionId}
                             homeworkMode={isHomework}
                             cabinetMode={showCabinetPart2SolutionUpload}
                             allowDelete
                             initialAttachments={homeworkTaskAttachments(hwPicked?.result, task.id, task.number, variant?.tasks)}
-                            onAttachmentsChange={(updater) => patchHomeworkTaskAttachments(task.id, task.number, updater)}
+                            onAttachmentsChange={(updater, extra) => patchHomeworkTaskAttachments(task.id, task.number, updater, extra)}
                             enabled={
                               (showLessonSolutionUpload || showCabinetPart2SolutionUpload)
                               && (!isHomework || (!hRead && !numLocked(task.number)))
@@ -3555,11 +3604,12 @@ function ExamPage() {
                         taskId={task.id}
                         lessonToken={lessonEmbedParams.token}
                         assignmentId={cabinetAssignmentId}
+                    submissionId={hwApiRaw?.submission_id || hwPicked?.submissionId}
                         homeworkMode={isHomework}
                         cabinetMode={showCabinetPart2SolutionUpload}
                         allowDelete
                         initialAttachments={homeworkTaskAttachments(hwPicked?.result, task.id, task.number, variant?.tasks)}
-                        onAttachmentsChange={(updater) => patchHomeworkTaskAttachments(task.id, task.number, updater)}
+                        onAttachmentsChange={(updater, extra) => patchHomeworkTaskAttachments(task.id, task.number, updater, extra)}
                         enabled={
                           (showLessonSolutionUpload || showCabinetPart2SolutionUpload)
                           && (!isHomework || (!hRead && !numLocked(task.number)))

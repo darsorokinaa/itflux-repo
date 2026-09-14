@@ -55,10 +55,8 @@ import {
   isHomeworkAttachmentImage,
   normalizeHomeworkAttachment,
   removeHomeworkAttachment,
-  shouldHydrateAttachmentList,
-  writeTaskAttachments,
-  writeTeacherCommentAttachments,
 } from "../homeworkAttachmentState";
+import { deleteHomeworkAttachment, openHomeworkNotebook } from "../notebook/notebookApi";
 
 const HW_TASK_TYPE_RU = {
   text: "Текст",
@@ -67,6 +65,47 @@ const HW_TASK_TYPE_RU = {
   generated_task: "Вариант",
   external_link: "Ссылка",
 };
+
+function TeacherNotebookActions({ submissionId, taskId, enabled }) {
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  if (!submissionId || taskId == null) return null;
+  return (
+    <div className="hw-notebook-actions">
+      {enabled ? (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            setErr("");
+            try {
+              const notebook = await openHomeworkNotebook(submissionId, taskId, {
+                ownerRole: "teacher",
+                seed: true,
+              });
+              navigate(`/cabinet/notebook/${notebook.id}`);
+            } catch (ex) {
+              setErr(ex instanceof Error ? ex.message : "Не удалось открыть тетрадь");
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? "Открытие…" : "Открыть для проверки"}
+        </button>
+      ) : null}
+      <button
+        type="button"
+        onClick={() => navigate(`/cabinet/notebook/published/${submissionId}/${encodeURIComponent(String(taskId))}`)}
+      >
+        Открыть проверенную работу
+      </button>
+      {err ? <p className="cb-inline-error" role="alert">{err}</p> : null}
+    </div>
+  );
+}
 
 function homeworkTaskMeta(task) {
   if (!task) return "Задание";
@@ -184,25 +223,10 @@ function ReviewFeedbackUpload({
   const fileInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState(null);
-  const [files, setFiles] = useState(() => (
-    Array.isArray(initialAttachments) ? initialAttachments : []
-  ));
+  const files = Array.isArray(initialAttachments) ? initialAttachments : [];
   const [deletingKeys, setDeletingKeys] = useState(() => new Set());
-  const hydratedKeyRef = useRef("");
-
-  useEffect(() => {
-    const incoming = Array.isArray(initialAttachments) ? initialAttachments : [];
-    const decision = shouldHydrateAttachmentList({
-      incoming,
-      lastHydratedKey: hydratedKeyRef.current,
-    });
-    if (!decision.hydrate) return;
-    hydratedKeyRef.current = decision.key;
-    setFiles(incoming);
-  }, [initialAttachments]);
 
   const applyChange = (updater) => {
-    setFiles((prev) => updater(prev));
     onAttachmentsChange?.(updater);
   };
 
@@ -251,12 +275,25 @@ function ReviewFeedbackUpload({
     setDeletingKeys((prev) => new Set(prev).add(key));
     setErr(null);
     try {
-      await deleteReviewFeedback(reviewId, {
-        id: file.id,
-        url: file.url,
-        taskNumber,
-        taskId,
-      });
+      if (file.id) {
+        try {
+          await deleteHomeworkAttachment(file.id);
+        } catch {
+          await deleteReviewFeedback(reviewId, {
+            id: file.id,
+            url: file.url,
+            taskNumber,
+            taskId,
+          });
+        }
+      } else {
+        await deleteReviewFeedback(reviewId, {
+          id: file.id,
+          url: file.url,
+          taskNumber,
+          taskId,
+        });
+      }
       applyChange((prev) => removeHomeworkAttachment(prev, file));
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : "Не удалось удалить файл");
@@ -390,22 +427,26 @@ export default function CabinetReviewDetailPage() {
       const result = submission.result_payload && typeof submission.result_payload === "object"
         ? submission.result_payload
         : {};
+      const grouped = result.task_attachments || submission.task_attachments || { tasks: {}, comment: [] };
       const current = comment
-        ? homeworkTeacherCommentAttachments(result)
-        : homeworkTeacherAttachments(result, taskId, taskNumber);
+        ? homeworkTeacherCommentAttachments({ ...result, task_attachments: grouped })
+        : homeworkTeacherAttachments({ ...result, task_attachments: grouped }, taskId, taskNumber);
       const next = typeof updater === "function" ? updater(current) : updater;
-      const nextResult = comment
-        ? writeTeacherCommentAttachments(result, next)
-        : writeTaskAttachments(result, {
-            taskId,
-            taskNumber,
-            attachments: next,
-            teacher: true,
-          });
+      let task_attachments = { ...grouped, tasks: { ...(grouped.tasks || {}) } };
+      if (comment) {
+        task_attachments = { ...task_attachments, comment: next };
+      } else {
+        const bucket = { student: [], teacher: [], ...(task_attachments.tasks[String(taskId)] || {}) };
+        bucket.teacher = next;
+        task_attachments.tasks[String(taskId)] = bucket;
+      }
+      const nextResult = { ...result, task_attachments };
+      if (comment) nextResult.teacher_comment_attachments = next;
       return {
         ...prev,
         homework_submission: {
           ...submission,
+          task_attachments,
           result_payload: nextResult,
         },
       };
@@ -418,7 +459,10 @@ export default function CabinetReviewDetailPage() {
 
   const submission = review?.homework_submission;
   const reviewCtx = review?.homework_review;
-  const result = submission?.result_payload || {};
+  const result = {
+    ...(submission?.result_payload || {}),
+    task_attachments: submission?.task_attachments || submission?.result_payload?.task_attachments,
+  };
   const commentAttachments = homeworkTeacherCommentAttachments(result);
   const isPending = review?.status === "pending";
   const isChecked = review?.status === "checked";
@@ -992,7 +1036,11 @@ export default function CabinetReviewDetailPage() {
                         <div
                           className={`cb-review-detail__task-answer${tableAnswer ? " cb-review-detail__task-answer--pre" : ""}`}
                         >
-                          {answer || <span className="cb-review-detail__empty-answer">Нет ответа</span>}
+                          {answer ? (
+                            <MathContent html={String(answer)} plainHtml />
+                          ) : (
+                            <span className="cb-review-detail__empty-answer">Нет ответа</span>
+                          )}
                         </div>
                       </div>
                       {!isReadOnly ? (
@@ -1014,6 +1062,11 @@ export default function CabinetReviewDetailPage() {
                       <div className="cb-review-detail__task-files">
                         <span className="cb-review-detail__section-label">Файлы ученика</span>
                         <AttachmentList attachments={studentAttachments} />
+                        <TeacherNotebookActions
+                          submissionId={submission?.id}
+                          taskId={task.id}
+                          enabled={isPending}
+                        />
                       </div>
                       <div className="cb-review-detail__task-files">
                         <span className="cb-review-detail__section-label">Файлы с разбором ошибок</span>
@@ -1068,7 +1121,9 @@ export default function CabinetReviewDetailPage() {
                       <div className="cb-review-detail__answer-block">
                         <span className="cb-review-detail__section-label">Ответ ученика</span>
                         {answer ? (
-                          <div className="cb-review-detail__task-answer">{answer}</div>
+                          <div className="cb-review-detail__task-answer">
+                            <MathContent html={String(answer)} plainHtml />
+                          </div>
                         ) : (
                           <p className="cb-review-detail__empty-answer">Текстовый ответ не указан</p>
                         )}
@@ -1076,6 +1131,11 @@ export default function CabinetReviewDetailPage() {
                       <div className="cb-review-detail__task-files">
                         <span className="cb-review-detail__section-label">Файлы ученика</span>
                         <AttachmentList attachments={studentAttachments} />
+                        <TeacherNotebookActions
+                          submissionId={submission?.id}
+                          taskId={task.id}
+                          enabled={isPending}
+                        />
                       </div>
                       <div className="cb-review-detail__score-row">
                         <label htmlFor={`score-${task.id}`}>

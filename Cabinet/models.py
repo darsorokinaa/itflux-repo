@@ -12,6 +12,11 @@ from .choices import (
     EnrollmentStatus,
     ExamType,
     GroupStatus,
+    HomeworkAttachmentOwnerRole,
+    HomeworkAttachmentType,
+    HomeworkNotebookPageType,
+    HomeworkNotebookRevisionReason,
+    HomeworkNotebookStatus,
     HomeworkStatus,
     HomeworkTaskType,
     InvitationStatus,
@@ -1966,6 +1971,275 @@ class HomeworkSubmissionAttempt(models.Model):
 
     def __str__(self):
         return f"Attempt {self.attempt_number} of submission {self.submission_id}"
+
+
+def homework_attachment_upload_to(instance, filename):
+    from .files_storage import sanitize_filename
+
+    name = sanitize_filename(filename)
+    ident = instance.id or uuid.uuid4()
+    submission_id = instance.submission_id or "pending"
+    return f"cabinet/homework/attachments/{submission_id}/{ident}/{name}"
+
+
+def homework_notebook_export_upload_to(instance, filename):
+    from .files_storage import sanitize_filename
+
+    name = sanitize_filename(filename)
+    ident = instance.id or uuid.uuid4()
+    notebook = getattr(instance, "notebook", None)
+    submission_id = getattr(notebook, "submission_id", None) or "pending"
+    return f"cabinet/homework/notebooks/{submission_id}/{ident}/{name}"
+
+
+def homework_notebook_page_background_upload_to(instance, filename):
+    from .files_storage import sanitize_filename
+
+    name = sanitize_filename(filename)
+    ident = instance.id or uuid.uuid4()
+    notebook_id = getattr(instance, "notebook_id", None) or "pending"
+    return f"cabinet/homework/notebook-pages/{notebook_id}/{ident}/{name}"
+
+
+class HomeworkAttachment(models.Model):
+    """Нормализованное вложение ответа/проверки. Source of truth, не JSON."""
+
+    COMMENT_TASK_KEY = "__comment__"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    submission = models.ForeignKey(
+        HomeworkSubmission,
+        on_delete=models.CASCADE,
+        related_name="task_file_attachments",
+        verbose_name="Сдача",
+    )
+    homework = models.ForeignKey(
+        Homework,
+        on_delete=models.CASCADE,
+        related_name="submission_task_attachments",
+        verbose_name="Домашнее задание",
+    )
+    homework_task = models.ForeignKey(
+        HomeworkTask,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="attachments",
+        verbose_name="Задание ДЗ",
+    )
+    task_key = models.CharField(
+        "Идентификатор задания",
+        max_length=64,
+        db_index=True,
+        help_text="Стабильный id задания варианта или PK HomeworkTask. Не номер и не URL.",
+    )
+    task_number = models.CharField("Номер задания (метаданные)", max_length=32, blank=True)
+    uploaded_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="homework_attachments",
+        verbose_name="Кто загрузил",
+    )
+    owner_role = models.CharField(
+        "Роль владельца",
+        max_length=16,
+        choices=HomeworkAttachmentOwnerRole.choices,
+    )
+    attachment_type = models.CharField(
+        "Тип вложения",
+        max_length=32,
+        choices=HomeworkAttachmentType.choices,
+        default=HomeworkAttachmentType.STUDENT_ANSWER,
+    )
+    file = models.FileField(
+        "Файл",
+        upload_to=homework_attachment_upload_to,
+        blank=True,
+        null=True,
+    )
+    original_filename = models.CharField("Исходное имя", max_length=255, blank=True)
+    mime_type = models.CharField("MIME", max_length=128, blank=True)
+    file_size = models.BigIntegerField("Размер", default=0)
+    checksum = models.CharField("SHA-256", max_length=64, blank=True)
+    storage_path = models.CharField("Путь в storage", max_length=512, blank=True)
+    legacy_url = models.CharField("URL из старого JSON", max_length=1024, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    is_deleted = models.BooleanField("Удалено", default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Вложение задания ДЗ"
+        verbose_name_plural = "Вложения заданий ДЗ"
+        ordering = ["created_at", "id"]
+        indexes = [
+            models.Index(
+                fields=["submission", "task_key", "owner_role", "is_deleted"],
+                name="cab_hw_att_sub_task_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return self.original_filename or str(self.id)
+
+
+class HomeworkNotebook(models.Model):
+    """Тетрадь проверки/черновик ученика. Одна на (сдача, задание, роль)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    submission = models.ForeignKey(
+        HomeworkSubmission,
+        on_delete=models.CASCADE,
+        related_name="notebooks",
+        verbose_name="Сдача",
+    )
+    homework_task = models.ForeignKey(
+        HomeworkTask,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="notebooks",
+        verbose_name="Задание ДЗ",
+    )
+    task_key = models.CharField("Идентификатор задания", max_length=64, db_index=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="homework_notebooks",
+        verbose_name="Автор",
+    )
+    owner_role = models.CharField(
+        "Роль владельца",
+        max_length=16,
+        choices=HomeworkAttachmentOwnerRole.choices,
+    )
+    status = models.CharField(
+        "Статус",
+        max_length=20,
+        choices=HomeworkNotebookStatus.choices,
+        default=HomeworkNotebookStatus.DRAFT,
+    )
+    version = models.PositiveIntegerField("Версия draft", default=1)
+    published_revision = models.ForeignKey(
+        "HomeworkNotebookRevision",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="published_for",
+        verbose_name="Отправленная ученику ревизия",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Тетрадь ДЗ"
+        verbose_name_plural = "Тетради ДЗ"
+        ordering = ["-updated_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["submission", "task_key", "owner_role"],
+                name="cabinet_unique_homework_notebook_owner_task",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Notebook {self.id} ({self.owner_role}/{self.task_key})"
+
+
+class HomeworkNotebookPage(models.Model):
+    DEFAULT_WIDTH = 1000
+    DEFAULT_HEIGHT = 1414
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    notebook = models.ForeignKey(
+        HomeworkNotebook,
+        on_delete=models.CASCADE,
+        related_name="pages",
+        verbose_name="Тетрадь",
+    )
+    page_number = models.PositiveIntegerField("Номер страницы", default=1)
+    source_attachment = models.ForeignKey(
+        HomeworkAttachment,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="notebook_pages",
+        verbose_name="Исходный файл",
+    )
+    background_file = models.FileField(
+        "Растр фона",
+        upload_to=homework_notebook_page_background_upload_to,
+        blank=True,
+        null=True,
+    )
+    page_type = models.CharField(
+        "Тип страницы",
+        max_length=20,
+        choices=HomeworkNotebookPageType.choices,
+        default=HomeworkNotebookPageType.BLANK,
+    )
+    pdf_page_number = models.PositiveIntegerField("Страница PDF", null=True, blank=True)
+    width = models.PositiveIntegerField("Логическая ширина", default=DEFAULT_WIDTH)
+    height = models.PositiveIntegerField("Логическая высота", default=DEFAULT_HEIGHT)
+    state = models.JSONField("Состояние аннотаций", default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Страница тетради ДЗ"
+        verbose_name_plural = "Страницы тетради ДЗ"
+        ordering = ["notebook_id", "page_number", "id"]
+
+    def __str__(self):
+        return f"Page {self.page_number} of {self.notebook_id}"
+
+
+class HomeworkNotebookRevision(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    notebook = models.ForeignKey(
+        HomeworkNotebook,
+        on_delete=models.CASCADE,
+        related_name="revisions",
+        verbose_name="Тетрадь",
+    )
+    version = models.PositiveIntegerField("Версия")
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="homework_notebook_revisions",
+        verbose_name="Автор",
+    )
+    reason = models.CharField(
+        "Причина",
+        max_length=32,
+        choices=HomeworkNotebookRevisionReason.choices,
+        default=HomeworkNotebookRevisionReason.MANUAL_SAVE,
+    )
+    snapshot = models.JSONField("Снимок", default=dict, blank=True)
+    export_file = models.FileField(
+        "PDF-снимок",
+        upload_to=homework_notebook_export_upload_to,
+        blank=True,
+        null=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Ревизия тетради ДЗ"
+        verbose_name_plural = "Ревизии тетради ДЗ"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["notebook", "version"], name="cab_hw_nb_rev_ver_idx"),
+        ]
+
+    def __str__(self):
+        return f"Revision {self.version} of {self.notebook_id}"
 
 
 class ReviewItem(models.Model):

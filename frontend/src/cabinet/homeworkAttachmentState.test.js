@@ -88,16 +88,50 @@ describe("homework attachment identity", () => {
     expect(state.map(homeworkAttachmentKey)).toEqual(["a", "c"]);
   });
 
+  it("does not leak a file from task A into task B via by_number", () => {
+    const payload = {
+      attachments_by_task_id: { A: [a] },
+      attachments_by_number: { "1": [a], "2": [a] },
+    };
+    expect(homeworkTaskAttachments(payload, "A", "1").map(homeworkAttachmentKey)).toEqual(["a"]);
+    expect(homeworkTaskAttachments(payload, "B", "2").map(homeworkAttachmentKey)).toEqual([]);
+  });
+
+  it("keeps a legacy file stored only under the task number", () => {
+    const payload = {
+      task_attachments: {
+        tasks: {
+          "1": { student: [a], teacher: [] },
+        },
+      },
+    };
+    expect(homeworkTaskAttachments(payload, "101", "1").map(homeworkAttachmentKey)).toEqual(["a"]);
+    expect(homeworkTeacherAttachments(payload, "101", "1")).toEqual([]);
+  });
+
+  it("reads grouped task_attachments as the source of truth", () => {
+    const payload = {
+      task_attachments: {
+        tasks: {
+          A: { student: [a], teacher: [] },
+          B: { student: [b], teacher: [] },
+        },
+      },
+      attachments_by_task_id: { A: [c] },
+    };
+    expect(homeworkTaskAttachments(payload, "A").map(homeworkAttachmentKey)).toEqual(["a"]);
+    expect(homeworkTaskAttachments(payload, "B").map(homeworkAttachmentKey)).toEqual(["b"]);
+  });
+
   it("writeTaskAttachments updates the canonical payload maps used by both UIs", () => {
     const payload = writeTaskAttachments({}, {
       taskId: "42",
-      taskNumber: "16",
       attachments: [a, c],
     });
     expect(homeworkTaskAttachments(payload, "42", "16").map(homeworkAttachmentKey)).toEqual(["a", "c"]);
+    expect(payload.attachments_by_number).toBeUndefined();
     const teacherPayload = writeTaskAttachments({}, {
       taskId: "20",
-      taskNumber: "20",
       attachments: [b],
       teacher: true,
     });
@@ -107,7 +141,6 @@ describe("homework attachment identity", () => {
   it("deleting comment attachments does not rewrite another task map", () => {
     let result = writeTaskAttachments({}, {
       taskId: "10",
-      taskNumber: "10",
       attachments: [a, b],
       teacher: true,
     });

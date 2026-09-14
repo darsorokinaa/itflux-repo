@@ -47,6 +47,7 @@ import CabinetInteractiveDetailPage from "./cabinet/pages/CabinetInteractiveDeta
 import CabinetInteractivePlayPage from "./cabinet/pages/CabinetInteractivePlayPage";
 import CabinetBoardsPage from "./cabinet/pages/CabinetBoardsPage";
 import CabinetBoardEditorPage from "./cabinet/pages/CabinetBoardEditorPage";
+import HomeworkNotebookEditor, { HomeworkPublishedNotebookPage } from "./cabinet/notebook/HomeworkNotebookEditor";
 import CabinetFilesPage from "./cabinet/pages/CabinetFilesPage";
 import VideoMeetingPage from "./cabinet/pages/VideoMeetingPage";
 import MeetingCallDock from "./cabinet/components/MeetingCallDock";
@@ -317,6 +318,22 @@ function App() {
             element={(
               <ErrorBoundary kind="room" homeHref="/cabinet">
                 <CabinetBoardEditorPage />
+              </ErrorBoundary>
+            )}
+          />
+          <Route
+            path="/cabinet/notebook/:notebookId"
+            element={(
+              <ErrorBoundary kind="room" homeHref="/cabinet">
+                <HomeworkNotebookEditor />
+              </ErrorBoundary>
+            )}
+          />
+          <Route
+            path="/cabinet/notebook/published/:submissionId/:taskId"
+            element={(
+              <ErrorBoundary kind="room" homeHref="/cabinet">
+                <HomeworkPublishedNotebookPage />
               </ErrorBoundary>
             )}
           />

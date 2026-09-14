@@ -35,6 +35,10 @@ from .models import (
     HomeworkSubmission,
     HomeworkSubmissionAttempt,
     HomeworkTask,
+    HomeworkAttachment,
+    HomeworkNotebook,
+    HomeworkNotebookPage,
+    HomeworkNotebookRevision,
     ParentAccessAuditLog,
     ParentInvitation,
     ParentStudentRelationship,
@@ -568,6 +572,31 @@ class HomeworkSubmissionAdmin(admin.ModelAdmin):
     list_filter = ("status",)
     search_fields = ("student__first_name", "homework__title")
     ordering = ("-submitted_at",)
+
+
+@admin.register(HomeworkAttachment)
+class HomeworkAttachmentAdmin(admin.ModelAdmin):
+    list_display = ("id", "submission", "task_key", "owner_role", "original_filename", "is_deleted")
+    list_filter = ("owner_role", "attachment_type", "is_deleted")
+    search_fields = ("original_filename", "task_key")
+    readonly_fields = ("id", "checksum", "created_at", "updated_at")
+
+
+@admin.register(HomeworkNotebook)
+class HomeworkNotebookAdmin(admin.ModelAdmin):
+    list_display = ("id", "submission", "task_key", "owner_role", "status", "version")
+    list_filter = ("owner_role", "status")
+
+
+@admin.register(HomeworkNotebookPage)
+class HomeworkNotebookPageAdmin(admin.ModelAdmin):
+    list_display = ("id", "notebook", "page_number", "page_type")
+
+
+@admin.register(HomeworkNotebookRevision)
+class HomeworkNotebookRevisionAdmin(admin.ModelAdmin):
+    list_display = ("id", "notebook", "version", "reason", "created_at")
+    list_filter = ("reason",)
 
 
 @admin.register(HomeworkEditHistory)

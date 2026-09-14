@@ -19,6 +19,8 @@ from . import (
     subscription_api,
     teacher_tasks_api,
     telegram_api,
+    homework_notebooks,
+    homework_task_files,
 )
 
 router = DefaultRouter()
@@ -263,6 +265,31 @@ urlpatterns = [
         "homework/submissions/<int:submission_id>/attached-files/<int:attachment_id>/",
         api_views.HomeworkSubmissionExtraAttachedFileView.as_view(),
         name="cabinet_homework_submission_extra_attached_file",
+    ),
+    path(
+        "homework/submissions/<int:submission_id>/attachments/",
+        homework_task_files.HomeworkSubmissionAttachmentsView.as_view(),
+        name="cabinet_homework_submission_task_attachments",
+    ),
+    path(
+        "homework/submissions/<int:submission_id>/tasks/<str:task_id>/attachments/",
+        homework_task_files.HomeworkSubmissionTaskAttachmentsView.as_view(),
+        name="cabinet_homework_submission_task_upload",
+    ),
+    path(
+        "homework/submissions/<int:submission_id>/notebooks/",
+        homework_notebooks.HomeworkNotebookCollectionView.as_view(),
+        name="cabinet_homework_submission_notebooks",
+    ),
+    path(
+        "homework/attachments/<uuid:attachment_id>/file/",
+        homework_task_files.HomeworkAttachmentFileView.as_view(),
+        name="cabinet_homework_attachment_file",
+    ),
+    path(
+        "homework/attachments/<uuid:attachment_id>/",
+        homework_task_files.HomeworkAttachmentDetailView.as_view(),
+        name="cabinet_homework_attachment_detail",
     ),
     path("direct-materials/", api_views.DirectMaterialAssignView.as_view(), name="direct_materials"),
     path("direct-materials/<int:pk>/", api_views.DirectMaterialAssignView.as_view(), name="direct_materials_delete"),

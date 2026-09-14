@@ -1,9 +1,6 @@
 import { homeworkTaskAttachments } from "../utils/cabinetHomework";
 import { normalizeHomeworkAttachmentList } from "./homeworkAttachmentState";
-import {
-  computePart1TaskCorrect,
-  formatCorrectAnswerPlain,
-} from "../utils/examAnswerCheck";
+import { computePart1TaskCorrect } from "../utils/examAnswerCheck";
 
 import { inferExamTaskPart, isMathLikeSubject } from "../utils/examTaskPart";
 
@@ -131,22 +128,34 @@ export function buildTeacherVariantUrl(reviewCtx) {
 
 export function homeworkTeacherCommentAttachments(result) {
   if (!result || typeof result !== "object") return [];
+  if (Array.isArray(result.task_attachments?.comment)) {
+    return normalizeHomeworkAttachmentList(result.task_attachments.comment);
+  }
   const list = result.teacher_comment_attachments || result.teacherCommentAttachments || [];
   return normalizeHomeworkAttachmentList(list);
 }
 
 export function homeworkTeacherAttachments(result, taskId, taskNumber, tasks) {
   if (!result || typeof result !== "object") return [];
+  const grouped = result.task_attachments;
+  const id = String(taskId ?? "");
+  if (grouped?.tasks && id && grouped.tasks[id]) {
+    return normalizeHomeworkAttachmentList(grouped.tasks[id].teacher || []);
+  }
   const byId = result.teacher_attachments_by_task_id || result.teacherAttachmentsByTaskId || {};
-  const byNum = result.teacher_attachments_by_number || result.teacherAttachmentsByNumber || {};
-  const id = String(taskId);
-  const num = String(taskNumber);
-  if (byId[id]) {
+  if (id && byId[id]) {
     return normalizeHomeworkAttachmentList(byId[id]);
   }
-  if (numberCollisionCount(tasks, num) > 1) return [];
-  const list = byNum[num] || byNum[String(Number(num))] || [];
-  return normalizeHomeworkAttachmentList(list);
+  const numKey = String(taskNumber ?? "");
+  if (numKey && numKey !== id) {
+    if (grouped?.tasks?.[numKey]) {
+      return normalizeHomeworkAttachmentList(grouped.tasks[numKey].teacher || []);
+    }
+    if (byId[numKey]) {
+      return normalizeHomeworkAttachmentList(byId[numKey]);
+    }
+  }
+  return [];
 }
 
 export { homeworkTaskAttachments };
@@ -183,7 +192,7 @@ export function buildStudentHomeworkReviewRows(tasks, result, level, subject) {
     const comment = homeworkTaskComment(result, task.id, task.number, list);
     const teacherFiles = homeworkTeacherAttachments(result, task.id, task.number, list);
     const studentFiles = homeworkTaskAttachments(result, task.id, task.number, list);
-    const correctAnswer = formatCorrectAnswerPlain(task.answer);
+    const correctAnswer = task.answer ?? "";
     if (part === 1) {
       part1.push({
         taskId: String(task.id),

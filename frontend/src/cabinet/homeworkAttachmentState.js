@@ -97,16 +97,22 @@ function writeAttachmentMap(mapping, key, rows) {
 
 export function writeTaskAttachments(result, {
   taskId,
-  taskNumber,
   attachments,
   teacher = false,
 } = {}) {
   const payload = result && typeof result === "object" ? { ...result } : {};
   const idKey = teacher ? "teacher_attachments_by_task_id" : "attachments_by_task_id";
-  const numKey = teacher ? "teacher_attachments_by_number" : "attachments_by_number";
   const rows = (attachments || []).map((item) => storageRow(item)).filter(Boolean);
-  payload[idKey] = writeAttachmentMap(payload[idKey], String(taskId || ""), rows);
-  payload[numKey] = writeAttachmentMap(payload[numKey], String(taskNumber || ""), rows);
+  const id = String(taskId || "");
+  payload[idKey] = writeAttachmentMap(payload[idKey], id, rows);
+  const grouped = payload.task_attachments && typeof payload.task_attachments === "object"
+    ? { ...payload.task_attachments, tasks: { ...(payload.task_attachments.tasks || {}) } }
+    : { tasks: {}, comment: Array.isArray(payload.task_attachments?.comment) ? payload.task_attachments.comment : [] };
+  const bucket = { student: [], teacher: [], ...(grouped.tasks[id] || {}) };
+  if (teacher) bucket.teacher = rows;
+  else bucket.student = rows;
+  grouped.tasks[id] = bucket;
+  payload.task_attachments = grouped;
   return payload;
 }
 
