@@ -477,20 +477,45 @@ export default function HomeworkNotebookEditor({
         </button>
         <strong className="hw-notebook__title">Тетрадь проверки</strong>
         <span className={`hw-notebook__status is-${saveState}`}>{saveStatus}</span>
-        <button type="button" className="hw-nb-ghost" onClick={() => setPagesOpen((v) => !v)}>
-          Страницы {pages.length}
-        </button>
-        <button type="button" className="hw-nb-ghost" aria-label="Горячие клавиши" onClick={() => setHelpOpen(true)}>
-          <CircleHelp size={18} />
-        </button>
-        {!readOnly ? (
-          <button type="button" className="hw-nb-done" disabled={busy} onClick={handleDone}>
-            {busy ? "Готовим…" : "Готово"}
+        <div className="hw-notebook__bar-actions">
+          <button type="button" className="hw-nb-ghost" onClick={() => setPagesOpen((v) => !v)}>
+            Страницы {pages.length}
           </button>
-        ) : null}
+          <button
+            type="button"
+            className={`hw-nb-ghost${helpOpen ? " is-active" : ""}`}
+            aria-label="Горячие клавиши"
+            aria-pressed={helpOpen}
+            onClick={() => setHelpOpen((v) => !v)}
+          >
+            <CircleHelp size={18} />
+          </button>
+          {!readOnly ? (
+            <button type="button" className="hw-nb-done" disabled={busy} onClick={handleDone}>
+              {busy ? "Готовим…" : "Готово"}
+            </button>
+          ) : null}
+        </div>
       </header>
+      {error ? <p className="hw-notebook__error" role="alert">{error}</p> : null}
 
-      <div
+      <div className="hw-notebook__workspace">
+        <NotebookPagesDrawer
+        open={pagesOpen}
+        onClose={() => setPagesOpen(false)}
+        pages={pages}
+        pageIndex={pageIndex}
+        onSelect={setPageIndex}
+        onAddBlank={() => onAddPage({ page_type: "blank" })}
+        onAddFile={(file) => onAddPage({ page_type: "attachment" }, file)}
+        onDuplicate={() => onAddPage({ page_type: "duplicate", page_id: page.id })}
+        onDelete={onDeletePage}
+        onReorder={(nextPages) => {
+          applyDoc({ ...doc, pages: nextPages }, { history: pagesCommand(pages, nextPages, "REORDER_PAGE") });
+        }}
+        readOnly={readOnly}
+        />
+        <div
         className="hw-notebook__stage"
         ref={stageRef}
         onPointerDown={(event) => {
@@ -548,17 +573,43 @@ export default function HomeworkNotebookEditor({
             />
           ) : <p>Нет страниц</p>}
         </div>
-        <div className="hw-nb-zoom">
-          <button type="button" className="hw-nb-ghost" aria-label="Уменьшить" onClick={() => zoomBy(0.9)}><Minus size={16} /></button>
-          <button type="button" className="hw-nb-ghost" onClick={fitPage}>{Math.round((fit ? 1 : zoom) * 100)}%</button>
-          <button type="button" className="hw-nb-ghost" aria-label="Увеличить" onClick={() => zoomBy(1.1)}><Plus size={16} /></button>
-          <button type="button" className="hw-nb-ghost" aria-label="На весь экран" onClick={() => document.querySelector(".hw-notebook")?.requestFullscreen?.()}>
-            <Maximize size={16} />
-          </button>
         </div>
+        {helpOpen ? (
+          <div className="hw-nb-help" role="dialog" aria-label="Горячие клавиши">
+            <header>
+              <strong>Клавиши</strong>
+              <button type="button" className="hw-nb-ghost" onClick={() => setHelpOpen(false)} aria-label="Закрыть">✕</button>
+            </header>
+            {shortcuts.map(([title, rows]) => (
+              <section key={title}>
+                <h3>{title}</h3>
+                {rows.map(([k, label]) => (
+                  <p key={k}><kbd>{k}</kbd> {label}</p>
+                ))}
+              </section>
+            ))}
+          </div>
+        ) : null}
       </div>
 
-      {!readOnly ? (
+      {hint ? (
+        <div className="hw-nb-hint">
+          Совет: удерживайте Space, чтобы перемещать страницу
+          <button
+            type="button"
+            className="hw-nb-ghost"
+            onClick={() => {
+              localStorage.setItem(HINT_KEY, "1");
+              setHint(false);
+            }}
+          >
+            Понятно
+          </button>
+        </div>
+      ) : null}
+
+      <div className="hw-notebook__dock">
+        {!readOnly ? (
         <NotebookToolbar
           tool={tool}
           onTool={setToolSafe}
@@ -602,57 +653,16 @@ export default function HomeworkNotebookEditor({
           readOnly={readOnly}
           selected={selected}
         />
-      ) : null}
-
-      <NotebookPagesDrawer
-        open={pagesOpen}
-        onClose={() => setPagesOpen(false)}
-        pages={pages}
-        pageIndex={pageIndex}
-        onSelect={setPageIndex}
-        onAddBlank={() => onAddPage({ page_type: "blank" })}
-        onAddFile={(file) => onAddPage({ page_type: "attachment" }, file)}
-        onDuplicate={() => onAddPage({ page_type: "duplicate", page_id: page.id })}
-        onDelete={onDeletePage}
-        onReorder={(nextPages) => {
-          applyDoc({ ...doc, pages: nextPages }, { history: pagesCommand(pages, nextPages, "REORDER_PAGE") });
-        }}
-        readOnly={readOnly}
-      />
-
-      {hint ? (
-        <div className="hw-nb-hint">
-          Совет: удерживайте Space, чтобы перемещать страницу
-          <button
-            type="button"
-            className="hw-nb-ghost"
-            onClick={() => {
-              localStorage.setItem(HINT_KEY, "1");
-              setHint(false);
-            }}
-          >
-            Понятно
+        ) : null}
+        <div className="hw-nb-zoom">
+          <button type="button" className="hw-nb-ghost" aria-label="Уменьшить" onClick={() => zoomBy(0.9)}><Minus size={16} /></button>
+          <button type="button" className="hw-nb-ghost" onClick={fitPage}>{Math.round((fit ? 1 : zoom) * 100)}%</button>
+          <button type="button" className="hw-nb-ghost" aria-label="Увеличить" onClick={() => zoomBy(1.1)}><Plus size={16} /></button>
+          <button type="button" className="hw-nb-ghost" aria-label="На весь экран" onClick={() => document.querySelector(".hw-notebook")?.requestFullscreen?.()}>
+            <Maximize size={16} />
           </button>
         </div>
-      ) : null}
-
-      {helpOpen ? (
-        <div className="hw-nb-help" role="dialog" aria-label="Горячие клавиши">
-          <header>
-            <strong>Клавиши</strong>
-            <button type="button" className="hw-nb-ghost" onClick={() => setHelpOpen(false)}>✕</button>
-          </header>
-          {shortcuts.map(([title, rows]) => (
-            <section key={title}>
-              <h3>{title}</h3>
-              {rows.map(([k, label]) => (
-                <p key={k}><kbd>{k}</kbd> {label}</p>
-              ))}
-            </section>
-          ))}
-        </div>
-      ) : null}
-      {error ? <p className="hw-notebook__error" role="alert">{error}</p> : null}
+      </div>
     </div>
   );
 }
