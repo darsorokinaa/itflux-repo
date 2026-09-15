@@ -54,17 +54,21 @@ export async function deleteHomeworkAttachment(attachmentId) {
   return parseJson(res);
 }
 
-export async function openHomeworkNotebook(submissionId, taskId, { ownerRole, seed = true } = {}) {
+export async function openHomeworkNotebook(submissionId, taskId, { ownerRole, seed = true, taskNumber } = {}) {
   await ensureCsrfCookie();
+  const body = {
+    task_id: String(taskId),
+    owner_role: ownerRole,
+    seed_from_attachments: seed,
+  };
+  if (taskNumber != null && String(taskNumber).trim() !== "") {
+    body.task_number = String(taskNumber);
+  }
   const res = await fetch(`/api/homework/submissions/${submissionId}/notebooks/`, {
     method: "POST",
     credentials: "include",
     headers: csrfHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({
-      task_id: String(taskId),
-      owner_role: ownerRole,
-      seed_from_attachments: seed,
-    }),
+    body: JSON.stringify(body),
   });
   return parseJson(res);
 }

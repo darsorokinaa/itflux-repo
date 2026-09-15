@@ -10,6 +10,7 @@ from copy import deepcopy
 
 from django.core.files.base import ContentFile
 from django.db import transaction
+from django.db.models import Q
 from django.http import FileResponse
 from django.utils import timezone
 from rest_framework import status
@@ -28,8 +29,10 @@ from .choices import (
 from .homework_task_files import (
     COMMENT_TASK_KEY,
     create_task_attachments,
+    ensure_payload_migrated,
     file_response_for_attachment,
     grouped_task_attachments,
+    resolve_homework_task,
     serialize_homework_task_attachment,
     soft_delete_attachment,
     user_can_view_submission,
@@ -56,6 +59,9 @@ NOTEBOOK_IMAGE_TYPES = {
     "image/jpg",
     "image/png",
     "image/webp",
+    "image/gif",
+    "image/heic",
+    "image/heif",
 }
 NOTEBOOK_PDF_TYPES = {"application/pdf"}
 
@@ -116,7 +122,126 @@ def _is_image(attachment: HomeworkAttachment) -> bool:
     name = (attachment.original_filename or "").lower()
     if mime in NOTEBOOK_IMAGE_TYPES or mime.startswith("image/"):
         return True
-    return name.endswith((".jpg", ".jpeg", ".png", ".webp"))
+    return name.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif"))
+
+
+SKIP_SEED_ATTACHMENT_TYPES = {
+    HomeworkAttachmentType.NOTEBOOK_EXPORT,
+    HomeworkAttachmentType.NOTEBOOK_SOURCE,
+    HomeworkAttachmentType.TEACHER_COMMENT,
+    HomeworkAttachmentType.TEACHER_CHECKED_FILE,
+}
+
+
+def _unique_keys(values) -> list[str]:
+    seen = set()
+    keys = []
+    for value in values:
+        key = str(value or "").strip()
+        if not key or key == COMMENT_TASK_KEY or key in seen:
+            continue
+        seen.add(key)
+        keys.append(key)
+    return keys
+
+
+def notebook_task_keys(submission: HomeworkSubmission, task_key: str) -> list[str]:
+    """Все ключи, под которыми могли сохранить файлы этого задания."""
+    raw = str(task_key or "").strip()
+    keys = _unique_keys([raw])
+    homework = getattr(submission, "homework", None)
+    hw_task = resolve_homework_task(homework, raw) if homework is not None else None
+    if hw_task is not None:
+        keys = _unique_keys(keys + [hw_task.pk, getattr(hw_task, "task_id", "")])
+    if homework is None:
+        return keys
+    from .homework_task_files import _variant_number_to_task_ids
+
+    mapping = _variant_number_to_task_ids(homework)
+    extra = []
+    for number, ids in mapping.items():
+        if raw == number or raw in ids:
+            extra.append(number)
+            extra.extend(ids)
+    return _unique_keys(keys + extra)
+
+
+def student_attachments_for_notebook(
+    submission: HomeworkSubmission,
+    task_key: str,
+    extra_task_keys=None,
+) -> list[HomeworkAttachment]:
+    ensure_payload_migrated(submission)
+    keys = _unique_keys(notebook_task_keys(submission, task_key) + list(extra_task_keys or []))
+    grouped = grouped_task_attachments(submission)
+    buckets = grouped.get("tasks") or {}
+    wanted = []
+    seen = set()
+    for key in keys:
+        for item in (buckets.get(key) or {}).get("student") or []:
+            ident = str(item.get("id") or "").strip()
+            if ident and ident not in seen:
+                seen.add(ident)
+                wanted.append(ident)
+    qs = HomeworkAttachment.objects.filter(
+        submission=submission,
+        owner_role=HomeworkAttachmentOwnerRole.STUDENT,
+        is_deleted=False,
+    ).exclude(attachment_type__in=SKIP_SEED_ATTACHMENT_TYPES)
+    if wanted:
+        return list(qs.filter(id__in=wanted).order_by("created_at", "id"))
+    q = Q(task_key__in=keys) | Q(task_number__in=keys)
+    matched = list(qs.filter(q).order_by("created_at", "id")) if keys else []
+    if matched:
+        return matched
+    homework = getattr(submission, "homework", None)
+    active_tasks = list(homework.tasks.filter(is_active=True)[:3]) if homework is not None else []
+    all_files = list(qs.order_by("created_at", "id"))
+    distinct_keys = {row.task_key for row in all_files if row.task_key}
+    if len(active_tasks) <= 1 and len(distinct_keys) <= 1:
+        return all_files
+    return []
+
+
+def _page_is_unused_blank(page: HomeworkNotebookPage) -> bool:
+    if page.page_type != HomeworkNotebookPageType.BLANK or page.source_attachment_id:
+        return False
+    state = page.state if isinstance(page.state, dict) else {}
+    objects = state.get("objects") if isinstance(state, dict) else None
+    return not objects
+
+
+def seed_notebook_from_student_files(notebook: HomeworkNotebook, extra_task_keys=None) -> bool:
+    """Добавляет страницы из файлов ученика; убирает пустой лист, если появились исходники."""
+    attachments = student_attachments_for_notebook(
+        notebook.submission, notebook.task_key, extra_task_keys
+    )
+    existing = {
+        str(attachment_id)
+        for attachment_id in notebook.pages.exclude(source_attachment_id=None).values_list(
+            "source_attachment_id", flat=True
+        )
+    }
+    preexisting = list(notebook.pages.all())
+    only_empty_blanks = bool(preexisting) and all(_page_is_unused_blank(page) for page in preexisting)
+    added = False
+    for attachment in attachments:
+        if str(attachment.id) in existing:
+            continue
+        _add_pages_from_attachment(notebook, attachment)
+        existing.add(str(attachment.id))
+        added = True
+    if added and (not preexisting or only_empty_blanks):
+        unused = [page for page in notebook.pages.all() if _page_is_unused_blank(page)]
+        sourced = notebook.pages.exclude(id__in=[page.id for page in unused]).exists()
+        if sourced:
+            for page in unused:
+                page.delete()
+            _renumber_pages(notebook)
+    if not notebook.pages.exists():
+        create_blank_page(notebook)
+        return True
+    return added
 
 
 def serialize_page(page: HomeworkNotebookPage) -> dict:
@@ -257,12 +382,11 @@ def get_or_create_notebook(
     user,
     owner_role: str,
     seed_from_student_files: bool = False,
+    extra_task_keys=None,
 ) -> HomeworkNotebook:
     task_key = str(task_key or "").strip()
     if not task_key or task_key == COMMENT_TASK_KEY:
         raise NotebookError("task_id required", code="TASK_ID_REQUIRED")
-    from .homework_task_files import resolve_homework_task
-
     homework_task = resolve_homework_task(submission.homework, task_key)
     notebook, created = HomeworkNotebook.objects.get_or_create(
         submission=submission,
@@ -275,19 +399,9 @@ def get_or_create_notebook(
             "version": 1,
         },
     )
-    if created and seed_from_student_files:
-        attachments = HomeworkAttachment.objects.filter(
-            submission=submission,
-            task_key=task_key,
-            owner_role=HomeworkAttachmentOwnerRole.STUDENT,
-            is_deleted=False,
-        ).order_by("created_at", "id")
-        for attachment in attachments:
-            if _is_image(attachment) or _is_pdf(attachment):
-                _add_pages_from_attachment(notebook, attachment)
-        if not notebook.pages.exists():
-            create_blank_page(notebook)
-    elif created:
+    if seed_from_student_files:
+        seed_notebook_from_student_files(notebook, extra_task_keys=extra_task_keys)
+    elif created and not notebook.pages.exists():
         create_blank_page(notebook)
     return notebook
 
@@ -682,6 +796,10 @@ class HomeworkNotebookCollectionView(APIView):
         if not submission or not user_can_view_submission(request.user, submission):
             return Response({"detail": "Нет доступа."}, status=status.HTTP_404_NOT_FOUND)
         task_key = str(request.data.get("task_id") or request.data.get("task_key") or "").strip()
+        extra_task_keys = [
+            request.data.get("task_number"),
+            request.data.get("task_key"),
+        ]
         seed = bool(request.data.get("seed_from_attachments", True))
         requested_role = str(request.data.get("owner_role") or "").strip()
         role = _owner_role_for_user(request.user, submission)
@@ -709,6 +827,7 @@ class HomeworkNotebookCollectionView(APIView):
                     user=request.user,
                     owner_role=role,
                     seed_from_student_files=seed,
+                    extra_task_keys=extra_task_keys,
                 )
         except NotebookError as exc:
             return Response({"error": exc.message, "code": exc.code}, status=exc.status_code)
@@ -740,6 +859,8 @@ class HomeworkNotebookDetailView(APIView):
                     "document": revision.snapshot,
                 }
             )
+        if notebook.owner_role == HomeworkAttachmentOwnerRole.TEACHER:
+            seed_notebook_from_student_files(notebook)
         return Response(serialize_notebook(notebook))
 
     def put(self, request, notebook_id):

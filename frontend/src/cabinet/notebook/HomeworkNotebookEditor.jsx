@@ -33,6 +33,18 @@ const CLIP_KEY = "itflux.notebook.clipboard";
 const ZOOM_MIN = 0.25;
 const ZOOM_MAX = 4;
 
+function pageSourceMeta(page) {
+  const source = page?.source_attachment;
+  const url = page?.background_url || source?.url || "";
+  const mime = String(source?.mime_type || source?.content_type || "").toLowerCase();
+  const filename = String(source?.filename || source?.name || "");
+  const isPdf = page?.page_type === "pdf_page" || mime === "application/pdf" || /\.pdf($|\?)/i.test(filename);
+  const isImage = Boolean(page?.background_url)
+    || mime.startsWith("image/")
+    || /\.(jpe?g|png|webp|gif|bmp|heic|heif)($|\?)/i.test(filename || url);
+  return { url, mime, filename, isPdf, isImage };
+}
+
 function persistPages(pages) {
   return (pages || []).map((page) => ({
     ...page,
@@ -47,6 +59,7 @@ function persistPages(pages) {
 export default function HomeworkNotebookEditor({
   notebookId: notebookIdProp,
   publishedPayload,
+  initialDocument,
   onClose,
   onComplete,
 }) {
@@ -55,7 +68,7 @@ export default function HomeworkNotebookEditor({
   const navigate = useNavigate();
   const notebookId = notebookIdProp || params.notebookId;
   const publishedMode = searchParams.get("published") === "1" || Boolean(publishedPayload);
-  const [doc, setDoc] = useState(publishedPayload?.document || null);
+  const [doc, setDoc] = useState(publishedPayload?.document || initialDocument || null);
   const [pageIndex, setPageIndex] = useState(0);
   const [tool, setTool] = useState(TOOL.PEN);
   const [color, setColor] = useState("#DC2626");
@@ -486,8 +499,10 @@ export default function HomeworkNotebookEditor({
     return () => window.removeEventListener("beforeunload", onLeave);
   }, []);
 
-  const backgroundUrl = page?.background_url || page?.source_attachment?.url || "";
-  const isPdf = page?.page_type === "pdf_page" || /\.pdf($|\?)/i.test(page?.source_attachment?.filename || "");
+  const background = pageSourceMeta(page);
+  const backgroundUrl = background.url;
+  const isPdf = background.isPdf;
+  const isImage = background.isImage;
   const saveStatus = saveState === "saving" ? "Сохраняем…" : saveState === "error" ? "Ошибка сохранения" : "Сохранено";
 
   const onAddPage = async (kind, file) => {
@@ -617,7 +632,7 @@ export default function HomeworkNotebookEditor({
           className={`hw-notebook__page-wrap${fit ? " is-fit" : ""}`}
           style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${fit ? 1 : zoom})` }}
         >
-          <NotebookPageBackground page={page} url={backgroundUrl} isPdf={isPdf} pdfCache={pdfCache} />
+          <NotebookPageBackground page={page} url={backgroundUrl} isPdf={isPdf} isImage={isImage} pdfCache={pdfCache} />
           {page ? (
             <NotebookCanvas
               page={page}
@@ -738,8 +753,12 @@ export default function HomeworkNotebookEditor({
   );
 }
 
-function NotebookPageBackground({ page, url, isPdf, pdfCache }) {
+function NotebookPageBackground({ page, url, isPdf, isImage, pdfCache }) {
   const canvasRef = useRef(null);
+  const [broken, setBroken] = useState(false);
+  useEffect(() => {
+    setBroken(false);
+  }, [url, page?.id]);
   useEffect(() => {
     if (!isPdf || !url || !page) return undefined;
     let cancelled = false;
@@ -771,7 +790,25 @@ function NotebookPageBackground({ page, url, isPdf, pdfCache }) {
   }, [isPdf, url, page, pdfCache]);
 
   if (isPdf) return <canvas ref={canvasRef} className="hw-notebook-bg" />;
-  if (url) return <img src={url} alt="" className="hw-notebook-bg" />;
+  if (url && isImage && !broken) {
+    return (
+      <img
+        src={url}
+        alt=""
+        className="hw-notebook-bg"
+        onError={() => setBroken(true)}
+      />
+    );
+  }
+  if (url || page?.source_attachment) {
+    const name = page?.source_attachment?.filename || page?.source_attachment?.name || "Файл ученика";
+    return (
+      <div className="hw-notebook-bg hw-notebook-bg--file">
+        <strong>{name}</strong>
+        <span>Вложение ученика</span>
+      </div>
+    );
+  }
   return <div className="hw-notebook-bg hw-notebook-bg--blank" />;
 }
 

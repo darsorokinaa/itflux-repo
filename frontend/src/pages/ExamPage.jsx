@@ -204,7 +204,7 @@ function LessonSolutionUpload({
   const [pendingItems, setPendingItems] = useState([]);
   const [deletingKeys, setDeletingKeys] = useState(() => new Set());
   const [notebookBusy, setNotebookBusy] = useState(false);
-  const [openNotebookId, setOpenNotebookId] = useState(null);
+  const [openNotebook, setOpenNotebook] = useState(null);
 
   const pendingItemsRef = useRef([]);
   pendingItemsRef.current = pendingItems;
@@ -505,8 +505,11 @@ function LessonSolutionUpload({
               e.stopPropagation();
               setNotebookBusy(true);
               try {
-                const notebook = await openHomeworkNotebook(submissionId, taskId, { ownerRole: "student" });
-                setOpenNotebookId(notebook.id);
+                const notebook = await openHomeworkNotebook(submissionId, taskId, {
+                  ownerRole: "student",
+                  taskNumber,
+                });
+                setOpenNotebook(notebook);
               } catch (ex) {
                 setErr(ex instanceof Error ? ex.message : "Не удалось открыть тетрадь");
               } finally {
@@ -580,15 +583,16 @@ function LessonSolutionUpload({
         </div>
       ) : null}
     </div>
-    {openNotebookId ? (
+    {openNotebook ? (
       <HomeworkNotebookEditor
-        notebookId={openNotebookId}
-        onClose={() => setOpenNotebookId(null)}
+        notebookId={openNotebook.id}
+        initialDocument={openNotebook}
+        onClose={() => setOpenNotebook(null)}
         onComplete={(payload) => {
           if (payload.attachment) {
             onAttachmentsChange?.((prev) => appendHomeworkAttachments(prev, [payload.attachment]));
           }
-          setOpenNotebookId(null);
+          setOpenNotebook(null);
         }}
       />
     ) : null}

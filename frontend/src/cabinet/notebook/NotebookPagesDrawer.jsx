@@ -46,8 +46,10 @@ export default function NotebookPagesDrawer({
               onDrop(Number(event.dataTransfer.getData("text/plain")), index);
             }}
           >
-            {page.background_url || page.source_attachment?.url ? (
+            {page.background_url || (page.source_attachment?.url && /\.(jpe?g|png|webp|gif|bmp|heic|heif)($|\?)/i.test(page.source_attachment?.filename || page.source_attachment.url)) ? (
               <img src={page.background_url || page.source_attachment.url} alt="" />
+            ) : page.source_attachment ? (
+              <span className="hw-nb-thumb-file">{page.source_attachment.filename || "Файл"}</span>
             ) : (
               <span className="hw-nb-thumb-blank" />
             )}

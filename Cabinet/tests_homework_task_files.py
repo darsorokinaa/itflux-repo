@@ -502,6 +502,86 @@ class HomeworkNotebookTests(TestCase):
         )
         self.assertEqual(exports.count(), 1)
 
+    def test_teacher_notebook_opens_with_student_photo(self):
+        teacher_nb = self.teacher_client.post(
+            f"/api/homework/submissions/{self.submission.pk}/notebooks/",
+            {"task_id": "A", "owner_role": "teacher", "seed_from_attachments": True},
+            format="json",
+        )
+        self.assertIn(teacher_nb.status_code, (200, 201), teacher_nb.content)
+        pages = teacher_nb.json()["pages"]
+        self.assertTrue(pages)
+        sourced = [page for page in pages if page.get("source_attachment")]
+        self.assertTrue(sourced)
+        self.assertEqual(sourced[0]["page_type"], "attachment")
+        self.assertEqual(sourced[0]["source_attachment"]["filename"], "a.jpg")
+        self.assertTrue(sourced[0]["source_attachment"]["url"])
+        self.assertFalse(all(page["page_type"] == "blank" for page in pages))
+
+    def test_teacher_notebook_reseeds_existing_blank(self):
+        blank = self.teacher_client.post(
+            f"/api/homework/submissions/{self.submission.pk}/notebooks/",
+            {"task_id": "B", "owner_role": "teacher", "seed_from_attachments": False},
+            format="json",
+        )
+        self.assertIn(blank.status_code, (200, 201), blank.content)
+        self.assertTrue(all(page["page_type"] == "blank" for page in blank.json()["pages"]))
+        upload = self.student_client.post(
+            f"/api/homework/assignment/{self.homework.pk}/upload-answer/",
+            {
+                "task_id": "B",
+                "task_number": "2",
+                "file": SimpleUploadedFile("photo.jpg", JPG_B, content_type="image/jpeg"),
+            },
+            format="multipart",
+        )
+        self.assertEqual(upload.status_code, 200, upload.content)
+        opened = self.teacher_client.post(
+            f"/api/homework/submissions/{self.submission.pk}/notebooks/",
+            {
+                "task_id": "B",
+                "task_number": "2",
+                "owner_role": "teacher",
+                "seed_from_attachments": True,
+            },
+            format="json",
+        )
+        self.assertIn(opened.status_code, (200, 201), opened.content)
+        pages = opened.json()["pages"]
+        self.assertTrue(
+            any((page.get("source_attachment") or {}).get("filename") == "photo.jpg" for page in pages)
+        )
+        self.assertFalse(all(page["page_type"] == "blank" for page in pages))
+
+    def test_teacher_notebook_seeds_file_keyed_by_number(self):
+        upload = self.student_client.post(
+            f"/api/homework/assignment/{self.homework.pk}/upload-answer/",
+            {
+                "task_number": "13",
+                "file": SimpleUploadedFile("scan.jpg", JPG_B, content_type="image/jpeg"),
+            },
+            format="multipart",
+        )
+        self.assertEqual(upload.status_code, 200, upload.content)
+        opened = self.teacher_client.post(
+            f"/api/homework/submissions/{self.submission.pk}/notebooks/",
+            {
+                "task_id": "99913",
+                "task_number": "13",
+                "owner_role": "teacher",
+                "seed_from_attachments": True,
+            },
+            format="json",
+        )
+        self.assertIn(opened.status_code, (200, 201), opened.content)
+        pages = opened.json()["pages"]
+        self.assertTrue(
+            any((page.get("source_attachment") or {}).get("filename") == "scan.jpg" for page in pages)
+        )
+        self.assertFalse(
+            any((page.get("source_attachment") or {}).get("filename") == "a.jpg" for page in pages)
+        )
+
 
 class HomeworkAttachmentMigrationAndEndpointTests(TestCase):
     def setUp(self):

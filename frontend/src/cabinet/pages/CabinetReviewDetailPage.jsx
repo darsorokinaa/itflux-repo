@@ -67,11 +67,11 @@ const HW_TASK_TYPE_RU = {
   external_link: "Ссылка",
 };
 
-function TeacherNotebookActions({ submissionId, taskId, enabled, onComplete }) {
+function TeacherNotebookActions({ submissionId, taskId, taskNumber, enabled, onComplete }) {
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [notebookId, setNotebookId] = useState(null);
+  const [notebook, setNotebook] = useState(null);
   if (!submissionId || taskId == null) return null;
   return (
     <div className="hw-notebook-actions">
@@ -83,11 +83,12 @@ function TeacherNotebookActions({ submissionId, taskId, enabled, onComplete }) {
             setBusy(true);
             setErr("");
             try {
-              const notebook = await openHomeworkNotebook(submissionId, taskId, {
+              const doc = await openHomeworkNotebook(submissionId, taskId, {
                 ownerRole: "teacher",
                 seed: true,
+                taskNumber,
               });
-              setNotebookId(notebook.id);
+              setNotebook(doc);
             } catch (ex) {
               setErr(ex instanceof Error ? ex.message : "Не удалось открыть тетрадь");
             } finally {
@@ -105,13 +106,14 @@ function TeacherNotebookActions({ submissionId, taskId, enabled, onComplete }) {
         Открыть проверенную работу
       </button>
       {err ? <p className="cb-inline-error" role="alert">{err}</p> : null}
-      {notebookId ? (
+      {notebook ? (
         <HomeworkNotebookEditor
-          notebookId={notebookId}
-          onClose={() => setNotebookId(null)}
+          notebookId={notebook.id}
+          initialDocument={notebook}
+          onClose={() => setNotebook(null)}
           onComplete={(payload) => {
             if (payload.attachment) onComplete?.(payload);
-            setNotebookId(null);
+            setNotebook(null);
           }}
         />
       ) : null}
@@ -1077,6 +1079,7 @@ export default function CabinetReviewDetailPage() {
                         <TeacherNotebookActions
                           submissionId={submission?.id}
                           taskId={task.id}
+                          taskNumber={task.number}
                           enabled={isPending}
                           onComplete={(payload) => {
                             if (!payload.attachment) return;
@@ -1153,6 +1156,7 @@ export default function CabinetReviewDetailPage() {
                         <TeacherNotebookActions
                           submissionId={submission?.id}
                           taskId={task.id}
+                          taskNumber={task.number}
                           enabled={isPending}
                           onComplete={(payload) => {
                             if (!payload.attachment) return;
