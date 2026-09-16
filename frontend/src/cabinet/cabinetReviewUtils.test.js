@@ -5,7 +5,7 @@ import {
   homeworkTaskAnswer,
   resolvePart1Verdict,
 } from "./cabinetReviewUtils";
-import { homeworkResultToUiState, buildHomeworkResultPayload } from "../utils/cabinetHomework";
+import { homeworkResultToUiState, buildHomeworkResultPayload, homeworkAttemptProgress } from "../utils/cabinetHomework";
 
 describe("hasOfficialTaskAnswer", () => {
   it("treats empty CKEditor html as missing", () => {
@@ -107,6 +107,28 @@ describe("homeworkResultToUiState + payload", () => {
     const payload = buildHomeworkResultPayload(tasks, ui.userAnswers, {}, {});
     expect(payload.by_task_id).toEqual({ "101": "26", "106": "732" });
     expect(payload.by_number).toEqual({ "1": "26", "6": "732" });
+  });
+
+  it("keeps live attempt progress in the homework result payload", () => {
+    const payload = buildHomeworkResultPayload(
+      [{ id: 7, number: 5 }],
+      { "7": "12" },
+      {},
+      {},
+      {
+        currentQuestionId: 7,
+        startedAt: "2026-01-01T12:00:00.000Z",
+        scrollPositions: { "7": 240 },
+      },
+    );
+    expect(payload.current_question_id).toBe(7);
+    expect(payload.started_at).toBe("2026-01-01T12:00:00.000Z");
+    expect(payload.scroll_positions).toEqual({ "7": 240 });
+    expect(homeworkAttemptProgress(payload)).toEqual({
+      currentQuestionId: "7",
+      startedAt: "2026-01-01T12:00:00.000Z",
+      scrollPositions: { "7": 240 },
+    });
   });
 });
 

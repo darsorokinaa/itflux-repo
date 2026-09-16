@@ -9,11 +9,11 @@ afterEach(() => {
 });
 
 describe("MiniCallBar", () => {
-  it("does not show mic, camera, or hide", () => {
+  it("does not show mic, camera, or hide as a text control", () => {
     render(
       <MiniCallBar
         remoteName="Ученик"
-        stayOnTopAvailable
+        pipAvailable
         onStayOnTop={() => {}}
         onExpand={() => {}}
         onHangup={() => {}}
@@ -21,24 +21,77 @@ describe("MiniCallBar", () => {
     );
     expect(screen.queryByRole("button", { name: /микрофон/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /камер/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Скрыть" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Поверх окон" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "На весь экран" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Скрыть" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Поверх окон" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "На весь экран" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Видео поверх окон" })).toBeTruthy();
   });
 
-  it("toggles stay-on-top from the compact chrome", () => {
+  it("keeps expand in the more menu and uses a PiP icon", () => {
     const onStayOnTop = vi.fn();
+    const onExpand = vi.fn();
     render(
       <MiniCallBar
         remoteName="Ученик"
-        stayOnTopAvailable
-        stayOnTopActive
+        pipAvailable
+        pipActive
         onStayOnTop={onStayOnTop}
+        onExpand={onExpand}
+        onHangup={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Вернуть видео в урок" }));
+    expect(onStayOnTop).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ещё" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "На весь экран" }));
+    expect(onExpand).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a compact participant chrome during screen share", () => {
+    const onStayOnTop = vi.fn();
+    render(
+      <MiniCallBar
+        shareMode
+        remoteName="Дарья"
+        remoteAudioMuted
+        pipAvailable
+        pipNeedsGesture
+        onStayOnTop={onStayOnTop}
+        onToggleCollapsed={() => {}}
+      />,
+    );
+    expect(screen.getByText("Дарья")).toBeTruthy();
+    expect(screen.queryByText("Поверх окон")).toBeNull();
+    expect(screen.queryByRole("button", { name: "На весь экран" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Завершить звонок" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Показать ученика поверх окон" }));
+    expect(onStayOnTop).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows waiting status and can collapse", () => {
+    const onToggleCollapsed = vi.fn();
+    const { rerender } = render(
+      <MiniCallBar
+        waiting
+        onToggleCollapsed={onToggleCollapsed}
         onExpand={() => {}}
         onHangup={() => {}}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Вернуть в урок" }));
-    expect(onStayOnTop).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Ждём ученика")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Скрыть" }));
+    expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <MiniCallBar
+        collapsed
+        waiting
+        onToggleCollapsed={onToggleCollapsed}
+        onExpand={() => {}}
+        onHangup={() => {}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Показать" })).toBeTruthy();
   });
 });

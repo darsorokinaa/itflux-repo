@@ -476,6 +476,38 @@ html.cb-board-editor-iframe .cb-board-editor {
   max-height: 100%;
 }
 
+/* В комнате урока шапка доски не должна занимать отдельный этаж. */
+html.cb-board-editor-iframe .cb-board-editor__top {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  left: auto;
+  width: auto;
+  min-height: 0;
+  height: auto;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  z-index: var(--cb-board-z-header);
+}
+
+html.cb-board-editor-iframe .cb-board-editor__left {
+  display: none;
+}
+
+html.cb-board-editor-iframe .cb-board-editor__right {
+  gap: 2px;
+}
+
+html.cb-board-editor-iframe.cb-board-editor-open .cb-board-editor--immersive .cb-board-burger,
+html.cb-board-editor-iframe .cb-board-editor--immersive .cb-board-burger {
+  top: 12px;
+}
+
 html.cb-board-editor-open,
 html.cb-board-editor-open body {
   overflow: hidden;
@@ -939,9 +971,9 @@ html.cb-board-editor-open body {
 }
 
 .cb-board-editor .excalidraw .Island {
-  box-shadow: none !important;
-  border: 1px solid var(--cb-board-border, #d7dce3);
-  border-radius: 8px !important;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08) !important;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px !important;
   background: var(--cb-board-surface, #fff);
 }
 
@@ -969,8 +1001,37 @@ html.cb-board-editor-open body {
 
 /* Тулбар: группы [lock,hand] | shapes | draw | text | eraser+more — только desktop layout */
 @media (min-width: 769px) {
+  .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-menu_top {
+    justify-content: center;
+    padding-top: 10px;
+  }
+
+  .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-menu_top__right {
+    position: absolute;
+    right: 12px;
+    top: 10px;
+  }
+
   .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-toolbar {
     gap: 0;
+    height: 46px;
+    padding: 5px;
+    border-radius: 12px;
+  }
+
+  .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-toolbar .ToolIcon,
+  .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-toolbar label.ToolIcon,
+  .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-toolbar .ToolIcon__icon,
+  .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-toolbar button {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+  }
+
+  .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-toolbar .ToolIcon--selected,
+  .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-toolbar .ToolIcon.active {
+    background: #eff6ff !important;
+    box-shadow: none;
   }
 
   .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-toolbar .App-toolbar__divider {
@@ -1111,10 +1172,10 @@ html.cb-board-editor-open body {
   width: 36px;
   height: 36px;
   padding: 0;
-  border: 1px solid var(--cb-board-border);
-  border-radius: var(--cb-board-radius-sm);
-  background: var(--cb-board-surface);
-  box-shadow: none;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
   cursor: pointer;
   position: relative;
   z-index: 1;
@@ -1148,13 +1209,14 @@ html.cb-board-editor-open body {
   top: calc(100% + 6px);
   left: 0;
   z-index: 2;
-  min-width: 220px;
+  width: 228px;
+  min-width: 210px;
   max-width: 240px;
-  padding: 0.5rem;
-  background: var(--cb-board-surface);
-  border: 1px solid var(--cb-board-border);
-  border-radius: var(--cb-board-radius);
-  box-shadow: none;
+  padding: 0.6rem;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.1);
   color: var(--cb-board-text);
 }
 
@@ -1206,13 +1268,30 @@ html.cb-board-editor-open body {
   width: auto;
   flex: 1;
   text-align: center;
-  border-color: var(--cb-board-border);
+  border-color: #e5e7eb;
+  min-height: 30px;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 600;
 }
 
 .cb-board-burger__row button.is-active {
-  border-color: var(--cb-board-accent);
-  background: var(--cb-board-accent-soft);
-  color: var(--cb-board-accent-active);
+  border-color: #dbeafe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.cb-board-editor--dark .cb-board-burger__btn {
+  background: var(--cb-board-surface);
+  border-color: var(--cb-board-border);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+}
+
+.cb-board-editor--dark .cb-board-burger__panel {
+  background: var(--cb-board-surface);
+  border-color: var(--cb-board-border);
+  color: var(--cb-board-text);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
 }
 
 .cb-board-editor--dark .cb-board-burger__row button.is-active {
@@ -1469,6 +1548,12 @@ html.cb-board-editor-open body {
     gap: 0.15rem;
   }
 
+  html.cb-board-editor-iframe .cb-board-editor__top {
+    height: auto;
+    min-height: 0;
+    padding: 4px;
+  }
+
   .cb-board-editor__left {
     flex: 1 1 auto;
     min-width: 0;
@@ -1689,7 +1774,9 @@ html.cb-board-editor-open body {
   }
 
   html.cb-board-editor-iframe .cb-board-editor__top {
-    padding-top: 0;
+    height: auto;
+    min-height: 0;
+    padding: 4px;
   }
 
   .cb-board-editor__iconbtn,

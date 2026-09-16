@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import CabinetIcon from "../CabinetIcons";
 import BoardCreateModal from "./BoardCreateModal";
 import CabinetModal from "./CabinetModal";
 import {
@@ -36,6 +37,7 @@ export default function BoardLessonBlock({
   /** Открыть доску у себя со свёрнутым звонком (во время встречи). */
   onOpenLocally = null,
   showingToStudent = false,
+  openedLocally = false,
   showBusy = false,
   /** Внутри «Материалы урока» — без отдельного заголовка секции */
   embedded = false,
@@ -149,67 +151,90 @@ export default function BoardLessonBlock({
       {loading ? (
         <p className="cb-lesson-card__meeting-empty">Загрузка…</p>
       ) : board ? (
-        <div className={embedded ? "vl-mat-item" : "cb-board-lesson__row"}>
+        <div className={embedded ? `vl-mat-item${showingToStudent || openedLocally ? " is-showing" : ""}` : "cb-board-lesson__row"}>
           {embedded ? (
             <>
               <div className="vl-mat-item__main">
+                <span className="vl-mat-item__icon" aria-hidden="true">
+                  <CabinetIcon name="board" />
+                </span>
                 <div className="vl-mat-item__body">
                   <div className="vl-mat-item__title">{board.title || "Доска"}</div>
                   <div className="vl-mat-item__meta">
                     Интерактивная доска
-                    {typeof onShowToStudent === "function" ? (
-                      <span className={`vl-mat-item__vis ${showingToStudent ? "is-on" : "is-off"}`}>
-                        {showingToStudent ? "Показан ученику" : "Скрыт от ученика"}
-                      </span>
-                    ) : null}
+                    {showingToStudent || openedLocally ? <span className="vl-mat-item__now">Открыт сейчас</span> : null}
                   </div>
                 </div>
               </div>
-              <div className="vl-mat-item__actions">
-                <button
-                  type="button"
-                  className={btnPrimary}
-                  onClick={() => {
-                    if (typeof onOpenLocally === "function") {
-                      onOpenLocally(board);
-                      return;
-                    }
-                    if (typeof onShowToStudent === "function") {
-                      window.open(`/cabinet/boards/${board.id}`, "_blank");
-                      return;
-                    }
-                    navigate(`/cabinet/boards/${board.id}`);
-                  }}
-                >
-                  Открыть
-                </button>
-                {typeof onShowToStudent === "function" ? (
-                  showingToStudent && typeof onHideFromStudent === "function" ? (
+              {typeof onShowToStudent === "function" ? (
+                <div className="vl-mat-item__present">
+                  <div className="vl-mat-item__present-row">
+                    <span className="vl-mat-item__present-label">Показ ученику</span>
+                    <span className="vl-mat-item__present-state">
+                      {showingToStudent ? "Включён" : "Выключен"}
+                    </span>
+                  </div>
+                  <div className="vl-mat-item__present-actions">
                     <button
                       type="button"
-                      className={btnSecondary}
-                      disabled={showBusy}
-                      aria-pressed="true"
-                      onClick={() => onHideFromStudent()}
+                      className="video-lesson-btn video-lesson-btn--ghost"
+                      onClick={() => {
+                        if (typeof onOpenLocally === "function") {
+                          onOpenLocally(board);
+                          return;
+                        }
+                        window.open(`/cabinet/boards/${board.id}`, "_blank");
+                      }}
                     >
-                      {showBusy ? "…" : "Скрыть"}
+                      Открыть
                     </button>
-                  ) : (
+                    {showingToStudent && typeof onHideFromStudent === "function" ? (
+                      <button
+                        type="button"
+                        className="video-lesson-btn video-lesson-btn--ghost"
+                        disabled={showBusy}
+                        aria-pressed="true"
+                        onClick={() => onHideFromStudent()}
+                      >
+                        {showBusy ? "…" : "Скрыть"}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="video-lesson-btn video-lesson-btn--ghost"
+                        disabled={showBusy}
+                        aria-pressed="false"
+                        onClick={() => onShowToStudent(board)}
+                      >
+                        {showBusy ? "…" : "Показать"}
+                      </button>
+                    )}
                     <button
                       type="button"
-                      className={btnSecondary}
-                      disabled={showBusy}
-                      aria-pressed="false"
-                      onClick={() => onShowToStudent(board)}
+                      className="video-lesson-btn video-lesson-btn--ghost"
+                      onClick={openPicker}
                     >
-                      {showBusy ? "…" : "Показать"}
+                      Другое
                     </button>
-                  )
-                ) : null}
-                <button type="button" className={btnSecondary} onClick={openPicker}>
-                  Другая
-                </button>
-              </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="vl-mat-item__actions">
+                  <button
+                    type="button"
+                    className="video-lesson-btn video-lesson-btn--ghost"
+                    onClick={() => {
+                      if (typeof onOpenLocally === "function") {
+                        onOpenLocally(board);
+                        return;
+                      }
+                      navigate(`/cabinet/boards/${board.id}`);
+                    }}
+                  >
+                    Открыть
+                  </button>
+                </div>
+              )}
             </>
           ) : (
             <>
@@ -263,20 +288,23 @@ export default function BoardLessonBlock({
           {embedded ? (
             <>
               <div className="vl-mat-item__main">
+                <span className="vl-mat-item__icon" aria-hidden="true">
+                  <CabinetIcon name="board" />
+                </span>
                 <div className="vl-mat-item__body">
                   <div className="vl-mat-item__title">Интерактивная доска</div>
                   <div className="vl-mat-item__meta">Не прикреплена</div>
                 </div>
               </div>
-              <div className="vl-mat-item__actions">
+              <div className="vl-mat-item__present-actions">
                 <button
                   type="button"
-                  className={btnPrimary}
+                  className="video-lesson-btn video-lesson-btn--ghost"
                   onClick={() => setShowCreate(true)}
                 >
                   Создать
                 </button>
-                <button type="button" className={btnSecondary} onClick={openPicker}>
+                <button type="button" className="video-lesson-btn video-lesson-btn--ghost" onClick={openPicker}>
                   Выбрать
                 </button>
               </div>

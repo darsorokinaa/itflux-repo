@@ -42,6 +42,7 @@ import {
   pickHomeworkFields,
   homeworkResultToUiState,
   buildHomeworkResultPayload,
+  homeworkAttemptProgress,
   saveHomeworkDraft,
   shouldHideHomeworkFinishButton,
   shouldShowHomeworkBottomActions,
@@ -839,7 +840,9 @@ function ExamPage() {
     || Boolean(isLiveVariant && meetingUuid && isTeacherRole(cabinetUser));
   const homeworkStudentMode = isHomework && !isTeacherHomeworkView;
   const [hwApiRaw, setHwApiRaw] = useState(null);
-  const [hwLoading, setHwLoading] = useState(false);
+  const [hwLoading, setHwLoading] = useState(() => Boolean(
+    homeworkQuery.isHomework && homeworkQuery.cabinetAssignment,
+  ));
   const [hwError, setHwError] = useState(null);
   const [hwActionBusy, setHwActionBusy] = useState(false);
   const [hwNotice, setHwNotice] = useState("");
@@ -987,6 +990,9 @@ function ExamPage() {
   const [examNavActiveId, setExamNavActiveId] = useState(null);
   const startTimeRef = useRef(null);
   const endTimeRef = useRef(null);
+  const scrollPositionsRef = useRef({});
+  const progressHydratedKeyRef = useRef("");
+  const attemptHydratedRef = useRef(false);
 
   const openBoardForActiveEduTask = useCallback(() => {
     if (examNavActiveId == null) return;
@@ -1071,11 +1077,16 @@ function ExamPage() {
   }, [level, subject, variant_id]);
 
   useEffect(() => {
-    if (!variant?.tasks?.length) return;
-    const sorted = [...variant.tasks].sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
-    const fid = sorted[0]?.id;
-    if (fid != null) setExamNavActiveId(fid);
-  }, [variant?.id, variant?.tasks]);
+    if (import.meta.env.DEV) {
+      console.debug("[variant] mount", { variant_id, isLiveVariant, cabinetAssignmentId });
+    }
+    return () => {
+      if (import.meta.env.DEV) {
+        console.debug("[variant] unmount", { variant_id });
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount/unmount of this attempt view
+  }, []);
 
   useEffect(() => {
     if (!isHomework || !cabinetAssignmentId) {
@@ -1322,6 +1333,18 @@ function ExamPage() {
 
   useEffect(() => () => timerStore.destroy(), [timerStore]);
 
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === "visible") timerStore.nudge();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onVis);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onVis);
+    };
+  }, [timerStore]);
+
   /* Время на каждое задание: каждую секунду добавляем к текущему заданию (только пока таймер идёт) */
   useEffect(() => {
     if (!variant) return;
@@ -1335,20 +1358,74 @@ function ExamPage() {
     return () => clearInterval(id);
   }, [variant, timerStore]);
 
-  /* Инициализация текущего задания при загрузке варианта */
+  /* Восстановить currentQuestion/startedAt из попытки. Не сбрасывать на №1 после hydration. */
   useEffect(() => {
     if (!variant?.tasks?.length) return;
-    const first = variant.tasks[0];
-    if (first && !currentTaskIdRef.current) currentTaskIdRef.current = first.id;
-  }, [variant]);
+    if (isHomework && cabinetAssignmentId && hwLoading) return;
+    if (isHomework && cabinetAssignmentId && hwApiRaw == null && !hwError) return;
+    const hydrateKey = `${variant.id || variant_id}|${cabinetAssignmentId || ""}`;
+    if (progressHydratedKeyRef.current === hydrateKey) return;
+    progressHydratedKeyRef.current = hydrateKey;
 
-  /* Автозапуск таймера при загрузке варианта — время решения считается с момента открытия */
-  useEffect(() => {
-    if (variant && timerStore.getStatus() === "idle") {
-      startTimeRef.current = new Date().toISOString();
-      timerStore.setStatus("running");
+    const sorted = [...variant.tasks].sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
+    const firstId = sorted[0]?.id ?? null;
+    const progress = isHomework && hwApiRaw
+      ? homeworkAttemptProgress(pickHomeworkFields(hwApiRaw, cabinetAssignmentId || "").result)
+      : { currentQuestionId: null, startedAt: null, scrollPositions: {} };
+
+    const match = progress.currentQuestionId
+      ? variant.tasks.find((t) => String(t.id) === String(progress.currentQuestionId))
+      : null;
+    const nextId = match?.id ?? firstId;
+    if (nextId != null) {
+      currentTaskIdRef.current = nextId;
+      setExamNavActiveId(nextId);
     }
-  }, [variant, timerStore]);
+    if (progress.scrollPositions && typeof progress.scrollPositions === "object") {
+      scrollPositionsRef.current = { ...progress.scrollPositions };
+    }
+
+    if (progress.startedAt) {
+      const restored = timerStore.restoreFromStartedAt(progress.startedAt);
+      startTimeRef.current = restored || progress.startedAt;
+      if (import.meta.env.DEV) {
+        console.debug("[timer] startedAt", startTimeRef.current);
+        console.debug("[timer] restored elapsed", timerStore.getSeconds());
+      }
+    } else if (timerStore.getStatus() === "idle") {
+      timerStore.setStatus("running");
+      startTimeRef.current = timerStore.getStartedAtIso();
+      if (import.meta.env.DEV) {
+        console.debug("[timer] startedAt", startTimeRef.current);
+      }
+    }
+
+    attemptHydratedRef.current = true;
+    if (import.meta.env.DEV) {
+      console.debug("[variant] hydrate attempt", {
+        homeworkId: cabinetAssignmentId || null,
+        currentQuestionId: nextId,
+        startedAt: startTimeRef.current,
+      });
+    }
+
+    if (match?.id != null) {
+      requestAnimationFrame(() => {
+        document.querySelector(`[data-task-id="${String(match.id)}"]`)?.scrollIntoView({
+          block: "start",
+        });
+      });
+    }
+  }, [
+    variant,
+    variant_id,
+    isHomework,
+    cabinetAssignmentId,
+    hwLoading,
+    hwApiRaw,
+    hwError,
+    timerStore,
+  ]);
 
   function formatTimer(sec) {
     const h = Math.floor(sec / 3600);
@@ -1684,6 +1761,12 @@ function ExamPage() {
     });
   }, []);
 
+  const attemptResultExtra = () => ({
+    currentQuestionId: currentTaskIdRef.current || examNavActiveId,
+    startedAt: startTimeRef.current || timerStore.getStartedAtIso(),
+    scrollPositions: scrollPositionsRef.current,
+  });
+
   const runHomeworkSave = useCallback(async () => {
     if (!isHomework || !cabinetAssignmentId || !variant) return;
     const statusNorm = pickHomeworkFields(hwApiRaw, cabinetAssignmentId || "").status;
@@ -1698,7 +1781,13 @@ function ExamPage() {
     setHwActionBusy(true);
     setHwNotice("");
     try {
-      const r = buildHomeworkResultPayload(variant.tasks, userAnswers, scores, checkedTasks);
+      const r = buildHomeworkResultPayload(
+        variant.tasks,
+        userAnswers,
+        scores,
+        checkedTasks,
+        attemptResultExtra(),
+      );
       await saveHomeworkDraft(cabinetAssignmentId, { result: r }, homeworkLkOpts);
       if (isEmbeddedHomework) setHomeworkFieldsLocked(true);
       setHwNotice(isLiveVariant ? "Ответы синхронизированы" : "Черновик сохранён");
@@ -1708,20 +1797,25 @@ function ExamPage() {
     } finally {
       setHwActionBusy(false);
     }
-  }, [isHomework, cabinetAssignmentId, variant, userAnswers, scores, checkedTasks, homeworkLkOpts, hwApiRaw, isTeacherHomeworkView, isEmbeddedHomework, isLiveVariant]);
+  }, [isHomework, cabinetAssignmentId, variant, userAnswers, scores, checkedTasks, homeworkLkOpts, hwApiRaw, isTeacherHomeworkView, isEmbeddedHomework, isLiveVariant, examNavActiveId, timerStore]);
 
-  // Живой урок: в базу уходят все ответы; учителю вердикт — только после «Проверить».
+  // Живой урок: в базу уходят ответы и прогресс попытки (задание, startedAt).
   useEffect(() => {
     if (!isLiveVariant || isLiveTeacherView || !cabinetAssignmentId || !variant || homeworkFieldsLocked) {
       return undefined;
     }
+    if (!attemptHydratedRef.current) return undefined;
     const statusNorm = pickHomeworkFields(hwApiRaw, cabinetAssignmentId || "").status;
     if (homeworkIsReviewed(statusNorm) || statusNorm === "reviewing") return undefined;
     const checked = checkedTasks || {};
-    const hasAnswer = Object.values(userAnswers || {}).some((v) => v != null && String(v).trim() !== "");
-    if (!hasAnswer && !Object.keys(checked).length) return undefined;
     const timer = window.setTimeout(() => {
-      const r = buildHomeworkResultPayload(variant.tasks, userAnswers, scores, checked);
+      const r = buildHomeworkResultPayload(
+        variant.tasks,
+        userAnswers,
+        scores,
+        checked,
+        attemptResultExtra(),
+      );
       void saveHomeworkDraft(cabinetAssignmentId, { result: r }, homeworkLkOpts)
         .then((data) => {
           const serverChecked = data?.result?.checked;
@@ -1750,7 +1844,7 @@ function ExamPage() {
           const msg = homeworkApiUserMessage(err) || "Не удалось синхронизировать ответы";
           setHwNotice(msg);
         });
-    }, 200);
+    }, 400);
     return () => window.clearTimeout(timer);
   }, [
     isLiveVariant,
@@ -1763,6 +1857,7 @@ function ExamPage() {
     homeworkLkOpts,
     hwApiRaw,
     homeworkFieldsLocked,
+    examNavActiveId,
   ]);
 
   const runHomeworkSubmit = useCallback(async () => {
@@ -1790,7 +1885,8 @@ function ExamPage() {
         variant.tasks,
         userAnswers,
         homeworkStudentMode ? {} : scores,
-        homeworkStudentMode ? {} : checkedTasks
+        homeworkStudentMode ? {} : checkedTasks,
+        attemptResultExtra(),
       );
       await saveHomeworkDraft(cabinetAssignmentId, { result: r }, homeworkLkOpts);
       await submitHomework(cabinetAssignmentId, { result: r }, homeworkLkOpts);
@@ -1826,10 +1922,18 @@ function ExamPage() {
   }, []);
 
   const goToExamTask = useCallback((taskId) => {
+    if (currentTaskIdRef.current != null) {
+      scrollPositionsRef.current[String(currentTaskIdRef.current)] = window.scrollY || 0;
+    }
     currentTaskIdRef.current = taskId;
     setExamNavActiveId(taskId);
     requestAnimationFrame(() => {
+      const saved = scrollPositionsRef.current[String(taskId)];
       const el = document.querySelector(`[data-task-id="${String(taskId)}"]`);
+      if (typeof saved === "number" && Number.isFinite(saved) && saved > 0) {
+        window.scrollTo({ top: saved });
+        return;
+      }
       el?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   }, []);

@@ -2,6 +2,8 @@
 
 import { reportClientEvent } from "../utils/clientTelemetry";
 
+import { findRemoteCameraVideo } from "./participantVideo";
+
 const PIP_STYLES = `
 html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #0f172a; overflow: hidden; }
 body { font-family: Inter, system-ui, sans-serif; }
@@ -46,23 +48,8 @@ export function liveCallVideoPipAvailable(iframe) {
  * Same-origin Jitsi iframe only. Cross-origin access throws and returns null.
  * Never clones or moves the iframe.
  */
-export function findSameOriginCallVideo(iframe) {
-  if (!iframe) return null;
-  try {
-    const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (!doc) return null;
-    const videos = [...doc.querySelectorAll("video")];
-    const usable = videos.filter((video) => {
-      if (!video || video.ended) return false;
-      const stream = video.srcObject;
-      const hasStream = Boolean(stream && typeof stream.getTracks === "function" && stream.getTracks().length);
-      return hasStream || Number(video.readyState) >= 2;
-    });
-    usable.sort((a, b) => (b.videoWidth * b.videoHeight) - (a.videoWidth * a.videoHeight));
-    return usable[0] || null;
-  } catch {
-    return null;
-  }
+export function findSameOriginCallVideo(iframe, options = {}) {
+  return findRemoteCameraVideo(iframe, options);
 }
 
 function diag(event, extra = {}) {

@@ -1,3 +1,4 @@
+/** @vitest-environment jsdom */
 import { describe, expect, it, vi, afterEach } from "vitest";
 
 import {
@@ -46,7 +47,16 @@ describe("callStayOnTop", () => {
 
   it("picks a same-origin video with a live stream", () => {
     const video = {
-      srcObject: { getTracks: () => [{}] },
+      id: "remoteVideo_student",
+      className: "",
+      nodeType: 1,
+      parentElement: {
+        id: "participant_student",
+        className: "remote-video",
+        nodeType: 1,
+        parentElement: null,
+      },
+      srcObject: { getTracks: () => [{}], getVideoTracks: () => [{ readyState: "live", label: "camera", getSettings: () => ({}) }] },
       readyState: 2,
       ended: false,
       videoWidth: 640,
@@ -57,7 +67,7 @@ describe("callStayOnTop", () => {
         querySelectorAll: () => [video],
       },
     };
-    expect(findSameOriginCallVideo(iframe)).toBe(video);
+    expect(findSameOriginCallVideo(iframe, { participantId: "student" })).toBe(video);
   });
 
   it("opens a document window for the mini call when Document PiP exists", async () => {

@@ -90,15 +90,104 @@ export function appendLiveVariantParams(url, { homeworkId, meetingUuid } = {}) {
   }
 }
 
-export function presentedOpenKey(presented) {
+export function variantIdFromUrl(url) {
+  const m = String(url || "").match(/\/variant\/(\d+)/i);
+  return m ? m[1] : "";
+}
+
+export function homeworkIdFromUrl(url) {
+  const raw = String(url || "").trim();
+  if (!raw) return "";
+  try {
+    const abs = raw.startsWith("http") ? new URL(raw) : new URL(raw, "https://local.invalid");
+    return String(abs.searchParams.get("cabinet_assignment") || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+export function boardIdFromUrl(url) {
+  const m = String(url || "").match(/\/cabinet\/boards\/([^/?#]+)/i);
+  return m ? m[1] : "";
+}
+
+/** Стабильный ключ попытки/материала: без presentedAt и без lesson_token. */
+export function presentedIdentityKey(presented) {
   if (!presented?.kind) return "";
-  // Не включаем openUrl: у ученика в ссылку каждый раз попадает новый lesson_token.
   const id = presented.boardId
     || presented.homeworkId
     || presented.materialId
     || presented.variantId
+    || variantIdFromUrl(presented.openUrl)
+    || boardIdFromUrl(presented.openUrl)
     || "";
-  return `${presented.kind}:${id}:${presented.presentedAt || ""}`;
+  return `${presented.kind}:${id}`;
+}
+
+export function presentedOpenKey(presented) {
+  // Не включаем openUrl/presentedAt: повторный SHOW и poll с новым token не должны
+  // считаться новым материалом.
+  return presentedIdentityKey(presented);
+}
+
+export function workspaceMaterialIdentityKey(material) {
+  if (!material?.kind) return "";
+  if (material.kind === "board") {
+    return `board:${material.boardId || boardIdFromUrl(material.url)}`;
+  }
+  if (material.kind === "variant") {
+    const hw = material.homeworkId || homeworkIdFromUrl(material.url);
+    const vid = material.variantId || variantIdFromUrl(material.url);
+    return `variant:${hw || vid}`;
+  }
+  return `${material.kind}:${String(material.url || material.text || "").split("?")[0]}`;
+}
+
+export function materialRowIdentityKey(row, presented) {
+  if (!row?.kind) return "";
+  if (row.kind === "board") {
+    return `board:${row.boardId || boardIdFromUrl(row.url)}`;
+  }
+  if (row.kind === "variant") {
+    const hw = presented?.kind === "variant" ? presented.homeworkId : null;
+    const vid = presented?.kind === "variant" ? presented.variantId : null;
+    return `variant:${hw || vid || variantIdFromUrl(row.url || presented?.openUrl)}`;
+  }
+  return `${row.kind}:${String(row.url || row.text || "").split("?")[0]}`;
+}
+
+export function shouldReplaceWorkspaceMaterial(current, incoming) {
+  if (!incoming) return false;
+  if (!current) return true;
+  const a = workspaceMaterialIdentityKey(current);
+  const b = workspaceMaterialIdentityKey(incoming);
+  if (!a || !b) return true;
+  return a !== b;
+}
+
+export function workspaceMaterialFromPresented(presented, meetingUuid) {
+  if (!presented?.kind) return null;
+  const url = String(presented.openUrl || "").trim();
+  if (!url) return null;
+  return {
+    kind: presented.kind,
+    title: presented.title || "Материал",
+    url,
+    boardId: presented.boardId || null,
+    homeworkId: presented.homeworkId || null,
+    variantId: presented.variantId || null,
+    embed: shouldEmbedMaterialInLesson(url, { meetingUuid }),
+  };
+}
+
+export function logVariantLifecycle(event, extra) {
+  try {
+    if (import.meta.env?.DEV) {
+      console.debug(`[variant] ${event}`, extra ?? "");
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 /**

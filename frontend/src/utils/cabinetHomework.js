@@ -403,7 +403,7 @@ export async function deleteHomeworkAnswer(assignmentId, params, opts) {
   return data;
 }
 
-export function buildHomeworkResultPayload(tasks, userAnswers, scores, checkedTasks) {
+export function buildHomeworkResultPayload(tasks, userAnswers, scores, checkedTasks, extra = {}) {
   const byNumber = {};
   const byTaskId = {};
   const list = Array.isArray(tasks) ? tasks : [];
@@ -443,11 +443,39 @@ export function buildHomeworkResultPayload(tasks, userAnswers, scores, checkedTa
     }
   }
 
-  return {
+  const payload = {
     by_number: byNumber,
     by_task_id: byTaskId,
     scores: { ...scores },
     checked: checkedTasks ? { ...checkedTasks } : undefined,
+  };
+  const meta = extra && typeof extra === "object" ? extra : {};
+  const currentQuestionId = meta.currentQuestionId ?? meta.current_question_id;
+  if (currentQuestionId != null && String(currentQuestionId) !== "") {
+    payload.current_question_id = currentQuestionId;
+  }
+  const startedAt = meta.startedAt ?? meta.started_at;
+  if (startedAt) payload.started_at = startedAt;
+  const scrollPositions = meta.scrollPositions ?? meta.scroll_positions;
+  if (scrollPositions && typeof scrollPositions === "object") {
+    payload.scroll_positions = scrollPositions;
+  }
+  return payload;
+}
+
+export function homeworkAttemptProgress(result) {
+  if (!result || typeof result !== "object") {
+    return { currentQuestionId: null, startedAt: null, scrollPositions: {} };
+  }
+  const currentQuestionId = result.current_question_id ?? result.currentQuestionId ?? null;
+  const startedAt = result.started_at ?? result.startedAt ?? null;
+  const scrollPositions = result.scroll_positions ?? result.scrollPositions ?? {};
+  return {
+    currentQuestionId: currentQuestionId != null && String(currentQuestionId) !== ""
+      ? String(currentQuestionId)
+      : null,
+    startedAt: startedAt ? String(startedAt) : null,
+    scrollPositions: scrollPositions && typeof scrollPositions === "object" ? scrollPositions : {},
   };
 }
 

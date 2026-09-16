@@ -40,7 +40,7 @@ const SELECTORS = {
   finishCall: { role: "button", name: "Завершить звонок" },
 
   materialsAside: { role: "complementary", name: "Материалы урока" },
-  materialsTitle: "Материалы урока",
+  materialsTitle: "Материалы",
   workspace: { role: "region", name: "Просмотр материала" },
   boardIframeSrc: 'iframe[src*="/cabinet/boards/"]',
   boardOpenButton: { role: "button", name: "Открыть" },

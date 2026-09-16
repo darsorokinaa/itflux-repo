@@ -654,6 +654,142 @@
     post("request");
   });
 
+  var PIP_TYPE = "itflux:participant-pip";
+  var PIP_RESULT = "itflux:participant-pip-result";
+
+  function isCameraTrackRecord(trackRecord) {
+    if (!trackRecord || trackMediaEnded(trackRecord)) return false;
+    var mediaType = String(trackRecord.mediaType || trackRecord.type || "").toLowerCase();
+    if (mediaType === "audio") return false;
+    if (isDesktopVideoType(readTrackVideoType(trackRecord))) return false;
+    try {
+      var jt = trackRecord.jitsiTrack || trackRecord.track;
+      if (jt && typeof jt.isLocal === "function" && jt.isLocal()) return false;
+    } catch (err) { /* ignore */ }
+    if (trackRecord.local || trackRecord.isLocal) return false;
+    return true;
+  }
+
+  function findRemoteCameraVideoEl(preferredId) {
+    var state = getJitsiState();
+    var tracks = listTracks(state);
+    var cameras = [];
+    var i;
+    for (i = 0; i < tracks.length; i += 1) {
+      if (isCameraTrackRecord(tracks[i])) cameras.push(tracks[i]);
+    }
+    var chosen = null;
+    var expected = String(preferredId || "");
+    if (expected) {
+      for (i = 0; i < cameras.length; i += 1) {
+        if (desktopOwnerId(cameras[i]) === expected) {
+          chosen = cameras[i];
+          break;
+        }
+      }
+    }
+    if (!chosen) {
+      for (i = 0; i < cameras.length; i += 1) {
+        if (!trackMuted(cameras[i])) {
+          chosen = cameras[i];
+          break;
+        }
+      }
+    }
+    if (!chosen && cameras.length) chosen = cameras[0];
+    if (chosen) {
+      var stream = trackStream(chosen);
+      var videos = document.querySelectorAll("video");
+      for (i = 0; i < videos.length; i += 1) {
+        var meta = ancestorMeta(videos[i]);
+        var blob = blobOfCandidate({
+          id: videos[i].id,
+          className: classNameOf(videos[i]),
+          ancestorIds: meta.ids,
+          ancestorClasses: meta.classes,
+        });
+        if (/localscreenshare|localvideo|local-video|local_preview/.test(blob)) continue;
+        if (stream && videoMatchesDesktopStream(videos[i], stream)) return videos[i];
+      }
+    }
+    var large = document.getElementById("largeVideo");
+    if (large && String(large.tagName || "").toLowerCase() === "video") {
+      var largeMeta = ancestorMeta(large);
+      var largeBlob = blobOfCandidate({
+        id: large.id,
+        className: classNameOf(large),
+        ancestorIds: largeMeta.ids,
+        ancestorClasses: largeMeta.classes,
+      });
+      if (!/localscreenshare|localvideo/.test(largeBlob)) return large;
+    }
+    return null;
+  }
+
+  function postPipResult(payload) {
+    var target = parentTargetOrigin();
+    var msg = {
+      type: PIP_RESULT,
+      source: SOURCE,
+      ok: Boolean(payload && payload.ok),
+      action: payload && payload.action ? payload.action : "",
+      reason: payload && payload.reason ? payload.reason : "",
+      participantId: payload && payload.participantId ? payload.participantId : "",
+    };
+    try {
+      window.parent.postMessage(msg, target);
+    } catch (err) {
+      window.parent.postMessage(msg, "*");
+    }
+  }
+
+  function handleParticipantPip(data) {
+    var action = data && data.action;
+    if (action === "exit") {
+      Promise.resolve().then(function () {
+        if (document.pictureInPictureElement && document.exitPictureInPicture) {
+          return document.exitPictureInPicture();
+        }
+        return null;
+      }).then(function () {
+        postPipResult({ ok: true, action: "exit" });
+      }).catch(function () {
+        postPipResult({ ok: true, action: "exit" });
+      });
+      return;
+    }
+    if (action !== "request") return;
+    if (!document.pictureInPictureEnabled || !HTMLVideoElement || !HTMLVideoElement.prototype.requestPictureInPicture) {
+      postPipResult({ ok: false, reason: "unsupported" });
+      return;
+    }
+    var video = findRemoteCameraVideoEl(data.participantId);
+    if (!video) {
+      postPipResult({ ok: false, reason: "no-video" });
+      return;
+    }
+    if (document.pictureInPictureElement === video) {
+      postPipResult({ ok: true, already: true, action: "entered", participantId: data.participantId || "" });
+      return;
+    }
+    Promise.resolve(video.requestPictureInPicture()).then(function () {
+      postPipResult({ ok: true, action: "entered", participantId: data.participantId || "" });
+    }).catch(function () {
+      postPipResult({ ok: false, reason: "blocked" });
+    });
+  }
+
+  window.addEventListener("message", function (event) {
+    var data = event.data;
+    if (data && data.type === PIP_TYPE) handleParticipantPip(data);
+  });
+  document.addEventListener("enterpictureinpicture", function () {
+    postPipResult({ ok: true, action: "entered" });
+  });
+  document.addEventListener("leavepictureinpicture", function () {
+    postPipResult({ ok: true, action: "left" });
+  });
+
   var ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(function () {
     schedule("resize");
   }) : null;
