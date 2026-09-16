@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react";
+import { useOutletContext } from "react-router-dom";
 import CabinetIcon from "../CabinetIcons";
+import {
+  formatClockRangeInZone,
+  formatDateInZone,
+  formatDayLabelInZone,
+  formatTimeInZone,
+  studentTimezoneNote,
+} from "../timezones";
 import { usePageTitle } from "../hooks/usePageTitle";
 import {
   cabinetMeetingPathFromHref,
@@ -142,38 +150,33 @@ export function StudentCardGrid({ children, columns }) {
   );
 }
 
-export function formatStudentDate(iso) {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
-  } catch {
-    return "—";
-  }
+export function useStudentTimeZone() {
+  const { user } = useOutletContext() || {};
+  return user?.timezone || undefined;
 }
 
-export function formatStudentTime(iso) {
-  if (!iso) return "";
-  try {
-    return new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-  } catch {
-    return "";
-  }
+export function formatStudentDate(iso, timeZone) {
+  return formatDateInZone(iso, timeZone);
 }
 
-export function formatLessonWhen(iso) {
+export function formatStudentTime(iso, timeZone) {
+  return formatTimeInZone(iso, timeZone);
+}
+
+export function formatLessonWhen(iso, timeZone) {
   if (!iso) return "Дата не указана";
   try {
-    const d = new Date(iso);
-    const now = new Date();
-    const time = formatStudentTime(iso);
-    if (d.toDateString() === now.toDateString()) return `Сегодня · ${time}`;
-    const tomorrow = new Date(now);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    if (d.toDateString() === tomorrow.toDateString()) return `Завтра · ${time}`;
-    return `${formatStudentDate(iso)} · ${time}`;
+    const time = formatStudentTime(iso, timeZone);
+    const day = formatDayLabelInZone(iso, timeZone);
+    if (day === "Сегодня" || day === "Завтра") return `${day} · ${time}`;
+    return `${formatStudentDate(iso, timeZone)} · ${time}`;
   } catch {
     return "Дата не указана";
   }
+}
+
+export function viewerTimezoneNote(event, timeZone) {
+  return studentTimezoneNote(event?.viewer_timezone || timeZone);
 }
 
 export function formatDueDate(iso) {
@@ -243,11 +246,8 @@ export function isLessonInProgress(startsAt, endsAt, now = Date.now()) {
   return now >= start && now < end;
 }
 
-export function formatLessonTimeRange(startsAt, endsAt) {
-  if (!startsAt) return "";
-  const start = formatStudentTime(startsAt);
-  const end = endsAt ? formatStudentTime(endsAt) : "";
-  return end ? `${start}–${end}` : start;
+export function formatLessonTimeRange(startsAt, endsAt, timeZone) {
+  return formatClockRangeInZone(startsAt, endsAt, timeZone);
 }
 
 export function useScheduleNow(intervalMs = 30000) {

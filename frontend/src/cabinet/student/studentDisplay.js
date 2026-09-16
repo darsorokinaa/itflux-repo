@@ -1,5 +1,7 @@
 /** Общие хелперы отображения статусов ДЗ ученика */
 
+import { formatDayLabelInZone } from "../timezones";
+
 export const STUDENT_HW_STATUS_LABELS = {
   new: "Не начато",
   in_progress: "В процессе",
@@ -61,19 +63,8 @@ export function formatCountdownTo(iso) {
   return `через ${days} ${pluralRu(days, "день", "дня", "дней")}`;
 }
 
-export function formatDayLabel(iso) {
-  if (!iso) return "";
-  try {
-    const d = new Date(iso);
-    const now = new Date();
-    if (d.toDateString() === now.toDateString()) return "Сегодня";
-    const tomorrow = new Date(now);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    if (d.toDateString() === tomorrow.toDateString()) return "Завтра";
-    return d.toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" });
-  } catch {
-    return "";
-  }
+export function formatDayLabel(iso, timeZone) {
+  return formatDayLabelInZone(iso, timeZone);
 }
 
 export function masteryLabel(status) {

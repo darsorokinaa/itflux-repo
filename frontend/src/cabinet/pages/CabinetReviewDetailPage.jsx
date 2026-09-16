@@ -42,6 +42,10 @@ import {
 import ConfirmActionModal from "../components/ConfirmActionModal";
 import HomeworkCopyModal from "../components/HomeworkCopyModal";
 import PlanItemResourcesPicker from "../components/PlanItemResourcesPicker";
+import AttachmentPreviewModal, {
+  isAttachmentPreviewable,
+  openAttachmentPreferPreview,
+} from "../components/AttachmentPreviewModal";
 import HomeworkReviewSummary, {
   buildHomeworkReviewFromVariant,
 } from "../HomeworkReviewResults";
@@ -200,26 +204,46 @@ function isImageAttachment(file) {
 }
 
 function AttachmentList({ attachments, emptyLabel = "Файлы не прикреплены" }) {
+  const [preview, setPreview] = useState(null);
   if (!attachments?.length) {
     return <p className="cb-review-detail__empty-answer">{emptyLabel}</p>;
   }
   return (
-    <ul className="cb-review-detail__attachments">
-      {attachments.map((file) => (
-        <li key={homeworkAttachmentKey(file)} className={isImageAttachment(file) ? "is-image" : ""}>
-          {isImageAttachment(file) ? (
-            <a href={file.url} target="_blank" rel="noreferrer" className="cb-review-detail__file-thumb">
-              <img src={file.url} alt={file.filename || file.name || "Изображение"} />
-              <span>{file.filename || file.name || "Файл"}</span>
-            </a>
-          ) : (
-            <a href={file.url} target="_blank" rel="noreferrer" className="cb-review-detail__file-link">
-              {file.filename || file.name || "Файл"}
-            </a>
-          )}
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul className="cb-review-detail__attachments">
+        {attachments.map((file) => {
+          const label = file.filename || file.name || "Файл";
+          const previewable = isAttachmentPreviewable(file) || isImageAttachment(file);
+          return (
+            <li key={homeworkAttachmentKey(file)} className={isImageAttachment(file) ? "is-image" : ""}>
+              {previewable ? (
+                <button
+                  type="button"
+                  className={isImageAttachment(file) ? "cb-review-detail__file-thumb" : "cb-review-detail__file-link"}
+                  onClick={() => openAttachmentPreferPreview(file, setPreview)}
+                >
+                  {isImageAttachment(file) ? (
+                    <>
+                      <img src={file.url} alt={label} />
+                      <span>{label}</span>
+                    </>
+                  ) : (
+                    label
+                  )}
+                </button>
+              ) : (
+                <a href={file.url} target="_blank" rel="noreferrer" className="cb-review-detail__file-link">
+                  {label}
+                </a>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {preview ? (
+        <AttachmentPreviewModal file={preview} onClose={() => setPreview(null)} />
+      ) : null}
+    </>
   );
 }
 
@@ -939,25 +963,45 @@ export default function CabinetReviewDetailPage() {
               ) : (
                 <p className="cb-review-detail__empty-answer">Текстовый ответ не указан</p>
               )}
-              {submission?.attached_files?.length ? (
-                submission.attached_files.map((file) => (
-                  <p key={file.id || file.url}>
-                    {file.url ? (
-                      <a href={file.url} target="_blank" rel="noreferrer">
-                        {file.name || "Прикреплённый файл"}
-                      </a>
-                    ) : (
-                      <span>{file.name || "Прикреплённый файл"}</span>
-                    )}
-                  </p>
-                ))
-              ) : submission?.attached_file_url ? (
-                <p>
-                  <a href={submission.attached_file_url} target="_blank" rel="noreferrer">
-                    {submission.attached_file_name || "Прикреплённый файл"}
-                  </a>
-                </p>
+              {submission?.attached_files?.length || submission?.attached_file_url ? (
+                <AttachmentList
+                  attachments={
+                    submission?.attached_files?.length
+                      ? submission.attached_files
+                      : [{
+                          id: "main",
+                          url: submission.attached_file_url,
+                          name: submission.attached_file_name || "Прикреплённый файл",
+                          filename: submission.attached_file_name || "Прикреплённый файл",
+                        }]
+                  }
+                  emptyLabel="Файлы не прикреплены"
+                />
               ) : null}
+              <div className="cb-review-detail__task-files">
+                <span className="cb-review-detail__section-label">Тетрадь проверки</span>
+                <TeacherNotebookActions
+                  submissionId={submission?.id}
+                  taskId={
+                    reviewCtx?.notebook_task_id
+                    ?? ((Array.isArray(reviewCtx?.tasks) && reviewCtx.tasks[0]?.id != null)
+                      ? reviewCtx.tasks[0].id
+                      : "__homework__")
+                  }
+                  enabled={isPending}
+                  onComplete={(payload) => {
+                    if (!payload.attachment) return;
+                    const taskId = reviewCtx?.notebook_task_id
+                      ?? ((Array.isArray(reviewCtx?.tasks) && reviewCtx.tasks[0]?.id != null)
+                        ? reviewCtx.tasks[0].id
+                        : "__homework__");
+                    patchReviewAttachments(
+                      (list) => appendHomeworkAttachments(list, [payload.attachment]),
+                      { taskId },
+                    );
+                  }}
+                />
+              </div>
             </div>
           </section>
 

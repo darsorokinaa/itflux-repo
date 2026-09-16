@@ -237,7 +237,9 @@ class PerformanceAuditTests(TestCase):
 
     def test_student_list_serializer_queries_for_prefetched_qs(self):
         self._make_students(20)
-        qs = Student.objects.filter(teacher=self.teacher).prefetch_related("groups", "subjects")
+        qs = Student.objects.filter(teacher=self.teacher).select_related(
+            "user", "user__profile",
+        ).prefetch_related("groups", "subjects")
         students = list(qs)
         with CaptureQueriesContext(connection) as ctx:
             StudentListSerializer(students, many=True).data

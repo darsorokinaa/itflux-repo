@@ -66,6 +66,7 @@ def _profile_payload(user):
         "is_staff": bool(getattr(user, "is_staff", False)),
         "is_superuser": bool(getattr(user, "is_superuser", False)),
         "can_edit_bank_tasks": can_edit_bank_tasks(user),
+        "timezone": (profile.timezone or "").strip() or "Europe/Moscow",
     }
 
 

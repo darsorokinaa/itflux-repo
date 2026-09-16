@@ -45,8 +45,10 @@ from .models import (
 from .serializers import StudentSubjectSerializer
 from .files_services import material_file_url, material_view_url
 from .permissions import IsCabinetStudent
+from .notification_time import user_timezone_name, user_zoneinfo
 from .plan_schedule import resolve_plan_item_for_event
 from .schedule_events import _participants_to_json, _plan_item_to_json
+from .timezones import normalize_timezone_name, timezone_city_label
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +72,14 @@ def resolve_roster_students(user):
         .select_related("teacher", "teacher__profile")
         .order_by("id")
     )
+
+
+def _viewer_timezone_fields(user=None):
+    name = user_timezone_name(user)
+    return {
+        "viewer_timezone": name,
+        "viewer_timezone_label": timezone_city_label(name),
+    }
 
 
 def resolve_roster_student(user, teacher_id=None):
@@ -363,7 +373,7 @@ def _video_meeting_payload(event):
     return payload, meeting_url
 
 
-def _serialize_schedule_lesson_card(event, students):
+def _serialize_schedule_lesson_card(event, students, *, viewer=None):
     assignment = _lesson_assignment_for_event(students, event)
     lesson = getattr(event, "lesson", None)
     materials_count = 0
@@ -397,6 +407,7 @@ def _serialize_schedule_lesson_card(event, students):
         "homework_title": homework_title,
         "student_subject_id": event.student_subject_id,
         "student_subject_label": subject_label,
+        **_viewer_timezone_fields(viewer),
     }
 
 
@@ -1097,7 +1108,7 @@ def _assignment_id_for_event(event, students):
     return assignment.id if assignment else None
 
 
-def _serialize_schedule_event(event, students):
+def _serialize_schedule_event(event, students, *, viewer=None):
     topic = _schedule_event_topic(event, students)
     video_meeting, meeting_url = _video_meeting_payload(event)
     subject_label = ""
@@ -1123,15 +1134,17 @@ def _serialize_schedule_event(event, students):
         "assignment_id": _assignment_id_for_event(event, students),
         "student_subject_id": event.student_subject_id,
         "student_subject_label": subject_label,
+        **_viewer_timezone_fields(viewer),
     }
 
 
-def _serialize_student_schedule_event_detail(event, students):
+def _serialize_student_schedule_event_detail(event, students, *, viewer=None):
     from .meeting_present import redact_plan_item_for_student
 
     plan_item_obj, lesson_number = resolve_plan_item_for_event(event)
-    local_start = timezone.localtime(event.starts_at)
-    local_end = timezone.localtime(event.ends_at)
+    zone = user_zoneinfo(viewer)
+    local_start = event.starts_at.astimezone(zone) if event.starts_at else None
+    local_end = event.ends_at.astimezone(zone) if event.ends_at else None
     plan_item_json = None
     if plan_item_obj:
         # Материалы и ДЗ плана видны только учителю; ученик получает их по «Показать».
@@ -1167,10 +1180,10 @@ def _serialize_student_schedule_event_detail(event, students):
     video_meeting, meeting_url = _video_meeting_payload(event)
     return {
         "id": event.id,
-        "startsAt": local_start.isoformat(),
-        "endsAt": local_end.isoformat(),
-        "startTime": local_start.strftime("%H:%M"),
-        "endTime": local_end.strftime("%H:%M"),
+        "startsAt": local_start.isoformat() if local_start else None,
+        "endsAt": local_end.isoformat() if local_end else None,
+        "startTime": local_start.strftime("%H:%M") if local_start else "",
+        "endTime": local_end.strftime("%H:%M") if local_end else "",
         "title": topic,
         "topic": topic,
         "type": event.event_type,
@@ -1189,6 +1202,7 @@ def _serialize_student_schedule_event_detail(event, students):
         "assignedHomework": assigned_homework,
         "planItem": plan_item_json,
         "planItems": [plan_item_json] if plan_item_json else [],
+        **_viewer_timezone_fields(viewer),
     }
 
 
@@ -1262,7 +1276,9 @@ class StudentDashboardView(StudentScopedView):
         interactives = list(_interactive_assignments_qs(students)[:20])
         dashboard_student = _pick_student(students)
         hw_sub_map = _submissions_by_homework(all_homeworks, dashboard_student)
-        today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        viewer_zone = user_zoneinfo(request.user)
+        now_local = timezone.now().astimezone(viewer_zone)
+        today_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
         today_end = today_start.replace(hour=23, minute=59, second=59)
         today_events = list(
             _schedule_qs(students).filter(starts_at__gte=today_start, starts_at__lte=today_end)[:5]
@@ -1291,7 +1307,7 @@ class StudentDashboardView(StudentScopedView):
             .first()
         )
         if upcoming:
-            card = _serialize_schedule_lesson_card(upcoming, students)
+            card = _serialize_schedule_lesson_card(upcoming, students, viewer=request.user)
             card["title"] = card["topic"]
             next_lesson = card
         elif lessons:
@@ -1326,7 +1342,7 @@ class StudentDashboardView(StudentScopedView):
         )
         seen_recent = set()
         for event in past_events:
-            card = _serialize_schedule_lesson_card(event, students)
+            card = _serialize_schedule_lesson_card(event, students, viewer=request.user)
             key = f"schedule-{event.id}"
             if key in seen_recent:
                 continue
@@ -1745,7 +1761,7 @@ class StudentScheduleView(StudentScopedView):
         )
         events = list(reversed(past)) + upcoming
         return Response({
-            "items": [_serialize_schedule_event(e, students) for e in events]
+            "items": [_serialize_schedule_event(e, students, viewer=request.user) for e in events]
         })
 
 
@@ -1781,7 +1797,7 @@ class StudentScheduleEventDetailView(StudentScopedView):
         )
         if not event:
             return Response({"error": "Занятие не найдено."}, status=status.HTTP_404_NOT_FOUND)
-        return Response(_serialize_student_schedule_event_detail(event, students))
+        return Response(_serialize_student_schedule_event_detail(event, students, viewer=request.user))
 
 
 class StudentProgressView(StudentScopedView):
@@ -2110,6 +2126,8 @@ class StudentProfileView(StudentScopedView):
             "teacher_name": teachers[0]["teacher_name"] if teachers else "",
             "teacher_email": teachers[0]["teacher_email"] if teachers else "",
             "notifications_enabled": True,
+            "timezone": user_timezone_name(request.user),
+            "timezone_label": timezone_city_label(user_timezone_name(request.user)),
         })
 
     def patch(self, request):
@@ -2123,8 +2141,20 @@ class StudentProfileView(StudentScopedView):
             profile.surname = request.data["surname"]
         if "notifications_enabled" in request.data:
             pass
+        if "timezone" in request.data:
+            tz_name = normalize_timezone_name(request.data.get("timezone"))
+            if not tz_name:
+                return Response(
+                    {"error": "Неизвестный часовой пояс."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            profile.timezone = tz_name
         profile.save()
-        return Response({"ok": True})
+        return Response({
+            "ok": True,
+            "timezone": user_timezone_name(request.user),
+            "timezone_label": timezone_city_label(user_timezone_name(request.user)),
+        })
 
 
 def _student_in_app_notifications(user):

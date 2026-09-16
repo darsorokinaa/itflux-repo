@@ -137,7 +137,10 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
     http_method_names = ["get", "post", "put", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
-        qs = Student.objects.filter(teacher=self.get_teacher()).prefetch_related(
+        qs = Student.objects.filter(teacher=self.get_teacher()).select_related(
+            "user",
+            "user__profile",
+        ).prefetch_related(
             "groups",
             "subjects",
         )

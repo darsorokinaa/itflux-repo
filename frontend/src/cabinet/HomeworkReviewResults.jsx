@@ -1,3 +1,8 @@
+import { useState } from "react";
+import AttachmentPreviewModal, {
+  isAttachmentPreviewable,
+  openAttachmentPreferPreview,
+} from "./components/AttachmentPreviewModal";
 import MathContent from "../components/MathContent";
 import {
   buildStudentHomeworkReviewRows,
@@ -35,6 +40,7 @@ function ReviewMathAnswer({ html, empty = "—" }) {
 }
 
 export function FileLinks({ files, label, emptyLabel }) {
+  const [preview, setPreview] = useState(null);
   if (!files?.length) {
     return emptyLabel ? <span className="hw-review-empty">{emptyLabel}</span> : null;
   }
@@ -45,6 +51,7 @@ export function FileLinks({ files, label, emptyLabel }) {
         {files.map((file) => {
           const isAudio = /\.(mp3|wav|ogg|aac|flac|m4a)$/i.test(file.filename || file.url || "");
           const normalizedUrl = normalizeMediaUrl(file.url);
+          const previewFile = { ...file, url: normalizedUrl || file.url };
           if (isAudio) {
             return (
               <li key={homeworkAttachmentKey(file)} className="hw-review-files__item--audio">
@@ -54,13 +61,26 @@ export function FileLinks({ files, label, emptyLabel }) {
               </li>
             );
           }
-          if (isImageFile(file)) {
+          if (isImageFile(file) || isAttachmentPreviewable(previewFile)) {
             return (
-              <li key={homeworkAttachmentKey(file)} className="hw-review-files__item--image">
-                <a href={normalizedUrl} target="_blank" rel="noreferrer" className="hw-review-files__thumb">
-                  <img src={normalizedUrl} alt={file.filename || "Изображение"} />
-                  <span>{file.filename || "Файл"}</span>
-                </a>
+              <li
+                key={homeworkAttachmentKey(file)}
+                className={isImageFile(file) ? "hw-review-files__item--image" : undefined}
+              >
+                <button
+                  type="button"
+                  className={isImageFile(file) ? "hw-review-files__thumb" : "hw-review-files__open"}
+                  onClick={() => openAttachmentPreferPreview(previewFile, setPreview)}
+                >
+                  {isImageFile(file) ? (
+                    <>
+                      <img src={normalizedUrl} alt={file.filename || "Изображение"} />
+                      <span>{file.filename || "Файл"}</span>
+                    </>
+                  ) : (
+                    file.filename || "Файл"
+                  )}
+                </button>
               </li>
             );
           }
@@ -73,6 +93,9 @@ export function FileLinks({ files, label, emptyLabel }) {
           );
         })}
       </ul>
+      {preview ? (
+        <AttachmentPreviewModal file={preview} onClose={() => setPreview(null)} />
+      ) : null}
     </div>
   );
 }

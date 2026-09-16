@@ -1681,6 +1681,13 @@ def build_homework_review_context(homework: Homework) -> dict:
     from .homework_attachments import list_homework_attachments
 
     attachments = list_homework_attachments(homework)
+    notebook_task_id = None
+    if not homework_has_variant_task(homework):
+        if tasks:
+            notebook_task_id = tasks[0].get("id")
+        else:
+            first = homework.tasks.filter(is_active=True).order_by("order", "id").first()
+            notebook_task_id = first.pk if first is not None else "__homework__"
     return {
         "homework_id": homework.id,
         "homework_title": homework.title,
@@ -1692,6 +1699,7 @@ def build_homework_review_context(homework: Homework) -> dict:
         "subject": subject,
         "tasks": tasks,
         "tasks_count": len(tasks),
+        "notebook_task_id": notebook_task_id,
         "description": homework_instruction_text(homework),
         "attachments": attachments,
         "attachments_count": len(attachments),

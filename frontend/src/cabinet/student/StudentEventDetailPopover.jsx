@@ -14,6 +14,7 @@ import {
   resolveLessonTopic,
 } from "../lessonCardContent";
 import { fetchStudentScheduleEvent } from "../../utils/cabinetAuth";
+import { studentTimezoneNote } from "../timezones";
 import { formatLessonTimeRange, useLessonConnectAvailable } from "./StudentSectionUi";
 import { resolveAuthenticatedMeetingNavigation } from "../meetingNavigation";
 
@@ -25,8 +26,6 @@ const EVENT_TYPES = {
   homework: { label: "Домашнее задание", color: "#D97706" },
   review: { label: "Проверка работ", color: "#DC2626" },
 };
-
-const MONTHS = ["янв.", "февр.", "мар.", "апр.", "мая", "июн.", "июл.", "авг.", "сент.", "окт.", "нояб.", "дек."];
 
 function eventAccentColor(event) {
   const tags = event.tags || [];
@@ -41,16 +40,21 @@ function eventAccentColor(event) {
 
 function formatEventDateShort(event) {
   if (!event?.startsAt) return "";
+  const timeZone = event.viewer_timezone;
   const d = new Date(event.startsAt);
   if (Number.isNaN(d.getTime())) return "";
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const day = new Date(d);
-  day.setHours(0, 0, 0, 0);
-  const diff = Math.round((day - today) / 86400000);
-  if (diff === 0) return "Сегодня";
-  if (diff === 1) return "Завтра";
-  return `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+  const todayKey = new Date().toLocaleDateString("en-CA", timeZone ? { timeZone } : {});
+  const dayKey = d.toLocaleDateString("en-CA", timeZone ? { timeZone } : {});
+  if (dayKey === todayKey) return "Сегодня";
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowKey = tomorrow.toLocaleDateString("en-CA", timeZone ? { timeZone } : {});
+  if (dayKey === tomorrowKey) return "Завтра";
+  return `${d.toLocaleDateString("ru-RU", {
+    day: "numeric",
+    month: "short",
+    ...(timeZone ? { timeZone } : {}),
+  })}`;
 }
 
 function shortenMeetingUrl(url) {
@@ -196,7 +200,8 @@ export default function StudentEventDetailPopover({ eventId, onClose }) {
       accentColor={eventAccentColor(event)}
       profileName={event.teacher_name || ""}
       dateLabel={formatEventDateShort(event)}
-      timeRange={formatLessonTimeRange(event.startsAt, event.endsAt) || `${event.startTime}–${event.endTime}`}
+      timeRange={formatLessonTimeRange(event.startsAt, event.endsAt, event.viewer_timezone) || `${event.startTime}–${event.endTime}`}
+      timeNote={studentTimezoneNote(event.viewer_timezone)}
       statusMeta={null}
       recurring={Boolean(event.seriesId)}
       isOnline={event.format === "Онлайн"}

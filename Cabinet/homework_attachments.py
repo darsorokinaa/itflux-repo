@@ -76,6 +76,20 @@ def _is_image(mime_type: str, extension: str) -> bool:
     return ext in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic", ".heif", ".svg"}
 
 
+def _preview_kind(mime_type: str, extension: str) -> str:
+    mime = (mime_type or "").lower()
+    ext = (extension or "").lower()
+    if not ext.startswith(".") and ext:
+        ext = f".{ext}"
+    if _is_image(mime, extension):
+        return "image"
+    if mime == "application/pdf" or ext == ".pdf":
+        return "pdf"
+    if mime.startswith("video/") or ext in {".mp4", ".webm", ".mov", ".m4v"}:
+        return "video"
+    return ""
+
+
 def serialize_homework_attachment(relation: CabinetFileRelation, *, for_student: bool = False) -> dict:
     file_obj = relation.file
     material = relation.material
@@ -88,6 +102,7 @@ def serialize_homework_attachment(relation: CabinetFileRelation, *, for_student:
     mime = (file_obj.mime_type if file_obj else "") or ""
     extension = (file_obj.extension if file_obj else "") or ""
     size = int(file_obj.size if file_obj else 0)
+    kind = _preview_kind(mime, extension)
     if file_obj is not None:
         if for_student:
             url = f"/api/cabinet/student/files/shared/{file_obj.id}/download/"
@@ -110,11 +125,12 @@ def serialize_homework_attachment(relation: CabinetFileRelation, *, for_student:
         "name": name,
         "original_name": (file_obj.original_name if file_obj else name) or name,
         "url": url,
-        "preview_url": preview_url if _is_image(mime, extension) else "",
+        "preview_url": preview_url if kind else "",
+        "preview_kind": kind,
         "mime_type": mime,
         "extension": extension,
         "size": size,
-        "is_image": _is_image(mime, extension),
+        "is_image": kind == "image",
         "created_at": relation.created_at.isoformat() if relation.created_at else None,
     }
 

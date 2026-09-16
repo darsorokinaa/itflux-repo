@@ -74,6 +74,8 @@ class StudentListSerializer(serializers.ModelSerializer):
     is_registered = serializers.BooleanField(read_only=True)
     subjects_count = serializers.SerializerMethodField()
     subjects_preview = serializers.SerializerMethodField()
+    timezone = serializers.SerializerMethodField()
+    timezone_label = serializers.SerializerMethodField()
 
     class Meta:
         model = Student
@@ -95,6 +97,8 @@ class StudentListSerializer(serializers.ModelSerializer):
             "is_registered",
             "subjects_count",
             "subjects_preview",
+            "timezone",
+            "timezone_label",
             "created_at",
             "updated_at",
         ]
@@ -111,6 +115,20 @@ class StudentListSerializer(serializers.ModelSerializer):
         if prefetched is not None:
             return sum(1 for s in prefetched if s.status == StudentSubjectStatus.ACTIVE)
         return obj.subjects.filter(status=StudentSubjectStatus.ACTIVE).count()
+
+    def get_timezone(self, obj):
+        user = getattr(obj, "user", None)
+        if not user:
+            return None
+        profile = getattr(user, "profile", None)
+        name = (getattr(profile, "timezone", None) or "").strip()
+        return name or None
+
+    def get_timezone_label(self, obj):
+        from .timezones import timezone_city_label
+
+        name = self.get_timezone(obj)
+        return timezone_city_label(name) if name else None
 
     def get_subjects_preview(self, obj):
         prefetched = getattr(obj, "_prefetched_objects_cache", {}).get("subjects")

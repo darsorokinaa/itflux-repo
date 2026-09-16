@@ -25,6 +25,11 @@ export function StudentMaterialPreviewModal({ item, onClose }) {
       footer={(
         <>
           {downloadHref ? (
+            <a className="cb-btn cb-btn--outline" href={downloadHref} target="_blank" rel="noreferrer">
+              Открыть снаружи
+            </a>
+          ) : null}
+          {downloadHref ? (
             <a className="cb-btn cb-btn--outline" href={downloadHref} download>
               Скачать
             </a>
@@ -40,7 +45,15 @@ export function StudentMaterialPreviewModal({ item, onClose }) {
           <img src={src} alt={item.title || "Изображение"} />
         ) : null}
         {kind === "pdf" ? (
-          <iframe src={src} title={item.title || "PDF"} />
+          <object className="st-mat-preview__pdf" data={src} type="application/pdf" title={item.title || "PDF"}>
+            <iframe src={src} title={item.title || "PDF"} />
+            <p className="st-mat-preview__empty">
+              Предпросмотр PDF недоступен.{" "}
+              {downloadHref ? (
+                <a href={downloadHref} target="_blank" rel="noreferrer">Открыть файл</a>
+              ) : null}
+            </p>
+          </object>
         ) : null}
         {kind === "video" ? (
           <video src={src} controls playsInline />

@@ -147,12 +147,13 @@ function LessonBillingBlock({
   );
 }
 
-function PassportTimeHero({ dateLabel, timeRange }) {
+function PassportTimeHero({ dateLabel, timeRange, note }) {
   const main = [dateLabel, timeRange].filter(Boolean).join(" · ");
   return (
     <div className="cb-lesson-card__passport-time">
       <span className="cb-lesson-card__passport-time-label">Время</span>
       <span className="cb-lesson-card__passport-time-main" title={main}>{main || "—"}</span>
+      {note ? <span className="cb-lesson-card__passport-time-note">{note}</span> : null}
     </div>
   );
 }
@@ -1037,6 +1038,7 @@ export default function EventDetailCard({
   profileName,
   dateLabel,
   timeRange,
+  timeNote = "",
   statusMeta,
   recurring,
   isOnline,
@@ -1321,7 +1323,7 @@ export default function EventDetailCard({
           <div className="cb-lesson-card__grid">
             <div className="cb-lesson-card__col cb-lesson-card__col--main">
               <div className="cb-lesson-card__passport">
-                <PassportTimeHero dateLabel={dateLabel} timeRange={timeRange} />
+                <PassportTimeHero dateLabel={dateLabel} timeRange={timeRange} note={studentMode ? timeNote : ""} />
                 <div className="cb-lesson-card__passport-mini">
                   <PassportMiniCell label="Формат" value={formatValue} meta={formatMeta} />
                   <PassportMiniCell label="Тип" value={typeLabel || "—"} />

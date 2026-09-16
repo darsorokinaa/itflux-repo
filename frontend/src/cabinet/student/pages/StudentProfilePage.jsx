@@ -6,6 +6,12 @@ import CabinetIcon from "../../CabinetIcons";
 import ProfileAvatarEditor from "../../components/ProfileAvatarEditor";
 import { loadStudentData } from "../studentData";
 import { StudentPageShell } from "../StudentSectionUi";
+import {
+  browserTimeZone,
+  ensureTimezoneOption,
+  timezoneCityLabel,
+  timezoneOptionLabel,
+} from "../../timezones";
 import "../../styles/payments.css";
 
 export default function StudentProfilePage() {
@@ -37,6 +43,7 @@ export default function StudentProfilePage() {
         name: profile.name,
         surname: profile.surname,
         notifications_enabled: profile.notifications_enabled,
+        timezone: profile.timezone,
       });
       setMsg("Сохранено");
       setMsgType("success");
@@ -99,6 +106,26 @@ export default function StudentProfilePage() {
             <span>{profile.email}</span>
           </p>
         )}
+        <label className="st-field">
+          <span>Часовой пояс</span>
+          <select
+            value={profile.timezone || "Europe/Moscow"}
+            onChange={(e) => setProfile({ ...profile, timezone: e.target.value })}
+            aria-label="Часовой пояс"
+          >
+            {ensureTimezoneOption(profile.timezone).map((item) => (
+              <option key={item.value} value={item.value}>
+                {timezoneOptionLabel(item)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="st-field-hint">
+          Учитель ставит урок по своему времени, а вам оно показывается в выбранном поясе.
+          {browserTimeZone() && timezoneCityLabel(browserTimeZone()) !== timezoneCityLabel(profile.timezone)
+            ? ` Сейчас на устройстве: ${timezoneCityLabel(browserTimeZone())}.`
+            : ""}
+        </p>
       </section>
 
       {billingAccounts.length ? (

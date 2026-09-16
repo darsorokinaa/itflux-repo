@@ -5109,6 +5109,19 @@ input.tasks-page-subtopic-num-input::-webkit-inner-spin-button {
     color: #4f46e5;
 }
 
+.hw-review-files__open {
+    font-size: 0.84rem;
+    color: #4f46e5;
+    background: none;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    text-decoration: underline;
+    word-break: break-word;
+}
+
 .hw-review-files__item--image {
     margin: 8px 0;
 }
@@ -5118,6 +5131,13 @@ input.tasks-page-subtopic-num-input::-webkit-inner-spin-button {
     align-items: center;
     gap: 10px;
     text-decoration: none;
+    background: none;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
 }
 
 .hw-review-files__thumb img {

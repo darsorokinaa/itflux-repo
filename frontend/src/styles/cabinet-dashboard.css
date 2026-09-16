@@ -8320,6 +8320,16 @@ button.cb-sch-event {
   text-overflow: ellipsis;
 }
 
+.cb-lesson-card__passport-time-note {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: #FFFFFF;
+  opacity: 0.9;
+}
+
 .cb-lesson-card__passport-mini {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -15210,6 +15220,13 @@ select.cb-lesson-card__about-input.is-empty {
   color: #64748B;
 }
 
+.cb-sch-form__tz-preview {
+  margin: 6px 0 0;
+  font-size: 0.78rem;
+  color: #1E3A8A;
+  font-weight: 600;
+}
+
 .cb-sch-form__conflict {
   padding: 10px 12px;
   border-radius: 8px;
@@ -18119,6 +18136,13 @@ select.cb-lesson-card__about-input.is-empty {
 .cb-review-detail__file-link {
   color: #2563EB;
   word-break: break-all;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
 }
 
 .cb-review-detail__file-thumb {
@@ -18128,6 +18152,12 @@ select.cb-lesson-card__about-input.is-empty {
   color: #2563EB;
   text-decoration: none;
   word-break: break-all;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .cb-review-detail__file-thumb img {
@@ -18138,6 +18168,68 @@ select.cb-lesson-card__about-input.is-empty {
   border: 1px solid #E2E8F0;
   background: #F8FAFC;
   flex-shrink: 0;
+}
+
+.att-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+  max-height: min(70vh, 640px);
+  background: #F8FAFC;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.att-preview img,
+.att-preview video {
+  max-width: 100%;
+  max-height: min(70vh, 640px);
+  object-fit: contain;
+  display: block;
+}
+
+.att-preview__pdf,
+.att-preview iframe {
+  width: 100%;
+  height: min(70vh, 640px);
+  border: 0;
+  background: #fff;
+}
+
+.att-preview__empty {
+  margin: 0;
+  padding: 24px;
+  color: #64748B;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+@media (max-width: 768px) {
+  .att-preview,
+  .att-preview img,
+  .att-preview video,
+  .att-preview__pdf,
+  .att-preview iframe {
+    max-height: 52vh;
+  }
+
+  .att-preview__pdf,
+  .att-preview iframe {
+    height: 52vh;
+  }
+
+  .cb-modal--wide .cb-modal__footer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .cb-modal--wide .cb-modal__footer .cb-btn {
+    flex: 1 1 calc(50% - 8px);
+    justify-content: center;
+    text-align: center;
+  }
 }
 
 .cb-review-detail__score-row {

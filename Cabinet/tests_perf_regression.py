@@ -133,7 +133,7 @@ class PrefetchAndCatalogRegressionTests(TestCase):
 
         qs = Student.objects.filter(
             teacher=self.teacher, status="active",
-        ).prefetch_related("groups", "subjects").order_by("last_name", "first_name")
+        ).select_related("user", "user__profile").prefetch_related("groups", "subjects").order_by("last_name", "first_name")
         prefetched = StudentListSerializer(list(qs), many=True).data
         plain = StudentListSerializer(
             list(Student.objects.filter(teacher=self.teacher, status="active").order_by("last_name", "first_name")),

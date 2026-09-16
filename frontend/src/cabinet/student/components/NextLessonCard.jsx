@@ -9,6 +9,7 @@ import {
   useLessonConnectAvailable,
   useLessonInProgress,
   useScheduleNow,
+  viewerTimezoneNote,
 } from "../StudentSectionUi";
 import { formatCountdownTo, formatDayLabel } from "../studentDisplay";
 import ConnectionCheckButton from "../../connectionCheck/ConnectionCheckButton";
@@ -66,12 +67,14 @@ export default function NextLessonCard({ lesson, onOpenSchedule }) {
     : "/cabinet/student/materials";
   const canOpenCard = lesson.kind === "schedule" && lesson.id;
   const meetingHref = lessonMeetingHref(lesson);
-  const dayLabel = formatDayLabel(lesson.starts_at);
-  const timeRange = formatLessonTimeRange(lesson.starts_at, lesson.ends_at);
+  const timeZone = lesson.viewer_timezone;
+  const dayLabel = formatDayLabel(lesson.starts_at, timeZone);
+  const timeRange = formatLessonTimeRange(lesson.starts_at, lesson.ends_at, timeZone);
+  const tzNote = viewerTimezoneNote(lesson, timeZone);
   const countdown = !inProgress ? formatCountdownTo(lesson.starts_at) : "";
   const connectMinutes = Math.round(LESSON_CONNECT_BEFORE_MS / 60000);
   const endsSoon = inProgress && lesson.ends_at
-    ? `до ${formatStudentTime(lesson.ends_at)}`
+    ? `до ${formatStudentTime(lesson.ends_at, timeZone)}`
     : "";
   const hasMeeting = Boolean(
     lesson.meeting_url
@@ -130,6 +133,7 @@ export default function NextLessonCard({ lesson, onOpenSchedule }) {
           {timeRange ? `, ${timeRange}` : ""}
           {endsSoon ? ` · ${endsSoon}` : ""}
         </p>
+        {tzNote ? <p className="st-time-tz-note">{tzNote}</p> : null}
 
         {subject ? <p className="st-next-lesson__subject">{subject}</p> : null}
         <h3 className="st-next-lesson__topic">

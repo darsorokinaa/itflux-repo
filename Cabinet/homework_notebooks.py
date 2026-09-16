@@ -132,6 +132,9 @@ SKIP_SEED_ATTACHMENT_TYPES = {
     HomeworkAttachmentType.TEACHER_CHECKED_FILE,
 }
 
+# Единая тетрадь для сдачи без варианта (файл/текст учителя → ответ ученика).
+SUBMISSION_NOTEBOOK_TASK_KEY = "__homework__"
+
 
 def _unique_keys(values) -> list[str]:
     seen = set()
@@ -145,16 +148,163 @@ def _unique_keys(values) -> list[str]:
     return keys
 
 
+def default_submission_notebook_task_key(submission: HomeworkSubmission) -> str:
+    """Стабильный task_key для невариантной сдачи: PK первого задания или sentinel."""
+    homework = getattr(submission, "homework", None)
+    if homework is not None:
+        first = homework.tasks.filter(is_active=True).order_by("order", "id").first()
+        if first is not None:
+            return str(first.pk)
+    return SUBMISSION_NOTEBOOK_TASK_KEY
+
+
+def _checksum_and_size_from_filefield(file_field) -> tuple[str, int]:
+    import hashlib
+
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        file_field.open("rb")
+        try:
+            for chunk in file_field.chunks():
+                if not chunk:
+                    continue
+                digest.update(chunk)
+                size += len(chunk)
+        finally:
+            try:
+                file_field.close()
+            except Exception:
+                pass
+    except Exception:
+        logger.warning("checksum failed for submission file", exc_info=True)
+        return "", 0
+    return digest.hexdigest(), size
+
+
+def ensure_submission_files_as_task_attachments(
+    submission: HomeworkSubmission,
+    task_key: str,
+) -> list[HomeworkAttachment]:
+    """
+    Копирует attached_file / HomeworkSubmissionAttachment в HomeworkAttachment,
+    чтобы тетрадь проверки могла сидиться так же, как у варианта.
+    """
+    task_key = str(task_key or "").strip() or default_submission_notebook_task_key(submission)
+    if task_key == COMMENT_TASK_KEY:
+        return []
+
+    from .homework_task_files import resolve_homework_task, sync_payload_attachment_maps
+    from .files_storage import sanitize_filename
+    from .submission_files import submission_has_files
+
+    if not submission_has_files(submission):
+        return []
+
+    existing = list(
+        HomeworkAttachment.objects.filter(
+            submission=submission,
+            owner_role=HomeworkAttachmentOwnerRole.STUDENT,
+            is_deleted=False,
+        ).exclude(attachment_type__in=SKIP_SEED_ATTACHMENT_TYPES)
+    )
+    existing_checksums = {row.checksum for row in existing if row.checksum}
+    existing_names = {
+        (row.original_filename or "", int(row.file_size or 0))
+        for row in existing
+    }
+
+    sources: list[tuple[object, str]] = []
+    try:
+        if submission.attached_file and submission.attached_file.name:
+            name = submission.attached_file.name.split("/")[-1] or "file"
+            sources.append((submission.attached_file, name))
+    except Exception:
+        pass
+    for att in submission.file_attachments.all().order_by("id"):
+        if not att.file:
+            continue
+        name = att.original_name or (att.file.name.split("/")[-1] if att.file.name else "file")
+        sources.append((att.file, name))
+
+    if not sources:
+        return []
+
+    homework = submission.homework
+    homework_task = resolve_homework_task(homework, task_key)
+    created: list[HomeworkAttachment] = []
+    for file_field, raw_name in sources:
+        checksum, size = _checksum_and_size_from_filefield(file_field)
+        filename = sanitize_filename(raw_name or "file")
+        if checksum and checksum in existing_checksums:
+            continue
+        if (filename, int(size or 0)) in existing_names and not checksum:
+            continue
+        mime = ""
+        try:
+            import mimetypes
+
+            mime = mimetypes.guess_type(filename)[0] or ""
+        except Exception:
+            mime = ""
+        row = HomeworkAttachment(
+            submission=submission,
+            homework=homework,
+            homework_task=homework_task,
+            task_key=task_key,
+            task_number="",
+            uploaded_by=None,
+            owner_role=HomeworkAttachmentOwnerRole.STUDENT,
+            attachment_type=HomeworkAttachmentType.STUDENT_ANSWER,
+            original_filename=filename,
+            mime_type=mime,
+            file_size=size,
+            checksum=checksum,
+        )
+        try:
+            file_field.open("rb")
+            try:
+                data = file_field.read()
+            finally:
+                try:
+                    file_field.close()
+                except Exception:
+                    pass
+            row.file.save(filename, ContentFile(data), save=False)
+        except Exception:
+            logger.warning(
+                "mirror submission file failed submission=%s name=%s",
+                submission.pk,
+                filename,
+                exc_info=True,
+            )
+            continue
+        if row.file and row.file.name:
+            row.storage_path = row.file.name
+        row.save()
+        created.append(row)
+        if checksum:
+            existing_checksums.add(checksum)
+        existing_names.add((filename, int(size or 0)))
+
+    if created:
+        sync_payload_attachment_maps(submission)
+        submission.save(update_fields=["result_payload", "updated_at"])
+    return created
+
+
 def notebook_task_keys(submission: HomeworkSubmission, task_key: str) -> list[str]:
     """Все ключи, под которыми могли сохранить файлы этого задания."""
     raw = str(task_key or "").strip()
-    keys = _unique_keys([raw])
+    keys = _unique_keys([raw, SUBMISSION_NOTEBOOK_TASK_KEY])
     homework = getattr(submission, "homework", None)
     hw_task = resolve_homework_task(homework, raw) if homework is not None else None
     if hw_task is not None:
         keys = _unique_keys(keys + [hw_task.pk, getattr(hw_task, "task_id", "")])
     if homework is None:
         return keys
+    default_key = default_submission_notebook_task_key(submission)
+    keys = _unique_keys(keys + [default_key])
     from .homework_task_files import _variant_number_to_task_ids
 
     mapping = _variant_number_to_task_ids(homework)
@@ -172,6 +322,7 @@ def student_attachments_for_notebook(
     extra_task_keys=None,
 ) -> list[HomeworkAttachment]:
     ensure_payload_migrated(submission)
+    ensure_submission_files_as_task_attachments(submission, task_key)
     keys = _unique_keys(notebook_task_keys(submission, task_key) + list(extra_task_keys or []))
     grouped = grouped_task_attachments(submission)
     buckets = grouped.get("tasks") or {}
@@ -198,7 +349,12 @@ def student_attachments_for_notebook(
     active_tasks = list(homework.tasks.filter(is_active=True)[:3]) if homework is not None else []
     all_files = list(qs.order_by("created_at", "id"))
     distinct_keys = {row.task_key for row in all_files if row.task_key}
+    # Невариантная сдача / одно задание: все файлы ответа ученика в одну тетрадь.
     if len(active_tasks) <= 1 and len(distinct_keys) <= 1:
+        return all_files
+    from .homework_api import homework_has_variant_task
+
+    if homework is not None and not homework_has_variant_task(homework):
         return all_files
     return []
 
@@ -385,6 +541,8 @@ def get_or_create_notebook(
     extra_task_keys=None,
 ) -> HomeworkNotebook:
     task_key = str(task_key or "").strip()
+    if not task_key or task_key == COMMENT_TASK_KEY:
+        task_key = default_submission_notebook_task_key(submission)
     if not task_key or task_key == COMMENT_TASK_KEY:
         raise NotebookError("task_id required", code="TASK_ID_REQUIRED")
     homework_task = resolve_homework_task(submission.homework, task_key)

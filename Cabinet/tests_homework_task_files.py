@@ -843,3 +843,107 @@ class HomeworkSaveDraftConcurrencyTests(TransactionTestCase):
         ).get("tasks") or {}
         self.assertEqual(tasks["A"]["student"][0]["filename"], "a.jpg")
 
+
+
+class HomeworkNotebookNonVariantTests(TestCase):
+    """Тетрадь проверки для ДЗ без варианта (файл учителя → ответ ученика)."""
+
+    def setUp(self):
+        self.teacher = User.objects.create_user(username="nb_nv_teacher", password="pass")
+        self.teacher.profile.role = Profile.Role.TEACHER
+        self.teacher.profile.save()
+        self.student_user = User.objects.create_user(username="nb_nv_student", password="pass")
+        self.student_user.profile.role = Profile.Role.STUDENT
+        self.student_user.profile.save()
+        self.student = Student.objects.create(
+            teacher=self.teacher,
+            user=self.student_user,
+            first_name="Петя",
+            last_name="Ученик",
+            status="active",
+        )
+        self.homework = Homework.objects.create(
+            teacher=self.teacher,
+            student=self.student,
+            title="ДЗ файл без варианта",
+            status="assigned",
+        )
+        self.task = HomeworkTask.objects.create(
+            homework=self.homework,
+            title="Файл",
+            task_type="file",
+            order=1,
+            is_active=True,
+        )
+        self.student_client = APIClient()
+        self.student_client.force_login(self.student_user)
+        self.teacher_client = APIClient()
+        self.teacher_client.force_login(self.teacher)
+
+    def test_teacher_notebook_seeds_from_submission_attached_file(self):
+        submit = self.student_client.post(
+            f"/api/cabinet/student/assignments/{self.homework.pk}/",
+            {
+                "answer_text": "Готово",
+                "attached_file": SimpleUploadedFile(
+                    "answer.jpg", JPG_A, content_type="image/jpeg"
+                ),
+            },
+            format="multipart",
+        )
+        self.assertEqual(submit.status_code, 200, submit.content)
+        submission = HomeworkSubmission.objects.get(homework=self.homework, student=self.student)
+        self.assertTrue(bool(submission.attached_file))
+
+        before = HomeworkAttachment.objects.filter(
+            submission=submission, is_deleted=False
+        ).count()
+        self.assertEqual(before, 0)
+
+        teacher_nb = self.teacher_client.post(
+            f"/api/homework/submissions/{submission.pk}/notebooks/",
+            {
+                "task_id": str(self.task.pk),
+                "owner_role": "teacher",
+                "seed_from_attachments": True,
+            },
+            format="json",
+        )
+        self.assertIn(teacher_nb.status_code, (200, 201), teacher_nb.content)
+        doc = teacher_nb.json()
+        self.assertTrue(doc.get("pages"), doc)
+        mirrored = HomeworkAttachment.objects.filter(
+            submission=submission,
+            owner_role=HomeworkAttachmentOwnerRole.STUDENT,
+            is_deleted=False,
+        )
+        self.assertGreaterEqual(mirrored.count(), 1)
+        self.assertTrue(
+            any(
+                page.get("source_attachment") or page.get("source_attachment_id")
+                for page in doc["pages"]
+            ),
+            doc["pages"],
+        )
+
+    def test_teacher_notebook_works_with_homework_sentinel(self):
+        submit = self.student_client.post(
+            f"/api/cabinet/student/assignments/{self.homework.pk}/",
+            {
+                "answer_text": "Только текст",
+            },
+            format="multipart",
+        )
+        self.assertEqual(submit.status_code, 200, submit.content)
+        submission = HomeworkSubmission.objects.get(homework=self.homework, student=self.student)
+        teacher_nb = self.teacher_client.post(
+            f"/api/homework/submissions/{submission.pk}/notebooks/",
+            {
+                "task_id": "__homework__",
+                "owner_role": "teacher",
+                "seed_from_attachments": True,
+            },
+            format="json",
+        )
+        self.assertIn(teacher_nb.status_code, (200, 201), teacher_nb.content)
+        self.assertTrue(teacher_nb.json().get("pages"))

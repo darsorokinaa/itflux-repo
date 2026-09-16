@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useOutletContext } from "react-router-dom";
 import CabinetIcon from "../CabinetIcons";
 import {
   billingPlanCheck,
@@ -10,6 +11,13 @@ import {
 } from "../../utils/cabinetAuth";
 import { formatMoney, formatUnits } from "../billing/billingFormat";
 import { useAccessGate } from "../../hooks/useAccessGate";
+import {
+  ensureTimezoneOption,
+  formatWallClockInTimeZone,
+  pickDefaultTimezone,
+  timezoneCityLabel,
+  timezoneOptionLabel,
+} from "../timezones";
 import "../styles/payments.css";
 
 const WEEKDAYS = [
@@ -89,13 +97,14 @@ export default function CreateScheduleLessonModal({
   lessonPlanItemId,
   dialogTitle,
 }) {
+  const { user } = useOutletContext() || {};
   const [type, setType] = useState(defaultType || "group_lesson");
   const [date, setDate] = useState(defaultDate || formatApiDate(new Date()));
   const [startTime, setStartTime] = useState(defaultStartTime || "15:00");
   const [endTime, setEndTime] = useState(defaultEndTime || "15:45");
   const [lessonTitle, setLessonTitle] = useState(defaultLessonTitle || "");
   const [topic, setTopic] = useState(defaultTopic || "");
-  const [timezone, setTimezone] = useState("Europe/Moscow");
+  const [timezone, setTimezone] = useState(() => pickDefaultTimezone(user?.timezone));
   const [format, setFormat] = useState(
     defaultFormat === "offline" || defaultFormat === "Офлайн" ? "offline" : "online",
   );
@@ -132,6 +141,14 @@ export default function CreateScheduleLessonModal({
   const [planProgress, setPlanProgress] = useState(null);
   const [planLinkMode, setPlanLinkMode] = useState(lessonPlanItemId ? "use" : "suggest");
   const [selectedPlanItemId, setSelectedPlanItemId] = useState(lessonPlanItemId || null);
+  const timezoneReadyRef = useRef(false);
+
+  useEffect(() => {
+    if (timezoneReadyRef.current) return;
+    if (!user?.timezone) return;
+    setTimezone(pickDefaultTimezone(user.timezone));
+    timezoneReadyRef.current = true;
+  }, [user?.timezone]);
 
   useEffect(() => {
     if (defaultDate) setDate(defaultDate);
@@ -294,6 +311,32 @@ export default function CreateScheduleLessonModal({
     }
     return "";
   }, [groupId, studentId, selectedStudentIds, groups, students]);
+
+  const timezoneOptions = useMemo(() => ensureTimezoneOption(timezone), [timezone]);
+
+  const studentTimePreview = useMemo(() => {
+    const ids = [];
+    if (studentId) ids.push(Number(studentId));
+    selectedStudentIds.forEach((id) => {
+      if (!ids.includes(id)) ids.push(id);
+    });
+    const picked = ids
+      .map((id) => students.find((row) => Number(row.id) === Number(id)))
+      .filter((row) => row?.timezone && row.timezone !== timezone);
+    if (!picked.length) return "";
+    const unique = [];
+    for (const row of picked) {
+      if (!unique.some((other) => other.timezone === row.timezone)) unique.push(row);
+    }
+    return unique.map((row) => {
+      const studentStart = formatWallClockInTimeZone(date, startTime, timezone, row.timezone);
+      const studentEnd = formatWallClockInTimeZone(date, endTime, timezone, row.timezone);
+      const city = row.timezone_label || timezoneCityLabel(row.timezone);
+      const who = unique.length > 1 ? `${row.full_name}: ` : "";
+      if (!studentStart) return `${who}увидит время в поясе ${city}`;
+      return `${who}увидит ${studentStart}${studentEnd ? `–${studentEnd}` : ""} (${city})`;
+    }).join("; ");
+  }, [date, startTime, endTime, timezone, studentId, selectedStudentIds, students]);
 
   const toggleStudent = (id) => {
     setSelectedStudentIds((prev) => (
@@ -689,11 +732,19 @@ export default function CreateScheduleLessonModal({
             <label className="cb-sch-field">
               <span>Часовой пояс</span>
               <select value={timezone} onChange={(e) => setTimezone(e.target.value)}>
-                <option value="Europe/Moscow">Москва (UTC+3)</option>
-                <option value="Europe/Kaliningrad">Калининград</option>
-                <option value="Asia/Yekaterinburg">Екатеринбург</option>
+                {timezoneOptions.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {timezoneOptionLabel(item)}
+                  </option>
+                ))}
               </select>
             </label>
+            <p className="cb-sch-form__hint">
+              Вы указываете время в выбранном поясе. Ученик увидит его уже в своём.
+            </p>
+            {studentTimePreview ? (
+              <p className="cb-sch-form__tz-preview">Ученик {studentTimePreview}.</p>
+            ) : null}
           </section>
 
           <section className="cb-sch-form__section">

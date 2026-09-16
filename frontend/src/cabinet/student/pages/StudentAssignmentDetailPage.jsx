@@ -21,6 +21,10 @@ import {
   formatDueDate,
 } from "../StudentSectionUi";
 import { usePageTitle } from "../../hooks/usePageTitle";
+import AttachmentPreviewModal, {
+  isAttachmentPreviewable,
+  openAttachmentPreferPreview,
+} from "../../components/AttachmentPreviewModal";
 
 const TASK_TYPE_META = {
   text: { icon: "note", typeLabel: "Текст" },
@@ -193,6 +197,7 @@ export default function StudentAssignmentDetailPage() {
   const [validationMsg, setValidationMsg] = useState("");
   const [msg, setMsg] = useState("");
   const [variantTasks, setVariantTasks] = useState(null);
+  const [filePreview, setFilePreview] = useState(null);
   const isDirtyRef = useRef(false);
   usePageTitle(item?.title || "Домашнее задание");
 
@@ -525,12 +530,17 @@ export default function StudentAssignmentDetailPage() {
                 {(item.attachments || []).map((file) => {
                   const isImage = Boolean(file.is_image || String(file.mime_type || "").startsWith("image/"));
                   const href = file.url || file.preview_url || "";
+                  const previewable = isAttachmentPreviewable(file) || isImage;
                   return (
                     <li key={file.id || file.url} className="st-hw-attachments__item">
                       {isImage && (file.preview_url || href) ? (
-                        <a className="st-hw-attachments__thumb" href={href} target="_blank" rel="noreferrer">
+                        <button
+                          type="button"
+                          className="st-hw-attachments__thumb"
+                          onClick={() => openAttachmentPreferPreview(file, setFilePreview)}
+                        >
                           <img src={file.preview_url || href} alt={file.name || "Файл"} />
-                        </a>
+                        </button>
                       ) : (
                         <span className="st-hw-attachments__icon" aria-hidden="true">
                           <CabinetIcon name="file" />
@@ -545,9 +555,19 @@ export default function StudentAssignmentDetailPage() {
                         </span>
                       </span>
                       {href ? (
-                        <a className="st-hw-btn st-hw-btn--outline" href={href} target="_blank" rel="noreferrer">
-                          Открыть
-                        </a>
+                        previewable ? (
+                          <button
+                            type="button"
+                            className="st-hw-btn st-hw-btn--outline"
+                            onClick={() => openAttachmentPreferPreview(file, setFilePreview)}
+                          >
+                            Открыть
+                          </button>
+                        ) : (
+                          <a className="st-hw-btn st-hw-btn--outline" href={href} target="_blank" rel="noreferrer">
+                            Открыть
+                          </a>
+                        )
                       ) : null}
                     </li>
                   );
@@ -726,17 +746,28 @@ export default function StudentAssignmentDetailPage() {
                   {answer?.trim() || item.answer_text?.trim() || "Ответ не указан"}
                   {savedAttachedFiles.length ? (
                     <div className="st-hw-attached-files is-visible">
-                      {savedAttachedFiles.map((file) => (
-                        <p key={file.id || file.url} className="st-hw-file-link">
-                          {file.url ? (
-                            <a href={file.url} target="_blank" rel="noreferrer">
-                              {file.name || "Прикреплённый файл"}
-                            </a>
-                          ) : (
-                            <span>{file.name || "Прикреплённый файл"}</span>
-                          )}
-                        </p>
-                      ))}
+                      {savedAttachedFiles.map((file) => {
+                        const previewable = isAttachmentPreviewable(file);
+                        return (
+                          <p key={file.id || file.url} className="st-hw-file-link">
+                            {file.url && previewable ? (
+                              <button
+                                type="button"
+                                className="st-hw-file-link__btn"
+                                onClick={() => openAttachmentPreferPreview(file, setFilePreview)}
+                              >
+                                {file.name || "Прикреплённый файл"}
+                              </button>
+                            ) : file.url ? (
+                              <a href={file.url} target="_blank" rel="noreferrer">
+                                {file.name || "Прикреплённый файл"}
+                              </a>
+                            ) : (
+                              <span>{file.name || "Прикреплённый файл"}</span>
+                            )}
+                          </p>
+                        );
+                      })}
                     </div>
                   ) : null}
                 </div>
@@ -759,6 +790,9 @@ export default function StudentAssignmentDetailPage() {
           <p className="st-hw-summary-note">{summaryNote}</p>
         </aside>
       </div>
+      {filePreview ? (
+        <AttachmentPreviewModal file={filePreview} onClose={() => setFilePreview(null)} />
+      ) : null}
     </StudentPageShell>
   );
 }

@@ -21,11 +21,13 @@ import {
   useLessonConnectAvailable,
   useLessonInProgress,
   useScheduleNow,
+  viewerTimezoneNote,
   LESSON_CONNECT_BEFORE_MS,
 } from "../StudentSectionUi";
 import ConnectionCheckButton from "../../connectionCheck/ConnectionCheckButton";
 import { closeConnectionCheck } from "../../connectionCheck/openConnectionCheck";
 import { usePageTitle } from "../../hooks/usePageTitle";
+import { dateKeyInTimeZone } from "../../timezones";
 import { formatDayLabel } from "../studentDisplay";
 import { resolveAuthenticatedMeetingNavigation } from "../../meetingNavigation";
 
@@ -51,21 +53,16 @@ function eventEndMs(event) {
   return 0;
 }
 
-function dateGroupKey(iso) {
-  if (!iso) return "unknown";
-  const d = new Date(iso);
-  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-}
-
 function groupByDate(events) {
   const groups = [];
   const map = new Map();
   for (const event of events) {
-    const key = dateGroupKey(event.starts_at);
+    const timeZone = event.viewer_timezone;
+    const key = dateKeyInTimeZone(event.starts_at, timeZone);
     if (!map.has(key)) {
       const group = {
         key,
-        label: formatDayLabel(event.starts_at) || formatStudentDate(event.starts_at) || "Дата не указана",
+        label: formatDayLabel(event.starts_at, timeZone) || formatStudentDate(event.starts_at, timeZone) || "Дата не указана",
         events: [],
       };
       map.set(key, group);
@@ -112,8 +109,10 @@ function ScheduleLessonRow({ event, onOpen, past = false, now }) {
   const inProgress = useLessonInProgress(event.starts_at, event.ends_at);
   const topic = lessonTopic(event);
   const subject = event.student_subject_label || "";
+  const timeZone = event.viewer_timezone;
   const { formatLine, teacher } = studentLessonMetaParts(event);
-  const timeRange = formatLessonTimeRange(event.starts_at, event.ends_at);
+  const timeRange = formatLessonTimeRange(event.starts_at, event.ends_at, timeZone);
+  const tzNote = viewerTimezoneNote(event, timeZone);
   const meetingHref = lessonMeetingHref(event);
   const materialsLink = event.assignment_id
     ? `/cabinet/student/lessons/${event.assignment_id}`
@@ -141,8 +140,9 @@ function ScheduleLessonRow({ event, onOpen, past = false, now }) {
         onClick={() => onOpen(event.id)}
       >
         <div className="st-schedule-row__time">
-          <strong>{event.starts_at ? formatStudentTime(event.starts_at) : "—"}</strong>
+          <strong>{event.starts_at ? formatStudentTime(event.starts_at, timeZone) : "—"}</strong>
           {timeRange ? <span>{timeRange}</span> : null}
+          {tzNote ? <span className="st-time-tz-note">{tzNote}</span> : null}
         </div>
         <div className="st-schedule-row__body">
           <div className="st-schedule-row__top">
