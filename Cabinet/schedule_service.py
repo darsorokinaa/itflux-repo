@@ -326,6 +326,33 @@ def check_conflicts(
     return conflicts
 
 
+def apply_students_timezone(*, teacher, student_ids=None, extra_student_ids=None, group=None, tz_name=None):
+    """Сохранить выбранный учителем пояс ученика в профиле участников."""
+    from .models import Profile
+    from .timezones import normalize_timezone_name
+
+    name = normalize_timezone_name(tz_name)
+    if not name:
+        return
+    ids = set()
+    for value in list(student_ids or []) + list(extra_student_ids or []):
+        try:
+            ids.add(int(value))
+        except (TypeError, ValueError):
+            continue
+    if group is not None and not ids:
+        ids.update(group.students.values_list("id", flat=True))
+    if not ids:
+        return
+    user_ids = list(
+        Student.objects.filter(teacher=teacher, pk__in=ids, user_id__isnull=False)
+        .values_list("user_id", flat=True)
+    )
+    if not user_ids:
+        return
+    Profile.objects.filter(user_id__in=user_ids).exclude(timezone=name).update(timezone=name)
+
+
 def create_single_event(
     *,
     teacher,
@@ -444,6 +471,13 @@ def create_single_event(
         )
     except Exception:
         pass
+    apply_students_timezone(
+        teacher=teacher,
+        student_ids=student_ids,
+        extra_student_ids=extra_student_ids,
+        group=group,
+        tz_name=data.get("student_timezone"),
+    )
     return event
 
 
@@ -594,6 +628,13 @@ def create_series(
     except Exception:
         pass
 
+    apply_students_timezone(
+        teacher=teacher,
+        student_ids=student_ids,
+        extra_student_ids=extra_student_ids,
+        group=group,
+        tz_name=series_data.get("student_timezone"),
+    )
     return series, events
 
 

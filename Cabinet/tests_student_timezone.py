@@ -8,6 +8,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from Cabinet.models import Profile, ScheduleEvent, Student
+from Cabinet.schedule_service import create_single_event
 
 
 class StudentLessonTimezoneTests(TestCase):
@@ -93,3 +94,30 @@ class StudentLessonTimezoneTests(TestCase):
         by_id = {row["id"]: row for row in rows}
         self.assertEqual(by_id[self.student.id]["timezone"], "Asia/Yekaterinburg")
         self.assertEqual(by_id[self.student.id]["timezone_label"], "Екатеринбург")
+
+    def test_create_uses_teacher_time_and_saves_student_timezone(self):
+        event = create_single_event(
+            teacher=self.teacher,
+            data={
+                "title": "Пояс ученика",
+                "timezone": "Europe/Moscow",
+                "student_timezone": "Asia/Vladivostok",
+                "starts_at": "2026-09-16T15:00:00",
+                "ends_at": "2026-09-16T15:45:00",
+                "notify_participants": False,
+                "skip_plan": True,
+            },
+            student_ids=[self.student.id],
+            notify=False,
+        )
+        self.assertEqual(event.timezone, "Europe/Moscow")
+        self.assertEqual(event.starts_at.astimezone(ZoneInfo("Europe/Moscow")).hour, 15)
+        self.student_user.profile.refresh_from_db()
+        self.assertEqual(self.student_user.profile.timezone, "Asia/Vladivostok")
+
+        self.client.force_authenticate(user=self.student_user)
+        response = self.client.get(f"/api/cabinet/student/schedule/{event.id}/")
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertEqual(data["startTime"], "22:00")
+        self.assertEqual(data["viewer_timezone"], "Asia/Vladivostok")

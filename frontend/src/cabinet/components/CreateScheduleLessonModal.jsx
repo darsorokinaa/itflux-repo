@@ -98,13 +98,14 @@ export default function CreateScheduleLessonModal({
   dialogTitle,
 }) {
   const { user } = useOutletContext() || {};
+  const teacherTimezone = pickDefaultTimezone(user?.timezone);
   const [type, setType] = useState(defaultType || "group_lesson");
   const [date, setDate] = useState(defaultDate || formatApiDate(new Date()));
   const [startTime, setStartTime] = useState(defaultStartTime || "15:00");
   const [endTime, setEndTime] = useState(defaultEndTime || "15:45");
   const [lessonTitle, setLessonTitle] = useState(defaultLessonTitle || "");
   const [topic, setTopic] = useState(defaultTopic || "");
-  const [timezone, setTimezone] = useState(() => pickDefaultTimezone(user?.timezone));
+  const [studentTimezone, setStudentTimezone] = useState("Europe/Moscow");
   const [format, setFormat] = useState(
     defaultFormat === "offline" || defaultFormat === "Офлайн" ? "offline" : "online",
   );
@@ -141,14 +142,6 @@ export default function CreateScheduleLessonModal({
   const [planProgress, setPlanProgress] = useState(null);
   const [planLinkMode, setPlanLinkMode] = useState(lessonPlanItemId ? "use" : "suggest");
   const [selectedPlanItemId, setSelectedPlanItemId] = useState(lessonPlanItemId || null);
-  const timezoneReadyRef = useRef(false);
-
-  useEffect(() => {
-    if (timezoneReadyRef.current) return;
-    if (!user?.timezone) return;
-    setTimezone(pickDefaultTimezone(user.timezone));
-    timezoneReadyRef.current = true;
-  }, [user?.timezone]);
 
   useEffect(() => {
     if (defaultDate) setDate(defaultDate);
@@ -312,31 +305,34 @@ export default function CreateScheduleLessonModal({
     return "";
   }, [groupId, studentId, selectedStudentIds, groups, students]);
 
-  const timezoneOptions = useMemo(() => ensureTimezoneOption(timezone), [timezone]);
+  const timezoneOptions = useMemo(() => ensureTimezoneOption(studentTimezone), [studentTimezone]);
 
-  const studentTimePreview = useMemo(() => {
+  const selectedStudents = useMemo(() => {
     const ids = [];
     if (studentId) ids.push(Number(studentId));
     selectedStudentIds.forEach((id) => {
       if (!ids.includes(id)) ids.push(id);
     });
-    const picked = ids
+    return ids
       .map((id) => students.find((row) => Number(row.id) === Number(id)))
-      .filter((row) => row?.timezone && row.timezone !== timezone);
-    if (!picked.length) return "";
-    const unique = [];
-    for (const row of picked) {
-      if (!unique.some((other) => other.timezone === row.timezone)) unique.push(row);
+      .filter(Boolean);
+  }, [studentId, selectedStudentIds, students]);
+
+  useEffect(() => {
+    const known = selectedStudents.find((row) => row.timezone);
+    if (known?.timezone) {
+      setStudentTimezone(pickDefaultTimezone(known.timezone));
     }
-    return unique.map((row) => {
-      const studentStart = formatWallClockInTimeZone(date, startTime, timezone, row.timezone);
-      const studentEnd = formatWallClockInTimeZone(date, endTime, timezone, row.timezone);
-      const city = row.timezone_label || timezoneCityLabel(row.timezone);
-      const who = unique.length > 1 ? `${row.full_name}: ` : "";
-      if (!studentStart) return `${who}увидит время в поясе ${city}`;
-      return `${who}увидит ${studentStart}${studentEnd ? `–${studentEnd}` : ""} (${city})`;
-    }).join("; ");
-  }, [date, startTime, endTime, timezone, studentId, selectedStudentIds, students]);
+  }, [selectedStudents]);
+
+  const studentTimePreview = useMemo(() => {
+    if (studentTimezone === teacherTimezone) return "";
+    const studentStart = formatWallClockInTimeZone(date, startTime, teacherTimezone, studentTimezone);
+    const studentEnd = formatWallClockInTimeZone(date, endTime, teacherTimezone, studentTimezone);
+    const city = timezoneCityLabel(studentTimezone);
+    if (!studentStart) return "";
+    return `увидит ${studentStart}${studentEnd ? `–${studentEnd}` : ""} (${city})`;
+  }, [date, startTime, endTime, teacherTimezone, studentTimezone]);
 
   const toggleStudent = (id) => {
     setSelectedStudentIds((prev) => (
@@ -377,7 +373,8 @@ export default function CreateScheduleLessonModal({
       format,
       starts_at: `${date}T${startTime}:00`,
       ends_at: `${date}T${endTime}:00`,
-      timezone,
+      timezone: teacherTimezone,
+      student_timezone: studentTimezone,
       group_id: groupId ? Number(groupId) : undefined,
       student_ids: ids,
       extra_student_ids: groupId && selectedStudentIds.length ? selectedStudentIds : undefined,
@@ -729,9 +726,12 @@ export default function CreateScheduleLessonModal({
                 <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
               </label>
             </div>
+            <p className="cb-sch-form__hint">
+              Время — по вашим часам ({timezoneCityLabel(teacherTimezone)}).
+            </p>
             <label className="cb-sch-field">
-              <span>Часовой пояс</span>
-              <select value={timezone} onChange={(e) => setTimezone(e.target.value)}>
+              <span>Часовой пояс ученика</span>
+              <select value={studentTimezone} onChange={(e) => setStudentTimezone(e.target.value)}>
                 {timezoneOptions.map((item) => (
                   <option key={item.value} value={item.value}>
                     {timezoneOptionLabel(item)}
@@ -739,12 +739,11 @@ export default function CreateScheduleLessonModal({
                 ))}
               </select>
             </label>
-            <p className="cb-sch-form__hint">
-              Вы указываете время в выбранном поясе. Ученик увидит его уже в своём.
-            </p>
             {studentTimePreview ? (
               <p className="cb-sch-form__tz-preview">Ученик {studentTimePreview}.</p>
-            ) : null}
+            ) : (
+              <p className="cb-sch-form__hint">Ученик увидит это же время — пояса совпадают.</p>
+            )}
           </section>
 
           <section className="cb-sch-form__section">
