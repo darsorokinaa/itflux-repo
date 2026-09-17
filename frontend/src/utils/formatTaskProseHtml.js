@@ -106,12 +106,18 @@ function stripLeadingItemNumber(el) {
   }
 }
 
+function applyOlStart(ol, start) {
+  if (!ol || !(start > 1)) return;
+  ol.setAttribute("start", String(start));
+  ol.style.counterReset = `task-step ${start - 1}`;
+}
+
 function wrapNumberedRun(run, start) {
   if (!run.length) return;
   const doc = run[0].ownerDocument;
   const ol = doc.createElement("ol");
   ol.className = "task-prose-list";
-  if (start > 1) ol.setAttribute("start", String(start));
+  applyOlStart(ol, start);
   for (const el of run) {
     const li = doc.createElement("li");
     li.innerHTML = el.innerHTML;
@@ -213,6 +219,8 @@ function promoteNumberedBrLines(el) {
     .map((idx) => `<li>${stripLeadingNumberFromHtml(parts[idx])}</li>`)
     .join("");
   wrap.innerHTML = `<ol class="task-prose-list"${startAttr}>${items}</ol>`;
+  const createdOl = wrap.querySelector("ol");
+  applyOlStart(createdOl, best.start);
   while (wrap.firstChild) frag.appendChild(wrap.firstChild);
   if (after) {
     const tail = el.cloneNode(false);

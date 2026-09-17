@@ -2163,11 +2163,7 @@ body.exam-variant-view .digital-flow-page .site-nav__inner {
   border: none !important;
 }
 
-/* Кнопка черновика в сгенерированном варианте: переносим из плавающего нижнего
-   правого угла в правый верхний угол карточки (внутрь кластера статуса в шапке). */
-.exam-task-card {
-  padding-bottom: 0 !important;
-}
+/* Кнопка черновика в сгенерированном варианте: в правом верхнем углу карточки. */
 
 .exam-task-card .exam-task-draw-fab {
   position: static !important;

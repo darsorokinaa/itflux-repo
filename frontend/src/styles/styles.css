@@ -15708,20 +15708,20 @@ body.exam-variant-view--edu main.container {
 }
 
 #main-wrapper.exam-page--edu .exam-task-card__num {
-    width: auto;
-    min-width: 1.85em;
-    min-height: 1.85em;
-    height: auto;
-    padding: 0.12em 0.28em;
-    border-radius: 2px;
-    border: 1.5px solid #1a2433;
-    background: #fff;
-    color: #1a2433;
+    width: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 10px;
+    border: 1.5px solid var(--exam-edu-purple, #4d43e6);
+    background: var(--exam-edu-purple-soft, #f0efff);
+    color: var(--exam-edu-purple, #4d43e6);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 16px;
-    font-weight: 700;
+    font-size: 15px;
+    font-weight: 800;
     box-shadow: none;
     flex-shrink: 0;
     line-height: 1;
@@ -15793,8 +15793,8 @@ body.exam-variant-view--edu main.container {
 }
 
 #main-wrapper.exam-page--edu .exam-task-answer {
-    margin-top: 18px;
-    padding-top: 15px;
+    margin-top: 20px;
+    padding-top: 16px;
     border-top: 1px solid #efeffb;
     display: flex;
     flex-direction: column;
@@ -16501,7 +16501,7 @@ body.exam-variant-view--edu main.container {
     #main-wrapper.exam-page--edu .exam-task-card__top {
         align-items: flex-start;
         flex-direction: column;
-        padding: 4px 0 10px;
+        padding: 0 0 14px;
     }
 
     #main-wrapper.exam-page--edu .exam-task-card__title-block,
@@ -16511,8 +16511,8 @@ body.exam-variant-view--edu main.container {
 
     #main-wrapper.exam-page--edu .exam-task-card__body,
     #main-wrapper.exam-page--edu .exam-task-answer {
-        padding-left: 14px;
-        padding-right: 14px;
+        padding-left: 0;
+        padding-right: 0;
     }
 
     #main-wrapper.exam-page--edu .exam-task-card__text,

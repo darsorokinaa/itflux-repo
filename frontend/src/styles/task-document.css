@@ -154,7 +154,7 @@
   max-width: 100%;
 }
 
-/* Глобальный `* { padding: 0 }` снимает отступ списков — возвращаем висячий отступ. */
+/* Глобальный `* { padding: 0 }` снимает отступ списков. */
 .tdoc-task :is(ol, ul),
 .workbook-task__body :is(ol, ul),
 .exam-task-card__text :is(ol, ul),
@@ -189,12 +189,56 @@
   padding-left: 0.2em;
 }
 
-.tdoc-task ol.task-prose-list,
-.workbook-task__body ol.task-prose-list,
-.exam-task-card__text ol.task-prose-list,
-.task-text ol.task-prose-list,
-.all-tasks-item__html ol.task-prose-list {
-  margin-top: 0.25em;
+@media screen {
+  .exam-task-card__text ol.task-prose-list,
+  .exam-page .task-text ol.task-prose-list,
+  .all-tasks-item__html ol.task-prose-list {
+    list-style: none;
+    margin: 0.5em 0 1.15em;
+    padding-left: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    counter-reset: task-step;
+  }
+
+  .exam-task-card__text ol.task-prose-list li,
+  .exam-page .task-text ol.task-prose-list li,
+  .all-tasks-item__html ol.task-prose-list li {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin: 0;
+    padding: 0;
+    line-height: 1.55;
+  }
+
+  .exam-task-card__text ol.task-prose-list li::before,
+  .exam-page .task-text ol.task-prose-list li::before,
+  .all-tasks-item__html ol.task-prose-list li::before {
+    counter-increment: task-step;
+    content: counter(task-step);
+    flex: 0 0 28px;
+    box-sizing: border-box;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 0.05em;
+    border-radius: 8px;
+    border: 1.5px solid var(--exam-edu-purple, var(--blue-hero, #4d43e6));
+    background: var(--exam-edu-purple-soft, #f0efff);
+    color: var(--exam-edu-purple, var(--blue-hero, #4d43e6));
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+    white-space: nowrap !important;
+    overflow-wrap: normal !important;
+    word-break: normal !important;
+  }
 }
 
 .tdoc-task img,
@@ -312,7 +356,7 @@
   width: 100%;
 }
 
-/* Экран варианта: worksheet-карточка без массивных рамок и клиппинга */
+/* Экран варианта: без массивных рамок, но с внутренними полями контента */
 #main-wrapper.exam-page .exam-task-card,
 #main-wrapper.exam-page--edu .exam-task-card {
   background: #fff;
@@ -320,36 +364,67 @@
   border-radius: 0;
   box-shadow: none;
   overflow: visible;
-  padding-bottom: 0 !important;
   width: 100%;
   max-width: 100%;
 }
 
-#main-wrapper.exam-page--edu .exam-task-card__top {
-  background: transparent;
-  border-bottom: none;
-  padding: 4px 0 10px;
-  align-items: flex-start;
+@media screen {
+  #main-wrapper.exam-page--edu .exam-task-card,
+  #main-wrapper.exam-page--edu .exam-task-card.tdoc-task {
+    padding: 20px 24px 24px !important;
+    margin-bottom: 20px;
+  }
+
+  #main-wrapper.exam-page--edu .exam-task-card__top {
+    background: transparent;
+    border-bottom: none;
+    padding: 0 0 16px;
+    margin: 0;
+    align-items: flex-start;
+  }
+
+  #main-wrapper.exam-page--edu .exam-task-card__body,
+  #main-wrapper.exam-page--edu .exam-task-card__body--draw-host {
+    overflow: visible;
+    padding: 0;
+  }
+
+  #main-wrapper.exam-page--edu .exam-task-card__text,
+  #main-wrapper.exam-page--edu .exam-task-card__text.task-text {
+    margin: 0 0 4px !important;
+  }
+
+  #main-wrapper.exam-page--edu .exam-task-answer {
+    margin-top: 20px;
+    padding-top: 16px;
+  }
+}
+
+@media screen and (max-width: 720px) {
+  #main-wrapper.exam-page--edu .exam-task-card,
+  #main-wrapper.exam-page--edu .exam-task-card.tdoc-task {
+    padding: 16px 16px 18px !important;
+  }
 }
 
 #main-wrapper.exam-page--edu .exam-task-card__num,
 #main-wrapper.exam-page--edu .tdoc-pos--card .tdoc-pos__num,
 #main-wrapper.exam-page--edu.exam-page--subject-themed .exam-task-card__num,
 #main-wrapper.exam-page--edu.exam-page--subject-themed .tdoc-pos--card .tdoc-pos__num {
-  width: auto;
-  min-width: 1.85em;
-  min-height: 1.85em;
-  height: auto;
-  padding: 0.12em 0.28em;
-  border-radius: 2px;
-  border: 1.5px solid #1a2433 !important;
-  background: #fff !important;
-  color: #1a2433 !important;
+  width: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 10px;
+  border: 1.5px solid var(--exam-edu-purple, var(--blue-hero, #4d43e6)) !important;
+  background: var(--exam-edu-purple-soft, #f0efff) !important;
+  color: var(--exam-edu-purple, var(--blue-hero, #4d43e6)) !important;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
-  font-weight: 700;
+  font-size: 15px;
+  font-weight: 800;
   box-shadow: none !important;
   line-height: 1;
 }
@@ -369,7 +444,6 @@
 #main-wrapper.exam-page--edu .exam-task-card__body,
 #main-wrapper.exam-page--edu .exam-task-card__body--draw-host {
   overflow: visible;
-  padding: 0 0 12px;
 }
 
 #main-wrapper.exam-page--edu .exam-task-card__text {
@@ -377,22 +451,58 @@
   overflow-x: auto;
 }
 
-#main-wrapper.exam-page--edu .exam-task-card__text :is(ol, ul) {
-  margin: 0.35em 0 0.8em;
-  padding-left: 1.55em;
+#main-wrapper.exam-page--edu .exam-task-card__text > p,
+#main-wrapper.exam-page--edu .exam-task-card__text > .task-html-block {
+  margin: 0 0 1em;
 }
 
-#main-wrapper.exam-page--edu .exam-task-card__text ol {
-  list-style: decimal;
+#main-wrapper.exam-page--edu .exam-task-card__text > p:last-child,
+#main-wrapper.exam-page--edu .exam-task-card__text > .task-html-block:last-child {
+  margin-bottom: 0;
 }
 
-#main-wrapper.exam-page--edu .exam-task-card__text ul {
-  list-style: disc;
+#main-wrapper.exam-page--edu .exam-task-card__text ol.task-prose-list {
+  list-style: none;
+  margin: 0.5em 0 1.15em;
+  padding-left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  counter-reset: task-step;
 }
 
-#main-wrapper.exam-page--edu .exam-task-card__text :is(ol, ul) li {
-  margin: 0.22em 0;
-  padding-left: 0.2em;
+#main-wrapper.exam-page--edu .exam-task-card__text ol.task-prose-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  line-height: 1.55;
+}
+
+#main-wrapper.exam-page--edu .exam-task-card__text ol.task-prose-list li::before {
+  counter-increment: task-step;
+  content: counter(task-step);
+  flex: 0 0 28px;
+  box-sizing: border-box;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.05em;
+  border-radius: 8px;
+  border: 1.5px solid var(--exam-edu-purple, #4d43e6);
+  background: var(--exam-edu-purple-soft, #f0efff);
+  color: var(--exam-edu-purple, #4d43e6);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  white-space: nowrap !important;
+  overflow-wrap: normal !important;
+  word-break: normal !important;
 }
 
 #main-wrapper.exam-page--edu .exam-task-card__status-cluster {
@@ -481,6 +591,33 @@
     box-shadow: none;
     border-radius: 0;
     overflow: visible;
+    padding: 0 !important;
+  }
+
+  .exam-task-card__num,
+  .tdoc-task__num,
+  .tdoc-pos--print .tdoc-pos__num {
+    border: 1.5px solid #1a2433 !important;
+    background: #fff !important;
+    color: #1a2433 !important;
+    border-radius: 2px;
+  }
+
+  ol.task-prose-list {
+    list-style: decimal !important;
+    display: block !important;
+    padding-left: 1.55em !important;
+    gap: 0 !important;
+  }
+
+  ol.task-prose-list li {
+    display: list-item !important;
+    gap: 0 !important;
+  }
+
+  ol.task-prose-list li::before {
+    content: none !important;
+    display: none !important;
   }
 
   .tdoc-solution__grid,
