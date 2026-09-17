@@ -154,6 +154,49 @@
   max-width: 100%;
 }
 
+/* Глобальный `* { padding: 0 }` снимает отступ списков — возвращаем висячий отступ. */
+.tdoc-task :is(ol, ul),
+.workbook-task__body :is(ol, ul),
+.exam-task-card__text :is(ol, ul),
+.task-text :is(ol, ul),
+.all-tasks-item__html :is(ol, ul) {
+  margin: 0.35em 0 0.8em;
+  padding-left: 1.55em;
+}
+
+.tdoc-task ol,
+.workbook-task__body ol,
+.exam-task-card__text ol,
+.task-text ol,
+.all-tasks-item__html ol {
+  list-style: decimal;
+}
+
+.tdoc-task ul,
+.workbook-task__body ul,
+.exam-task-card__text ul,
+.task-text ul,
+.all-tasks-item__html ul {
+  list-style: disc;
+}
+
+.tdoc-task :is(ol, ul) li,
+.workbook-task__body :is(ol, ul) li,
+.exam-task-card__text :is(ol, ul) li,
+.task-text :is(ol, ul) li,
+.all-tasks-item__html :is(ol, ul) li {
+  margin: 0.22em 0;
+  padding-left: 0.2em;
+}
+
+.tdoc-task ol.task-prose-list,
+.workbook-task__body ol.task-prose-list,
+.exam-task-card__text ol.task-prose-list,
+.task-text ol.task-prose-list,
+.all-tasks-item__html ol.task-prose-list {
+  margin-top: 0.25em;
+}
+
 .tdoc-task img,
 .workbook-task__body img,
 .exam-task-card__text img,
@@ -332,6 +375,24 @@
 #main-wrapper.exam-page--edu .exam-task-card__text {
   overflow: visible;
   overflow-x: auto;
+}
+
+#main-wrapper.exam-page--edu .exam-task-card__text :is(ol, ul) {
+  margin: 0.35em 0 0.8em;
+  padding-left: 1.55em;
+}
+
+#main-wrapper.exam-page--edu .exam-task-card__text ol {
+  list-style: decimal;
+}
+
+#main-wrapper.exam-page--edu .exam-task-card__text ul {
+  list-style: disc;
+}
+
+#main-wrapper.exam-page--edu .exam-task-card__text :is(ol, ul) li {
+  margin: 0.22em 0;
+  padding-left: 0.2em;
 }
 
 #main-wrapper.exam-page--edu .exam-task-card__status-cluster {

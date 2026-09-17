@@ -11,6 +11,7 @@ import { formatOgeRus13TaskHtml } from "../utils/formatOgeRus13TaskHtml";
 import { formatTaskCodeBlocksHtml } from "../utils/formatTaskCodeBlocksHtml";
 import { formatProgTaskSheetHtml, convertLatexTextCommandsHtml } from "../utils/formatProgTaskSheetHtml";
 import { formatFipiUnicodeMathHtml } from "../utils/formatFipiUnicodeMathHtml";
+import { formatTaskProseHtml } from "../utils/formatTaskProseHtml";
 import { parseTaskHtmlFragment } from "../utils/parseTaskHtmlFragment";
 import { repairOrphanSpanTags } from "../utils/repairTaskHtmlSpans";
 import { sanitizeTaskHtml } from "../utils/sanitizeTaskHtml";
@@ -725,6 +726,7 @@ function preparePlainBankTaskHtml(raw, options = {}) {
     const choiceFormatted = formatOgeMathChoiceTaskHtml(afterMatch);
     sFinal = choiceFormatted && choiceFormatted.trim() ? choiceFormatted : afterMatch;
   }
+  sFinal = pipeTaskHtmlFormatter(sFinal, formatTaskProseHtml);
   return repairOrphanSpanTags(sFinal);
 }
 
