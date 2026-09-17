@@ -445,7 +445,7 @@ function workbookPrintCss(): string {
       --wb-margin-right: 14mm;
       --wb-margin-bottom: 14mm;
       --wb-margin-left: 14mm;
-      --wb-num-w: 10mm;
+      --wb-num-w: 12mm;
       --wb-num-h: auto;
       --wb-cell: 5mm;
       --wb-grid-line: rgba(0, 0, 0, 0.10);
@@ -628,15 +628,21 @@ function workbookPrintCss(): string {
     .wb-task__num,
     .wb-task .tdoc-pos__num {
       width: auto;
-      min-width: 0;
+      min-width: 7mm;
+      min-height: 7mm;
       height: auto;
-      border: none;
-      display: block;
-      font-size: 12pt;
+      padding: 0.4mm 1mm;
+      border: 0.7pt solid var(--wb-line);
+      border-radius: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11pt;
       font-weight: 700;
-      line-height: 1.25;
+      line-height: 1;
       color: var(--wb-text);
-      background: transparent;
+      background: #fff;
+      box-sizing: border-box;
     }
     .wb-task__num::before,
     .wb-task .tdoc-pos__num::before {

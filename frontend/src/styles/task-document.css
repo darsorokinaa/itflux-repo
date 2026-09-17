@@ -20,15 +20,9 @@
   padding: 0 0 6mm;
   background: #fff;
   border: none;
-  border-bottom: 1px solid #e4e7ee;
   overflow: visible;
   break-inside: avoid;
   page-break-inside: avoid;
-}
-
-.tdoc-task:last-child,
-.task-block:last-child {
-  border-bottom: none;
 }
 
 .tdoc-task--allow-break {
@@ -73,26 +67,48 @@
 }
 
 .tdoc-task__num,
-.tdoc-pos__num {
+.tdoc-pos--card .tdoc-pos__num,
+.tdoc-pos--print .tdoc-pos__num {
   flex: 0 0 auto;
-  min-width: 1.4em;
-  font-size: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.85em;
+  min-height: 1.85em;
+  padding: 0.12em 0.28em;
+  font-size: 16px;
   font-weight: 700;
-  line-height: 1.2;
+  line-height: 1;
   color: #1a2433;
   letter-spacing: 0.01em;
-  background: transparent;
-  border: none;
+  font-variant-numeric: tabular-nums;
+  background: #fff;
+  border: 1.5px solid #1a2433;
+  border-radius: 2px;
   box-shadow: none;
+  box-sizing: border-box;
 }
 
 .tdoc-pos--compact .tdoc-pos__num,
 .tdoc-pos--result .tdoc-pos__num {
-  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.6em;
+  min-height: 1.45em;
+  padding: 0.08em 0.22em;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  border: 1.25px solid #1a2433;
+  border-radius: 2px;
+  background: #fff;
 }
 
 .tdoc-pos--print .tdoc-pos__num {
   font-size: 12pt;
+  min-width: 7mm;
+  min-height: 7mm;
 }
 
 .tdoc-pos__progress {
@@ -258,7 +274,6 @@
 #main-wrapper.exam-page--edu .exam-task-card {
   background: #fff;
   border: none;
-  border-bottom: 1px solid #e4e7ee;
   border-radius: 0;
   box-shadow: none;
   overflow: visible;
@@ -275,20 +290,25 @@
 }
 
 #main-wrapper.exam-page--edu .exam-task-card__num,
-#main-wrapper.exam-page--edu .tdoc-pos__num,
+#main-wrapper.exam-page--edu .tdoc-pos--card .tdoc-pos__num,
 #main-wrapper.exam-page--edu.exam-page--subject-themed .exam-task-card__num,
-#main-wrapper.exam-page--edu.exam-page--subject-themed .tdoc-pos__num {
+#main-wrapper.exam-page--edu.exam-page--subject-themed .tdoc-pos--card .tdoc-pos__num {
   width: auto;
-  min-width: 1.5em;
+  min-width: 1.85em;
+  min-height: 1.85em;
   height: auto;
-  border-radius: 0;
-  background: transparent !important;
+  padding: 0.12em 0.28em;
+  border-radius: 2px;
+  border: 1.5px solid #1a2433 !important;
+  background: #fff !important;
   color: #1a2433 !important;
-  display: block;
-  font-size: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
   font-weight: 700;
   box-shadow: none !important;
-  line-height: 1.3;
+  line-height: 1;
 }
 
 #main-wrapper.exam-page--edu .exam-edu-side-section__progress.tdoc-pos {
