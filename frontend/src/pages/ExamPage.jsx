@@ -17,6 +17,8 @@ import ReportErrorModal from "../components/ReportErrorModal";
 import ExamBoardOverlay from "../components/ExamBoardOverlay";
 import ExamTaskDrawingShell, { ExamTaskDrawingHeaderButton } from "../components/ExamTaskDrawingShell";
 import EduVariantSidebarCard from "../components/EduVariantSidebarCard";
+import TaskNumber from "../components/taskDocument/TaskNumber";
+import { assignDisplayNumbers } from "../utils/taskDocument";
 import { ExamVariantTimerReadout, ExamVariantFixedTimer } from "../components/ExamVariantTimerReadout";
 import { createExamVariantTimerStore } from "../utils/examVariantTimerStore";
 import TruthTableInput from "../components/TruthTableInput";
@@ -2001,7 +2003,17 @@ function ExamPage() {
   const showInfCodeSidebar = false;
   // const showInfCodeSidebar = isInformaticsCodeEditorContext(level, subject);
   // Для математики или если не все три — показываем 19/20/21 как обычные задания
-  const part2Regular = showLinkedGroup ? part2Rest : [...part2Linked1921, ...part2Rest].sort((a, b) => a.number - b.number);
+  const part2Regular = showLinkedGroup ? part2Rest : part2Tasks;
+  const documentTasks = assignDisplayNumbers([
+    ...part1Tasks,
+    ...(showLinkedGroup ? part2Linked1921 : []),
+    ...part2Regular,
+  ]);
+  const displayNumberById = new Map(documentTasks.map((t) => [t.id, t.displayNumber]));
+  const taskDisplayNumber = (task) => {
+    const n = Number(displayNumberById.get(task.id));
+    return Number.isFinite(n) && n >= 1 ? n : 1;
+  };
 
   const hwPicked = isHomework && hwApiRaw ? pickHomeworkFields(hwApiRaw, cabinetAssignmentId) : null;
   const hwSt = hwPicked?.status || "unknown";
@@ -2248,7 +2260,7 @@ function ExamPage() {
       scoreExam,
       scoreComment,
       markLevel,
-      tasks: variant.tasks,
+      tasks: documentTasks,
       startTime: startTimeRef.current,
       endTime: endTimeRef.current,
       checkedTasks: effectiveCheckedTasks,
@@ -2299,7 +2311,7 @@ function ExamPage() {
       (level ? String(level).toUpperCase() : "");
     const subjectLabel = examHeroSubjectBadge(subject, location.state?.subjectName);
     const subtitle = [levelLabel, subjectLabel].filter(Boolean).join(" · ");
-    openWorkbook(variantTasksToWorkbookTasks(variant.tasks), {
+    openWorkbook(variantTasksToWorkbookTasks(documentTasks), {
       title: `Вариант ${variant.id} — ${subjectLabel} — ${levelLabel}`,
       sheetTitle: `Вариант №${variant.id}`,
       subtitle,
@@ -2371,7 +2383,7 @@ function ExamPage() {
   };
   const heroLongDescription = `${variant.tasks.length} ${ruTasksWord(variant.tasks.length)} для подготовки к экзамену. Часть 1 — ${part1Tasks.length} ${ruTasksWord(part1Tasks.length)}, часть 2 — ${part2Tasks.length} ${ruTasksWord(part2Tasks.length)}. Решайте по порядку или переходите к нужному номеру.`;
   const heroLeadForEdu = `${variant.tasks.length} ${ruTasksWord(variant.tasks.length)} для подготовки. Решайте по порядку или переходите к нужному номеру.`;
-  const navTasksOrdered = [...tasksFilteredByAuthor].sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
+  const navTasksOrdered = documentTasks;
   const currentNavTask = navTasksOrdered.find((t) => t.id === examNavActiveId) ?? navTasksOrdered[0];
   const activeBoardPersist =
     examNavActiveId != null ? boardsByTask[String(examNavActiveId)] : undefined;
@@ -3055,7 +3067,7 @@ function ExamPage() {
                     </button>
                   </div>
                 )}
-            <header className="exam-edu-hero">
+            <header className="exam-edu-hero no-print">
               <div className="exam-edu-hero__grid">
                 <div className="exam-edu-hero__content">
                   <div className="exam-edu-hero__badges" aria-label="Предмет и формат работы">
@@ -3140,26 +3152,21 @@ function ExamPage() {
                   key={task.id}
                   data-task-id={task.id}
                   data-task-number={task.number}
-                  className={`exam-task-card exam-task-card--p1${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${level === "ege" && subject === "math" && Number(task.number) === 11 ? " task-function-graphs" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${isEgeInfTruthTableTask(level, subject, task.number) ? " exam-task-card--ege-inf-2" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
+                  data-display-number={taskDisplayNumber(task)}
+                  className={`exam-task-card tdoc-task task-block exam-task-card--p1${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${level === "ege" && subject === "math" && Number(task.number) === 11 ? " task-function-graphs" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${isEgeInfTruthTableTask(level, subject, task.number) ? " exam-task-card--ege-inf-2" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
                   onClick={() => handleTaskFocus(task.id)}
                 >
                   <div className="exam-task-card__top">
-                      <div className="exam-task-card__title-block">
-                      <div className="exam-task-card__num">{task.number}</div>
-                      <div className="exam-task-card__title-text">
-                        <strong>Задание {task.number}</strong>
-                        {!hideHomeworkVariantChrome && (
-                          <>
-                            <span className="exam-task-card__meta">
-                              ID {task.id}
-                              {!task.answer || String(task.answer).trim() === "" ? (
-                                <TaskNoAnswerBadge />
-                              ) : null}
-                            </span>
-                          </>
-                        )}
-                      </div>
-                    </div>
+                    <TaskNumber
+                      displayNumber={taskDisplayNumber(task)}
+                      total={documentTasks.length}
+                      examNumber={task.number}
+                      level={level}
+                      topic={task.task_title}
+                      id={task.id}
+                      showMeta={!hideHomeworkVariantChrome}
+                      metaExtra={!task.answer || String(task.answer).trim() === "" ? <TaskNoAnswerBadge /> : null}
+                    />
                     {showExamEducationShell ? (
                       <div className="exam-task-card__status-cluster">
                         {!hideHomeworkVariantChrome && (
@@ -3558,26 +3565,21 @@ function ExamPage() {
                         <section
                           key={task.id}
                           data-task-id={task.id}
-                          className={`exam-task-card exam-task-card--p2 exam-task-card--in-group${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${level === "ege" && subject === "math" && Number(task.number) === 11 ? " task-function-graphs" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${isEgeInfTruthTableTask(level, subject, task.number) ? " exam-task-card--ege-inf-2" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
+                          className={`exam-task-card tdoc-task task-block exam-task-card--p2 exam-task-card--in-group${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${level === "ege" && subject === "math" && Number(task.number) === 11 ? " task-function-graphs" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${isEgeInfTruthTableTask(level, subject, task.number) ? " exam-task-card--ege-inf-2" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
+                          data-display-number={taskDisplayNumber(task)}
                           onClick={() => handleTaskFocus(task.id)}
                         >
                           <div className="exam-task-card__top">
-                            <div className="exam-task-card__title-block">
-                              <div className="exam-task-card__num">{task.number}</div>
-                              <div className="exam-task-card__title-text">
-                                <strong>Задание {task.number}</strong>
-                                {!hideHomeworkVariantChrome && (
-                                  <>
-                                    <span className="exam-task-card__meta">
-                                      ID {task.id}
-                                      {!task.answer || String(task.answer).trim() === "" ? (
-                                        <TaskNoAnswerBadge />
-                                      ) : null}
-                                    </span>
-                                  </>
-                                )}
-                              </div>
-                            </div>
+                            <TaskNumber
+                              displayNumber={taskDisplayNumber(task)}
+                              total={documentTasks.length}
+                              examNumber={task.number}
+                              level={level}
+                              topic={task.task_title}
+                              id={task.id}
+                              showMeta={!hideHomeworkVariantChrome}
+                              metaExtra={!task.answer || String(task.answer).trim() === "" ? <TaskNoAnswerBadge /> : null}
+                            />
                             {showExamEducationShell ? (
                               <div className="exam-task-card__status-cluster">
                                 {!hideHomeworkVariantChrome && (
@@ -3675,26 +3677,21 @@ function ExamPage() {
                     <section
                       key={task.id}
                       data-task-id={task.id}
-                      className={`exam-task-card exam-task-card--p2${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${level === "ege" && subject === "math" && Number(task.number) === 11 ? " task-function-graphs" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${isEgeInfTruthTableTask(level, subject, task.number) ? " exam-task-card--ege-inf-2" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
+                      className={`exam-task-card tdoc-task task-block exam-task-card--p2${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${level === "ege" && subject === "math" && Number(task.number) === 11 ? " task-function-graphs" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${isEgeInfTruthTableTask(level, subject, task.number) ? " exam-task-card--ege-inf-2" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
+                      data-display-number={taskDisplayNumber(task)}
                       onClick={() => handleTaskFocus(task.id)}
                     >
                       <div className="exam-task-card__top">
-                        <div className="exam-task-card__title-block">
-                          <div className="exam-task-card__num">{task.number}</div>
-                          <div className="exam-task-card__title-text">
-                            <strong>Задание {task.number}</strong>
-                            {!hideHomeworkVariantChrome && (
-                              <>
-                                <span className="exam-task-card__meta">
-                                  ID {task.id}
-                                  {!task.answer || String(task.answer).trim() === "" ? (
-                                    <TaskNoAnswerBadge />
-                                  ) : null}
-                                </span>
-                              </>
-                            )}
-                          </div>
-                        </div>
+                        <TaskNumber
+                          displayNumber={taskDisplayNumber(task)}
+                          total={documentTasks.length}
+                          examNumber={task.number}
+                          level={level}
+                          topic={task.task_title}
+                          id={task.id}
+                          showMeta={!hideHomeworkVariantChrome}
+                          metaExtra={!task.answer || String(task.answer).trim() === "" ? <TaskNoAnswerBadge /> : null}
+                        />
                         {showExamEducationShell ? (
                           <div className="exam-task-card__status-cluster">
                             {!hideHomeworkVariantChrome && (
@@ -3862,7 +3859,7 @@ function ExamPage() {
               </div>
 
               {showExamEducationShell && (
-                <aside className="exam-edu-sidebar desktop-variant-panel">
+                <aside className="exam-edu-sidebar desktop-variant-panel no-print">
                   {isLiveTeacherView ? (
                     <div className="live-variant-answers-sidebar">
                       <LiveVariantAnswersTable
@@ -3886,6 +3883,7 @@ function ExamPage() {
                     activeNavTaskId={examNavActiveId}
                     examNavBtnClass={examNavBtnClass}
                     goToExamTask={goToExamTask}
+                    level={level}
                     supportItems={supportInfo.items}
                     onOpenSupport={() => setSupportInfo((s) => ({ ...s, open: true }))}
                     hideFinish={hideHomeworkFinishButton}
@@ -3901,7 +3899,7 @@ function ExamPage() {
 
               {showExamEducationShell && mobileVariantNavOpen && (
                 <div
-                  className="mobile-panel-backdrop"
+                  className="mobile-panel-backdrop no-print"
                   onClick={() => setMobileVariantNavOpen(false)}
                   role="presentation"
                 >
@@ -3937,6 +3935,7 @@ function ExamPage() {
                       activeNavTaskId={examNavActiveId}
                       examNavBtnClass={examNavBtnClass}
                       goToExamTask={goToExamTask}
+                      level={level}
                       onAfterNavTask={() => setMobileVariantNavOpen(false)}
                       supportItems={supportInfo.items}
                       onOpenSupport={() => setSupportInfo((s) => ({ ...s, open: true }))}

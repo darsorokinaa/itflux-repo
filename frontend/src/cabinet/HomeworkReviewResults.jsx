@@ -187,10 +187,10 @@ function Part1Table({ rows }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, index) => (
+            {rows.map((row) => (
               <tr key={row.taskId}>
-                <td className="hw-review-table__ord">{index + 1}</td>
-                <td>{row.number}</td>
+                <td className="hw-review-table__ord">{row.displayNumber}</td>
+                <td>{row.examLabel || "—"}</td>
                 <td className="hw-review-table__pre">
                   <ReviewMathAnswer html={row.answer} />
                 </td>
@@ -240,10 +240,10 @@ function Part2Table({ rows }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, index) => (
+            {rows.map((row) => (
               <tr key={row.taskId}>
-                <td className="hw-review-table__ord">{index + 1}</td>
-                <td>{row.number}</td>
+                <td className="hw-review-table__ord">{row.displayNumber}</td>
+                <td>{row.examLabel || "—"}</td>
                 <td className="hw-review-table__pre">
                   <ReviewMathAnswer html={row.answer} />
                 </td>

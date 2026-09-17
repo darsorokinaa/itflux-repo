@@ -3,6 +3,9 @@
  * Используется в десктопном aside и в мобильном bottom-sheet.
  */
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { TaskPosition } from "./taskDocument/TaskNumber";
+import { taskPositionAriaLabel } from "../utils/taskDocument";
+
 function SidebarTimerControls({ store, formatTimer }) {
   const timerStatus = useSyncExternalStore(store.subscribe, store.getStatus, store.getStatus);
   const seconds = useSyncExternalStore(store.subscribe, store.getSeconds, store.getSeconds);
@@ -83,8 +86,10 @@ export default function EduVariantSidebarCard({
   finishDisabled = false,
   finishBusy = false,
   submittedMessage = "",
+  level = "",
 }) {
   const taskTotal = navTasksOrdered.length;
+  const currentNavTask = navTasksOrdered.find((t) => t.id === activeNavTaskId) ?? navTasksOrdered[0];
   const isFullVariantMode = mode === "variant";
   const pagingThreshold = isFullVariantMode
     ? FULL_VARIANT_PAGING_THRESHOLD
@@ -183,6 +188,17 @@ export default function EduVariantSidebarCard({
 
       <div className="exam-edu-side-section exam-edu-side-section--tasks">
         <span className="exam-edu-side-section__eyebrow">Задания</span>
+        {currentNavTask ? (
+          <TaskPosition
+            mode="viewer"
+            className="exam-edu-side-section__progress"
+            position={currentNavTask.displayNumber}
+            total={taskTotal}
+            examNumber={currentNavTask.number}
+            level={level}
+            topic={currentNavTask.task_title}
+          />
+        ) : null}
         <div className="exam-edu-task-nav-wrap">
           <div className="exam-edu-task-nav" role="navigation" aria-label="Номера заданий">
             {pagedNavTasks.map((t) => (
@@ -190,13 +206,20 @@ export default function EduVariantSidebarCard({
                 key={t.id}
                 type="button"
                 className={examNavBtnClass(t)}
+                aria-label={taskPositionAriaLabel({
+                  position: t.displayNumber,
+                  total: taskTotal,
+                  examNumber: t.number,
+                  level,
+                  topic: t.task_title,
+                })}
                 onClick={(e) => {
                   e.stopPropagation();
                   goToExamTask(t.id);
                   onAfterNavTask?.();
                 }}
               >
-                {t.number}
+                {t.displayNumber ?? t.number}
               </button>
             ))}
           </div>

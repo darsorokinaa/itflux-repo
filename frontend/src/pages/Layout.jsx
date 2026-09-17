@@ -148,7 +148,11 @@ function Layout() {
       {/* Фон-паттерн: по умолчанию скрыт (home.css). Сезонная тема включает через CSS-переменные. */}
       <div className="app-shell-pattern" aria-hidden="true" />
       <div className="app-shell-content">
-      {!isLessonOrHomeworkContext && !isChromelessPage && !isBookingPage && (!isCabinetArea || pathname === '/cabinet/login') && <Nav />}
+      {!isLessonOrHomeworkContext && !isChromelessPage && !isBookingPage && (!isCabinetArea || pathname === '/cabinet/login') && (
+        <div className="no-print">
+          <Nav />
+        </div>
+      )}
 
       <aside>
         {/* боковое меню */}
@@ -159,7 +163,7 @@ function Layout() {
       </main>
 
       {showSiteFooter ? (
-      <footer className={`site-footer${isLessonOrHomeworkContext ? " site-footer--embed" : ""}`}>
+      <footer className={`site-footer no-print${isLessonOrHomeworkContext ? " site-footer--embed" : ""}`}>
         <div className="site-footer-inner">
           <span className="site-footer-copy">© 2026 Цифровой поток</span>
           {!isLessonOrHomeworkContext && (
@@ -174,7 +178,7 @@ function Layout() {
       ) : null}
 
       {!cookieAccepted && !isLessonOrHomeworkContext && !isChromelessPage && (
-        <div className="cookie-banner" role="alertdialog" aria-label="Уведомление об использовании файлов cookie">
+        <div className="cookie-banner no-print" role="alertdialog" aria-label="Уведомление об использовании файлов cookie">
           <div className="cookie-banner-inner">
             <p className="cookie-banner-text">
               Мы используем файлы cookie для корректной работы сайта. Продолжая использование сайта, вы соглашаетесь с{" "}
@@ -187,9 +191,11 @@ function Layout() {
         </div>
       )}
 
-      {showMobileTabBar ? <MobileTabBar /> : null}
+      {showMobileTabBar ? <div className="no-print"><MobileTabBar /></div> : null}
 
+      <div className="no-print">
       <SupportFab hidden={!showSupportFab} />
+      </div>
       </div>
     </div>
   );

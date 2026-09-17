@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { fetchStudentResultDetail, fetchStudentResults } from "../../../utils/cabinetAuth";
 import { usePageTitle } from "../../hooks/usePageTitle";
+import { TaskPosition } from "../../../components/taskDocument/TaskNumber";
 import "../../styles/journal.css";
 
 const ATTENDANCE_RU = {
@@ -104,9 +105,16 @@ function VariantResultBlock({ result, titleFallback = "Вариант на ур�
               </tr>
             </thead>
             <tbody>
-              {tasks.map((task) => (
+              {tasks.map((task, index) => (
                 <tr key={`${result.title || "v"}-${task.id || task.number}`}>
-                  <td>{task.number ?? "—"}</td>
+                  <td>
+                    <TaskPosition
+                      mode="result"
+                      position={task.display_number ?? task.displayNumber ?? task.position ?? index + 1}
+                      examNumber={task.number}
+                      level={result.level}
+                    />
+                  </td>
                   <td>{String(task.student_answer || "").trim() || "—"}</td>
                   <td>
                     {task.ok === true ? (
@@ -165,9 +173,16 @@ function HomeworkResultBlock({ result }) {
               </tr>
             </thead>
             <tbody>
-              {tasks.map((task) => (
+              {tasks.map((task, index) => (
                 <tr key={`hw-${result.homework_id}-${task.id || task.number}`}>
-                  <td>{task.number ?? "—"}</td>
+                  <td>
+                    <TaskPosition
+                      mode="result"
+                      position={task.display_number ?? task.displayNumber ?? task.position ?? index + 1}
+                      examNumber={task.number}
+                      level={result.level}
+                    />
+                  </td>
                   <td>{String(task.student_answer || "").trim() || "—"}</td>
                   <td>
                     {task.ok === true ? (

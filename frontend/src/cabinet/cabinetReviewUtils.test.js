@@ -155,10 +155,24 @@ describe("duplicate bank numbers (тетрадь из одного типа за
 
     const review = buildStudentHomeworkReviewRows(tasks, result, "ege", "inf");
     expect(review.part1).toHaveLength(7);
+    expect(review.part1.map((r) => r.displayNumber)).toEqual([1, 2, 3, 4, 5, 6, 7]);
     const answers = review.part1.map((r) => r.answer);
     expect(answers.filter((a) => a === "13123")).toHaveLength(1);
     expect(answers.filter((a) => a === "23")).toHaveLength(0);
     expect(answers.filter((a) => a === "")).toHaveLength(6);
+  });
+
+  it("keeps original positions when tasks share an exam number", () => {
+    const tasks = [
+      { id: 1, number: 15, part: 1, answer: "a" },
+      { id: 2, number: 8, part: 1, answer: "b" },
+      { id: 3, number: 15, part: 2, answer: "c" },
+    ];
+    const review = buildStudentHomeworkReviewRows(tasks, { by_task_id: {} }, "ege", "math");
+    expect(review.part1.map((r) => r.displayNumber)).toEqual([1, 2]);
+    expect(review.part2.map((r) => r.displayNumber)).toEqual([3]);
+    expect(review.part1.map((r) => r.examLabel)).toEqual(["ЕГЭ №15", "ЕГЭ №8"]);
+    expect(review.part2[0].examLabel).toBe("ЕГЭ №15");
   });
 
   it("payload keeps answers only on task ids when numbers collide", () => {

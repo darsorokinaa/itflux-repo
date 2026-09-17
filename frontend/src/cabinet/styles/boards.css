@@ -1020,18 +1020,42 @@ html.cb-board-editor-open body {
   }
 
   .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-toolbar .ToolIcon,
-  .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-toolbar label.ToolIcon,
+  .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-toolbar label.ToolIcon {
+    width: auto;
+    height: 36px;
+    background: transparent !important;
+    box-sizing: border-box;
+    border-radius: 0;
+  }
+
   .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-toolbar .ToolIcon__icon,
   .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-toolbar button {
     width: 36px;
     height: 36px;
     border-radius: 8px;
+    box-sizing: border-box;
   }
 
-  .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-toolbar .ToolIcon--selected,
-  .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-toolbar .ToolIcon.active {
+  /* Активный инструмент: квадратный фон 36×36, как у остальных иконок,
+     а не заливка всей label (она шире из-за разделителей групп). */
+  .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-toolbar .ToolIcon--selected .ToolIcon__icon,
+  .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-toolbar .ToolIcon.active .ToolIcon__icon,
+  .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-toolbar .ToolIcon .ToolIcon_type_radio:checked + .ToolIcon__icon,
+  .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-toolbar .App-toolbar__extra-tools-trigger--selected {
     background: #eff6ff !important;
     box-shadow: none;
+    border-radius: 8px;
+  }
+
+  .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-toolbar .eraser.active {
+    background: transparent !important;
+  }
+
+  .cb-board-editor--dark .excalidraw:not(.excalidraw--mobile) .App-toolbar .ToolIcon--selected .ToolIcon__icon,
+  .cb-board-editor--dark .excalidraw:not(.excalidraw--mobile) .App-toolbar .ToolIcon.active .ToolIcon__icon,
+  .cb-board-editor--dark .excalidraw:not(.excalidraw--mobile) .App-toolbar .ToolIcon .ToolIcon_type_radio:checked + .ToolIcon__icon,
+  .cb-board-editor--dark .excalidraw:not(.excalidraw--mobile) .App-toolbar .App-toolbar__extra-tools-trigger--selected {
+    background: var(--color-surface-primary-container, #1e3a8a) !important;
   }
 
   .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-toolbar .App-toolbar__divider {
@@ -1676,6 +1700,18 @@ html.cb-board-editor-open body {
 
   .cb-board-editor .excalidraw.excalidraw--mobile .App-toolbar--mobile {
     max-width: 100%;
+  }
+
+  .cb-board-editor .excalidraw.excalidraw--mobile .App-toolbar--mobile .ToolIcon,
+  .cb-board-editor .excalidraw.excalidraw--mobile .App-toolbar--mobile label.ToolIcon,
+  .cb-board-editor .excalidraw.excalidraw--mobile .App-toolbar--mobile .eraser.active {
+    background: transparent !important;
+  }
+
+  .cb-board-editor .excalidraw.excalidraw--mobile .App-toolbar--mobile .ToolIcon--selected .ToolIcon__icon,
+  .cb-board-editor .excalidraw.excalidraw--mobile .App-toolbar--mobile .ToolIcon.active .ToolIcon__icon,
+  .cb-board-editor .excalidraw.excalidraw--mobile .App-toolbar--mobile .ToolIcon .ToolIcon_type_radio:checked + .ToolIcon__icon {
+    border-radius: 8px;
   }
 
   .cb-board-editor .excalidraw.excalidraw--mobile .HintViewer {

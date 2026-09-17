@@ -1,0 +1,486 @@
+/**
+ * Общие стили задания для рабочей тетради и варианта
+ * (экран, preview, print/PDF).
+ */
+
+.tdoc,
+.workbook-sheet {
+  width: 100%;
+  max-width: 210mm;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.tdoc-task,
+.task-block {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  margin: 0 0 8mm;
+  padding: 0 0 6mm;
+  background: #fff;
+  border: none;
+  border-bottom: 1px solid #e4e7ee;
+  overflow: visible;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.tdoc-task:last-child,
+.task-block:last-child {
+  border-bottom: none;
+}
+
+.tdoc-task--allow-break {
+  break-inside: auto;
+  page-break-inside: auto;
+}
+
+.tdoc-task__heading,
+.tdoc-pos {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 8px;
+}
+
+.tdoc-pos--compact {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0;
+  margin: 0;
+  color: #1a2433;
+}
+
+.tdoc-pos--viewer,
+.tdoc-pos--review,
+.tdoc-pos--result,
+.tdoc-pos--print {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.tdoc-pos--review {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.tdoc-pos--result {
+  margin: 0;
+  gap: 1px;
+}
+
+.tdoc-task__num,
+.tdoc-pos__num {
+  flex: 0 0 auto;
+  min-width: 1.4em;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #1a2433;
+  letter-spacing: 0.01em;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.tdoc-pos--compact .tdoc-pos__num,
+.tdoc-pos--result .tdoc-pos__num {
+  font-size: 14px;
+}
+
+.tdoc-pos--print .tdoc-pos__num {
+  font-size: 12pt;
+}
+
+.tdoc-pos__progress {
+  display: block;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #1a2433;
+}
+
+.tdoc-task__exam,
+.tdoc-pos__exam,
+.tdoc-pos__fallback,
+.tdoc-task__heading .exam-task-card__title-text strong,
+.tdoc-pos .exam-task-card__title-text strong {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: #5a6a7a;
+}
+
+.tdoc-pos__dot {
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.tdoc-pos__text {
+  min-width: 0;
+}
+
+.tdoc-pos__meta,
+.tdoc-pos .exam-task-card__meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #7b8898;
+}
+
+.tdoc-task__body,
+.workbook-task__body {
+  overflow: visible;
+  max-width: 100%;
+}
+
+.tdoc-task img,
+.workbook-task__body img,
+.exam-task-card__text img,
+.task-text img {
+  max-width: 100%;
+  height: auto;
+}
+
+.tdoc-task table,
+.workbook-task__body table,
+.exam-task-card__text table,
+.task-text table {
+  max-width: 100%;
+}
+
+.tdoc-task mjx-container,
+.workbook-task__body mjx-container,
+.exam-task-card__text mjx-container {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.tdoc-task__head,
+.tdoc-task figure,
+.tdoc-task img,
+.oge-math-choice-options,
+.tdoc-answer,
+.tdoc-solution--small,
+.tdoc-solution--medium {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+/* ── Поле решения: тетрадная сетка через background, без сотен DOM-узлов ── */
+.tdoc-solution,
+.solution-area {
+  margin: 4mm 0 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.tdoc-solution__grid,
+.solution-grid {
+  width: 100%;
+  min-height: 45mm;
+  box-sizing: border-box;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  background-color: #fff;
+  background-image:
+    linear-gradient(to right, rgba(0, 0, 0, 0.1) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.1) 1px, transparent 1px);
+  background-size: 5mm 5mm;
+  background-repeat: repeat;
+  background-position: 0 0;
+  background-origin: padding-box;
+  background-clip: padding-box;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+  color-adjust: exact;
+}
+
+.tdoc-solution--small .tdoc-solution__grid,
+.solution-area--small .solution-grid,
+.solution-area--small {
+  min-height: 25mm;
+}
+
+.tdoc-solution--medium .tdoc-solution__grid,
+.solution-area--medium .solution-grid,
+.solution-area--medium {
+  min-height: 45mm;
+}
+
+.tdoc-solution--large .tdoc-solution__grid,
+.solution-area--large .solution-grid,
+.solution-area--large {
+  min-height: 70mm;
+}
+
+.tdoc-answer {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 4mm 0 0;
+  font-size: 14px;
+  line-height: 1.35;
+  color: #1a2433;
+}
+
+.tdoc-answer__label {
+  flex-shrink: 0;
+}
+
+.tdoc-answer__line {
+  flex: 1;
+  min-width: 40mm;
+  max-width: 110mm;
+  border-bottom: 1px solid #94a3b8;
+  min-height: 1.15em;
+}
+
+.tdoc-answer__print {
+  display: none;
+  margin: 4mm 0 0;
+  font-size: 14px;
+}
+
+.tdoc-answer__print--always {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+}
+
+/* Экран варианта: worksheet-карточка без массивных рамок и клиппинга */
+#main-wrapper.exam-page .exam-task-card,
+#main-wrapper.exam-page--edu .exam-task-card {
+  background: #fff;
+  border: none;
+  border-bottom: 1px solid #e4e7ee;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
+  padding-bottom: 0 !important;
+  width: 100%;
+  max-width: 100%;
+}
+
+#main-wrapper.exam-page--edu .exam-task-card__top {
+  background: transparent;
+  border-bottom: none;
+  padding: 4px 0 10px;
+  align-items: flex-start;
+}
+
+#main-wrapper.exam-page--edu .exam-task-card__num,
+#main-wrapper.exam-page--edu .tdoc-pos__num,
+#main-wrapper.exam-page--edu.exam-page--subject-themed .exam-task-card__num,
+#main-wrapper.exam-page--edu.exam-page--subject-themed .tdoc-pos__num {
+  width: auto;
+  min-width: 1.5em;
+  height: auto;
+  border-radius: 0;
+  background: transparent !important;
+  color: #1a2433 !important;
+  display: block;
+  font-size: 20px;
+  font-weight: 700;
+  box-shadow: none !important;
+  line-height: 1.3;
+}
+
+#main-wrapper.exam-page--edu .exam-edu-side-section__progress.tdoc-pos {
+  margin: 6px 0 10px;
+}
+
+#main-wrapper.exam-page--edu .exam-edu-side-section__progress .tdoc-pos__progress {
+  font-size: 13px;
+}
+
+#main-wrapper.exam-page--edu .exam-edu-side-section__progress .tdoc-pos__exam {
+  font-size: 11px;
+}
+
+#main-wrapper.exam-page--edu .exam-task-card__body,
+#main-wrapper.exam-page--edu .exam-task-card__body--draw-host {
+  overflow: visible;
+  padding: 0 0 12px;
+}
+
+#main-wrapper.exam-page--edu .exam-task-card__text {
+  overflow: visible;
+  overflow-x: auto;
+}
+
+#main-wrapper.exam-page--edu .exam-task-card__status-cluster {
+  flex-shrink: 0;
+}
+
+.exam-task-card .exam-task-draw-fab {
+  position: static !important;
+  right: auto !important;
+  bottom: auto !important;
+  z-index: auto !important;
+  margin-top: 8px;
+}
+
+.exam-task-draw-chrome {
+  position: relative;
+  z-index: 2;
+  margin: 0 0 12px;
+}
+
+@media screen {
+  .tdoc-solution--small .tdoc-solution__grid {
+    min-height: max(25mm, 92px);
+  }
+  .tdoc-solution--medium .tdoc-solution__grid {
+    min-height: max(45mm, 148px);
+  }
+  .tdoc-solution--large .tdoc-solution__grid {
+    min-height: max(70mm, 220px);
+  }
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm 14mm 14mm;
+  }
+
+  html,
+  body {
+    width: 210mm;
+    background: #fff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    color-adjust: exact;
+  }
+
+  .no-print,
+  .wb-toolbar,
+  nav,
+  .site-header,
+  .site-footer,
+  .cookie-banner,
+  .app-shell-pattern,
+  .exam-edu-sidebar,
+  .exam-edu-hero,
+  .exam-edu-hero-visual,
+  .exam-edu-btn,
+  .exam-task-draw-chrome,
+  .exam-task-draw-header-pencil,
+  .exam-task-draw-fab,
+  .exam-task-draw-canvas,
+  .exam-task-card__status,
+  .exam-task-card__status-cluster,
+  .task-report-error-wrap,
+  .exam-fixed-corner,
+  .exam-edu-section-chip,
+  .support-fab,
+  .mobile-tab-bar {
+    display: none !important;
+  }
+
+  .tdoc,
+  .workbook-sheet {
+    width: auto;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+    background: #fff;
+  }
+
+  .tdoc-task,
+  .task-block,
+  .exam-task-card {
+    box-shadow: none;
+    border-radius: 0;
+    overflow: visible;
+  }
+
+  .tdoc-solution__grid,
+  .solution-grid {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+    background-color: #fff !important;
+    background-image:
+      linear-gradient(to right, rgba(0, 0, 0, 0.12) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(0, 0, 0, 0.12) 1px, transparent 1px) !important;
+    background-size: 5mm 5mm !important;
+    background-repeat: repeat !important;
+  }
+
+  .tdoc-solution--small .tdoc-solution__grid,
+  .solution-area--small .solution-grid {
+    min-height: 25mm;
+    height: 25mm;
+  }
+
+  .tdoc-solution--medium .tdoc-solution__grid,
+  .solution-area--medium .solution-grid {
+    min-height: 45mm;
+    height: 45mm;
+  }
+
+  .tdoc-solution--large .tdoc-solution__grid,
+  .solution-area--large .solution-grid {
+    min-height: 70mm;
+    height: 70mm;
+  }
+
+  .tdoc-answer__input,
+  .exam-task-input,
+  .answer-input,
+  .answer-table-wrap,
+  .hidden-answer {
+    display: none !important;
+  }
+
+  .tdoc-answer__print {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .exam-task-answer__label::after {
+    content: " __________________________";
+  }
+
+  .tdoc-task mjx-container,
+  .workbook-task__body mjx-container,
+  .exam-task-card__text mjx-container {
+    overflow: visible !important;
+  }
+
+  .tdoc-task table,
+  .workbook-task__body table,
+  .exam-task-card__text table {
+    max-width: 100% !important;
+  }
+
+  .tdoc-task--allow-break {
+    break-inside: auto;
+    page-break-inside: auto;
+  }
+}
+
+@media (max-width: 720px) {
+  .tdoc,
+  .workbook-sheet {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .tdoc-task,
+  .task-block,
+  #main-wrapper.exam-page .exam-task-card {
+    width: 100%;
+    max-width: 100%;
+  }
+}

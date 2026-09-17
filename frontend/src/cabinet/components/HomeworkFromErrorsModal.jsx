@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { createHomeworkFromStudentErrors } from "../../utils/cabinetAuth";
 import CabinetModal from "./CabinetModal";
+import { TaskPosition } from "../../components/taskDocument/TaskNumber";
 
 function toLocalInputValue(iso) {
   if (!iso) return "";
@@ -250,9 +251,13 @@ export default function HomeworkFromErrorsModal({
                 <li key={taskErrorKey(task)} className="hw-from-review__card is-selected">
                   <span className="hw-from-review__card-body">
                     <strong>
-                      {task.number != null ? `№${task.number}` : "Задание"}
-                      {" · "}
-                      {task.title || task.task_id}
+                      <TaskPosition
+                        mode="compact"
+                        position={task.display_number ?? task.displayNumber ?? task.position}
+                        examNumber={task.number}
+                        level={group.level}
+                      />
+                      {task.title || task.task_id ? ` · ${task.title || task.task_id}` : ""}
                     </strong>
                     <span>
                       {task.status === "partial" ? "Частично" : "Неверно"}

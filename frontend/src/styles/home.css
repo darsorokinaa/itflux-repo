@@ -4096,7 +4096,7 @@ body.exam-variant-view--subject-themed.exam-variant-view--edu,
 }
 
 #main-wrapper.exam-page--edu.exam-page--subject-themed .exam-task-card__num {
-  box-shadow: 0 8px 16px color-mix(in srgb, var(--subject-primary, var(--blue-hero)) 22%, transparent);
+  box-shadow: none;
 }
 
 #main-wrapper.exam-page--edu.exam-page--subject-themed .exam-edu-sidebar-finish {
@@ -6248,13 +6248,12 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
 /* Отступы для плавающей кнопки черновика */
 .exam-task-card {
   position: relative;
-  padding-bottom: 64px !important;
 }
 
 .exam-task-draw-fab {
-  position: absolute;
-  right: 16px;
-  bottom: 16px;
+  position: static;
+  right: auto;
+  bottom: auto;
   appearance: none;
   -webkit-appearance: none;
   margin: 0;
@@ -8032,84 +8031,7 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   -moz-tab-size: 4;
 }
 
-/* Новая плавающая кнопка черновика в правом нижнем углу карточки */
-.exam-task-draw-fab {
-  position: absolute;
-  right: 16px;
-  bottom: 16px;
-  appearance: none;
-  -webkit-appearance: none;
-  margin: 0;
-  border: 1px solid transparent;
-  color: #ffffff;
-  font-family: var(--font-body);
-  font-weight: 700;
-  font-size: 13px;
-  line-height: 1;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border-radius: 999px;
-  padding: 10px 16px;
-  background: var(--blue-hero, #2b52f5);
-  box-shadow: 0 8px 18px rgba(43, 82, 245, 0.28);
-  cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
-  z-index: 10;
-}
-
-.exam-task-draw-fab:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 22px rgba(43, 82, 245, 0.34);
-  background: var(--blue-dark, #1e3ebd);
-}
-
-.exam-task-draw-fab svg {
-  width: 16px;
-  height: 16px;
-}
-
-/* Отступы для плавающей кнопки черновика */
-.exam-task-card {
-  position: relative;
-  padding-bottom: 64px !important;
-}
-
-.exam-task-draw-fab {
-  position: absolute;
-  right: 16px;
-  bottom: 16px;
-  appearance: none;
-  -webkit-appearance: none;
-  margin: 0;
-  border: 1px solid transparent;
-  color: #ffffff !important;
-  font-family: var(--font-body);
-  font-weight: 700;
-  font-size: 13px;
-  line-height: 1;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border-radius: 999px;
-  padding: 10px 16px;
-  background: var(--blue-hero, #2b52f5) !important;
-  box-shadow: 0 8px 18px rgba(43, 82, 245, 0.28);
-  cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
-  z-index: 10;
-}
-
-.exam-task-draw-fab:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 22px rgba(43, 82, 245, 0.34);
-  background: var(--blue-dark, #1e3ebd) !important;
-}
-
-.exam-task-draw-fab svg {
-  width: 16px;
-  height: 16px;
-}
+/* Кнопка черновика в потоке документа, не поверх условия */
 
 /* ——— Интересное ——— */
 .interesting-page {

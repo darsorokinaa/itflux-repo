@@ -3,6 +3,7 @@ import { normalizeHomeworkAttachmentList } from "./homeworkAttachmentState";
 import { computePart1TaskCorrect } from "../utils/examAnswerCheck";
 
 import { inferExamTaskPart, isMathLikeSubject } from "../utils/examTaskPart";
+import { assignDisplayNumbers, examTypeNumber, examTypeShortLabel } from "../utils/taskDocument";
 
 export { inferExamTaskPart, isMathLikeSubject };
 
@@ -185,7 +186,8 @@ export function buildStudentHomeworkReviewRows(tasks, result, level, subject) {
   const teacherCommentAttachments = homeworkTeacherCommentAttachments(result);
   const part1 = [];
   const part2 = [];
-  const list = [...tasks].sort((a, b) => a.number - b.number);
+  const list = assignDisplayNumbers(tasks);
+  const total = list.length;
   for (const task of list) {
     const part = inferExamTaskPart(task, level, subject);
     const answer = homeworkTaskAnswer(result, task.id, task.number, list);
@@ -193,10 +195,16 @@ export function buildStudentHomeworkReviewRows(tasks, result, level, subject) {
     const teacherFiles = homeworkTeacherAttachments(result, task.id, task.number, list);
     const studentFiles = homeworkTaskAttachments(result, task.id, task.number, list);
     const correctAnswer = task.answer ?? "";
+    const examNumber = examTypeNumber(task);
+    const examLabel = examTypeShortLabel(task, level, task.displayNumber);
     if (part === 1) {
       part1.push({
         taskId: String(task.id),
         number: task.number,
+        examNumber,
+        examLabel,
+        displayNumber: task.displayNumber,
+        total,
         answer,
         correctAnswer,
         verdict: resolvePart1Verdict(task, answer, result, subject),
@@ -208,6 +216,10 @@ export function buildStudentHomeworkReviewRows(tasks, result, level, subject) {
       part2.push({
         taskId: String(task.id),
         number: task.number,
+        examNumber,
+        examLabel,
+        displayNumber: task.displayNumber,
+        total,
         answer,
         correctAnswer,
         score: homeworkTaskScore(result, task.id),

@@ -10,6 +10,19 @@ import {
   polishBankTaskMathJaxTables,
 } from "../components/MathContent.jsx";
 import { formatTasksCount } from "./formatTasksCount";
+import { inferExamTaskPart } from "./examTaskPart";
+import {
+  answerAreaHtml,
+  assignDisplayNumbers,
+  examTypeNumber,
+  examTypeShortLabel,
+  inferSolutionSize,
+  orderVariantDocumentTasks,
+  solutionAreaHtml,
+  taskPositionAriaLabel,
+  type SolutionSize,
+} from "./taskDocument";
+import taskDocumentCss from "../styles/task-document.css?raw";
 
 export type WorkbookTask = {
   id: number;
@@ -20,8 +33,11 @@ export type WorkbookTask = {
   task_title?: string | null;
   file_url?: string | null;
   part?: number | null;
+  part_title?: string | null;
+  exam_part?: number | null;
   max_score?: number | null;
   author?: string | null;
+  solutionSize?: SolutionSize | null;
 };
 
 export type WorkbookOptions = {
@@ -65,13 +81,15 @@ export type VariantPdfTask = {
   file?: string | null;
   attachments?: Array<{ url?: string; name?: string | null }>;
   part?: number | null;
+  part_title?: string | null;
+  exam_part?: number | null;
   max_score?: number | null;
   author?: string | null;
 };
 
 export const VARIANT_PDF_OPTIONS: Required<WorkbookOptions> = {
   showGrading: false,
-  showSolutionSpace: false,
+  showSolutionSpace: true,
   showAnswers: true,
   showAnswerKey: true,
   showTaskIds: false,
@@ -81,13 +99,15 @@ export const VARIANT_PDF_OPTIONS: Required<WorkbookOptions> = {
 export function variantTasksToWorkbookTasks(tasks: VariantPdfTask[]): WorkbookTask[] {
   return tasks.map((task) => ({
       id: task.id,
-      task_number: task.number != null ? Number(task.number) : null,
+      task_number: examTypeNumber({ number: task.number }),
       text: task.text || "",
       answer: task.answer ?? null,
       subtopic: task.subtopic_title ?? null,
       task_title: task.task_title ?? null,
       file_url: task.file || task.attachments?.[0]?.url || null,
       part: task.part ?? null,
+      part_title: task.part_title ?? null,
+      exam_part: task.exam_part ?? null,
       max_score: task.max_score ?? null,
       author: task.author ?? null,
     }));
@@ -143,17 +163,18 @@ function formatRuBalls(n: number): string {
   return `${n} баллов`;
 }
 
-function taskExamPart(task: WorkbookTask): 1 | 2 | null {
-  const title = String((task as { part_title?: string | null }).part_title || "").toLowerCase();
-  if (/говорен|устн|speaking|oral/.test(title)) return 2;
-  if (/часть\s*2\b/.test(title)) return 2;
-  if (/часть\s*1\b/.test(title)) return 1;
-  if (task.part === 1 || task.part === 2) return task.part;
-  if (typeof task.part === "number" && task.part >= 3) return 2;
-  const n = task.task_number;
-  if (n != null && n >= 1 && n <= 12) return 1;
-  if (n != null && n >= 13) return 2;
-  return null;
+function taskExamPart(task: WorkbookTask, level?: string, subject?: string): 1 | 2 {
+  return inferExamTaskPart(
+    {
+      number: task.task_number,
+      task_number: task.task_number,
+      part: task.part,
+      part_title: task.part_title,
+      exam_part: task.exam_part,
+    },
+    level,
+    subject
+  );
 }
 
 function displayTaskNumber(_task: WorkbookTask, index: number): number {
@@ -278,23 +299,27 @@ function prepareTaskHtml(raw: string, subject?: string, level?: string): string 
 
 function renderTask(
   task: WorkbookTask,
-  index: number,
+  displayNumber: number,
   options: Required<WorkbookOptions>,
   variantMode = false,
   subject?: string,
   level?: string
 ): string {
-  const num = displayTaskNumber(task, index);
-  const idHtml = `<span class="wb-task__id"${options.showTaskIds ? "" : ' style="display:none"'}">${escapeHtml(String(task.id))}</span>`;
-
-  const solutionHtml = `<div class="wb-task__solution workbook-solution-block">
-        <div class="wb-solution-grid" role="presentation"></div>
-      </div>`;
-
-  const answerHtml = `<div class="wb-task__answer workbook-answer-block">
-        <span class="wb-answer-label">Ответ:</span>
-        <span class="wb-answer-line" aria-hidden="true"></span>
-      </div>`;
+  const num = displayNumber >= 1 ? displayNumber : 1;
+  const examCaption = examTypeShortLabel(task, level, num);
+  const examHtml = examCaption
+    ? `<div class="tdoc-pos__exam tdoc-task__exam">${escapeHtml(examCaption)}</div>`
+    : "";
+  const aria = taskPositionAriaLabel({
+    position: num,
+    examNumber: examTypeNumber(task),
+    level,
+    topic: task.task_title,
+  });
+  const idHtml = `<span class="wb-task__id"${options.showTaskIds ? "" : " style=\"display:none\""}>${escapeHtml(String(task.id))}</span>`;
+  const size = inferSolutionSize(task, { level, subject });
+  const solutionHtml = solutionAreaHtml(size);
+  const answerHtml = answerAreaHtml();
   const fileHtml = renderTaskFileHtml(task.file_url);
   const scoreHtml =
     variantMode && task.max_score != null && task.max_score > 0
@@ -305,14 +330,15 @@ function renderTask(
     : "";
 
   return `
-    <section class="wb-task workbook-task${variantMode ? " wb-task--variant" : ""}">
-      <div class="wb-task__row">
+    <section class="tdoc-task task-block wb-task workbook-task${variantMode ? " wb-task--variant" : ""}" data-display-number="${num}"${aria ? ` aria-label="${escapeHtml(aria)}"` : ""}>
+      <div class="tdoc-task__head wb-task__row">
         <div class="wb-task__num-col">
-          <div class="wb-task__num">${num}</div>
+          <div class="tdoc-pos__num tdoc-task__num wb-task__num" aria-hidden="true">${num}</div>
           ${idHtml}
         </div>
         <div class="wb-task__content">
-          <div class="workbook-task__body">${prepareTaskHtml(task.text, subject, level)}</div>
+          ${examHtml}
+          <div class="workbook-task__body tdoc-task__body">${prepareTaskHtml(task.text, subject, level)}</div>
         </div>
         ${scoreHtml}
       </div>
@@ -329,16 +355,17 @@ function renderVariantTasksHtml(
   subject?: string,
   level?: string
 ): string {
+  const ordered = assignDisplayNumbers(orderVariantDocumentTasks(tasks, { level, subject }));
   const chunks: string[] = [];
   let lastPart: 1 | 2 | null = null;
 
-  tasks.forEach((task, index) => {
-    const part = taskExamPart(task);
-    if (part != null && part !== lastPart) {
+  ordered.forEach((task) => {
+    const part = taskExamPart(task, level, subject);
+    if (part !== lastPart) {
       chunks.push(`<h2 class="wb-part-title">Часть ${part}</h2>`);
       lastPart = part;
     }
-    chunks.push(renderTask(task, index, options, true, subject, level));
+    chunks.push(renderTask(task, task.displayNumber, options, true, subject, level));
   });
 
   return chunks.join("\n");
@@ -354,19 +381,21 @@ function renderTasksHtml(
   if (mode === "variant") {
     return renderVariantTasksHtml(tasks, options, subject, level);
   }
-  return tasks
-    .map((task, index) => renderTask(task, index, options, false, subject, level))
+  return assignDisplayNumbers(tasks)
+    .map((task) => renderTask(task, task.displayNumber, options, false, subject, level))
     .join("\n");
 }
 
 function buildAnswerKeySectionHtml(
-  tasks: WorkbookTask[],
+  tasks: Array<WorkbookTask & { displayNumber?: number }>,
   subject?: string
 ): string {
-  const rows = tasks
-    .map((task, index) => {
-      const num = displayTaskNumber(task, index);
-      // Ответы всегда обычным текстом — без табличного task sheet.
+  const numbered = tasks[0] && typeof tasks[0].displayNumber === "number"
+    ? tasks
+    : assignDisplayNumbers(tasks);
+  const rows = numbered
+    .map((task) => {
+      const num = task.displayNumber >= 1 ? task.displayNumber : displayTaskNumber(task, 0);
       const body = task.answer?.trim()
         ? prepareTaskHtml(task.answer, subject, undefined)
         : '<span class="wb-answer-key-empty">—</span>';
@@ -395,9 +424,12 @@ function buildAnswerKeySectionHtml(
 
 function workbookPrintCss(): string {
   return `
+    ${taskDocumentCss}
+
     :root {
       --wb-text: #1a2433;
       --wb-text-secondary: #55657a;
+      --wb-text-muted: #6b7a8d;
       --wb-line: #334155;
       --wb-line-light: #b8c5d4;
       --wb-accent: #4a6280;
@@ -409,17 +441,14 @@ function workbookPrintCss(): string {
       --wb-bg: #e8ecf2;
       --wb-surface: #f7f9fc;
       --wb-font: "PT Serif", "Liberation Serif", "Times New Roman", Times, Georgia, serif;
-      --wb-margin-top: 10mm;
-      --wb-margin-right: 9mm;
-      --wb-margin-bottom: 10mm;
-      --wb-margin-left: 12mm;
-      --wb-print-header-h: 10mm;
-      --wb-print-footer-h: 8mm;
+      --wb-margin-top: 12mm;
+      --wb-margin-right: 14mm;
+      --wb-margin-bottom: 14mm;
+      --wb-margin-left: 14mm;
       --wb-num-w: 10mm;
-      --wb-num-h: 6mm;
-      --wb-cell: 4.5mm;
-      --wb-grid-rows: 6;
-      --wb-grid-line: rgba(74, 98, 128, 0.28);
+      --wb-num-h: auto;
+      --wb-cell: 5mm;
+      --wb-grid-line: rgba(0, 0, 0, 0.10);
       --wb-table-border: #94a3b8;
     }
 
@@ -427,7 +456,7 @@ function workbookPrintCss(): string {
 
     @page {
       size: A4;
-      margin: var(--wb-margin-top) var(--wb-margin-right) var(--wb-margin-bottom) var(--wb-margin-left);
+      margin: 12mm 14mm 14mm;
     }
 
     html, body.workbook-body {
@@ -441,51 +470,9 @@ function workbookPrintCss(): string {
       -webkit-font-smoothing: antialiased;
     }
     body.workbook-body--variant {
-      --wb-print-header-h: 11mm;
+      background: var(--wb-bg);
     }
 
-    .wb-print-frame {
-      width: 100%;
-      border-collapse: collapse;
-      border-spacing: 0;
-    }
-    .wb-print-frame > :is(thead, tfoot, tbody) > tr > :is(td, th) {
-      padding: 0;
-      border: none;
-      vertical-align: top;
-    }
-    .wb-print-header-gap,
-    .wb-print-footer-gap {
-      display: none;
-    }
-
-    /* Экранный превью: обёртка печати не должна ломать вложенные таблицы */
-    @media screen {
-      .wb-print-frame {
-        display: block;
-      }
-      .wb-print-frame > thead,
-      .wb-print-frame > tfoot {
-        display: none !important;
-      }
-      .wb-print-frame > tbody,
-      .wb-print-frame > tbody > tr,
-      .wb-print-frame > tbody > tr > .wb-print-frame__body {
-        display: block;
-      }
-      .wb-print-header,
-      .wb-print-footer {
-        display: none !important;
-        visibility: hidden !important;
-        position: absolute !important;
-        width: 0 !important;
-        height: 0 !important;
-        overflow: hidden !important;
-        pointer-events: none !important;
-      }
-    }
-
-    /* ── Панель перед печатью (не попадает в PDF) ── */
     .wb-toolbar {
       width: 210mm;
       max-width: calc(100% - 24px);
@@ -616,9 +603,14 @@ function workbookPrintCss(): string {
       margin-top: 2mm;
     }
     .wb-task {
-      margin-bottom: 5mm;
+      margin-bottom: 0;
+      padding-bottom: 5mm;
       page-break-inside: avoid;
       break-inside: avoid;
+    }
+    .wb-task.tdoc-task--allow-break {
+      page-break-inside: auto;
+      break-inside: auto;
     }
     .wb-task__row {
       display: flex;
@@ -630,21 +622,32 @@ function workbookPrintCss(): string {
       width: var(--wb-num-w);
       display: flex;
       flex-direction: column;
-      align-items: center;
+      align-items: flex-start;
       padding-top: 1px;
     }
-    .wb-task__num {
-      width: var(--wb-num-w);
-      height: var(--wb-num-h);
-      border: 0.5pt solid var(--wb-line);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 10pt;
-      font-weight: 400;
-      line-height: 1;
+    .wb-task__num,
+    .wb-task .tdoc-pos__num {
+      width: auto;
+      min-width: 0;
+      height: auto;
+      border: none;
+      display: block;
+      font-size: 12pt;
+      font-weight: 700;
+      line-height: 1.25;
       color: var(--wb-text);
-      background: #fff;
+      background: transparent;
+    }
+    .wb-task__num::before,
+    .wb-task .tdoc-pos__num::before {
+      content: none;
+    }
+    .wb-task .tdoc-pos__exam,
+    .wb-task .tdoc-task__exam {
+      margin: 0 0 2mm;
+      font-size: 8.5pt;
+      font-weight: 600;
+      color: var(--wb-text-secondary);
     }
     .wb-task__id {
       margin-top: 1.5mm;
@@ -1099,37 +1102,54 @@ function workbookPrintCss(): string {
       max-width: 50%;
     }
 
-    /* ── Поле для решения (сетка на всю ширину) ── */
-    .wb-task__solution {
-      margin: 3mm 0 0;
-      width: 100%;
+    /* Поле решения: тетрадная сетка. Правила продублированы здесь,
+       чтобы PDF-вкладка не зависела от vite raw-import CSS. */
+    .tdoc-task__exam {
+      margin: 0 0 2mm;
+      font-size: 9.5pt;
+      color: var(--wb-text-secondary);
     }
+    .tdoc-solution,
+    .solution-area,
+    .wb-task__solution {
+      margin: 4mm 0 0;
+      width: 100%;
+      max-width: 100%;
+    }
+    .tdoc-solution__grid,
+    .solution-grid,
     .wb-solution-grid {
       width: 100%;
-      height: calc(var(--wb-cell) * var(--wb-grid-rows));
-      border: 0.5pt solid var(--wb-grid-line);
+      min-height: 45mm;
+      box-sizing: border-box;
+      border: 1px solid rgba(0, 0, 0, 0.14);
       background-color: #fff;
       background-image:
-        repeating-linear-gradient(
-          to bottom,
-          var(--wb-grid-line) 0,
-          var(--wb-grid-line) 0.5pt,
-          transparent 0.5pt,
-          transparent var(--wb-cell)
-        ),
-        repeating-linear-gradient(
-          to right,
-          var(--wb-grid-line) 0,
-          var(--wb-grid-line) 0.5pt,
-          transparent 0.5pt,
-          transparent var(--wb-cell)
-        );
+        linear-gradient(to right, rgba(0, 0, 0, 0.1) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(0, 0, 0, 0.1) 1px, transparent 1px);
+      background-size: 5mm 5mm;
+      background-repeat: repeat;
+      background-position: 0 0;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
+      color-adjust: exact;
+    }
+    .tdoc-solution--small .tdoc-solution__grid,
+    .solution-area--small .solution-grid {
+      min-height: 25mm;
+    }
+    .tdoc-solution--medium .tdoc-solution__grid,
+    .solution-area--medium .solution-grid {
+      min-height: 45mm;
+    }
+    .tdoc-solution--large .tdoc-solution__grid,
+    .solution-area--large .solution-grid {
+      min-height: 70mm;
     }
 
     /* ── Строка ответа ── */
-    .wb-task__answer {
+    .wb-task__answer,
+    .tdoc-answer {
       display: flex;
       align-items: baseline;
       gap: 3mm;
@@ -1289,7 +1309,7 @@ function workbookPrintCss(): string {
       width: 22mm;
     }
 
-    /* ── Колонтитулы (на каждой странице при печати) ── */
+    /* ── Колонтитулы: в потоке документа, без position:fixed ── */
     .wb-print-header,
     .wb-print-footer {
       display: none;
@@ -1303,50 +1323,28 @@ function workbookPrintCss(): string {
 
     @media print {
       html, body.workbook-body {
+        width: 210mm;
         background: #fff;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
       }
-      .wb-toolbar {
+      .wb-toolbar,
+      .no-print {
         display: none !important;
       }
       .workbook-sheet {
         width: auto;
+        max-width: none;
         min-height: auto;
         margin: 0;
-        padding: 0 var(--wb-margin-right) 0 var(--wb-margin-left);
+        padding: 0;
         box-shadow: none;
-      }
-      .wb-print-frame {
-        display: table;
-      }
-      .wb-print-frame > thead {
-        display: table-header-group;
-      }
-      .wb-print-frame > tfoot {
-        display: table-footer-group;
-      }
-      .wb-print-frame > tbody {
-        display: table-row-group;
-      }
-      .wb-print-frame > tbody > tr {
-        display: table-row;
-      }
-      .wb-print-frame > tbody > tr > .wb-print-frame__body {
-        display: table-cell;
-      }
-      .wb-print-header-gap {
-        display: block;
-        height: calc(var(--wb-print-header-h) + 1em);
-      }
-      .wb-print-footer-gap {
-        display: block;
-        height: var(--wb-print-footer-h);
       }
       .wb-answer-key-section {
         break-inside: avoid;
         page-break-inside: avoid;
       }
-      .wb-task,
-      .wb-solution-grid,
+      .wb-task:not(.tdoc-task--allow-break),
       .wb-teacher-block {
         break-inside: avoid;
         page-break-inside: avoid;
@@ -1366,76 +1364,21 @@ function workbookPrintCss(): string {
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
       }
-      .wb-print-header {
-        display: grid !important;
-        visibility: visible !important;
-        position: fixed !important;
-        top: 0;
-        left: 0;
-        right: 0;
-        width: auto !important;
-        height: var(--wb-print-header-h) !important;
-        overflow: visible !important;
-        pointer-events: none !important;
-        grid-template-columns: 1fr auto 1fr;
-        align-items: center;
-        gap: 3mm;
-        box-sizing: border-box;
-        padding: 1.5mm var(--wb-margin-right) 1.5mm var(--wb-margin-left);
-        font-size: 7.5pt;
-        line-height: 1.2;
-        color: var(--wb-text-secondary);
-        border-bottom: 0.5pt solid var(--wb-line-light);
-        background: #fff;
-        z-index: 2;
+      .tdoc-solution__grid,
+      .solution-grid,
+      .wb-solution-grid {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        color-adjust: exact !important;
+        background-image:
+          linear-gradient(to right, rgba(0, 0, 0, 0.12) 1px, transparent 1px),
+          linear-gradient(to bottom, rgba(0, 0, 0, 0.12) 1px, transparent 1px) !important;
+        background-size: 5mm 5mm !important;
+        background-repeat: repeat !important;
       }
-      .wb-print-header--simple {
-        display: flex !important;
-        justify-content: space-between;
-      }
-      .wb-print-header__brand {
-        color: var(--wb-accent-muted);
-        text-align: left;
-      }
-      .wb-print-header__center {
-        text-align: center;
-        font-size: 7pt;
-        color: var(--wb-text-secondary);
-      }
-      .wb-print-header__handle {
-        text-align: right;
-        color: var(--wb-text-secondary);
-      }
-      .wb-print-header--simple .wb-print-header__center {
-        display: none;
-      }
-      .wb-print-footer {
-        display: flex !important;
-        visibility: visible !important;
-        position: fixed !important;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        width: auto !important;
-        height: var(--wb-print-footer-h) !important;
-        overflow: visible !important;
-        pointer-events: none !important;
-        box-sizing: border-box;
-        align-items: center;
-        justify-content: space-between;
-        padding: 0 var(--wb-margin-right) 0 var(--wb-margin-left);
-        font-size: 7.5pt;
-        line-height: 1.2;
-        color: var(--wb-text-secondary);
-        background: #fff;
-        z-index: 2;
-      }
-      .wb-print-footer__brand {
-        color: var(--wb-accent-muted);
-      }
-      .wb-print-footer__page::after {
-        content: counter(page);
-      }
+      .tdoc-solution--small .tdoc-solution__grid { min-height: 25mm; height: 25mm; }
+      .tdoc-solution--medium .tdoc-solution__grid { min-height: 45mm; height: 45mm; }
+      .tdoc-solution--large .tdoc-solution__grid { min-height: 70mm; height: 70mm; }
     }
   `;
 }
@@ -1462,12 +1405,13 @@ function normalizeWorkbookTableTypography(root: ParentNode): void {
   });
 }
 
-export function typesetWorkbookMath(doc: Document): Promise<void> {
+export function typesetWorkbookMath(doc: Document, attempt = 0): Promise<void> {
   const mj = (doc.defaultView as Window | null)?.MathJax;
   if (!mj?.typesetPromise) {
+    if (attempt >= 40) return Promise.resolve();
     return new Promise((resolve) => {
       setTimeout(() => {
-        typesetWorkbookMath(doc).then(resolve);
+        typesetWorkbookMath(doc, attempt + 1).then(resolve);
       }, 120);
     });
   }
@@ -1487,6 +1431,44 @@ export function typesetWorkbookMath(doc: Document): Promise<void> {
     .catch(() => undefined);
 }
 
+function waitForDocumentAssets(doc: Document): Promise<void> {
+  const win = doc.defaultView;
+  const fonts = win?.document?.fonts?.ready?.catch?.(() => undefined) ?? Promise.resolve();
+  const images = Array.from(doc.images || []).map((img) => {
+    if (img.complete) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const done = () => resolve();
+      img.addEventListener("load", done, { once: true });
+      img.addEventListener("error", done, { once: true });
+      setTimeout(done, 4000);
+    });
+  });
+  return Promise.all([fonts, ...images]).then(() => undefined);
+}
+
+function markOversizedWorkbookTasks(doc: Document): void {
+  const probe = doc.createElement("div");
+  probe.style.cssText = "position:absolute;visibility:hidden;height:250mm;width:0;pointer-events:none";
+  doc.body.appendChild(probe);
+  const pagePx = probe.offsetHeight || 0;
+  probe.remove();
+  if (pagePx < 80) return;
+  doc.querySelectorAll(".tdoc-task, .wb-task").forEach((el) => {
+    if (!(el instanceof HTMLElement)) return;
+    if (el.offsetHeight > pagePx) {
+      el.classList.add("tdoc-task--allow-break");
+    } else {
+      el.classList.remove("tdoc-task--allow-break");
+    }
+  });
+}
+
+export async function prepareWorkbookForPrint(doc: Document): Promise<void> {
+  await typesetWorkbookMath(doc);
+  await waitForDocumentAssets(doc);
+  markOversizedWorkbookTasks(doc);
+}
+
 export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): string {
   const origin = siteOrigin();
   const isVariant = meta.mode === "variant";
@@ -1495,11 +1477,17 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
   const subtitle = meta.subtitle?.trim() ?? "";
   const { center: headerCenter, right: headerRight } = parseWorkbookHeader(subtitle);
   const options = normalizeOptions(meta.options);
-  const tasksHtml = renderTasksHtml(tasks, options, meta.mode, meta.subject, meta.level);
-  const sheetInfoHtml = buildSheetInfoHtml(tasks, meta.mode);
-  const answerKeyHtml = buildAnswerKeySectionHtml(tasks, meta.subject);
-
-  const pageHeaderCenter = [headerCenter, meta.examDuration].filter(Boolean).join(" · ");
+  const documentTasks =
+    isVariant
+      ? assignDisplayNumbers(orderVariantDocumentTasks(tasks, { level: meta.level, subject: meta.subject }))
+      : assignDisplayNumbers(tasks);
+  const tasksHtml = isVariant
+    ? renderVariantTasksHtml(documentTasks, options, meta.subject, meta.level)
+    : documentTasks
+        .map((task) => renderTask(task, task.displayNumber, options, false, meta.subject, meta.level))
+        .join("\n");
+  const sheetInfoHtml = buildSheetInfoHtml(documentTasks, meta.mode);
+  const answerKeyHtml = buildAnswerKeySectionHtml(documentTasks, meta.subject);
 
   const gradingChecked = options.showGrading ? "checked" : "";
   const solutionChecked = options.showSolutionSpace ? "checked" : "";
@@ -1521,10 +1509,15 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
     .filter(Boolean)
     .join(" ");
 
+  const durationHtml = meta.examDuration
+    ? `<p class="wb-sheet-info">${escapeHtml(meta.examDuration)}</p>`
+    : "";
+
   const sheetHeaderHtml = isVariant
     ? `<header class="wb-header wb-header--variant">
       <h1 class="wb-sheet-title">${sheetTitle}</h1>
       ${sheetInfoHtml}
+      ${durationHtml}
       <p class="wb-student-line">
         Фамилия, имя<span class="wb-fill"></span>
         Класс<span class="wb-fill wb-fill--short"></span>
@@ -1544,19 +1537,6 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
         Дата<span class="wb-fill wb-fill--short"></span>
       </p>
     </header>`;
-
-  const printHeaderClass = isVariant ? "wb-print-header" : "wb-print-header wb-print-header--simple";
-  const printHeaderHtml = isVariant
-    ? `<header class="${printHeaderClass}" aria-hidden="true">
-    <span class="wb-print-header__brand">Цифровой поток</span>
-    <span class="wb-print-header__center">${escapeHtml(pageHeaderCenter)}</span>
-    <span class="wb-print-header__handle">@itfluxacademy</span>
-  </header>`
-    : `<header class="${printHeaderClass}" aria-hidden="true">
-    <span class="wb-print-header__brand">Цифровой поток</span>
-    <span class="wb-print-header__center"></span>
-    <span class="wb-print-header__handle">@itfluxacademy</span>
-  </header>`;
 
   const teacherBlock = `
       <section class="wb-teacher-block" aria-label="Для учителя">
@@ -1584,7 +1564,7 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
   <style>${workbookPrintCss()}</style>
 </head>
 <body class="${bodyClasses}">
-  <div class="wb-toolbar">
+  <div class="wb-toolbar no-print">
     <div class="wb-toolbar__group">
       <label>
         <input type="checkbox" id="toggle-grading" ${gradingChecked} />
@@ -1615,43 +1595,17 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
     <button type="button" onclick="window.close()">Закрыть</button>
   </div>
 
-  <main class="workbook-sheet">
-    <table class="wb-print-frame">
-      <thead>
-        <tr>
-          <td><div class="wb-print-header-gap" aria-hidden="true"></div></td>
-        </tr>
-      </thead>
-      <tfoot>
-        <tr>
-          <td><div class="wb-print-footer-gap" aria-hidden="true"></div></td>
-        </tr>
-      </tfoot>
-      <tbody>
-        <tr>
-          <td class="wb-print-frame__body">
-            ${sheetHeaderHtml}
+  <main class="tdoc workbook-sheet">
+    ${sheetHeaderHtml}
 
-            <div class="wb-tasks">
-              ${tasksHtml}
-            </div>
+    <div class="wb-tasks tdoc-tasks">
+      ${tasksHtml}
+    </div>
 
-            ${answerKeyHtml}
+    ${answerKeyHtml}
 
-            ${teacherBlock}
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    ${teacherBlock}
   </main>
-
-  ${printHeaderHtml}
-
-  <footer class="wb-print-footer" aria-hidden="true">
-    <span class="wb-print-footer__brand">Цифровой поток</span>
-    <span class="wb-print-footer__page"></span>
-    <span class="wb-print-footer__handle">@itfluxacademy</span>
-  </footer>
 
   <script>
     (function () {
@@ -1684,7 +1638,9 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
         printBtn.textContent = "Печать / Сохранить в PDF";
         printBtn.onclick = function () { window.print(); };
       }
-      if (window.opener && typeof window.opener.__typesetWorkbookTab === "function") {
+      if (window.opener && typeof window.opener.__prepareWorkbookTab === "function") {
+        window.opener.__prepareWorkbookTab(window).then(enablePrint).catch(enablePrint);
+      } else if (window.opener && typeof window.opener.__typesetWorkbookTab === "function") {
         window.opener.__typesetWorkbookTab(window).then(enablePrint).catch(enablePrint);
       } else {
         enablePrint();
@@ -1710,8 +1666,12 @@ export function openWorkbook(tasks: WorkbookTask[], meta: WorkbookMeta): void {
     return;
   }
 
-  (window as Window & { __typesetWorkbookTab?: (w: Window) => Promise<void> }).__typesetWorkbookTab =
-    (tab) => typesetWorkbookMath(tab.document);
+  const hookHost = window as Window & {
+    __typesetWorkbookTab?: (w: Window) => Promise<void>;
+    __prepareWorkbookTab?: (w: Window) => Promise<void>;
+  };
+  hookHost.__prepareWorkbookTab = (tab) => prepareWorkbookForPrint(tab.document);
+  hookHost.__typesetWorkbookTab = (tab) => prepareWorkbookForPrint(tab.document);
 
   win.document.open();
   win.document.write(html);

@@ -5,6 +5,7 @@ import {
   fetchReviewHomeworkPreview,
 } from "../../utils/cabinetAuth";
 import CabinetModal from "./CabinetModal";
+import { TaskPosition } from "../../components/taskDocument/TaskNumber";
 
 function toLocalInputValue(iso) {
   if (!iso) return "";
@@ -306,9 +307,13 @@ export default function HomeworkFromReviewModal({
                         />
                         <span className="hw-from-review__card-body">
                           <strong>
-                            {task.number != null ? `№${task.number}` : "Задание"}
-                            {" · "}
-                            {task.title || id}
+                            <TaskPosition
+                              mode="compact"
+                              position={task.display_number ?? task.displayNumber ?? task.position}
+                              examNumber={task.number}
+                              level={preview?.level}
+                            />
+                            {task.title || task.task_id ? ` · ${task.title || task.task_id}` : ""}
                           </strong>
                           <span>
                             {statusLabel(task.status)}

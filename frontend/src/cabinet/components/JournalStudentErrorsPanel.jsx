@@ -13,6 +13,7 @@ import {
 import { fetchJournalStudentErrors } from "../../utils/cabinetAuth";
 import { homeworkAttachmentKey } from "../homeworkAttachmentState";
 import HomeworkFromErrorsModal, { taskErrorKey } from "./HomeworkFromErrorsModal";
+import { TaskPosition } from "../../components/taskDocument/TaskNumber";
 
 function statusLabel(status) {
   if (status === "partial") return "Частично";
@@ -497,7 +498,12 @@ export default function JournalStudentErrorsPanel({
                             </td>
                           ) : null}
                           <td className="jg-errors-table__num">
-                            {task.number != null ? `№${task.number}` : "—"}
+                            <TaskPosition
+                              mode="compact"
+                              position={task.display_number ?? task.displayNumber ?? task.position}
+                              examNumber={task.number}
+                              level={group.level}
+                            />
                           </td>
                           <td>
                             <div className="jg-errors-table__title">

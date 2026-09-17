@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import confetti from "canvas-confetti";
 import StudentNameModal from "./StudentNameModal";
+import { TaskPosition } from "./taskDocument/TaskNumber";
+import { assignDisplayNumbers } from "../utils/taskDocument";
 
 /**
  * Модальное окно с результатами выполнения варианта.
@@ -121,12 +123,14 @@ export default function ResultsModal({ open, onClose, results, onRetry }) {
     tasks,
     level,
   } = results;
-  const taskIdToNumber = tasks?.reduce((acc, t) => ({ ...acc, [t.id]: t.number }), {}) ?? {};
+  const numberedTasks = assignDisplayNumbers(tasks || []);
+  const taskIdToDisplay = numberedTasks.reduce((acc, t) => ({ ...acc, [String(t.id)]: t.displayNumber }), {});
+  const taskById = numberedTasks.reduce((acc, t) => ({ ...acc, [String(t.id)]: t }), {});
 
   const taskTimesEntries =
     taskTimes && Object.keys(taskTimes).length > 0
       ? Object.entries(taskTimes).sort(
-          ([a], [b]) => (taskIdToNumber[a] ?? 0) - (taskIdToNumber[b] ?? 0)
+          ([a], [b]) => (taskIdToDisplay[String(a)] ?? 0) - (taskIdToDisplay[String(b)] ?? 0)
         )
       : [];
 
@@ -246,7 +250,14 @@ export default function ResultsModal({ open, onClose, results, onRetry }) {
                     <tbody>
                       {taskTimesEntries.map(([taskId, seconds]) => (
                         <tr key={taskId}>
-                          <td>{taskIdToNumber[taskId] ?? taskId}</td>
+                          <td>
+                            <TaskPosition
+                              mode="compact"
+                              position={taskIdToDisplay[String(taskId)]}
+                              examNumber={taskById[String(taskId)]?.number}
+                              level={level}
+                            />
+                          </td>
                           <td>{formatDurationCompact(seconds)}</td>
                         </tr>
                       ))}

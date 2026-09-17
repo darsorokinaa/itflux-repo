@@ -19,6 +19,7 @@ import {
 import { homeworkJournalStatusLabel, wasHomeworkSubmittedLate } from "../journal/homeworkStatus";
 import LateHomeworkMark from "../journal/LateHomeworkMark";
 import { journalEventPk } from "../journal/openLessonSummary";
+import { TaskPosition } from "../../components/taskDocument/TaskNumber";
 import "../styles/journal.css";
 
 const SECTIONS = [
@@ -105,9 +106,16 @@ function HomeworkResultBlock({ result, showCorrectAnswer = true }) {
               </tr>
             </thead>
             <tbody>
-              {tasks.map((task) => (
+              {tasks.map((task, index) => (
                 <tr key={`hw-${result.homework_id}-${task.id || task.number}`}>
-                  <td>{task.number ?? "—"}</td>
+                  <td>
+                    <TaskPosition
+                      mode="result"
+                      position={task.display_number ?? task.displayNumber ?? task.position ?? index + 1}
+                      examNumber={task.number}
+                      level={result.level}
+                    />
+                  </td>
                   <td>{String(task.student_answer || "").trim() || "—"}</td>
                   {showCorrectAnswer ? (
                     <td>{String(task.correct_answer || "").trim() || "—"}</td>
@@ -1336,9 +1344,16 @@ function RecordExpanded({
                 </tr>
               </thead>
               <tbody>
-                {variantTasks.map((task) => (
+                {variantTasks.map((task, index) => (
                   <tr key={`${record.id}-${task.id || task.number}`}>
-                    <td>{task.number ?? "—"}</td>
+                    <td>
+                      <TaskPosition
+                        mode="result"
+                        position={task.display_number ?? task.displayNumber ?? task.position ?? index + 1}
+                        examNumber={task.number}
+                        level={record.level || variantResult.level}
+                      />
+                    </td>
                     <td>{String(task.student_answer || "").trim() || "—"}</td>
                     <td>{String(task.correct_answer || "").trim() || "—"}</td>
                     <td>

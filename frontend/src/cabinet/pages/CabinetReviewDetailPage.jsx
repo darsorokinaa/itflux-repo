@@ -21,6 +21,8 @@ import {
   resolvePart1Verdict,
   taskMaxScore,
 } from "../cabinetReviewUtils";
+import { assignDisplayNumbers } from "../../utils/taskDocument";
+import { TaskPosition } from "../../components/taskDocument/TaskNumber";
 import {
   isEgeInfParallelProcessesTask,
   isEgeInfRoadGraphTask,
@@ -554,17 +556,18 @@ export default function CabinetReviewDetailPage() {
 
   const part1Tasks = useMemo(() => {
     if (!variant?.tasks?.length || !reviewCtx) return [];
-    return variant.tasks
-      .filter((t) => inferExamTaskPart(t, reviewCtx.level, reviewCtx.subject) === 1)
-      .sort((a, b) => a.number - b.number);
+    return assignDisplayNumbers(variant.tasks).filter(
+      (t) => inferExamTaskPart(t, reviewCtx.level, reviewCtx.subject) === 1
+    );
   }, [variant, reviewCtx]);
 
   const part2Tasks = useMemo(() => {
     if (!variant?.tasks?.length || !reviewCtx) return [];
-    return variant.tasks
-      .filter((t) => inferExamTaskPart(t, reviewCtx.level, reviewCtx.subject) === 2)
-      .sort((a, b) => a.number - b.number);
+    return assignDisplayNumbers(variant.tasks).filter(
+      (t) => inferExamTaskPart(t, reviewCtx.level, reviewCtx.subject) === 2
+    );
   }, [variant, reviewCtx]);
+  const reviewTaskTotal = (variant?.tasks || []).length;
 
   const homeworkReviewData = useMemo(() => {
     if (!reviewCtx?.has_variant || !variant?.tasks?.length || !level || !subject) return null;
@@ -1072,8 +1075,14 @@ export default function CabinetReviewDetailPage() {
                   return (
                     <article key={task.id} className="cb-review-detail__task">
                       <div className="cb-review-detail__task-head">
-                        <span className="cb-review-detail__task-num">{task.number}</span>
-                        <strong>Задание {task.number}</strong>
+                        <TaskPosition
+                          mode="review"
+                          position={task.displayNumber}
+                          total={reviewTaskTotal}
+                          examNumber={task.number}
+                          level={level}
+                          topic={task.task_title}
+                        />
                         <VerdictBadge verdict={verdict} />
                       </div>
                       <TaskCondition task={task} level={level} subject={subject} />
@@ -1170,8 +1179,14 @@ export default function CabinetReviewDetailPage() {
                   return (
                     <article key={task.id} className="cb-review-detail__task">
                       <div className="cb-review-detail__task-head">
-                        <span className="cb-review-detail__task-num">{task.number}</span>
-                        <strong>Задание {task.number}</strong>
+                        <TaskPosition
+                          mode="review"
+                          position={task.displayNumber}
+                          total={reviewTaskTotal}
+                          examNumber={task.number}
+                          level={level}
+                          topic={task.task_title}
+                        />
                       </div>
                       <TaskCondition task={task} level={level} subject={subject} />
                       <div className="cb-review-detail__answer-block">

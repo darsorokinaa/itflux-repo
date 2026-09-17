@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { isUserAnswerCorrect } from "../../utils/examAnswerCheck";
+import { TaskPosition } from "../../components/taskDocument/TaskNumber";
 
 export function stripAnswerHtml(html) {
   return String(html || "")
@@ -79,13 +80,12 @@ function buildTasks(answers) {
   const students = answers?.students || [];
   const rows = Array.isArray(answers?.tasks) ? answers.tasks : [];
   if (rows.length) {
-    return [...rows]
-      .map((t, index) => ({
-        id: t.id,
-        number: t.number != null ? t.number : index + 1,
-        answer: t.answer || "",
-      }))
-      .sort((a, b) => (Number(a.number) || 0) - (Number(b.number) || 0));
+    return [...rows].map((t, index) => ({
+      id: t.id,
+      number: t.number,
+      displayNumber: index + 1,
+      answer: t.answer || "",
+    }));
   }
   const byIdKeys = new Set();
   students.forEach((row) => {
@@ -95,15 +95,18 @@ function buildTasks(answers) {
     });
   });
   if (byIdKeys.size) {
-    return [...byIdKeys].map((id, index) => ({ id, number: index + 1, answer: "" }));
+    return [...byIdKeys].map((id, index) => ({ id, number: null, displayNumber: index + 1, answer: "" }));
   }
   const nums = new Set();
   students.forEach((row) => {
     Object.keys(row.result?.by_number || row.result?.byNumber || {}).forEach((n) => nums.add(n));
   });
-  return [...nums]
-    .sort((a, b) => Number(a) - Number(b))
-    .map((n) => ({ id: null, number: n, answer: "" }));
+  return [...nums].map((n, index) => ({
+    id: null,
+    number: n,
+    displayNumber: index + 1,
+    answer: "",
+  }));
 }
 
 /**
@@ -158,7 +161,14 @@ export default function LiveVariantAnswersTable({ answers, loading = false, comp
                       const correct = stripAnswerHtml(task.answer);
                       return (
                         <tr key={`${row.studentId}-${task.id || task.number}`}>
-                          <td>{task.number ?? "—"}</td>
+                          <td>
+                            <TaskPosition
+                              mode="result"
+                              position={task.displayNumber}
+                              examNumber={task.number}
+                              level={answers?.level}
+                            />
+                          </td>
                           <td className="live-variant-answers__pre">{value.trim() ? value : "—"}</td>
                           <td className="live-variant-answers__pre">{correct || "—"}</td>
                           <td>

@@ -18033,17 +18033,17 @@ select.cb-lesson-card__about-input.is-empty {
   margin-bottom: 10px;
 }
 
-.cb-review-detail__task-num {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  background: #EEF2FF;
-  color: #4338CA;
-  font-size: 0.82rem;
-  font-weight: 800;
+.cb-review-detail__task-num,
+.cb-review-detail__task-head .tdoc-pos__progress {
+  background: transparent;
+  color: #1a2433;
+  min-width: 0;
+  height: auto;
+  border-radius: 0;
+}
+
+.cb-review-detail__task-head .tdoc-pos__exam {
+  color: #64748b;
 }
 
 .cb-review-detail__task-answer {

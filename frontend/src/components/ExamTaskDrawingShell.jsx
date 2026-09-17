@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import DrawingPanel, { ERASER_CURSOR_CSS, ExamTaskDrawingHeaderButton } from "./DrawingPanel";
+import SolutionArea from "./taskDocument/SolutionArea";
 import { loadExamDrawingOverlay, saveExamDrawingOverlay } from "../utils/examTaskDrawingStorage";
 import { findHitStroke, newStrokeId, redrawAllStrokes, sanitizeStrokes } from "../utils/taskStrokeDrawing";
 
@@ -497,9 +498,7 @@ function ExamTaskDrawingShell({
       >
         <div className="exam-task-card__body-inner">{children}</div>
         {!narrowPhone && extraDrawingPad && showCanvasLayer && (
-          <div className="exam-task-draw-extra-slab" aria-hidden="true">
-            <span className="exam-task-draw-extra-slab__hint">Дополнительное место в клетку</span>
-          </div>
+          <SolutionArea size="large" />
         )}
         {showCanvasLayer && (
           <canvas ref={canvasRef} className={canvasClass} style={canvasStyle} aria-hidden="true" />
