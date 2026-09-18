@@ -49,7 +49,11 @@ except Exception:
     _WEASYPRINT_OK = False
 
 from .error_report_utils import notify_error_report_email
-from .task_tag_access import can_edit_bank_tasks, can_edit_task_tags
+from .variant_theme_service import (
+    VariantThemeAssignmentError,
+    assign_theme_from_payload,
+    theme_for_variant_payload,
+)
 from .models import (
     Announcement,
     Criteria,
@@ -1189,6 +1193,19 @@ def _taskgroup_ids_matching_task_numbers(subject_instance, level_instance, task_
     )
 
 
+def _theme_from_create_payload(request, data):
+    theme, error = assign_theme_from_payload(
+        user=getattr(request, "user", None),
+        data=data if isinstance(data, dict) else {},
+    )
+    if error:
+        message, status = error
+        raise VariantThemeAssignmentError(message, status)
+    if theme is Ellipsis:
+        return None
+    return theme
+
+
 def _create_variant(subject_short, level_str, body_bytes, create=True, request=None):
     subject_instance = get_subject_for_api(subject_short)
     level_instance = get_object_or_404(Level, level=level_str)
@@ -1790,6 +1807,7 @@ def _create_variant(subject_short, level_str, body_bytes, create=True, request=N
             created_by=username_for_created_by(request),
             share_token=secrets.token_urlsafe(12),
             content=content or {},
+            theme=_theme_from_create_payload(request, data if isinstance(data, dict) else {}),
         )
         VariantContent.objects.bulk_create([
             VariantContent(variant=new_variant, task=task, order=index)
@@ -2423,6 +2441,8 @@ def api_generate_variant(request, level, subject):
         except Exception:
             pass
         return response
+    except VariantThemeAssignmentError as exc:
+        return JsonResponse({'error': exc.message}, status=exc.status)
     except AccessDenied as exc:
         return JsonResponse(exc.to_dict(), status=403)
     except Exception as e:
@@ -2870,11 +2890,17 @@ def api_variant_from_ids(request, level, subject):
             continue
         task_map[tid] = task
 
+    try:
+        theme = _theme_from_create_payload(request, data)
+    except VariantThemeAssignmentError as exc:
+        return JsonResponse({'error': exc.message}, status=exc.status)
+
     variant = create_variant_for_request(
         subject=subject_instance,
         level=level_instance,
         request=request,
         created_by='lk_teacher',
+        theme=theme,
     )
 
     vc_objects = []
@@ -4104,6 +4130,8 @@ def _variant_detail_payload(request, variant, *, include_answers=True):
         "level": variant.level.level,
         "subject": variant.var_subject.subject_short,
         "tasks": tasks_data,
+        "theme_id": getattr(variant, "theme_id", None),
+        "theme": theme_for_variant_payload(variant, request),
         **_subject_background_payload(variant.var_subject, request),
     }
     if show_teacher_meta:
@@ -4138,14 +4166,49 @@ def _request_should_see_variant_answers(request) -> bool:
     return True
 
 
+@csrf_exempt
+@require_http_methods(["GET", "PATCH"])
 def api_variant_detail(request, level, subject, variant_id):
-    variant = get_object_or_404(Variant.objects.select_related('level', 'var_subject'), id=variant_id)
+    variant = get_object_or_404(
+        Variant.objects.select_related("level", "var_subject", "theme"),
+        id=variant_id,
+    )
     url_level = (level or "").strip().lower()
     url_subject = (subject or "").strip().lower()
     if (variant.level.level or "").strip().lower() != url_level:
         raise Http404()
     if (variant.var_subject.subject_short or "").strip().lower() != url_subject:
         raise Http404()
+    if request.method == "PATCH":
+        try:
+            data = json.loads(request.body.decode("utf-8") or "{}")
+        except (TypeError, ValueError, UnicodeDecodeError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        extra_keys = set(data.keys()) - {"theme_id", "theme"}
+        if extra_keys:
+            return JsonResponse({"error": "Можно изменить только оформление варианта"}, status=400)
+        theme, error = assign_theme_from_payload(
+            user=getattr(request, "user", None),
+            data=data,
+            required=True,
+        )
+        if error:
+            message, status = error
+            return JsonResponse({"error": message}, status=status)
+        variant.theme = None if theme is Ellipsis else theme
+        variant.save(update_fields=["theme"])
+        variant = Variant.objects.select_related("level", "var_subject", "theme").get(pk=variant.pk)
+        response = JsonResponse(
+            _variant_detail_payload(
+                request,
+                variant,
+                include_answers=_request_should_see_variant_answers(request),
+            )
+        )
+        response["Cache-Control"] = "private, no-store"
+        return response
     response = JsonResponse(
         _variant_detail_payload(
             request,
@@ -4208,7 +4271,10 @@ def api_variant_check_answer(request, variant_id):
 @require_http_methods(["GET"])
 def api_lesson_variant_detail(request, variant_id):
     """Вариант для урока: всегда по /api, без зависимости от роутинга SPA."""
-    variant = get_object_or_404(Variant.objects.select_related("level", "var_subject"), id=variant_id)
+    variant = get_object_or_404(
+        Variant.objects.select_related("level", "var_subject", "theme"),
+        id=variant_id,
+    )
     response = JsonResponse(
         _variant_detail_payload(
             request,

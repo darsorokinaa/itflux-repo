@@ -24,6 +24,7 @@ from .models import Profile, ScheduleEvent, TeacherApplication, TeacherCommunity
 from .invitations import invite_accept_api_payload
 from .plan_catalog import can_publish_catalog_lesson_plan
 from .task_tags import can_edit_bank_tasks, can_edit_task_tags
+from Generator.variant_theme_access import can_manage_variant_themes, can_select_variant_theme
 from .rate_limit import client_ip, rate_limit_check, rate_limit_json_response
 from .avatar_api import build_avatar_url
 from .schedule_events import (
@@ -66,6 +67,8 @@ def _profile_payload(user):
         "is_staff": bool(getattr(user, "is_staff", False)),
         "is_superuser": bool(getattr(user, "is_superuser", False)),
         "can_edit_bank_tasks": can_edit_bank_tasks(user),
+        "can_manage_variant_themes": can_manage_variant_themes(user),
+        "can_select_variant_theme": can_select_variant_theme(user),
         "timezone": (profile.timezone or "").strip() or "Europe/Moscow",
     }
 

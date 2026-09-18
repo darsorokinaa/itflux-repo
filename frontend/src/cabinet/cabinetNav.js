@@ -134,7 +134,7 @@ export function getCabinetSectionTitle(pathname) {
   if (/\/cabinet\/plans\/[^/]+$/.test(pathname)) return "План занятий";
   if (pathname.startsWith("/cabinet/interactives/new")) return "Создать интерактив";
   if (pathname.startsWith("/cabinet/interactives/")) return "Интерактив";
-  if (pathname.startsWith("/cabinet/boards/")) return "Доска";
+  if (pathname.startsWith("/cabinet/variant-themes")) return "Темы вариантов";
 
   // Desktop-навигация приоритетнее mobile (там другие подписи, напр. «Расписание» vs «Календарь»).
   const candidates = [

@@ -11,6 +11,7 @@ import { useAnonLimitModal } from "../hooks/useAnonLimitModal";
 import { rememberValueReached, trackValueGoal } from "../utils/valuePath";
 import { rememberLastVariant } from "../utils/recentLessons";
 import { fetchCabinetSession } from "../utils/cabinetAuth";
+import VariantThemeSelector from "../variantThemes/VariantThemeSelector";
 import "../styles/my-task-bank.css";
 
 const SUBJECT_NAMES = {
@@ -168,6 +169,7 @@ function TasksPage() {
   const [showPrepIntro, setShowPrepIntro] = useState(true);
   const [submitBlock1, setSubmitBlock1] = useState(false);
   const [submitBlock2, setSubmitBlock2] = useState(false);
+  const [variantThemeId, setVariantThemeId] = useState(null);
 
   const variantSectionRef = useRef(null);
   const trainerSectionRef = useRef(null);
@@ -398,7 +400,9 @@ function TasksPage() {
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
       signal: controller.signal,
-      body: JSON.stringify(payload),
+      body: JSON.stringify(
+        variantThemeId ? { ...payload, theme_id: variantThemeId } : payload
+      ),
     })
       .then(async (res) => {
         window.clearTimeout(timeoutId);
@@ -1323,6 +1327,7 @@ function TasksPage() {
                   </aside>
                 ) : null}
                 </div>
+                <VariantThemeSelector value={variantThemeId} onChange={setVariantThemeId} compact />
                 <div className="subject-pick__actions tasks-prep-variant-generate">
                   <button
                     type="button"

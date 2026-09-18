@@ -1,4 +1,5 @@
 import { resolveTaskPosition } from "../../utils/taskDocument";
+import { useVariantThemeLabels } from "../../variantThemes/VariantThemeRoot";
 
 /**
  * Единое отображение позиции задания в наборе и номера по экзамену/банку.
@@ -27,6 +28,7 @@ export function TaskPosition({
   className = "",
   children,
 }) {
+  const labels = useVariantThemeLabels();
   const model = resolveTaskPosition({
     position,
     displayNumber,
@@ -36,6 +38,7 @@ export function TaskPosition({
     task,
     level,
     topic,
+    taskLabel: labels.task,
   });
   const shown = model.position;
   const examText = model.examLabel;
@@ -57,7 +60,7 @@ export function TaskPosition({
           {model.progressLabel ? (
             <strong className="tdoc-pos__progress">{model.progressLabel}</strong>
           ) : shown != null ? (
-            <strong className="tdoc-pos__progress">Задание {shown}</strong>
+            <strong className="tdoc-pos__progress">{labels.task} {shown}</strong>
           ) : null}
           {examText ? <span className="tdoc-pos__exam">{examText}</span> : null}
           {topicText ? <span className="tdoc-pos__exam">{topicText}</span> : null}
@@ -113,7 +116,7 @@ export function TaskPosition({
         {examText ? <strong className="tdoc-pos__exam">{examText}</strong> : null}
         {!examText && topicText ? <strong className="tdoc-pos__exam">{topicText}</strong> : null}
         {!examText && !topicText && shown != null ? (
-          <strong className="tdoc-pos__fallback">Задание {shown}</strong>
+          <strong className="tdoc-pos__fallback">{labels.task} {shown}</strong>
         ) : null}
         {showMeta ? (
           <span className="exam-task-card__meta tdoc-pos__meta">

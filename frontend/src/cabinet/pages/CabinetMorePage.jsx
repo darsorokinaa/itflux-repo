@@ -139,6 +139,15 @@ export default function CabinetMorePage() {
 
   const moreGroups = [
     ...CABINET_MORE_GROUPS,
+    ...(user?.can_manage_variant_themes
+      ? [{
+          id: "admin",
+          label: "Администрирование",
+          items: [
+            { id: "variant-themes", label: "Темы вариантов", path: "/cabinet/variant-themes", icon: "spark" },
+          ],
+        }]
+      : []),
     {
       id: "help",
       label: "Помощь",

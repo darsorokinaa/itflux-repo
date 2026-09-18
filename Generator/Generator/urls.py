@@ -6,6 +6,7 @@ from django.views.static import serve
 
 from . import views
 from . import seasonal_theme_api
+from . import variant_theme_api
 from Cabinet import homework_api
 from Cabinet import homework_notebooks
 from Cabinet import homework_task_files
@@ -203,6 +204,21 @@ urlpatterns = [
         "api/seasonal-theme/preview/stop/",
         seasonal_theme_api.SeasonalThemePreviewStopView.as_view(),
         name="seasonal_theme_preview_stop",
+    ),
+    path(
+        "api/variant-themes/available/",
+        variant_theme_api.VariantThemeAvailableView.as_view(),
+        name="variant_theme_available",
+    ),
+    path(
+        "api/admin/variant-themes/",
+        variant_theme_api.VariantThemeAdminListCreateView.as_view(),
+        name="variant_theme_admin_list",
+    ),
+    path(
+        "api/admin/variant-themes/<int:theme_id>/",
+        variant_theme_api.VariantThemeAdminDetailView.as_view(),
+        name="variant_theme_admin_detail",
     ),
     path("api/lessons/", views.api_lessons, name="api_lessons"),
     path("api/lessons/purchases/", views.api_lesson_purchases, name="api_lesson_purchases"),

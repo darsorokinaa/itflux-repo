@@ -31,6 +31,7 @@ export type TaskPositionInput = {
   task?: DocumentTaskLike | null;
   level?: string | null;
   topic?: string | null;
+  taskLabel?: string | null;
 };
 
 export function toDisplayNumber(
@@ -88,7 +89,7 @@ export function resolveTaskPosition(input: TaskPositionInput = {}): {
     input.level,
     position
   );
-  const progressLabel = formatTaskProgress(position, total);
+  const progressLabel = formatTaskProgress(position, total, input.taskLabel);
   return {
     position,
     total,
@@ -119,12 +120,17 @@ export function examTypeShortLabel(
   return label ? `${label} №${exam}` : `№${exam}`;
 }
 
-export function formatTaskProgress(position: number | null, total?: number | null): string {
+export function formatTaskProgress(
+  position: number | null,
+  total?: number | null,
+  taskLabel = "Задание"
+): string {
   const pos = toDisplayNumber(position);
   if (pos == null) return "";
+  const word = String(taskLabel || "Задание").trim() || "Задание";
   const tot = toDisplayNumber(total);
-  if (tot != null) return `Задание ${pos} из ${tot}`;
-  return `Задание ${pos}`;
+  if (tot != null) return `${word} ${pos} из ${tot}`;
+  return `${word} ${pos}`;
 }
 
 export function taskPositionAriaLabel(input: {
@@ -133,9 +139,10 @@ export function taskPositionAriaLabel(input: {
   examNumber?: number | null;
   level?: string | null;
   topic?: string | null;
+  taskLabel?: string | null;
 }): string {
   const parts: string[] = [];
-  const progress = formatTaskProgress(input.position ?? null, input.total);
+  const progress = formatTaskProgress(input.position ?? null, input.total, input.taskLabel);
   if (progress) parts.push(`${progress}.`);
   const exam = toDisplayNumber(input.examNumber);
   if (exam != null) {

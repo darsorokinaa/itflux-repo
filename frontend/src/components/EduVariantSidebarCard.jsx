@@ -5,6 +5,8 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { TaskPosition } from "./taskDocument/TaskNumber";
 import { taskPositionAriaLabel } from "../utils/taskDocument";
+import { useVariantTheme, useVariantThemeLabels } from "../variantThemes/VariantThemeRoot";
+import { ThemeRouteProgress } from "../variantThemes/ThemeNavigation";
 
 function SidebarTimerControls({ store, formatTimer }) {
   const timerStatus = useSyncExternalStore(store.subscribe, store.getStatus, store.getStatus);
@@ -87,7 +89,11 @@ export default function EduVariantSidebarCard({
   finishBusy = false,
   submittedMessage = "",
   level = "",
+  checkedTasks = {},
+  userAnswers = {},
 }) {
+  const theme = useVariantTheme();
+  const labels = useVariantThemeLabels();
   const taskTotal = navTasksOrdered.length;
   const currentNavTask = navTasksOrdered.find((t) => t.id === activeNavTaskId) ?? navTasksOrdered[0];
   const isFullVariantMode = mode === "variant";
@@ -152,8 +158,10 @@ export default function EduVariantSidebarCard({
     return `${from}–${to} из ${taskTotal}`;
   }, [needTaskPaging, pageRanges, taskNavPage, taskTotal]);
 
+  const isRouteLayout = theme.layoutType === "route";
+
   return (
-    <div className="exam-edu-side-card">
+    <div className={`exam-edu-side-card${theme.isClassic ? "" : " exam-edu-side-card--themed"}`}>
       <div className="exam-edu-side-section exam-edu-side-section--timer">
         <span className="exam-edu-side-section__eyebrow">Время выполнения</span>
         <SidebarTimerControls store={timerStore} formatTimer={formatTimer} />
@@ -187,7 +195,7 @@ export default function EduVariantSidebarCard({
       </div>
 
       <div className="exam-edu-side-section exam-edu-side-section--tasks">
-        <span className="exam-edu-side-section__eyebrow">Задания</span>
+        <span className="exam-edu-side-section__eyebrow">{labels.tasks}</span>
         {currentNavTask ? (
           <TaskPosition
             mode="viewer"
@@ -199,31 +207,45 @@ export default function EduVariantSidebarCard({
             topic={currentNavTask.task_title}
           />
         ) : null}
-        <div className="exam-edu-task-nav-wrap">
-          <div className="exam-edu-task-nav" role="navigation" aria-label="Номера заданий">
-            {pagedNavTasks.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                className={examNavBtnClass(t)}
-                aria-label={taskPositionAriaLabel({
-                  position: t.displayNumber,
-                  total: taskTotal,
-                  examNumber: t.number,
-                  level,
-                  topic: t.task_title,
-                })}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  goToExamTask(t.id);
-                  onAfterNavTask?.();
-                }}
-              >
-                {t.displayNumber ?? t.number}
-              </button>
-            ))}
+        {isRouteLayout ? (
+          <ThemeRouteProgress
+            tasks={navTasksOrdered}
+            activeId={activeNavTaskId}
+            onSelect={(id) => {
+              goToExamTask(id);
+              onAfterNavTask?.();
+            }}
+            checkedTasks={checkedTasks}
+            userAnswers={userAnswers}
+          />
+        ) : (
+          <div className="exam-edu-task-nav-wrap">
+            <div className="exam-edu-task-nav" role="navigation" aria-label="Номера заданий">
+              {pagedNavTasks.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={examNavBtnClass(t)}
+                  aria-label={taskPositionAriaLabel({
+                    position: t.displayNumber,
+                    total: taskTotal,
+                    examNumber: t.number,
+                    level,
+                    topic: t.task_title,
+                    taskLabel: labels.task,
+                  })}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    goToExamTask(t.id);
+                    onAfterNavTask?.();
+                  }}
+                >
+                  {t.displayNumber ?? t.number}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {supportItems?.length > 0 ? (
@@ -245,7 +267,7 @@ export default function EduVariantSidebarCard({
         </div>
       ) : null}
 
-      {needTaskPaging ? (
+      {needTaskPaging && !isRouteLayout ? (
         <div className="exam-edu-side-section exam-edu-side-section--task-pager">
           <div className="exam-edu-task-nav-pager" aria-label="Страницы списка заданий">
             <button
@@ -281,7 +303,7 @@ export default function EduVariantSidebarCard({
             onClick={onFinish}
             disabled={finishDisabled || finishBusy}
           >
-            {finishBusy ? "Отправка…" : (finishLabel || "Завершить вариант")}
+            {finishBusy ? "Отправка…" : (finishLabel || labels.finish)}
           </button>
         )
       )}

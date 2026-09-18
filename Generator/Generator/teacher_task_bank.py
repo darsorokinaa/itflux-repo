@@ -243,6 +243,7 @@ def create_variant_for_request(
     created_by: str | None = None,
     share_token: str | None = None,
     content=None,
+    theme=None,
 ) -> Variant:
     teacher = request_teacher(request)
     kwargs = {
@@ -250,6 +251,8 @@ def create_variant_for_request(
         "level": level,
         "created_by": created_by or username_for_created_by(request),
     }
+    if theme is not None:
+        kwargs["theme"] = theme
     if share_token is not None:
         kwargs["share_token"] = share_token
     if content is not None:

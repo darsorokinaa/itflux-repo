@@ -365,12 +365,12 @@ class SubTopicAdmin(admin.ModelAdmin):
 
 @admin.register(Variant)
 class VariantAdmin(SearchByIdMixin, admin.ModelAdmin):
-    list_display = ("id", "var_subject", "level", "owner_teacher", "local_number", "created_by", "created_at")
-    list_filter = ("var_subject", "level", "created_by")
+    list_display = ("id", "var_subject", "level", "theme", "owner_teacher", "local_number", "created_by", "created_at")
+    list_filter = ("var_subject", "level", "created_by", "theme")
     search_fields = ("created_by",)
     date_hierarchy = "created_at"
-    list_select_related = ("var_subject", "level", "owner_teacher")
-    raw_id_fields = ("owner_teacher",)
+    list_select_related = ("var_subject", "level", "owner_teacher", "theme")
+    raw_id_fields = ("owner_teacher", "theme")
     list_per_page = 25
     show_full_result_count = False
 
@@ -1183,3 +1183,34 @@ class SeasonalThemeDecorationAdmin(admin.ModelAdmin):
     search_fields = ("name", "theme__name", "theme__slug")
     list_select_related = ("theme",)
     autocomplete_fields = ("theme",)
+
+
+from .variant_theme_models import VariantTheme  # noqa: E402
+from .variant_theme_service import sanitize_variant_theme_config  # noqa: E402
+
+
+@admin.register(VariantTheme)
+class VariantThemeAdmin(admin.ModelAdmin):
+    list_display = ("id", "name", "slug", "layout_type", "is_active", "is_published", "updated_at")
+    list_filter = ("layout_type", "is_active", "is_published")
+    search_fields = ("name", "slug", "description")
+    prepopulated_fields = {"slug": ("name",)}
+    readonly_fields = ("created_at", "updated_at")
+    fields = (
+        "name",
+        "slug",
+        "description",
+        "layout_type",
+        "config",
+        "preview_image",
+        "background_image",
+        "block_background_image",
+        "is_active",
+        "is_published",
+        "created_at",
+        "updated_at",
+    )
+
+    def save_model(self, request, obj, form, change):
+        obj.config = sanitize_variant_theme_config(obj.config)
+        super().save_model(request, obj, form, change)

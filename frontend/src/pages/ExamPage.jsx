@@ -67,11 +67,12 @@ import {
   normalizeHomeworkAttachment,
   removeHomeworkAttachment,
 } from "../cabinet/homeworkAttachmentState";
-import {
-  fetchCabinetSession,
-  fetchVideoMeetingLiveAnswers,
-  isTeacherRole,
-} from "../utils/cabinetAuth";
+import { VariantThemeRoot } from "../variantThemes/VariantThemeRoot";
+import { resolveVariantTheme } from "../variantThemes/registry";
+import VariantThemeSelector from "../variantThemes/VariantThemeSelector";
+import { TravelMiniMap } from "../variantThemes/TravelMarks";
+import { assignVariantTheme } from "../variantThemes/variantThemeApi";
+import { fetchCabinetSession, fetchVideoMeetingLiveAnswers, isTeacherRole } from "../utils/cabinetAuth";
 import LiveVariantAnswersTable from "../cabinet/components/LiveVariantAnswersTable";
 import "../cabinet/styles/live-variant-answers.css";
 import HomeworkReviewResults, {
@@ -832,6 +833,7 @@ function ExamPage() {
   const showExamEducationShell = !lessonEmbedParams.embed;
   const cabinetAssignmentId = homeworkQuery.cabinetAssignment;
   const [cabinetUser, setCabinetUser] = useState(null);
+  const [canSelectVariantTheme, setCanSelectVariantTheme] = useState(false);
   const [liveAnswers, setLiveAnswers] = useState(null);
   const [liveAnswersLoading, setLiveAnswersLoading] = useState(false);
   /** Учитель на вкладке варианта во время урока — определяем по доступу к live-answers. */
@@ -1125,10 +1127,16 @@ function ExamPage() {
     let cancelled = false;
     fetchCabinetSession()
       .then((data) => {
-        if (!cancelled) setCabinetUser(data?.authenticated ? data.user : null);
+        if (!cancelled) {
+          setCabinetUser(data?.authenticated ? data.user : null);
+          setCanSelectVariantTheme(Boolean(data?.user?.can_select_variant_theme));
+        }
       })
       .catch(() => {
-        if (!cancelled) setCabinetUser(null);
+        if (!cancelled) {
+          setCabinetUser(null);
+          setCanSelectVariantTheme(false);
+        }
       });
     return () => {
       cancelled = true;
@@ -2385,6 +2393,8 @@ function ExamPage() {
   const heroLeadForEdu = `${variant.tasks.length} ${ruTasksWord(variant.tasks.length)} для подготовки. Решайте по порядку или переходите к нужному номеру.`;
   const navTasksOrdered = documentTasks;
   const currentNavTask = navTasksOrdered.find((t) => t.id === examNavActiveId) ?? navTasksOrdered[0];
+  const themeCurrentId = examNavActiveId ?? currentNavTask?.id ?? null;
+  const resolvedTheme = resolveVariantTheme(variant?.theme);
   const activeBoardPersist =
     examNavActiveId != null ? boardsByTask[String(examNavActiveId)] : undefined;
   const activeBoardHasDraft = boardPersistHasDraft(activeBoardPersist);
@@ -2885,6 +2895,7 @@ function ExamPage() {
   }
 
   return (
+    <VariantThemeRoot payload={variant?.theme}>
     <>
     <div className="exam-edu-shell digital-flow-page">
     </div>
@@ -3034,6 +3045,25 @@ function ExamPage() {
           >
             <div className={`exam-edu-layout${showExamEducationShell ? "" : " exam-edu-layout--single"}`}>
               <div className="exam-edu-main">
+                {canSelectVariantTheme && !homeworkStudentMode ? (
+                  <div className="no-print">
+                    <VariantThemeSelector
+                      compact
+                      showHint
+                      value={variant?.theme_id ?? variant?.theme?.id ?? null}
+                      onChange={(themeId) => {
+                        assignVariantTheme({
+                          level,
+                          subject,
+                          variantId: variant.id,
+                          themeId,
+                        }).then((data) => {
+                          if (data) setVariant(data);
+                        }).catch(() => {});
+                      }}
+                    />
+                  </div>
+                ) : null}
                 {showExamEducationShell && (
                   <div className="mobile-variant-bar" aria-label="Компактная панель варианта">
                     <div className="mobile-stat mobile-stat--time">
@@ -3055,7 +3085,7 @@ function ExamPage() {
                       className="mobile-bar-btn"
                       onClick={() => setMobileVariantNavOpen(true)}
                     >
-                      Задания
+                      {resolvedTheme.labels.tasks}
                     </button>
                     <button
                       type="button"
@@ -3067,7 +3097,7 @@ function ExamPage() {
                     </button>
                   </div>
                 )}
-            <header className="exam-edu-hero no-print">
+            <header className={`exam-edu-hero no-print${resolvedTheme.isClassic ? "" : " exam-edu-hero--themed"}`}>
               <div className="exam-edu-hero__grid">
                 <div className="exam-edu-hero__content">
                   <div className="exam-edu-hero__badges" aria-label="Предмет и формат работы">
@@ -3104,11 +3134,15 @@ function ExamPage() {
                   )}
                 </div>
                 <div className="exam-edu-hero-visual" aria-hidden="true">
-                  <div className="exam-edu-hero-visual-inner">
-                    <span className="exam-edu-hero-deco exam-edu-hero-deco--g" />
-                    <span className="exam-edu-hero-deco exam-edu-hero-deco--p" />
-                    <span className="exam-edu-hero-deco exam-edu-hero-deco--stu" />
-                  </div>
+                  {!resolvedTheme.isClassic ? (
+                    <TravelMiniMap className="exam-edu-hero-visual__theme" />
+                  ) : (
+                    <div className="exam-edu-hero-visual-inner">
+                      <span className="exam-edu-hero-deco exam-edu-hero-deco--g" />
+                      <span className="exam-edu-hero-deco exam-edu-hero-deco--p" />
+                      <span className="exam-edu-hero-deco exam-edu-hero-deco--stu" />
+                    </div>
+                  )}
                 </div>
               </div>
             </header>
@@ -3153,7 +3187,7 @@ function ExamPage() {
                   data-task-id={task.id}
                   data-task-number={task.number}
                   data-display-number={taskDisplayNumber(task)}
-                  className={`exam-task-card tdoc-task task-block exam-task-card--p1${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${level === "ege" && subject === "math" && Number(task.number) === 11 ? " task-function-graphs" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${isEgeInfTruthTableTask(level, subject, task.number) ? " exam-task-card--ege-inf-2" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
+                  className={`exam-task-card tdoc-task task-block exam-task-card--p1${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${level === "ege" && subject === "math" && Number(task.number) === 11 ? " task-function-graphs" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${isEgeInfTruthTableTask(level, subject, task.number) ? " exam-task-card--ege-inf-2" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}${String(task.id) === String(themeCurrentId) ? " is-theme-current" : ""}`}
                   onClick={() => handleTaskFocus(task.id)}
                 >
                   <div className="exam-task-card__top">
@@ -3565,7 +3599,7 @@ function ExamPage() {
                         <section
                           key={task.id}
                           data-task-id={task.id}
-                          className={`exam-task-card tdoc-task task-block exam-task-card--p2 exam-task-card--in-group${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${level === "ege" && subject === "math" && Number(task.number) === 11 ? " task-function-graphs" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${isEgeInfTruthTableTask(level, subject, task.number) ? " exam-task-card--ege-inf-2" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
+                          className={`exam-task-card tdoc-task task-block exam-task-card--p2 exam-task-card--in-group${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${level === "ege" && subject === "math" && Number(task.number) === 11 ? " task-function-graphs" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${isEgeInfTruthTableTask(level, subject, task.number) ? " exam-task-card--ege-inf-2" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}${String(task.id) === String(themeCurrentId) ? " is-theme-current" : ""}`}
                           data-display-number={taskDisplayNumber(task)}
                           onClick={() => handleTaskFocus(task.id)}
                         >
@@ -3677,7 +3711,7 @@ function ExamPage() {
                     <section
                       key={task.id}
                       data-task-id={task.id}
-                      className={`exam-task-card tdoc-task task-block exam-task-card--p2${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${level === "ege" && subject === "math" && Number(task.number) === 11 ? " task-function-graphs" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${isEgeInfTruthTableTask(level, subject, task.number) ? " exam-task-card--ege-inf-2" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
+                      className={`exam-task-card tdoc-task task-block exam-task-card--p2${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${level === "ege" && subject === "math" && Number(task.number) === 11 ? " task-function-graphs" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${isEgeInfTruthTableTask(level, subject, task.number) ? " exam-task-card--ege-inf-2" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}${String(task.id) === String(themeCurrentId) ? " is-theme-current" : ""}`}
                       data-display-number={taskDisplayNumber(task)}
                       onClick={() => handleTaskFocus(task.id)}
                     >
@@ -3892,6 +3926,8 @@ function ExamPage() {
                     finishDisabled={homeworkStudentMode && (hwActionBusy || hwLoading)}
                     finishBusy={homeworkStudentMode && hwActionBusy}
                     submittedMessage={homeworkSidebarSubmittedMessage}
+                    checkedTasks={checkedTasks}
+                    userAnswers={userAnswers}
                     onFinish={handleSidebarFinish}
                   />
                 </aside>
@@ -3911,7 +3947,7 @@ function ExamPage() {
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div className="mobile-panel-head">
-                      <h3 className="mobile-panel-title">Навигация по варианту</h3>
+                      <h3 className="mobile-panel-title">{resolvedTheme.labels.tasks}</h3>
                       <button
                         type="button"
                         className="mobile-panel-close"
@@ -3945,6 +3981,8 @@ function ExamPage() {
                       finishDisabled={homeworkStudentMode && (hwActionBusy || hwLoading)}
                       finishBusy={homeworkStudentMode && hwActionBusy}
                       submittedMessage={homeworkSidebarSubmittedMessage}
+                      checkedTasks={checkedTasks}
+                      userAnswers={userAnswers}
                       onFinish={() => {
                         setMobileVariantNavOpen(false);
                         handleSidebarFinish();
@@ -4013,6 +4051,7 @@ function ExamPage() {
       )}
     </div>
     </>
+    </VariantThemeRoot>
   );
 }
 

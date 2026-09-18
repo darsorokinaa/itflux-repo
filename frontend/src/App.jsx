@@ -54,6 +54,8 @@ import MeetingCallDock from "./cabinet/components/MeetingCallDock";
 import CabinetMorePage from "./cabinet/pages/CabinetMorePage";
 import CabinetReportsPage from "./cabinet/CabinetReportsPage";
 import CabinetUpgradePage from "./cabinet/pages/CabinetUpgradePage";
+import CabinetVariantThemesPage from "./cabinet/pages/CabinetVariantThemesPage";
+import CabinetVariantThemeEditorPage from "./cabinet/pages/CabinetVariantThemeEditorPage";
 import CabinetPaymentsPage from "./cabinet/pages/CabinetPaymentsPage";
 import CabinetJournalPage from "./cabinet/pages/CabinetJournalPage";
 import CabinetJournalAnalyticsPage from "./cabinet/pages/CabinetJournalAnalyticsPage";
@@ -461,6 +463,9 @@ function App() {
             <Route path="ai" element={<Navigate to="/cabinet" replace />} />
             <Route path="more" element={<CabinetMorePage />} />
             <Route path="upgrade" element={<CabinetUpgradePage />} />
+            <Route path="variant-themes" element={<CabinetVariantThemesPage />} />
+            <Route path="variant-themes/new" element={<CabinetVariantThemeEditorPage />} />
+            <Route path="variant-themes/:themeId" element={<CabinetVariantThemeEditorPage />} />
           </Route>
           <Route path="/login" element={<Navigate to="/cabinet/login" replace />} />
           <Route path="/subject" element={<SubjectPage />} />

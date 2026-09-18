@@ -4,6 +4,7 @@ import { useAnonLimitModal } from "../hooks/useAnonLimitModal";
 import { rememberValueReached, trackValueGoal } from "../utils/valuePath";
 import { rememberLastVariant } from "../utils/recentLessons";
 import type { WorkbookTask } from "../utils/buildWorkbookHtml";
+import VariantThemeSelector from "../variantThemes/VariantThemeSelector";
 
 type VariantCreateBarProps = {
   active: boolean;
@@ -25,6 +26,7 @@ export default function VariantCreateBar({
   const navigate = useNavigate();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [themeId, setThemeId] = useState<number | null>(null);
   const { modal: anonLimitModal, openFromError } = useAnonLimitModal();
 
   const countLabel = useMemo(() => {
@@ -54,7 +56,10 @@ export default function VariantCreateBar({
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
           signal: controller.signal,
-          body: JSON.stringify({ task_ids: tasks.map((task) => task.id) }),
+          body: JSON.stringify({
+            task_ids: tasks.map((task) => task.id),
+            ...(themeId ? { theme_id: themeId } : {}),
+          }),
         }
       );
       window.clearTimeout(timeoutId);
@@ -116,7 +121,7 @@ export default function VariantCreateBar({
     } finally {
       setSubmitting(false);
     }
-  }, [level, navigate, onCreated, openFromError, subject, subjectName, submitting, tasks]);
+  }, [level, navigate, onCreated, openFromError, subject, subjectName, submitting, tasks, themeId]);
 
   if (!active) return null;
 
@@ -127,6 +132,7 @@ export default function VariantCreateBar({
           {error}
         </p>
       ) : null}
+      <VariantThemeSelector value={themeId} onChange={setThemeId} disabled={submitting} compact />
       <div className="workbook-create-bar__actions">
         <span className="workbook-create-bar__count">{countLabel}</span>
         <button

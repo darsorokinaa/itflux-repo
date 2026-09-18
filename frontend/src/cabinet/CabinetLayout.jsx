@@ -357,6 +357,17 @@ export default function CabinetLayout() {
               </div>
             </div>
           ))}
+          {user?.can_manage_variant_themes ? (
+            <div className="cabinet-nav-group">
+              <p className="cabinet-nav-group__label">Администрирование</p>
+              <div className="cabinet-nav-group__items">
+                <NavSidebarItem
+                  item={{ id: "variant-themes", label: "Темы вариантов", path: "/cabinet/variant-themes", icon: "spark" }}
+                  active={isCabinetNavActive(location.pathname, { path: "/cabinet/variant-themes" })}
+                />
+              </div>
+            </div>
+          ) : null}
         </nav>
         <div className="cabinet-sidebar-bottom">
           <Link

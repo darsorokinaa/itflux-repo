@@ -433,6 +433,14 @@ class Variant(models.Model):
         null=True,
         blank=True,
     )
+    theme = models.ForeignKey(
+        "VariantTheme",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="variants",
+        verbose_name="Тема оформления",
+    )
 
     class Meta:
         indexes = [
@@ -1336,3 +1344,4 @@ class ReportNextStepTemplate(models.Model):
 
 # Сезонное / праздничное оформление (импорт для Django model discovery)
 from .seasonal_theme_models import SeasonalTheme, SeasonalThemeDecoration  # noqa: E402,F401
+from .variant_theme_models import VariantTheme  # noqa: E402,F401
