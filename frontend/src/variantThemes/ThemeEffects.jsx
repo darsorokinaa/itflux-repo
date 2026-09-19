@@ -46,7 +46,7 @@ export default function ThemeEffects({ type }) {
     }));
   }, [motionType, narrow, reduced, showParticles]);
 
-  if (reduced || motionType === "none" || motionType === "plane-route") return null;
+  if (reduced || motionType === "none" || motionType === "plane-route" || motionType === "travel-route") return null;
 
   if (!showParticles || !items.length) return null;
 

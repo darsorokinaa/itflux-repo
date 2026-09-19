@@ -40,13 +40,17 @@ class VariantTheme(models.Model):
         "Конфигурация",
         default=dict,
         blank=True,
-        help_text="labels, decorations, animation, background. Без HTML/JS.",
+        help_text=(
+            "JSON: labels, decorations, animation, background. "
+            "Можно задать animation=travel-route и background.type=gradient."
+        ),
     )
     preview_image = models.ImageField(
         "Превью",
         upload_to=variant_theme_upload_to,
         blank=True,
         null=True,
+        help_text="Картинка в каталоге тем. Выберите файл и нажмите «Сохранить».",
     )
     background_image = models.ImageField(
         "Фон",

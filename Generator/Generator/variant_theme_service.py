@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from django.utils.html import strip_tags
@@ -11,10 +12,42 @@ from .variant_theme_models import VariantTheme
 
 ALLOWED_LAYOUTS = frozenset(choice[0] for choice in VariantTheme.LayoutType.choices)
 ALLOWED_ANIMATIONS = frozenset(
-    ("none", "falling-leaves", "snow", "floating-stars", "plane-route", "clouds")
+    (
+        "none",
+        "falling-leaves",
+        "snow",
+        "floating-stars",
+        "plane-route",
+        "travel-route",
+        "clouds",
+    )
 )
-ALLOWED_DECORATIONS = frozenset(("clouds", "route", "plane", "leaves", "stars", "map"))
-ALLOWED_BACKGROUND_TYPES = frozenset(("none", "color", "image"))
+ALLOWED_DECORATIONS = frozenset(
+    (
+        "clouds",
+        "route",
+        "plane",
+        "leaves",
+        "stars",
+        "map",
+        "camera",
+        "backpack",
+        "compass",
+        "suitcase",
+        "postcard",
+        "passport",
+        "airplane",
+        "route-dots",
+        "mountains",
+        "sea",
+        "sailboats",
+        "flowers",
+    )
+)
+ALLOWED_BACKGROUND_TYPES = frozenset(("none", "color", "image", "gradient"))
+ALLOWED_GRADIENT_DIRECTIONS = frozenset(
+    ("sunset", "sunrise", "vertical", "horizontal", "radial")
+)
 ALLOWED_LABEL_KEYS = ("task", "tasks", "next", "previous", "finish")
 
 DEFAULT_LABELS = {
@@ -59,6 +92,11 @@ def _safe_color(value: Any) -> str:
 
 def sanitize_variant_theme_config(raw: Any) -> dict:
     """Оставляем только известные ключи. Произвольный HTML/JS отбрасывается."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (TypeError, ValueError):
+            raw = {}
     src = raw if isinstance(raw, dict) else {}
     out: dict[str, Any] = {}
 
@@ -70,6 +108,21 @@ def sanitize_variant_theme_config(raw: Any) -> dict:
     color = _safe_color(background.get("color"))
     if color:
         bg_out["color"] = color
+    if bg_type == "gradient":
+        colors = []
+        raw_colors = background.get("colors")
+        if isinstance(raw_colors, list):
+            for item in raw_colors[:8]:
+                item_color = _safe_color(item)
+                if item_color:
+                    colors.append(item_color)
+        if len(colors) >= 2:
+            bg_out["colors"] = colors
+            direction = str(background.get("direction") or "").strip().lower()
+            if direction in ALLOWED_GRADIENT_DIRECTIONS:
+                bg_out["direction"] = direction
+        else:
+            bg_out["type"] = "color" if color else "none"
     out["background"] = bg_out
 
     labels_src = src.get("labels") if isinstance(src.get("labels"), dict) else {}

@@ -1189,13 +1189,32 @@ from .variant_theme_models import VariantTheme  # noqa: E402
 from .variant_theme_service import sanitize_variant_theme_config  # noqa: E402
 
 
+class VariantThemeAdminForm(forms.ModelForm):
+    class Meta:
+        model = VariantTheme
+        fields = "__all__"
+        widgets = {
+            "config": forms.Textarea(
+                attrs={
+                    "rows": 24,
+                    "cols": 90,
+                    "style": "font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;",
+                }
+            ),
+        }
+
+    def clean_config(self):
+        return sanitize_variant_theme_config(self.cleaned_data.get("config"))
+
+
 @admin.register(VariantTheme)
 class VariantThemeAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "slug", "layout_type", "is_active", "is_published", "updated_at")
+    form = VariantThemeAdminForm
+    list_display = ("id", "name", "slug", "layout_type", "preview_thumb", "is_active", "is_published", "updated_at")
     list_filter = ("layout_type", "is_active", "is_published")
     search_fields = ("name", "slug", "description")
     prepopulated_fields = {"slug": ("name",)}
-    readonly_fields = ("created_at", "updated_at")
+    readonly_fields = ("preview_thumb", "created_at", "updated_at")
     fields = (
         "name",
         "slug",
@@ -1203,6 +1222,7 @@ class VariantThemeAdmin(admin.ModelAdmin):
         "layout_type",
         "config",
         "preview_image",
+        "preview_thumb",
         "background_image",
         "block_background_image",
         "is_active",
@@ -1210,6 +1230,19 @@ class VariantThemeAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     )
+
+    @admin.display(description="Превью")
+    def preview_thumb(self, obj):
+        if not obj or not getattr(obj, "preview_image", None):
+            return "Файл не загружен — выберите картинку в поле «Превью» и нажмите «Сохранить»."
+        try:
+            url = obj.preview_image.url
+        except (ValueError, AttributeError):
+            return "Файл не загружен — выберите картинку в поле «Превью» и нажмите «Сохранить»."
+        return format_html(
+            '<img src="{}" alt="" style="max-width:240px;max-height:120px;object-fit:cover;border-radius:8px" />',
+            url,
+        )
 
     def save_model(self, request, obj, form, change):
         obj.config = sanitize_variant_theme_config(obj.config)

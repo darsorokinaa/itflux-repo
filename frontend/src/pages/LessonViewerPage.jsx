@@ -72,13 +72,7 @@ export default function LessonViewerPage() {
       frameSrc={lesson && slug ? getLessonContentUrl(slug) : ""}
       loading={loading}
       error={error}
-      engagement={lesson?.slug ? {
-        kind: "lessons",
-        slug: lesson.slug,
-        viewsCount: lesson.views_count,
-        likesCount: lesson.likes_count,
-        isLiked: lesson.is_liked,
-      } : null}
+      engagement={lesson?.slug ? { kind: "lessons", slug: lesson.slug } : null}
     />
   );
 }

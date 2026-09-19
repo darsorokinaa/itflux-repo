@@ -1,5 +1,7 @@
 """Темы оформления вариантов: права, API, fallback, назначение theme_id."""
 
+import json
+
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase
@@ -278,6 +280,99 @@ class VariantThemeApiTests(TestCase):
         self.assertEqual(cleaned["animation"], "none")
         self.assertEqual(cleaned["decorations"], ["clouds"])
         self.assertNotIn("url", cleaned["background"])
+
+    def test_travel_json_config_is_kept(self):
+        cleaned = sanitize_variant_theme_config(
+            {
+                "labels": {
+                    "next": "Следующая остановка",
+                    "task": "Остановка",
+                    "tasks": "Маршрут",
+                    "finish": "Завершить путешествие",
+                    "previous": "Вернуться",
+                },
+                "animation": "travel-route",
+                "background": {
+                    "type": "gradient",
+                    "colors": ["#f7d6a3", "#f6b97a", "#9dcfe3"],
+                    "direction": "sunset",
+                },
+                "decorations": [
+                    "map",
+                    "camera",
+                    "backpack",
+                    "compass",
+                    "suitcase",
+                    "postcard",
+                    "passport",
+                    "airplane",
+                    "route-dots",
+                    "mountains",
+                    "sea",
+                    "sailboats",
+                    "flowers",
+                ],
+            }
+        )
+        self.assertEqual(cleaned["animation"], "travel-route")
+        self.assertEqual(cleaned["labels"]["task"], "Остановка")
+        self.assertEqual(cleaned["background"]["type"], "gradient")
+        self.assertEqual(cleaned["background"]["colors"], ["#f7d6a3", "#f6b97a", "#9dcfe3"])
+        self.assertEqual(cleaned["background"]["direction"], "sunset")
+        self.assertEqual(
+            cleaned["decorations"],
+            [
+                "map",
+                "camera",
+                "backpack",
+                "compass",
+                "suitcase",
+                "postcard",
+                "passport",
+                "airplane",
+                "route-dots",
+                "mountains",
+                "sea",
+                "sailboats",
+                "flowers",
+            ],
+        )
+
+    def test_staff_can_upload_preview_and_patch_travel_config(self):
+        from io import BytesIO
+        from PIL import Image
+
+        buf = BytesIO()
+        Image.new("RGB", (4, 4), (240, 180, 80)).save(buf, format="PNG")
+        preview = SimpleUploadedFile("preview.png", buf.getvalue(), content_type="image/png")
+        self.api.force_authenticate(self.staff)
+        resp = self.api.patch(
+            f"/api/admin/variant-themes/{self.travel.id}/",
+            {
+                "preview_image": preview,
+                "config": json.dumps(
+                    {
+                        "labels": {"task": "Остановка", "finish": "Завершить путешествие"},
+                        "animation": "travel-route",
+                        "background": {
+                            "type": "gradient",
+                            "colors": ["#f7d6a3", "#f6b97a", "#9dcfe3"],
+                            "direction": "sunset",
+                        },
+                        "decorations": ["map", "backpack", "airplane"],
+                    }
+                ),
+            },
+            format="multipart",
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertTrue(payload.get("preview_image_url"))
+        self.assertEqual(payload["config"]["animation"], "travel-route")
+        self.assertEqual(payload["config"]["background"]["type"], "gradient")
+        self.travel.refresh_from_db()
+        self.assertTrue(self.travel.preview_image)
+        self.assertEqual(self.travel.config.get("animation"), "travel-route")
 
     def test_me_exposes_theme_permissions(self):
         self.client.force_login(self.staff)

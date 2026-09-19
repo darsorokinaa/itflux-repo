@@ -8262,37 +8262,6 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   min-width: 11rem;
 }
 
-.lesson-viewer-page__toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.75rem 1.25rem;
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--border-card, #e4e8ff);
-  background: #fff;
-}
-
-.lesson-viewer-page__toolbar .lesson-viewer-page__back {
-  flex: 0 0 auto;
-}
-
-.lesson-viewer-page__toolbar .lesson-viewer-page__title {
-  flex: 1 1 12rem;
-  margin: 0;
-  font-size: 1.05rem;
-  font-weight: 650;
-  color: var(--text-main, #1a2236);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.lesson-viewer-page__toolbar .catalog-engagement {
-  margin: 0;
-  flex: 0 0 auto;
-}
-
 /* ── Access gate: регистрация / тариф / лимит ── */
 
 .access-gate-overlay,

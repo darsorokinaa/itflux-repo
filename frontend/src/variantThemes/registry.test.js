@@ -48,6 +48,27 @@ describe("resolveVariantTheme", () => {
     expect(theme.layoutType).toBe("classic");
   });
 
+  it("keeps travel-route animation, gradient and travel decorations", () => {
+    const theme = resolveVariantTheme({
+      slug: "travel",
+      layout_type: "route",
+      config: {
+        animation: "travel-route",
+        background: {
+          type: "gradient",
+          colors: ["#f7d6a3", "#f6b97a", "#9dcfe3"],
+          direction: "sunset",
+        },
+        decorations: ["map", "backpack", "airplane", "malware"],
+      },
+    });
+    expect(theme.animation).toBe("travel-route");
+    expect(theme.background.type).toBe("gradient");
+    expect(theme.background.colors).toEqual(["#f7d6a3", "#f6b97a", "#9dcfe3"]);
+    expect(theme.background.direction).toBe("sunset");
+    expect(theme.decorations).toEqual(["map", "backpack", "airplane"]);
+  });
+
   it("ignores unknown animation and decorations", () => {
     const theme = resolveVariantTheme({
       slug: "travel",

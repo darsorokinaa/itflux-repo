@@ -14,9 +14,29 @@ export const VARIANT_THEME_ANIMATIONS = [
   "snow",
   "floating-stars",
   "plane-route",
+  "travel-route",
   "clouds",
 ];
-export const VARIANT_THEME_DECORATIONS = ["clouds", "route", "plane", "leaves", "stars", "map"];
+export const VARIANT_THEME_DECORATIONS = [
+  "clouds",
+  "route",
+  "plane",
+  "leaves",
+  "stars",
+  "map",
+  "camera",
+  "backpack",
+  "compass",
+  "suitcase",
+  "postcard",
+  "passport",
+  "airplane",
+  "route-dots",
+  "mountains",
+  "sea",
+  "sailboats",
+  "flowers",
+];
 
 export const CLASSIC_VARIANT_THEME = {
   id: null,
@@ -26,7 +46,7 @@ export const CLASSIC_VARIANT_THEME = {
   labels: { ...DEFAULT_VARIANT_THEME_LABELS },
   decorations: [],
   animation: "none",
-  background: { type: "none", color: "", url: "", blockUrl: "" },
+  background: { type: "none", color: "", url: "", blockUrl: "", colors: [], direction: "" },
   previewImageUrl: "",
   isClassic: true,
 };
@@ -79,10 +99,16 @@ export function resolveVariantTheme(payload) {
     decorations,
     animation,
     background: {
-      type: backgroundSrc.type === "image" || backgroundSrc.type === "color" ? backgroundSrc.type : "none",
+      type: ["image", "color", "gradient"].includes(String(backgroundSrc.type || ""))
+        ? String(backgroundSrc.type)
+        : "none",
       color: String(backgroundSrc.color || ""),
       url: String(payload.background_image_url || payload.backgroundImageUrl || backgroundSrc.url || ""),
       blockUrl: String(payload.block_background_image_url || payload.blockBackgroundImageUrl || ""),
+      colors: Array.isArray(backgroundSrc.colors)
+        ? backgroundSrc.colors.map((item) => String(item || "")).filter((item) => /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(item))
+        : [],
+      direction: String(backgroundSrc.direction || ""),
     },
     previewImageUrl: String(payload.preview_image_url || payload.previewImageUrl || ""),
     isClassic: layoutType === "classic",

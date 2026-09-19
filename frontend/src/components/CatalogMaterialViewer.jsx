@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import CatalogEngagementBar, { useRegisterCatalogView } from "./CatalogEngagementBar";
+import { useRegisterCatalogView } from "./CatalogEngagementBar";
 
 /**
  * SPA-оболочка HTML-тренажёра/урока: контент в iframe, выход не уводит на /api/.
@@ -13,12 +13,11 @@ export default function CatalogMaterialViewer({
   error = "",
   engagement = null,
 }) {
-  const registeredViews = useRegisterCatalogView(
+  useRegisterCatalogView(
     engagement?.kind,
     engagement?.slug,
     Boolean(engagement?.slug && frameSrc && !loading && !error),
   );
-  const viewsCount = registeredViews ?? engagement?.viewsCount ?? 0;
   if (loading) {
     return (
       <div className="lesson-viewer-page lesson-viewer-page--loading">
@@ -43,21 +42,6 @@ export default function CatalogMaterialViewer({
 
   return (
     <div className="lesson-viewer-page lesson-viewer-page--doc">
-      <div className="lesson-viewer-page__toolbar">
-        {backHref ? (
-          <Link className="lesson-viewer-page__back" to={backHref}>{backLabel}</Link>
-        ) : null}
-        {title ? <h1 className="lesson-viewer-page__title">{title}</h1> : null}
-        {engagement?.slug ? (
-          <CatalogEngagementBar
-            kind={engagement.kind}
-            slug={engagement.slug}
-            viewsCount={viewsCount}
-            likesCount={engagement.likesCount}
-            isLiked={engagement.isLiked}
-          />
-        ) : null}
-      </div>
       <div className="lesson-viewer-page__doc-main">
         <iframe
           className="lesson-viewer-page__pdf-frame"

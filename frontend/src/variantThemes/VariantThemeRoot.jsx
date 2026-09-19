@@ -33,9 +33,24 @@ function clearPageBackground(node) {
   PAGE_BG_PROPS.forEach((prop) => node.style.removeProperty(prop));
 }
 
-function applyPageBackground(node, { pageImage, color }) {
+function fallbackGradient(background) {
+  const colors = Array.isArray(background?.colors)
+    ? background.colors.filter((item) => /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(item))
+    : [];
+  if (background?.type === "gradient" && colors.length >= 2) {
+    const joined = colors.join(", ");
+    if (background.direction === "radial") return `radial-gradient(ellipse at 50% 0%, ${joined})`;
+    if (background.direction === "sunset") return `linear-gradient(160deg, ${joined})`;
+    if (background.direction === "sunrise") return `linear-gradient(20deg, ${joined})`;
+    if (background.direction === "horizontal") return `linear-gradient(90deg, ${joined})`;
+    return `linear-gradient(180deg, ${joined})`;
+  }
+  return "linear-gradient(180deg, #9fc8e4 0%, #c5e0f2 42%, #e7f3fb 100%)";
+}
+
+function applyPageBackground(node, { pageImage, color, background }) {
   const wash = "linear-gradient(rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.3))";
-  const image = pageImage || "linear-gradient(180deg, #9fc8e4 0%, #c5e0f2 42%, #e7f3fb 100%)";
+  const image = pageImage || fallbackGradient(background);
   node.style.setProperty("background-image", `${wash}, ${image}`, "important");
   node.style.setProperty("background-size", pageImage ? "auto, cover" : "auto, 100% 100%", "important");
   node.style.setProperty("background-repeat", "no-repeat", "important");
@@ -105,7 +120,7 @@ export function VariantThemeRoot({ payload, children }) {
       if (blockImage) node.style.setProperty("--variant-theme-block-bg-image", blockImage);
       else node.style.removeProperty("--variant-theme-block-bg-image");
       node.style.setProperty("--variant-theme-bg-color", color);
-      applyPageBackground(node, { pageImage, color });
+      applyPageBackground(node, { pageImage, color, background: theme.background });
     });
     return () => {
       nodes.forEach(clearNode);
