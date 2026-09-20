@@ -123,6 +123,7 @@ import {
   shouldIgnoreReconnect,
   shouldStudentLeaveOnJitsiHangup,
 } from "../jitsiLeave";
+import { createHardReconnectPolicy } from "../jitsiMediaWatchdog";
 import ConnectionRecoveryBanner from "../components/ConnectionRecoveryBanner";
 import {
   RESUME_STATES,
@@ -398,6 +399,15 @@ export default function VideoMeetingPage() {
       : `tab-${Math.random().toString(36).slice(2, 12)}`,
   );
   const callSessionIdRef = useRef(createCallSessionId());
+  const reconnectPolicyRef = useRef(null);
+  if (!reconnectPolicyRef.current) {
+    reconnectPolicyRef.current = createHardReconnectPolicy();
+  }
+  const recoveryRemountRef = useRef(false);
+  const hardReconnectMetaRef = useRef(null);
+  const hardReconnectTimerRef = useRef(null);
+  const onReconnectRequiredRef = useRef(() => {});
+  const [callReconnectNeeded, setCallReconnectNeeded] = useState(false);
   const callStateRef = useRef(null);
   if (!callStateRef.current) {
     callStateRef.current = createCallStateMachine({
@@ -514,6 +524,10 @@ export default function VideoMeetingPage() {
     }
     setParticipantCount(null);
     setConnectionHint("");
+    if (hardReconnectTimerRef.current) {
+      window.clearTimeout(hardReconnectTimerRef.current);
+      hardReconnectTimerRef.current = null;
+    }
   }, []);
 
   const stopPolling = useCallback(() => {
@@ -553,6 +567,7 @@ export default function VideoMeetingPage() {
     stopPolling();
     sendLeave(true);
     disposeApi();
+    reconnectPolicyRef.current?.reset?.();
     navigate(STUDENT_HOME_ROUTE, { replace: true });
   }, [disposeApi, meetingUuid, navigate, sendLeave, stopPolling]);
   const leaveStudentRoomRef = useRef(leaveStudentRoom);
@@ -569,15 +584,17 @@ export default function VideoMeetingPage() {
   }, [attendanceTracker]);
 
   const initializeJitsi = useCallback(async () => {
-    if (shouldIgnoreReconnect(intentionalLeaveRef.current)) return;
+    if (shouldIgnoreReconnect(intentionalLeaveRef.current)) return false;
     if (!meetingUuid || jitsiInitRef.current || apiRef.current) {
-      return;
+      return Boolean(apiRef.current);
     }
     const cameraEnabled = cameraPrefRef.current === true
-      || (cameraPrefRef.current == null && getMeetingCameraEnabled(meetingUuid) === true);
+      || (cameraPrefRef.current == null && getMeetingCameraEnabled(meetingUuid) === true)
+      || (recoveryRemountRef.current && intendedMediaRef.current.camOn === true);
     const startWithVideoMuted = !cameraEnabled;
     // Первый вход — с muted mic; если пользователь уже включал микрофон в этом звонке — не глушим снова.
-    const micWasEnabled = getMeetingMicEnabled(meetingUuid) === true;
+    const micWasEnabled = getMeetingMicEnabled(meetingUuid) === true
+      || (recoveryRemountRef.current && intendedMediaRef.current.micOn === true);
     const startWithAudioMuted = !micWasEnabled;
     jitsiInitRef.current = true;
     programmaticDisposeRef.current = false;
@@ -609,12 +626,12 @@ export default function VideoMeetingPage() {
         if (initGenRef.current === initGen) {
           jitsiInitRef.current = false;
         }
-        return;
+        return false;
       }
       if (config?.meeting?.status && config.meeting.status !== "live") {
         jitsiInitRef.current = false;
         setPageState(config.meeting.status === "finished" ? "finished" : "waiting");
-        return;
+        return false;
       }
       if (!config?.domain || !config?.roomName) {
         throw Object.assign(new Error("Backend не смог создать конфигурацию"), { code: "config" });
@@ -768,6 +785,29 @@ export default function VideoMeetingPage() {
           conferencePresenceRef.current.joined = true;
           resumeControllerRef.current?.succeed?.();
           callStateRef.current?.transition(CALL_STATES.joined, "videoConferenceJoined");
+          reconnectPolicyRef.current?.markSuccess();
+          setCallReconnectNeeded(false);
+          const hardMeta = hardReconnectMetaRef.current;
+          hardReconnectMetaRef.current = null;
+          recoveryRemountRef.current = false;
+          if (hardMeta) {
+            void reportMeetingTechnicalEvent(meetingUuid, {
+              eventType: "jitsi_hard_reconnect_succeeded",
+              reason: hardMeta.reason || "",
+              browserTabSessionId: tabSessionIdRef.current,
+              callSessionId: callSessionIdRef.current,
+              jitsiParticipantId: event?.id || "",
+              metadata: {
+                reason: hardMeta.reason || "",
+                attempt: hardMeta.attempt,
+                previousCallSessionId: hardMeta.previousCallSessionId,
+                intendedMicOn: Boolean(intendedMediaRef.current.micOn),
+                intendedCamOn: Boolean(intendedMediaRef.current.camOn),
+                visibilityState: typeof document !== "undefined" ? document.visibilityState : "visible",
+                online: typeof navigator === "undefined" ? true : navigator.onLine !== false,
+              },
+            });
+          }
           void attendanceTracker.onVerifiedJoin(event);
           if (event?.roomName && config.roomName && !jitsiRoomsMatch(config.roomName, event.roomName)) {
             setMediaWarning(
@@ -793,12 +833,6 @@ export default function VideoMeetingPage() {
         onBecameModerator: showModeratorToast,
         onMediaWarning: (msg) => setMediaWarning(msg || ""),
         onConnectionHint: (msg) => {
-          const live = conferencePresenceRef.current.joined
-            && (conferencePresenceRef.current.mediaUp
-              || (conferencePresenceRef.current.remoteCount || 0) >= 1);
-          if (live && msg && /восстанавливаем/i.test(String(msg))) {
-            return;
-          }
           setConnectionHint(msg || "");
         },
         onConnectionState: (next, why) => {
@@ -816,23 +850,10 @@ export default function VideoMeetingPage() {
           } else if (next === "peer_glitch") {
             return;
           } else if (next === "reconnecting") {
-            const live = conferencePresenceRef.current.joined
-              && (conferencePresenceRef.current.mediaUp
-                || (conferencePresenceRef.current.remoteCount || 0) >= 1);
-            if (live) {
-              return;
-            }
             conferencePresenceRef.current.reconnecting = true;
             callStateRef.current?.transition(CALL_STATES.reconnecting, why);
-            if (!conferencePresenceRef.current.joined) {
-              setConnectionHint("Соединение восстанавливается…");
-            }
-            void reportMeetingTechnicalEvent(meetingUuid, {
-              eventType: "connection_reconnecting",
-              reason: why || "",
-              browserTabSessionId: tabSessionIdRef.current,
-              callSessionId: callSessionIdRef.current,
-            });
+            setConnectionHint("Соединение восстанавливается…");
+            attendanceTracker.cancelPendingLeave();
             void apiRef.current?.reconcileParticipants?.("connection-state");
           } else if (next === "degraded") {
             if (conferencePresenceRef.current.joined && conferencePresenceRef.current.mediaUp) {
@@ -846,6 +867,14 @@ export default function VideoMeetingPage() {
           }
         },
         getIntendedMedia: () => intendedMediaRef.current,
+        shouldReconnect: () => !shouldIgnoreReconnect(intentionalLeaveRef.current),
+        onRecoveryStarted: () => {
+          attendanceTracker.cancelPendingLeave();
+        },
+        onReconnectRequired: (payload) => {
+          if (shouldIgnoreReconnect(intentionalLeaveRef.current)) return;
+          onReconnectRequiredRef.current?.(payload);
+        },
         onAudioMuteStatusChanged: (payload) => {
           const on = !payload?.muted;
           setMeetingMicEnabled(meetingUuid, on);
@@ -926,7 +955,7 @@ export default function VideoMeetingPage() {
         } catch {
           /* ignore */
         }
-        return;
+        return false;
       }
       apiRef.current = wrapped;
       screenShareApiRef.current = wrapped.screenShare || null;
@@ -949,14 +978,15 @@ export default function VideoMeetingPage() {
       }
 
       attendanceTracker.cancelPendingLeave();
+      return true;
     } catch (err) {
       if (err?.code === "jitsi_aborted" || abort.signal.aborted) {
         if (initGenRef.current === initGen) jitsiInitRef.current = false;
-        return;
+        return false;
       }
       if (initGenRef.current !== initGen) {
         jitsiInitRef.current = false;
-        return;
+        return false;
       }
       jitsiInitRef.current = false;
       if (err?.code === "jitsi_auth" && jitsiAuthRetryRef.current < 1) {
@@ -967,9 +997,15 @@ export default function VideoMeetingPage() {
         await new Promise((resolve) => {
           window.setTimeout(resolve, 900);
         });
-        if (shouldIgnoreReconnect(intentionalLeaveRef.current)) return;
-        if (initGenRef.current !== retryGen + 1) return;
+        if (shouldIgnoreReconnect(intentionalLeaveRef.current)) return false;
+        if (initGenRef.current !== retryGen + 1) return false;
         return initializeJitsi();
+      }
+      if (recoveryRemountRef.current) {
+        callStateRef.current?.transition(CALL_STATES.failed, err?.code || "recovery-join");
+        setPageState("live");
+        setConnectionHint("Соединение восстанавливается…");
+        return false;
       }
       disposeApi();
       if (err?.code === "not_live" || err?.status === 409) {
@@ -978,7 +1014,7 @@ export default function VideoMeetingPage() {
         if (st === "finished") setPageState("finished");
         else if (st === "cancelled") setPageState("cancelled");
         else setPageState("waiting");
-        return;
+        return false;
       }
       callStateRef.current?.transition(CALL_STATES.failed, err?.code || "init-error");
       if (err?.code === "jitsi_script" || err?.code === "jitsi_script_timeout" || err?.message === "Не удалось загрузить Jitsi Meet") {
@@ -989,32 +1025,36 @@ export default function VideoMeetingPage() {
         setError(mapJoinError(err));
       }
       setPageState("error");
+      return false;
     }
   }, [attendanceTracker, disposeApi, meetingUuid]);
 
   /** Первый вход — спросить про камеру; повторный (док/материалы) — взять сохранённый выбор. */
   const requestJoin = useCallback(async ({ skipCameraPrompt = false } = {}) => {
-    if (shouldIgnoreReconnect(intentionalLeaveRef.current)) return;
+    if (shouldIgnoreReconnect(intentionalLeaveRef.current)) return false;
     if (!meetingUuid || jitsiInitRef.current || apiRef.current) {
-      return;
+      return Boolean(apiRef.current);
     }
     const stored = getMeetingCameraEnabled(meetingUuid);
     if (skipCameraPrompt || stored != null) {
       cameraPrefRef.current = stored === true;
-      await initializeJitsi();
-      return;
+      return initializeJitsi();
     }
     setError("");
     setPageState("camera");
+    return false;
   }, [initializeJitsi, meetingUuid]);
 
-  const remountJitsi = useCallback(async () => {
-    if (shouldIgnoreReconnect(intentionalLeaveRef.current)) return;
+  const remountJitsi = useCallback(async ({ rotateSession = true } = {}) => {
+    if (shouldIgnoreReconnect(intentionalLeaveRef.current)) return false;
     if (remountPromiseRef.current) return remountPromiseRef.current;
     const gen = jitsiGenRef.current + 1;
     jitsiGenRef.current = gen;
     remountPromiseRef.current = (async () => {
       logLifecycle("JITSI_RECONNECT_START", { gen });
+      if (rotateSession) {
+        callSessionIdRef.current = createCallSessionId();
+      }
       disposeApi();
       conferencePresenceRef.current = {
         joined: false,
@@ -1028,14 +1068,108 @@ export default function VideoMeetingPage() {
         window.setTimeout(resolve, 50);
       });
       if (jitsiGenRef.current !== gen || shouldIgnoreReconnect(intentionalLeaveRef.current)) {
-        return;
+        return false;
       }
-      await requestJoin({ skipCameraPrompt: true });
+      return requestJoin({ skipCameraPrompt: true });
     })().finally(() => {
       if (jitsiGenRef.current === gen) remountPromiseRef.current = null;
     });
     return remountPromiseRef.current;
   }, [disposeApi, requestJoin]);
+
+  const performHardReconnect = useCallback(async (payload = {}) => {
+    if (shouldIgnoreReconnect(intentionalLeaveRef.current)) return false;
+    const policy = reconnectPolicyRef.current;
+    const slot = policy?.consumeAttempt?.();
+    if (!slot) {
+      policy?.markAttemptFailed?.();
+      setCallReconnectNeeded(true);
+      setConnectionHint("Не удалось восстановить соединение.");
+      void reportMeetingTechnicalEvent(meetingUuid, {
+        eventType: "jitsi_hard_reconnect_failed",
+        reason: "exhausted",
+        browserTabSessionId: tabSessionIdRef.current,
+        callSessionId: callSessionIdRef.current,
+        metadata: {
+          reason: payload.reason || "exhausted",
+          intendedMicOn: Boolean(intendedMediaRef.current.micOn),
+          intendedCamOn: Boolean(intendedMediaRef.current.camOn),
+          visibilityState: typeof document !== "undefined" ? document.visibilityState : "visible",
+          online: typeof navigator === "undefined" ? true : navigator.onLine !== false,
+        },
+      });
+      return false;
+    }
+    if (slot.delayMs > 0) {
+      await new Promise((resolve) => {
+        hardReconnectTimerRef.current = window.setTimeout(resolve, slot.delayMs);
+      });
+      hardReconnectTimerRef.current = null;
+    }
+    if (shouldIgnoreReconnect(intentionalLeaveRef.current)) {
+      policy.markAttemptFailed();
+      return false;
+    }
+    const previousCallSessionId = callSessionIdRef.current;
+    const nextId = createCallSessionId();
+    callSessionIdRef.current = nextId;
+    hardReconnectMetaRef.current = {
+      reason: payload.reason || "watchdog",
+      attempt: slot.attempt,
+      previousCallSessionId,
+      callSessionId: nextId,
+    };
+    recoveryRemountRef.current = true;
+    setCallReconnectNeeded(false);
+    setConnectionHint("Соединение восстанавливается…");
+    void reportMeetingTechnicalEvent(meetingUuid, {
+      eventType: "jitsi_hard_reconnect_started",
+      reason: payload.reason || "",
+      browserTabSessionId: tabSessionIdRef.current,
+      callSessionId: nextId,
+      metadata: {
+        reason: payload.reason || "",
+        attempt: slot.attempt,
+        previousCallSessionId,
+        intendedMicOn: Boolean(intendedMediaRef.current.micOn),
+        intendedCamOn: Boolean(intendedMediaRef.current.camOn),
+        visibilityState: typeof document !== "undefined" ? document.visibilityState : "visible",
+        online: typeof navigator === "undefined" ? true : navigator.onLine !== false,
+      },
+    });
+    const ok = await remountJitsi({ rotateSession: false });
+    if (shouldIgnoreReconnect(intentionalLeaveRef.current)) {
+      policy.markAttemptFailed();
+      recoveryRemountRef.current = false;
+      return false;
+    }
+    if (ok) return true;
+    policy.markAttemptFailed();
+    recoveryRemountRef.current = false;
+    void reportMeetingTechnicalEvent(meetingUuid, {
+      eventType: "jitsi_hard_reconnect_failed",
+      reason: payload.reason || "join_failed",
+      browserTabSessionId: tabSessionIdRef.current,
+      callSessionId: callSessionIdRef.current,
+      metadata: {
+        reason: payload.reason || "join_failed",
+        attempt: slot.attempt,
+        previousCallSessionId,
+        intendedMicOn: Boolean(intendedMediaRef.current.micOn),
+        intendedCamOn: Boolean(intendedMediaRef.current.camOn),
+      },
+    });
+    if (policy.canAttempt()) {
+      return performHardReconnect(payload);
+    }
+    setCallReconnectNeeded(true);
+    setConnectionHint("Не удалось восстановить соединение.");
+    setPageState("live");
+    return false;
+  }, [meetingUuid, remountJitsi]);
+  onReconnectRequiredRef.current = (payload) => {
+    void performHardReconnect(payload);
+  };
 
   const onCameraChoice = useCallback((enabled) => {
     if (!meetingUuid) return;
@@ -1128,6 +1262,7 @@ export default function VideoMeetingPage() {
       stopPolling();
       sendLeave(false);
       disposeApi();
+      reconnectPolicyRef.current?.dispose?.();
     };
   }, [bootstrap, disposeApi, sendLeave, stopPolling]);
 
@@ -1410,21 +1545,37 @@ export default function VideoMeetingPage() {
       if (!api?.reconcileParticipants) return;
       void api.reconcileParticipants(reason);
     };
-    const onOnline = () => reconcile("online");
+    const onOnline = () => {
+      reconcile("online");
+      try {
+        apiRef.current?.watchdog?.handleLifecycleEvent?.("online");
+      } catch {
+        /* ignore */
+      }
+    };
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
       reconcile("visible");
       try {
-        apiRef.current?.watchdog?.inspect?.();
+        apiRef.current?.watchdog?.handleLifecycleEvent?.("visibilitychange");
+      } catch {
+        /* ignore */
+      }
+    };
+    const onPageShow = () => {
+      try {
+        apiRef.current?.watchdog?.handleLifecycleEvent?.("pageshow");
       } catch {
         /* ignore */
       }
     };
     window.addEventListener("online", onOnline);
     document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("pageshow", onPageShow);
     return () => {
       window.removeEventListener("online", onOnline);
       document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("pageshow", onPageShow);
     };
   }, [pageState]);
 
@@ -2869,8 +3020,21 @@ export default function VideoMeetingPage() {
 
   const onManualRoomReconnect = useCallback(() => {
     if (shouldIgnoreReconnect(intentionalLeaveRef.current)) return;
+    reconnectPolicyRef.current?.reset();
+    setCallReconnectNeeded(false);
     resumeControllerRef.current?.manualReconnect?.();
-  }, []);
+    if (callReconnectNeeded || !apiRef.current) {
+      void remountJitsi();
+    }
+  }, [callReconnectNeeded, remountJitsi]);
+
+  const onManualJitsiReconnect = useCallback(() => {
+    if (shouldIgnoreReconnect(intentionalLeaveRef.current)) return;
+    reconnectPolicyRef.current?.reset();
+    setCallReconnectNeeded(false);
+    setConnectionHint("Соединение восстанавливается…");
+    void remountJitsi();
+  }, [remountJitsi]);
 
   const onManualRoomReload = useCallback(() => {
     resumeControllerRef.current?.manualReload?.();
@@ -3025,6 +3189,15 @@ export default function VideoMeetingPage() {
         onReload={onManualRoomReload}
         testId="room-connection-recovery"
       />
+      {callReconnectNeeded && resumeUi.phase === "hidden" ? (
+        <ConnectionRecoveryBanner
+          phase="failed"
+          title="Не удалось восстановить соединение."
+          showReconnect
+          onReconnect={onManualJitsiReconnect}
+          testId="jitsi-call-reconnect"
+        />
+      ) : null}
       {showJitsi && liveDurationUi.phase !== "ok" ? (
         <div
           className={`itflux-recovery-banner itflux-recovery-banner--${liveDurationUi.phase === "overdue" ? "failed" : "slow"}`}
@@ -3379,6 +3552,11 @@ export default function VideoMeetingPage() {
             {connectionHint ? (
               <div className="video-lesson-media-warning video-lesson-media-warning--info" role="status">
                 <span>{connectionHint}</span>
+                {callReconnectNeeded ? (
+                  <button type="button" onClick={onManualJitsiReconnect}>
+                    Переподключиться
+                  </button>
+                ) : null}
               </div>
             ) : null}
             {mediaWarning ? (

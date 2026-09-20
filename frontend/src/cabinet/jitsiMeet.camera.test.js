@@ -41,6 +41,7 @@ describe("meeting camera preference", () => {
     expect(cfg.replaceParticipant).toBe(true);
     expect(cfg.channelLastN).toBe(8);
     expect(cfg.enableNoAudioDetection).toBe(true);
+    expect(cfg.enableIceRestart).toBe(true);
     expect(cfg.disableRemoteControl).toBe(false);
   });
 
@@ -93,6 +94,7 @@ describe("meeting camera preference", () => {
     expect(url).toContain("interfaceConfig.SHOW_POWERED_BY=false");
     expect(url).toContain("config.inviteAppName=");
     expect(url).toContain("config.p2p.enabled=false");
+    expect(url).toContain("config.enableIceRestart=true");
     expect(url).toContain("config.preferBosh=true");
     expect(url).toContain("config.replaceParticipant=true");
   });

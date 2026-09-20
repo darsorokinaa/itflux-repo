@@ -6,6 +6,7 @@ import {
   JOIN_SLOW_THRESHOLD_MS,
   createJitsiMeetSession,
 } from "./jitsiMeet";
+import { NETWORK_RECOVERY_GRACE_MS } from "./jitsiMediaWatchdog";
 import { resetRuntimeResourceState } from "./pwa/runtimeResources";
 
 function createFakeJitsiApi({ participantCount = 1, autoJoin = false, iframe = null } = {}) {
@@ -218,6 +219,23 @@ describe("createJitsiMeetSession join gating", () => {
     const remainingJoinWait = [...api._listeners.values()].reduce((n, list) => n + list.length, 0);
     expect(remainingJoinWait).toBe(0);
     await vi.advanceTimersByTimeAsync(JOIN_FATAL_TIMEOUT_MS);
+    expect(api.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not dispose after join on connectionFailed; watchdog asks to reconnect once", async () => {
+    vi.useFakeTimers();
+    const onReconnectRequired = vi.fn();
+    const pending = createJitsiMeetSession(jwtConfig, container, { onReconnectRequired });
+    await vi.advanceTimersByTimeAsync(20);
+    api.emit("videoConferenceJoined", { id: "local-abc", roomName: "digitalstreamroom" });
+    const session = await pending;
+    api.emit("connectionFailed", { error: "connection.droppedError" });
+    expect(api.dispose).not.toHaveBeenCalled();
+    expect(onReconnectRequired).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(NETWORK_RECOVERY_GRACE_MS);
+    expect(onReconnectRequired).toHaveBeenCalledTimes(1);
+    expect(api.dispose).not.toHaveBeenCalled();
+    session.dispose();
     expect(api.dispose).toHaveBeenCalledTimes(1);
   });
 });

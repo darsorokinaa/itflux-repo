@@ -7,11 +7,14 @@ import {
 } from "../../utils/cabinetAuth";
 import {
   createJitsiMeetSession,
+  createCallSessionId,
   getMeetingCameraEnabled,
   getMeetingMicEnabled,
   resolveJitsiDisplayName,
+  setMeetingCameraEnabled,
   setMeetingMicEnabled,
 } from "../jitsiMeet";
+import { createHardReconnectPolicy } from "../jitsiMediaWatchdog";
 import { getMeetingAttendanceTracker } from "../meetingAttendance";
 import {
   claimMeetingCall,
@@ -66,6 +69,14 @@ export default function MeetingCallDock() {
   const [error, setError] = useState("");
   const [collapsed, setCollapsed] = useState(false);
   const [callElsewhere, setCallElsewhere] = useState(false);
+  const [needManualReconnect, setNeedManualReconnect] = useState(false);
+  const reconnectPolicyRef = useRef(null);
+  if (!reconnectPolicyRef.current) {
+    reconnectPolicyRef.current = createHardReconnectPolicy();
+  }
+  const callSessionIdRef = useRef(createCallSessionId());
+  const intendedMediaRef = useRef({ micOn: false, camOn: false, screenSharing: false });
+  const manualDockReconnectRef = useRef(() => {});
   const {
     nodeRef: dockRef,
     style: dockStyle,
@@ -106,6 +117,9 @@ export default function MeetingCallDock() {
     let cancelled = false;
     let returning = false;
     setError("");
+    setNeedManualReconnect(false);
+    reconnectPolicyRef.current?.reset?.();
+    callSessionIdRef.current = createCallSessionId();
     ownerIdRef.current = newOwnerId();
     const attendance = getMeetingAttendanceTracker(meetingUuid);
 
@@ -194,6 +208,8 @@ export default function MeetingCallDock() {
       void pollPresented();
     }, PRESENT_POLL_MS);
 
+    const onReconnectRequiredRef = { current: () => {} };
+
     const start = async () => {
       if (cancelled || initRef.current || apiRef.current) return;
 
@@ -223,6 +239,7 @@ export default function MeetingCallDock() {
         attendance.cancelPendingLeave();
         const config = await fetchVideoMeetingJoinConfig(meetingUuid, {
           browserTabSessionId: `dock-${ownerIdRef.current}`,
+          callSessionId: callSessionIdRef.current,
         });
         if (cancelled) return;
         if (config?.meeting?.status && config.meeting.status !== "live") {
@@ -239,10 +256,20 @@ export default function MeetingCallDock() {
         ).trim();
         const cameraEnabled = getMeetingCameraEnabled(meetingUuid);
         const micEnabled = getMeetingMicEnabled(meetingUuid);
+        intendedMediaRef.current = {
+          micOn: micEnabled === true,
+          camOn: cameraEnabled === true,
+          screenSharing: false,
+        };
         const joinConfig = {
           ...config,
           startWithVideoMuted: cameraEnabled !== true,
           startWithAudioMuted: micEnabled !== true,
+          diagnostics: {
+            ...(config.diagnostics || {}),
+            browserTabSessionId: `dock-${ownerIdRef.current}`,
+            callSessionId: callSessionIdRef.current,
+          },
           meeting: {
             ...(config.meeting || {}),
             subject,
@@ -255,8 +282,31 @@ export default function MeetingCallDock() {
         };
         resolveJitsiDisplayName(joinConfig);
         const wrapped = await createJitsiMeetSession(joinConfig, containerRef.current, {
+          getIntendedMedia: () => intendedMediaRef.current,
+          shouldReconnect: () => !cancelled && !returning,
+          onRecoveryStarted: () => attendance.cancelPendingLeave(),
+          onReconnectRequired: () => {
+            onReconnectRequiredRef.current();
+          },
+          onConnectionState: (next) => {
+            if (next === "reconnecting") {
+              setError("Соединение восстанавливается…");
+            }
+            if (next === "joined") {
+              setError("");
+              setNeedManualReconnect(false);
+              reconnectPolicyRef.current?.markSuccess();
+            }
+          },
           onAudioMuteStatusChanged: (payload) => {
-            setMeetingMicEnabled(meetingUuid, !payload?.muted);
+            const on = !payload?.muted;
+            setMeetingMicEnabled(meetingUuid, on);
+            intendedMediaRef.current = { ...intendedMediaRef.current, micOn: on };
+          },
+          onVideoMuteStatusChanged: (payload) => {
+            const on = !payload?.muted;
+            setMeetingCameraEnabled(meetingUuid, on);
+            intendedMediaRef.current = { ...intendedMediaRef.current, camOn: on };
           },
           onJoined: (event) => {
             void attendance.onVerifiedJoin(event);
@@ -285,6 +335,56 @@ export default function MeetingCallDock() {
       }
     };
 
+    const reconnectFromWatchdog = async () => {
+      if (cancelled || returning) return;
+      const policy = reconnectPolicyRef.current;
+      if (policy?.snapshot?.().inFlight) return;
+      const slot = policy?.consumeAttempt?.();
+      if (!slot) {
+        setNeedManualReconnect(true);
+        setError("Не удалось восстановить соединение.");
+        return;
+      }
+      if (slot.delayMs > 0) {
+        await new Promise((resolve) => {
+          window.setTimeout(resolve, slot.delayMs);
+        });
+      }
+      if (cancelled || returning) {
+        policy.markAttemptFailed();
+        return;
+      }
+      callSessionIdRef.current = createCallSessionId();
+      dispose();
+      setNeedManualReconnect(false);
+      setError("Соединение восстанавливается…");
+      await start();
+      if (cancelled || returning) {
+        policy.markAttemptFailed();
+        return;
+      }
+      if (apiRef.current) return;
+      policy.markAttemptFailed();
+      if (policy.canAttempt()) {
+        await reconnectFromWatchdog();
+        return;
+      }
+      setNeedManualReconnect(true);
+      setError("Не удалось восстановить соединение.");
+    };
+    onReconnectRequiredRef.current = () => {
+      void reconnectFromWatchdog();
+    };
+    manualDockReconnectRef.current = () => {
+      if (cancelled || returning) return;
+      reconnectPolicyRef.current?.reset();
+      setNeedManualReconnect(false);
+      callSessionIdRef.current = createCallSessionId();
+      dispose();
+      setError("");
+      void start();
+    };
+
     const onPageHide = () => attendance.onPageHide();
     const onBeforeUnload = () => attendance.onPageHide();
     window.addEventListener("pagehide", onPageHide);
@@ -304,6 +404,7 @@ export default function MeetingCallDock() {
       dispose();
       attendance.onUnmount();
       releaseMeetingCall(meetingUuid, ownerIdRef.current);
+      reconnectPolicyRef.current?.dispose?.();
     };
   }, [inIframe, location.pathname, location.search, meetingUuid, navigate, onMeetingPage]);
 
@@ -371,14 +472,27 @@ export default function MeetingCallDock() {
         </div>
       </div>
       {error ? (
-        <p className="meeting-call-dock__error">{error}</p>
-      ) : (
-        <div
-          className="meeting-call-dock__stage"
-          ref={containerRef}
-          hidden={collapsed}
-        />
-      )}
+        <p className="meeting-call-dock__error">
+          {error}
+          {needManualReconnect ? (
+            <>
+              {" "}
+              <button
+                type="button"
+                className="meeting-call-dock__btn meeting-call-dock__btn--primary"
+                onClick={() => manualDockReconnectRef.current?.()}
+              >
+                Переподключиться
+              </button>
+            </>
+          ) : null}
+        </p>
+      ) : null}
+      <div
+        className="meeting-call-dock__stage"
+        ref={containerRef}
+        hidden={collapsed}
+      />
       {visible && !collapsed ? (
         <FloatingResizeHandles onPointerDown={onDockResizePointerDown} />
       ) : null}

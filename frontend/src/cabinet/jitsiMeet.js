@@ -251,6 +251,7 @@ export function buildJitsiConfigOverwrite({
     disableSimulcast: false,
     enableNoAudioDetection: true,
     enableNoisyMicDetection: true,
+    enableIceRestart: true,
     stereo: false,
     constraints: {
       video: {
@@ -658,6 +659,7 @@ export function buildJitsiEmbedUrl(config) {
     `config.localSubject=${encodeURIComponent(JSON.stringify(subject))}`,
     `config.inviteAppName=${encodeURIComponent(JSON.stringify("Цифровой поток"))}`,
     "config.p2p.enabled=false",
+    "config.enableIceRestart=true",
     "config.preferBosh=true",
     "config.replaceParticipant=true",
     ...(hosts ? [
@@ -695,6 +697,30 @@ function wireParticipantListeners(api, hooks) {
     onConnectionState: hooks.onConnectionState,
     onAudioMuteStatusChanged: hooks.onAudioMuteStatusChanged,
     onVideoMuteStatusChanged: hooks.onVideoMuteStatusChanged,
+    onReconnectRequired: hooks.onReconnectRequired,
+    onRecoveryStarted: hooks.onRecoveryStarted,
+    shouldReconnect: hooks.shouldReconnect,
+    onTelemetry: (eventType, extra = {}) => {
+      const meetingUuid = hooks.diagnostics?.meetingUuid;
+      if (!meetingUuid) return;
+      void reportMeetingTechnicalEvent(meetingUuid, {
+        eventType,
+        role: hooks.diagnostics?.role || "",
+        reason: extra.reason || "",
+        jitsiParticipantId: extra.jitsiParticipantId || "",
+        browserTabSessionId: hooks.diagnostics?.browserTabSessionId || "",
+        callSessionId: extra.callSessionId || hooks.diagnostics?.callSessionId || "",
+        metadata: {
+          reason: extra.reason || "",
+          attempt: extra.attempt,
+          intendedMicOn: extra.intendedMicOn,
+          intendedCamOn: extra.intendedCamOn,
+          visibilityState: extra.visibilityState,
+          online: extra.online,
+          jitsiParticipantId: extra.jitsiParticipantId || "",
+        },
+      });
+    },
   });
   registerJoinDiagnostics(api, {
     onMediaWarning: hooks.onMediaWarning,
@@ -1155,6 +1181,9 @@ export async function createJitsiMeetSession(config, container, hooks = {}) {
     onScreenShare,
     onConnectionHint,
     onConnectionState,
+    onReconnectRequired,
+    onRecoveryStarted,
+    shouldReconnect,
     getIntendedMedia,
     preferIframe = false,
     signal,
@@ -1193,6 +1222,9 @@ export async function createJitsiMeetSession(config, container, hooks = {}) {
     onScreenShare,
     onConnectionHint,
     onConnectionState,
+    onReconnectRequired,
+    onRecoveryStarted,
+    shouldReconnect,
     getIntendedMedia,
     signal,
   };
