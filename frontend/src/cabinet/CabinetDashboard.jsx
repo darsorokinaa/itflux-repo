@@ -672,7 +672,7 @@ export default function CabinetDashboard() {
   }
 
   return (
-    <main className={`td-page${night ? " is-night" : ""}`}>
+    <main className="td-page">
       <DashboardTopbar user={user} firstName={firstName} />
 
       <div className="td-shell">

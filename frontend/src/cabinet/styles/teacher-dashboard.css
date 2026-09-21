@@ -83,147 +83,16 @@
   box-shadow: var(--td-focus);
 }
 
-.td-page.is-night {
-  --td-ink: #E7ECF5;
-  --td-text: #B4BECE;
-  --td-muted: #93A0B5;
-  --td-faint: #7C8AA0;
-  --td-surface: #1B212C;
-  --td-soft: #242B38;
-  --td-line: #313A4A;
-  --td-line-strong: #3A4558;
-  --td-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
-  --td-well-blue: #243044;
-  --td-well-violet: #2A2640;
-  --td-well-green: #1C2E24;
-  --td-well-teal: #1A2C32;
-  --td-well-orange: #332818;
-  --td-well-red: #3A2226;
-  --td-fill-blue: #243044;
-  --td-fill-violet: #2A2640;
-  --td-fill-green: #1C2E24;
-  --td-fill-orange: #332818;
-  --td-fill-red: #3A2226;
-  --td-fill-slate: #2A3140;
-  --td-edge-blue: #3D4E78;
-  --td-edge-violet: #4A4270;
-  --td-edge-green: #2F5A3A;
-  --td-edge-orange: #6A4A28;
-  --td-edge-red: #6A3438;
-  color-scheme: dark;
-  background-color: #070b16;
-  background-image:
-    radial-gradient(1.2px 1.2px at 8% 12%, rgba(255, 255, 255, 0.95), transparent 60%),
-    radial-gradient(1px 1px at 18% 28%, rgba(255, 255, 255, 0.7), transparent 60%),
-    radial-gradient(1.6px 1.6px at 27% 8%, rgba(255, 255, 255, 0.9), transparent 60%),
-    radial-gradient(1px 1px at 36% 42%, rgba(226, 232, 255, 0.55), transparent 60%),
-    radial-gradient(1.4px 1.4px at 44% 18%, rgba(255, 255, 255, 0.85), transparent 60%),
-    radial-gradient(1px 1px at 53% 36%, rgba(255, 255, 255, 0.5), transparent 60%),
-    radial-gradient(2px 2px at 62% 14%, rgba(255, 248, 220, 0.95), transparent 60%),
-    radial-gradient(1px 1px at 71% 48%, rgba(255, 255, 255, 0.6), transparent 60%),
-    radial-gradient(1.3px 1.3px at 79% 22%, rgba(255, 255, 255, 0.8), transparent 60%),
-    radial-gradient(1px 1px at 88% 9%, rgba(210, 224, 255, 0.75), transparent 60%),
-    radial-gradient(1.5px 1.5px at 94% 38%, rgba(255, 255, 255, 0.7), transparent 60%),
-    radial-gradient(1px 1px at 14% 62%, rgba(255, 255, 255, 0.45), transparent 60%),
-    radial-gradient(1.2px 1.2px at 31% 74%, rgba(255, 255, 255, 0.65), transparent 60%),
-    radial-gradient(1px 1px at 48% 68%, rgba(255, 255, 255, 0.4), transparent 60%),
-    radial-gradient(1.8px 1.8px at 66% 78%, rgba(255, 255, 255, 0.85), transparent 60%),
-    radial-gradient(1px 1px at 82% 64%, rgba(255, 255, 255, 0.5), transparent 60%),
-    radial-gradient(1px 1px at 6% 86%, rgba(255, 255, 255, 0.35), transparent 60%),
-    radial-gradient(1.4px 1.4px at 22% 92%, rgba(255, 255, 255, 0.7), transparent 60%),
-    radial-gradient(1px 1px at 57% 90%, rgba(226, 232, 255, 0.5), transparent 60%),
-    radial-gradient(1.2px 1.2px at 91% 84%, rgba(255, 255, 255, 0.6), transparent 60%),
-    radial-gradient(ellipse 70% 42% at 70% -8%, rgba(88, 110, 180, 0.28), transparent 62%),
-    linear-gradient(180deg, #0a1022 0%, #10182c 42%, #0c1220 100%);
-  background-attachment: fixed;
-  background-repeat: no-repeat;
-}
-
-.td-page.is-night :is(h1, h2, h3, h4, h5, h6) {
-  color: #F4F7FB;
-}
-
-.cb-layout:has(.td-page.is-night) .cabinet-main,
-.cabinet-layout:has(.td-page.is-night) .cabinet-main,
-.cabinet-content:has(.td-page.is-night) {
-  background: #070b16 !important;
-}
-
-.td-page.is-night .td-card,
-.td-page.is-night .td-topbar,
-.td-page.is-night .td-topbar__user,
-.td-page.is-night .td-topbar__icon,
-.td-page.is-night .td-topbar .cabinet-notifications__btn,
-.td-page.is-night .td-topbar .cabinet-header-search:focus-within,
-.td-page.is-night .td-msg__menu,
-.td-page.is-night .td-rhythm__tip-pop,
-.td-page.is-night .td-rhythm__pager-nav button {
-  background: var(--td-surface);
-  color: var(--td-ink);
-}
-
-.td-page.is-night .td-rhythm__time {
-  background: linear-gradient(180deg, #1A2A22 0%, #1B212C 72%);
-  border-color: #2C4A38;
-}
-
-.td-page.is-night .td-rhythm__time-value,
-.td-page.is-night .td-rhythm__time-parts li > b:last-child {
-  color: #8ED7AE;
-}
-
-.td-page.is-night .td-rhythm__daily {
-  background: linear-gradient(145deg, #1B212C, #222838);
-}
-
-.td-page.is-night .td-rhythm__badge.is-done {
-  background: #1C3328;
-  border-color: #2F5A3A;
-}
-
-.td-page.is-night .td-rhythm__badge.is-locked {
-  background: #242B38;
-}
-
-.td-page.is-night .td-rhythm__badge-icon,
-.td-page.is-night .td-rhythm__badge:nth-child(2) .td-rhythm__badge-icon,
-.td-page.is-night .td-rhythm__badge:nth-child(3) .td-rhythm__badge-icon {
-  background: #2A3344;
-  color: #C5D0E0;
-}
-
-.td-page.is-night .td-rhythm__badge.is-done .td-rhythm__badge-icon {
-  background: #244433;
-  color: #8ED7AE;
-}
-
-.td-page.is-night .td-rhythm__milestone,
-.td-page.is-night .td-rhythm__bar {
-  background: #242B38;
-  border-color: var(--td-line);
-}
-
-body:has(.td-page.is-night) .support-fab {
-  background: #1B212C;
-  color: #E7ECF5;
-  border-color: #3A4558;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-}
-
-body:has(.td-page.is-night) .support-fab:hover {
-  background: #242B38;
-}
-
 .td-night-note {
   padding: 14px 16px;
-  border: 1px solid #3A4560;
+  border: 1px solid var(--td-line);
   border-radius: 14px;
-  background: #1A2030;
+  background: var(--td-surface);
 }
 
 .td-night-note p {
   margin: 0;
-  color: #E7ECF5;
+  color: var(--td-ink);
   font-size: 0.95rem;
   font-weight: 650;
 }
@@ -2637,14 +2506,6 @@ body:has(.td-page.is-night) .support-fab:hover {
 .td-suggest__card:hover {
   background: var(--td-well-blue);
   border-color: var(--td-line-strong);
-}
-
-.td-page.is-night .td-suggest__card {
-  background: var(--td-soft);
-}
-
-.td-page.is-night .td-suggest__card:hover {
-  background: #2C3546;
 }
 
 .td-suggest__cover {
