@@ -2,7 +2,9 @@ import { useRef, useState } from "react";
 import { attachMyFile, uploadMyFile } from "../../utils/cabinetAuth";
 import { buildLinkMaterialPayload } from "../planItemAttachments";
 import { buildVariantMaterialFromNumber } from "../variantMaterialUtils";
+import { isQuotaExceededError, quotaExceededMessage, quotaPayloadFromError } from "../storageFormat";
 import MyFilesPickerModal from "./MyFilesPickerModal";
+import QuotaExceededNotice from "./QuotaExceededNotice";
 
 export default function PlanItemCustomMaterialForm({ mode, onSubmit, saving, error }) {
   const fileRef = useRef(null);
@@ -10,6 +12,7 @@ export default function PlanItemCustomMaterialForm({ mode, onSubmit, saving, err
   const [url, setUrl] = useState("");
   const [variantNumber, setVariantNumber] = useState("");
   const [localError, setLocalError] = useState("");
+  const [quotaError, setQuotaError] = useState(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const displayError = localError || error;
@@ -36,6 +39,7 @@ export default function PlanItemCustomMaterialForm({ mode, onSubmit, saving, err
   const handleSubmit = async (event) => {
     event.preventDefault();
     setLocalError("");
+    setQuotaError(null);
     try {
       if (mode === "file") {
         const files = Array.from(fileRef.current?.files || []);
@@ -56,7 +60,12 @@ export default function PlanItemCustomMaterialForm({ mode, onSubmit, saving, err
       if (!title.trim() || !url.trim()) return;
       await onSubmit(buildLinkMaterialPayload({ title, url }));
     } catch (err) {
-      setLocalError(err?.message || "Не удалось добавить материал");
+      if (isQuotaExceededError(err)) {
+        const payload = quotaPayloadFromError(err);
+        setQuotaError({ message: quotaExceededMessage(payload), quota: payload });
+      } else {
+        setLocalError(err?.message || "Не удалось добавить материал");
+      }
     } finally {
       setBusy(false);
     }
@@ -64,6 +73,7 @@ export default function PlanItemCustomMaterialForm({ mode, onSubmit, saving, err
 
   const handlePickFromFiles = async (picked) => {
     setLocalError("");
+    setQuotaError(null);
     setBusy(true);
     try {
       const files = Array.isArray(picked) ? picked : [picked];
@@ -140,7 +150,9 @@ export default function PlanItemCustomMaterialForm({ mode, onSubmit, saving, err
             </label>
           </>
         )}
-        {displayError ? <p className="cb-modal-form__error" role="alert">{displayError}</p> : null}
+        {quotaError ? (
+          <QuotaExceededNotice message={quotaError.message} quota={quotaError.quota} />
+        ) : displayError ? <p className="cb-modal-form__error" role="alert">{displayError}</p> : null}
         <button type="submit" className="cb-btn cb-btn--primary cb-btn--sm" disabled={isBusy}>
           {isBusy ? "Добавление…" : `Добавить ${labels[mode].toLowerCase()}`}
         </button>

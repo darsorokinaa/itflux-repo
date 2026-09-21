@@ -25,6 +25,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .files_services import FileServiceError, assert_quota_allows, lock_user_storage
 from .models import (
     InteractiveBoard,
     InteractiveBoardAccess,
@@ -466,6 +467,7 @@ def board_asset_content_sha256(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+@transaction.atomic
 def get_or_create_board_asset(
     board: InteractiveBoard,
     *,
@@ -483,6 +485,11 @@ def get_or_create_board_asset(
     )
     if existing is not None:
         return existing, False
+
+    owner = user or getattr(board, "owner", None)
+    if owner is not None:
+        lock_user_storage(owner)
+        assert_quota_allows(owner, len(content))
 
     ext = {
         "image/png": ".png",
@@ -677,6 +684,10 @@ def copy_board_assets(source: InteractiveBoard, clone: InteractiveBoard) -> dict
         return scene
 
     source_assets = list(source.assets.all())
+    total_copy = sum(int(asset.size_bytes or 0) for asset in source_assets)
+    if total_copy and clone.owner_id:
+        lock_user_storage(clone.owner)
+        assert_quota_allows(clone.owner, total_copy)
     path_to_asset = {}
     for asset in source_assets:
         path_to_asset[board_asset_api_path(source.id, asset.id)] = asset
@@ -1192,6 +1203,10 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
                         scene = persist_large_scene_files(locked, scene, request.user)
                     except serializers.ValidationError as exc:
                         return Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
+                    except FileServiceError as exc:
+                        payload = {"detail": exc.message, "code": exc.code, "error": exc.message}
+                        payload.update(exc.extra or {})
+                        return Response(payload, status=exc.status)
 
                     saved_scene = scene
                     locked.scene_data = scene
@@ -1328,7 +1343,12 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
                 allow_export=board.allow_export,
                 version=1,
             )
-            clone.scene_data = copy_board_assets(board, clone)
+            try:
+                clone.scene_data = copy_board_assets(board, clone)
+            except FileServiceError as exc:
+                payload = {"detail": exc.message, "code": exc.code, "error": exc.message}
+                payload.update(exc.extra or {})
+                return Response(payload, status=exc.status)
             clone.save(update_fields=["scene_data", "updated_at"])
             if for_student and for_student.user_id:
                 InteractiveBoardAccess.objects.create(
@@ -1496,13 +1516,18 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        asset, _created = get_or_create_board_asset(
-            board,
-            content=raw,
-            mime=mime,
-            file_id=str(file_id),
-            user=request.user,
-        )
+        try:
+            asset, _created = get_or_create_board_asset(
+                board,
+                content=raw,
+                mime=mime,
+                file_id=str(file_id),
+                user=request.user,
+            )
+        except FileServiceError as exc:
+            payload = {"detail": exc.message, "code": exc.code, "error": exc.message}
+            payload.update(exc.extra or {})
+            return Response(payload, status=exc.status)
         path = board_asset_api_path(board.id, asset.id)
 
         return Response({
@@ -1537,13 +1562,18 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
         file_id = request.data.get("id") or str(uuid.uuid4())
 
         original_name = getattr(uploaded, "name", "") or f"{file_id}.pdf"
-        asset, _created = get_or_create_board_asset(
-            board,
-            content=raw,
-            mime=mime,
-            file_id=str(file_id),
-            user=request.user,
-        )
+        try:
+            asset, _created = get_or_create_board_asset(
+                board,
+                content=raw,
+                mime=mime,
+                file_id=str(file_id),
+                user=request.user,
+            )
+        except FileServiceError as exc:
+            payload = {"detail": exc.message, "code": exc.code, "error": exc.message}
+            payload.update(exc.extra or {})
+            return Response(payload, status=exc.status)
         if original_name and asset.original_name != original_name:
             asset.original_name = original_name[:255]
             asset.save(update_fields=["original_name"])

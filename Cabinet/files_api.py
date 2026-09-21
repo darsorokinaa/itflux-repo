@@ -54,7 +54,7 @@ from .upload_validation import is_previewable
 
 
 def _error_response(exc: FileServiceError) -> Response:
-    payload = {"detail": exc.message, "code": exc.code}
+    payload = {"detail": exc.message, "error": exc.message, "code": exc.code}
     if exc.extra:
         payload.update(exc.extra)
     return Response(payload, status=exc.status)

@@ -2102,10 +2102,22 @@ class InteractiveViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         except UploadValidationError as exc:
             return Response({"error": exc.message, "code": exc.code}, status=status.HTTP_400_BAD_REQUEST)
 
+        from .files_services import FileServiceError, assert_quota_allows, lock_user_storage
+
+        teacher = self.get_teacher()
+        size = int(getattr(uploaded, "size", 0) or 0)
         safe_name = _safe_upload_filename(uploaded.name)
         uid = uuid.uuid4().hex[:12]
         rel_path = f"cabinet/interactives/uploads/{self.get_teacher().pk}/{uid}_{safe_name}"
-        saved_path = default_storage.save(rel_path, uploaded)
+        try:
+            with transaction.atomic():
+                lock_user_storage(teacher)
+                assert_quota_allows(teacher, size)
+                saved_path = default_storage.save(rel_path, uploaded)
+        except FileServiceError as exc:
+            payload = {"error": exc.message, "detail": exc.message, "code": exc.code}
+            payload.update(exc.extra or {})
+            return Response(payload, status=exc.status)
         file_url = default_storage.url(saved_path)
         # Keep relative /media/... URLs stable across hosts; CharField accepts them on save.
         if file_url and not file_url.startswith(("http://", "https://", "/")):
@@ -2533,7 +2545,9 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
                     comment=is_comment_attachment,
                 )
             except HomeworkTaskFileError as exc:
-                return Response({"error": exc.message, "code": exc.code}, status=exc.status_code)
+                payload = {"error": exc.message, "detail": exc.message, "code": exc.code}
+                payload.update(exc.extra or {})
+                return Response(payload, status=exc.status_code)
             saved = [serialize_homework_task_attachment(row) for row in rows]
 
         first = saved[0]
@@ -2826,6 +2840,16 @@ class MaterialViewSet(
     def perform_create(self, serializer):
         serializer.save(teacher=self.get_teacher())
 
+    def create(self, request, *args, **kwargs):
+        from .files_services import FileServiceError
+
+        try:
+            return super().create(request, *args, **kwargs)
+        except FileServiceError as exc:
+            payload = {"detail": exc.message, "code": exc.code, "error": exc.message}
+            payload.update(exc.extra or {})
+            return Response(payload, status=exc.status)
+
     def update(self, request, *args, **kwargs):
         kwargs["partial"] = True
         return super().update(request, *args, **kwargs)
@@ -2949,8 +2973,8 @@ class DashboardView(TeacherScopedMixin, APIView):
             record_teacher_cabinet_presence(request)
         except Exception:
             pass
-        payload = build_dashboard_payload(request.user)
-        serializer = DashboardSerializer(payload)
+        payload = build_dashboard_payload(request.user, request=request)
+        serializer = DashboardSerializer(payload, context={"request": request})
         return Response(serializer.data)
 
 

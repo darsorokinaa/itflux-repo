@@ -84,6 +84,7 @@ function conflictTypeLabel(type) {
 export default function CreateScheduleLessonModal({
   onClose,
   onCreate,
+  onSwitchToPersonal,
   defaultDate,
   defaultStartTime,
   defaultEndTime,
@@ -464,6 +465,29 @@ export default function CreateScheduleLessonModal({
         </div>
         <form className="cb-sch-form cb-sch-form--sections" onSubmit={(e) => handleSubmit(e, false)}>
           {error ? <p className="cb-sch-form__error" role="alert">{error}</p> : null}
+          {onSwitchToPersonal && !dialogTitle ? (
+            <section className="cb-sch-form__section">
+              <label className="cb-sch-field">
+                <span>Тип</span>
+                <select
+                  value="lesson"
+                  onChange={(e) => {
+                    if (e.target.value === "personal") {
+                      onSwitchToPersonal({
+                        date,
+                        startTime,
+                        endTime,
+                        title: (lessonTitle || topic).trim(),
+                      });
+                    }
+                  }}
+                >
+                  <option value="lesson">Урок</option>
+                  <option value="personal">Личное дело</option>
+                </select>
+              </label>
+            </section>
+          ) : null}
           {!lessonPlanItemId && !nextPlanItem && planProgress ? (
             <section className="cb-sch-form__section">
               <h3>План уроков</h3>

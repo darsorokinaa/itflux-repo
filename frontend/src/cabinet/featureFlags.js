@@ -6,9 +6,9 @@ export const PAYMENTS_ENABLED = true;
 
 /**
  * Screen-share annotation overlay in the video lesson.
- * false — hidden from the UI; engine/protocol stay in the codebase.
+ * Рисование поверх картинки демонстрации: перо, маркер, фигуры.
  */
-export const SCREEN_SHARE_ANNOTATIONS_VISIBLE = false;
+export const SCREEN_SHARE_ANNOTATIONS_VISIBLE = true;
 
 /**
  * Screen-share annotations V2: captured-surface coordinates, canvas renderer,

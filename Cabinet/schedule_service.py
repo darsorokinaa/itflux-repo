@@ -159,6 +159,13 @@ SERIES_SHARED_EVENT_FIELDS = (
     "telemost_url",
     "meeting_provider",
     "location",
+    "location_lat",
+    "location_lng",
+    "location_place_id",
+    "travel_before_minutes",
+    "travel_after_minutes",
+    "all_day",
+    "visibility",
     "materials",
     "teacher_comment",
     "reminder_minutes",
@@ -188,6 +195,20 @@ def update_series_template(series, data, *, reference_event=None):
     if "telemost_url" in normalized:
         series.meeting_url = normalized["telemost_url"]
         fields_to_update.append("meeting_url")
+    for extra in (
+        "location",
+        "location_lat",
+        "location_lng",
+        "location_place_id",
+        "travel_before_minutes",
+        "travel_after_minutes",
+        "all_day",
+        "visibility",
+        "description",
+    ):
+        if extra in normalized:
+            setattr(series, extra, normalized[extra])
+            fields_to_update.append(extra)
     if reference_event and "starts_at" in normalized:
         tz = _event_timezone(reference_event)
         series.start_time = normalized["starts_at"].astimezone(tz).time()
@@ -247,22 +268,50 @@ def check_conflicts(
     group_id=None,
     exclude_event_id=None,
     exclude_event_ids=None,
+    travel_before_minutes=0,
+    travel_after_minutes=0,
+    all_day=False,
 ):
-    conflicts = []
-    base = ScheduleEvent.objects.filter(owner=teacher).exclude(
-        status=ScheduleEvent.Status.CANCELLED,
+    from .busy_intervals import (
+        find_overlapping_intervals,
+        get_busy_intervals,
+        occupancy_window,
+        serialize_busy_interval,
     )
+
+    conflicts = []
     excluded_ids = []
     if exclude_event_ids:
         excluded_ids.extend(exclude_event_ids)
     if exclude_event_id:
         excluded_ids.append(exclude_event_id)
+
+    busy_start, busy_end = occupancy_window(
+        starts_at,
+        ends_at,
+        travel_before_minutes=travel_before_minutes,
+        travel_after_minutes=travel_after_minutes,
+        all_day=all_day,
+        tz=resolve_schedule_timezone(teacher=teacher),
+    )
+    intervals = get_busy_intervals(
+        teacher,
+        busy_start,
+        busy_end,
+        exclude_event_ids=excluded_ids,
+    )
+    teacher_hits = find_overlapping_intervals(intervals, busy_start, busy_end)
+    if teacher_hits:
+        conflicts.append({
+            "type": "teacher",
+            "events": [serialize_busy_interval(item) for item in teacher_hits],
+        })
+
+    base = ScheduleEvent.objects.filter(owner=teacher).exclude(
+        status=ScheduleEvent.Status.CANCELLED,
+    )
     if excluded_ids:
         base = base.exclude(pk__in=excluded_ids)
-
-    teacher_overlap = base.filter(starts_at__lt=ends_at, ends_at__gt=starts_at)
-    if teacher_overlap.exists():
-        conflicts.append({"type": "teacher", "events": list(teacher_overlap.values("id", "title", "starts_at"))})
 
     if student_id:
         student_events = base.filter(
@@ -270,58 +319,22 @@ def check_conflicts(
             | Q(participants__student_id=student_id, participants__status__in=[
                 ParticipantStatus.INVITED, ParticipantStatus.ACCEPTED,
             ])
-        ).filter(starts_at__lt=ends_at, ends_at__gt=starts_at).distinct()
+        ).filter(starts_at__lt=busy_end, ends_at__gt=busy_start).distinct()
         if student_events.exists():
-            conflicts.append({"type": "student", "events": list(student_events.values("id", "title", "starts_at"))})
+            conflicts.append({
+                "type": "student",
+                "events": list(student_events.values("id", "title", "starts_at", "ends_at")),
+            })
 
     if group_id:
         group_events = base.filter(group_id=group_id).filter(
-            starts_at__lt=ends_at, ends_at__gt=starts_at,
+            starts_at__lt=busy_end, ends_at__gt=busy_start,
         )
         if group_events.exists():
-            conflicts.append({"type": "group", "events": list(group_events.values("id", "title", "starts_at"))})
-
-    # Permanent self-booked weekday slots must block teacher create/move as well.
-    try:
-        from .availability_models import TeacherBooking
-        from .availability_service import booking_occupies_weekday_time, teacher_timezone
-
-        tz = teacher_timezone(teacher)
-        local_start = starts_at.astimezone(tz) if timezone.is_aware(starts_at) else starts_at
-        local_end = ends_at.astimezone(tz) if timezone.is_aware(ends_at) else ends_at
-        exclude_series_ids = set()
-        if excluded_ids:
-            exclude_series_ids = set(
-                ScheduleEvent.objects.filter(pk__in=excluded_ids)
-                .exclude(series_id=None)
-                .values_list("series_id", flat=True)
-            )
-        bookings = TeacherBooking.objects.filter(
-            teacher=teacher,
-            weekday=local_start.weekday(),
-            status=TeacherBooking.Status.ACTIVE,
-        )
-        if exclude_series_ids:
-            bookings = bookings.exclude(series_id__in=exclude_series_ids)
-        for booking in bookings:
-            if booking_occupies_weekday_time(
-                booking,
-                local_start.weekday(),
-                local_start.time().replace(second=0, microsecond=0),
-                local_end.time().replace(second=0, microsecond=0),
-            ):
-                conflicts.append({
-                    "type": "booking",
-                    "events": [{
-                        "id": booking.pk,
-                        "title": "Постоянная запись ученика",
-                        "starts_at": starts_at.isoformat() if hasattr(starts_at, "isoformat") else starts_at,
-                    }],
-                })
-                break
-    except Exception:
-        # Conflict checks must never crash create/move; booking path has its own guards.
-        pass
+            conflicts.append({
+                "type": "group",
+                "events": list(group_events.values("id", "title", "starts_at", "ends_at")),
+            })
 
     return conflicts
 
@@ -395,6 +408,25 @@ def create_single_event(
     tz_name = data.get("timezone") or DEFAULT_SCHEDULE_TIMEZONE
     starts_at = coerce_schedule_datetime(data["starts_at"], tz_name=tz_name, teacher=teacher)
     ends_at = coerce_schedule_datetime(data["ends_at"], tz_name=tz_name, teacher=teacher)
+    event_type = data.get("event_type", ScheduleEvent.EventType.GROUP_LESSON)
+    from datetime import time as time_cls
+    from datetime import timedelta as td
+
+    from .busy_intervals import (
+        clamp_travel_minutes,
+        default_visibility_for_type,
+        is_non_lesson_event_type,
+        parse_latlng,
+    )
+
+    is_non_lesson = is_non_lesson_event_type(event_type)
+    visibility = data.get("visibility") or default_visibility_for_type(event_type)
+    all_day = bool(data.get("all_day"))
+    if all_day:
+        zone = resolve_schedule_timezone(tz_name, teacher=teacher)
+        local_day = starts_at.astimezone(zone).date()
+        starts_at = timezone.make_aware(datetime.combine(local_day, time_cls.min), zone)
+        ends_at = timezone.make_aware(datetime.combine(local_day + td(days=1), time_cls.min), zone)
 
     event = ScheduleEvent.objects.create(
         owner=teacher,
@@ -403,7 +435,7 @@ def create_single_event(
         topic=data.get("topic", ""),
         starts_at=starts_at,
         ends_at=ends_at,
-        event_type=data.get("event_type", ScheduleEvent.EventType.GROUP_LESSON),
+        event_type=event_type,
         format=data.get("format", ScheduleEvent.Format.ONLINE),
         lesson_id=data.get("lesson"),
         lesson_plan_item_id=data.get("lesson_plan_item"),
@@ -414,6 +446,13 @@ def create_single_event(
         telemost_url=data.get("telemost_url", data.get("meeting_url", "")),
         meeting_provider=data.get("meeting_provider", "none"),
         location=data.get("location", ""),
+        location_lat=parse_latlng(data.get("location_lat")),
+        location_lng=parse_latlng(data.get("location_lng")),
+        location_place_id=(data.get("location_place_id") or "").strip(),
+        travel_before_minutes=clamp_travel_minutes(data.get("travel_before_minutes")),
+        travel_after_minutes=clamp_travel_minutes(data.get("travel_after_minutes")),
+        all_day=all_day,
+        visibility=visibility,
         materials=data.get("materials", ""),
         teacher_comment=data.get("teacher_comment", ""),
         reminder_minutes=data.get("reminder_minutes"),
@@ -434,9 +473,13 @@ def create_single_event(
     from .plan_sync import PlanSyncService
     from .models import LessonPlanItem
 
-    skip_plan = bool(data.get("skip_plan") or data.get("unplanned"))
+    skip_plan = bool(data.get("skip_plan") or data.get("unplanned") or is_non_lesson)
     item_id = data.get("lesson_plan_item") or data.get("lesson_plan_item_id")
-    if skip_plan:
+    if is_non_lesson:
+        event.plan_sync_enabled = False
+        event.content_source = LessonContentSource.MANUAL
+        event.save(update_fields=["plan_sync_enabled", "content_source", "updated_at"])
+    elif skip_plan:
         event.plan_sync_enabled = False
         event.content_source = LessonContentSource.MANUAL
         event.save(update_fields=["plan_sync_enabled", "content_source", "updated_at"])
@@ -457,27 +500,28 @@ def create_single_event(
         event.refresh_from_db()
 
     log_change(event, changed_by=teacher, change_type=ScheduleChangeType.CREATED, new_data=event_snapshot(event))
-    if notify and data.get("notify_participants", True):
+    if notify and data.get("notify_participants", True) and not is_non_lesson:
         NotificationService.notify_event_created(event)
-    try:
-        from .activation_events import LESSON_CREATED, record_event_on_commit
+    if not is_non_lesson:
+        try:
+            from .activation_events import LESSON_CREATED, record_event_on_commit
 
-        record_event_on_commit(
-            LESSON_CREATED,
-            teacher,
-            object_type="schedule_event",
-            object_id=event.pk,
-            source="schedule_create",
+            record_event_on_commit(
+                LESSON_CREATED,
+                teacher,
+                object_type="schedule_event",
+                object_id=event.pk,
+                source="schedule_create",
+            )
+        except Exception:
+            pass
+        apply_students_timezone(
+            teacher=teacher,
+            student_ids=student_ids,
+            extra_student_ids=extra_student_ids,
+            group=group,
+            tz_name=data.get("student_timezone"),
         )
-    except Exception:
-        pass
-    apply_students_timezone(
-        teacher=teacher,
-        student_ids=student_ids,
-        extra_student_ids=extra_student_ids,
-        group=group,
-        tz_name=data.get("student_timezone"),
-    )
     return event
 
 
@@ -496,11 +540,20 @@ def create_series(
     if group_id:
         group = StudentGroup.objects.filter(pk=group_id, teacher=teacher).first()
 
+    from .busy_intervals import (
+        clamp_travel_minutes,
+        default_visibility_for_type,
+        is_non_lesson_event_type,
+        parse_latlng,
+    )
     from .student_subjects import resolve_student_subject_for_write
+
+    event_type = series_data.get("event_type", "group_lesson")
+    is_non_lesson = is_non_lesson_event_type(event_type)
 
     student_subject = None
     student_subject_id = series_data.get("student_subject") or series_data.get("student_subject_id")
-    if student_ids and len(student_ids) == 1 and not group_id:
+    if student_ids and len(student_ids) == 1 and not group_id and not is_non_lesson:
         primary_student = Student.objects.filter(pk=student_ids[0], teacher=teacher).first()
         if primary_student is not None:
             active_count = primary_student.subjects.filter(status="active").count()
@@ -524,7 +577,7 @@ def create_series(
         created_by=teacher,
         title=series_data["title"],
         description=series_data.get("description", ""),
-        event_type=series_data.get("event_type", "group_lesson"),
+        event_type=event_type,
         lesson_id=series_data.get("lesson"),
         lesson_plan_item_id=series_data.get("lesson_plan_item"),
         homework_id=series_data.get("homework"),
@@ -539,13 +592,22 @@ def create_series(
         recurrence_weekdays=series_data.get("recurrence_weekdays", []),
         recurrence_until=series_data.get("recurrence_until"),
         recurrence_count=series_data.get("recurrence_count"),
+        excluded_dates=list(series_data.get("excluded_dates") or []),
         meeting_url=series_data.get("meeting_url", ""),
         meeting_provider=series_data.get("meeting_provider", "none"),
         format=series_data.get("format", "online"),
         topic=series_data.get("topic", ""),
         teacher_comment=series_data.get("teacher_comment", ""),
         reminder_minutes=series_data.get("reminder_minutes"),
-        notify_on_create=series_data.get("notify_participants", True),
+        notify_on_create=False if is_non_lesson else series_data.get("notify_participants", True),
+        location=series_data.get("location", "") or "",
+        location_lat=parse_latlng(series_data.get("location_lat")),
+        location_lng=parse_latlng(series_data.get("location_lng")),
+        location_place_id=(series_data.get("location_place_id") or "").strip(),
+        travel_before_minutes=clamp_travel_minutes(series_data.get("travel_before_minutes")),
+        travel_after_minutes=clamp_travel_minutes(series_data.get("travel_after_minutes")),
+        all_day=bool(series_data.get("all_day")),
+        visibility=series_data.get("visibility") or default_visibility_for_type(event_type),
     )
 
     date_to = timezone.localdate() + timedelta(days=DEFAULT_HORIZON_DAYS)
@@ -580,7 +642,7 @@ def create_series(
     item_id = series_data.get("lesson_plan_item") or series_data.get("lesson_plan_item_id")
     if item_id:
         first_item = LessonPlanItem.objects.filter(pk=item_id).first()
-    skip_plan = bool(series_data.get("skip_plan") or series_data.get("unplanned"))
+    skip_plan = bool(series_data.get("skip_plan") or series_data.get("unplanned") or is_non_lesson)
     if skip_plan:
         from .choices import LessonContentSource
 
@@ -610,31 +672,32 @@ def create_series(
                 "content_source", "plan_synced_at", "updated_at",
             ])
 
-    if notify and series.notify_on_create:
+    if notify and series.notify_on_create and not is_non_lesson:
         for event in events[:1]:
             NotificationService.notify_event_created(event)
 
-    try:
-        from .activation_events import LESSON_CREATED, record_event_on_commit
+    if not is_non_lesson:
+        try:
+            from .activation_events import LESSON_CREATED, record_event_on_commit
 
-        for event in events:
-            record_event_on_commit(
-                LESSON_CREATED,
-                teacher,
-                object_type="schedule_event",
-                object_id=event.pk,
-                source="schedule_series_create",
-            )
-    except Exception:
-        pass
+            for event in events:
+                record_event_on_commit(
+                    LESSON_CREATED,
+                    teacher,
+                    object_type="schedule_event",
+                    object_id=event.pk,
+                    source="schedule_series_create",
+                )
+        except Exception:
+            pass
 
-    apply_students_timezone(
-        teacher=teacher,
-        student_ids=student_ids,
-        extra_student_ids=extra_student_ids,
-        group=group,
-        tz_name=series_data.get("student_timezone"),
-    )
+        apply_students_timezone(
+            teacher=teacher,
+            student_ids=student_ids,
+            extra_student_ids=extra_student_ids,
+            group=group,
+            tz_name=series_data.get("student_timezone"),
+        )
     return series, events
 
 
@@ -892,7 +955,9 @@ def update_event(event, *, changed_by, data, notify=True, sync_plan=True):
     fields = [
         "title", "description", "topic", "subtopic", "goal", "homework_description",
         "telemost_url", "meeting_provider",
-        "location", "materials", "teacher_comment", "reminder_minutes", "timezone",
+        "location", "location_lat", "location_lng", "location_place_id",
+        "travel_before_minutes", "travel_after_minutes", "all_day", "visibility",
+        "materials", "teacher_comment", "reminder_minutes", "timezone",
         "plan_sync_enabled", "content_source", "manual_override_fields",
         "lesson_plan_item",
     ]

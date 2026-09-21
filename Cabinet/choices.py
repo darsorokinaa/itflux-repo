@@ -240,7 +240,14 @@ class ScheduleEventType(models.TextChoices):
     CONSULTATION = "consultation", "Консультация"
     HOMEWORK_DEADLINE = "homework_deadline", "Дедлайн ДЗ"
     REVIEW = "review", "Проверка работ"
+    PERSONAL = "personal", "Личное событие"
+    BLOCKED = "blocked", "Заблокированное время"
     OTHER = "other", "Другое"
+
+
+class ScheduleEventVisibility(models.TextChoices):
+    PUBLIC = "public", "Видно участникам"
+    PRIVATE = "private", "Только преподавателю"
 
 
 class RecurrenceType(models.TextChoices):

@@ -140,6 +140,15 @@ class TeacherBooking(models.Model):
     start_time = models.TimeField("Время начала")
     end_time = models.TimeField("Время окончания")
     first_date = models.DateField("Первая дата")
+    recurrence_type = models.CharField(
+        "Периодичность",
+        max_length=24,
+        default="weekly",
+        db_index=True,
+    )
+    recurrence_interval = models.PositiveSmallIntegerField("Интервал", default=1)
+    recurrence_weekdays = models.JSONField("Дни недели", default=list, blank=True)
+    recurrence_until = models.DateField("Повторять до", null=True, blank=True)
     status = models.CharField(
         "Статус",
         max_length=20,
@@ -173,7 +182,7 @@ class TeacherBooking(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["teacher", "weekday", "start_time"],
-                condition=Q(status="active"),
+                condition=Q(status="active") & Q(recurrence_type="weekly"),
                 name="cabinet_unique_active_teacher_weekday_slot",
             ),
         ]

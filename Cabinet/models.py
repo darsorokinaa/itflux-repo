@@ -42,6 +42,7 @@ from .choices import (
     ReviewStatus,
     ScheduleChangeType,
     ScheduleEventType,
+    ScheduleEventVisibility,
     ScheduleMaterialSource,
     SeriesStatus,
     StudentStatus,
@@ -2310,6 +2311,7 @@ class ScheduleEvent(models.Model):
         GROUP_LESSON = "group_lesson", "Групповой урок"
         HOMEWORK_DEADLINE = "homework_deadline", "Дедлайн ДЗ"
         PERSONAL = "personal", "Личное"
+        BLOCKED = "blocked", "Заблокированное время"
 
     class Format(models.TextChoices):
         ONLINE = "online", "Онлайн"
@@ -2407,6 +2409,43 @@ class ScheduleEvent(models.Model):
         default=MeetingProvider.NONE,
     )
     location = models.CharField("Место", max_length=255, blank=True)
+    location_lat = models.DecimalField(
+        "Широта места",
+        max_digits=9,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="Для последующего расчёта дороги через карты.",
+    )
+    location_lng = models.DecimalField(
+        "Долгота места",
+        max_digits=9,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="Для последующего расчёта дороги через карты.",
+    )
+    location_place_id = models.CharField(
+        "ID места в картографическом API",
+        max_length=128,
+        blank=True,
+    )
+    travel_before_minutes = models.PositiveSmallIntegerField(
+        "Дорога до события, мин",
+        default=0,
+    )
+    travel_after_minutes = models.PositiveSmallIntegerField(
+        "Дорога после события, мин",
+        default=0,
+    )
+    all_day = models.BooleanField("Весь день", default=False)
+    visibility = models.CharField(
+        "Видимость",
+        max_length=16,
+        choices=ScheduleEventVisibility.choices,
+        default=ScheduleEventVisibility.PUBLIC,
+        db_index=True,
+    )
     audience = models.CharField("Участники", max_length=200, blank=True)
     materials = models.TextField("Материалы", blank=True)
     status = models.CharField(
@@ -2623,6 +2662,37 @@ class ScheduleEventSeries(models.Model):
     recurrence_weekdays = models.JSONField("Дни недели", default=list, blank=True)
     recurrence_until = models.DateField("Повторять до", null=True, blank=True)
     recurrence_count = models.PositiveIntegerField("Количество занятий", null=True, blank=True)
+    excluded_dates = models.JSONField(
+        "Пропущенные даты серии",
+        default=list,
+        blank=True,
+        help_text="ISO-даты, для которых экземпляр не создаётся (занятые слоты серии).",
+    )
+    location = models.CharField("Место", max_length=255, blank=True)
+    location_lat = models.DecimalField(
+        "Широта места",
+        max_digits=9,
+        decimal_places=6,
+        null=True,
+        blank=True,
+    )
+    location_lng = models.DecimalField(
+        "Долгота места",
+        max_digits=9,
+        decimal_places=6,
+        null=True,
+        blank=True,
+    )
+    location_place_id = models.CharField("ID места в картографическом API", max_length=128, blank=True)
+    travel_before_minutes = models.PositiveSmallIntegerField("Дорога до события, мин", default=0)
+    travel_after_minutes = models.PositiveSmallIntegerField("Дорога после события, мин", default=0)
+    all_day = models.BooleanField("Весь день", default=False)
+    visibility = models.CharField(
+        "Видимость",
+        max_length=16,
+        choices=ScheduleEventVisibility.choices,
+        default=ScheduleEventVisibility.PUBLIC,
+    )
     status = models.CharField(
         "Статус",
         max_length=20,

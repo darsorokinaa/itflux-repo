@@ -3557,7 +3557,7 @@ body.vl-room-fullscreen .student-cabinet-nav {
 .ss-ann-v2-canvas,
 .ss-ann-v2-platform {
   position: fixed;
-  z-index: 11000;
+  z-index: 11120;
   display: block;
   pointer-events: none;
   touch-action: none;

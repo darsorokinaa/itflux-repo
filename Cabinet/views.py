@@ -836,18 +836,29 @@ def api_schedule_create(request):
     tz_name = (data.get("timezone") or "").strip() or None
     starts_at = _parse_schedule_datetime(data.get("starts_at"), tz_name=tz_name, teacher=request.user)
     ends_at = _parse_schedule_datetime(data.get("ends_at"), tz_name=tz_name, teacher=request.user)
+    event_type = (data.get("type") or data.get("event_type") or "group_lesson").strip()
+    if event_type in ("group", "individual"):
+        event_type = "group_lesson" if event_type == "group" else "individual_lesson"
+    from .busy_intervals import clamp_travel_minutes, is_non_lesson_event_type
+
+    is_non_lesson = is_non_lesson_event_type(event_type)
     if not title:
-        return JsonResponse({"ok": False, "error": "Укажите название урока."}, status=400)
+        if event_type == "blocked":
+            title = "Заблокированное время"
+        elif event_type == "personal":
+            title = "Личное событие"
+        else:
+            return JsonResponse({"ok": False, "error": "Укажите название урока."}, status=400)
     if not starts_at or not ends_at:
-        return JsonResponse({"ok": False, "error": "Укажите дату и время урока."}, status=400)
-    if ends_at <= starts_at:
+        return JsonResponse({"ok": False, "error": "Укажите дату и время."}, status=400)
+    if ends_at <= starts_at and not data.get("all_day"):
         return JsonResponse({"ok": False, "error": "Время окончания должно быть позже начала."}, status=400)
 
-    fmt = (data.get("format") or "online").strip().lower()
-    is_online = fmt in ("online", "онлайн")
+    fmt = (data.get("format") or ("offline" if is_non_lesson else "online")).strip().lower()
+    is_online = fmt in ("online", "онлайн") and not is_non_lesson
     telemost_url = (data.get("telemost_url") or data.get("link") or "").strip()
-    telemost_auto = data.get("telemost_auto_create") is True
-    jitsi_auto = data.get("jitsi_auto_create") is True
+    telemost_auto = data.get("telemost_auto_create") is True and not is_non_lesson
+    jitsi_auto = data.get("jitsi_auto_create") is True and not is_non_lesson
 
     if is_online and not telemost_url and telemost_auto and telemost_auto_create_enabled():
         telemost_url, telemost_error = _create_telemost_link_for_user(
@@ -891,18 +902,17 @@ def api_schedule_create(request):
             ends_at=ends_at,
             student_id=student_ids[0] if student_ids and len(student_ids) == 1 else None,
             group_id=group_id,
+            travel_before_minutes=clamp_travel_minutes(data.get("travel_before_minutes")),
+            travel_after_minutes=clamp_travel_minutes(data.get("travel_after_minutes")),
+            all_day=bool(data.get("all_day")),
         )
         if conflicts:
             return JsonResponse({
                 "ok": False,
-                "error": "В это время уже есть занятие.",
+                "error": "Есть конфликт расписания.",
                 "conflicts": conflicts,
                 "code": "schedule_conflict",
             }, status=409)
-
-    event_type = (data.get("type") or data.get("event_type") or "group_lesson").strip()
-    if event_type in ("group", "individual"):
-        event_type = "group_lesson" if event_type == "group" else "individual_lesson"
 
     def _ensure_jitsi_meetings(created_events):
         if not (is_online and jitsi_auto):
@@ -941,7 +951,15 @@ def api_schedule_create(request):
             "reminder_minutes": data.get("reminder_minutes"),
             "notify_participants": notify,
             "student_subject_id": student_subject_id,
-            "skip_plan": data.get("skip_plan") or data.get("unplanned"),
+            "skip_plan": data.get("skip_plan") or data.get("unplanned") or is_non_lesson,
+            "location": (data.get("location") or "").strip(),
+            "location_lat": data.get("location_lat"),
+            "location_lng": data.get("location_lng"),
+            "location_place_id": (data.get("location_place_id") or "").strip(),
+            "travel_before_minutes": data.get("travel_before_minutes"),
+            "travel_after_minutes": data.get("travel_after_minutes"),
+            "all_day": data.get("all_day"),
+            "visibility": data.get("visibility"),
         }
         if series_data["recurrence_until"] and isinstance(series_data["recurrence_until"], str):
             series_data["recurrence_until"] = dt.strptime(series_data["recurrence_until"], "%Y-%m-%d").date()
@@ -991,7 +1009,15 @@ def api_schedule_create(request):
                 "reminder_minutes": data.get("reminder_minutes"),
                 "notify_participants": notify,
                 "student_subject_id": student_subject_id,
-                "skip_plan": data.get("skip_plan") or data.get("unplanned"),
+                "skip_plan": data.get("skip_plan") or data.get("unplanned") or is_non_lesson,
+                "location": (data.get("location") or "").strip(),
+                "location_lat": data.get("location_lat"),
+                "location_lng": data.get("location_lng"),
+                "location_place_id": (data.get("location_place_id") or "").strip(),
+                "travel_before_minutes": data.get("travel_before_minutes"),
+                "travel_after_minutes": data.get("travel_after_minutes"),
+                "all_day": data.get("all_day"),
+                "visibility": data.get("visibility"),
             },
             student_ids=student_ids,
             group_id=group_id,
@@ -1079,6 +1105,9 @@ def api_schedule_update(request, event_id):
                     student_id=event.student_id,
                     group_id=event.group_id,
                     exclude_event_ids=exclude_event_ids,
+                    travel_before_minutes=data.get("travel_before_minutes", event.travel_before_minutes),
+                    travel_after_minutes=data.get("travel_after_minutes", event.travel_after_minutes),
+                    all_day=data.get("all_day", event.all_day),
                 )
                 if conflicts:
                     return JsonResponse({
@@ -1134,6 +1163,26 @@ def api_schedule_update(request, event_id):
         update_fields["teacher_comment"] = (data.get("teacher_comment") or data.get("comment") or "").strip()
     if "reminder_minutes" in data:
         update_fields["reminder_minutes"] = data.get("reminder_minutes")
+    if "location" in data:
+        update_fields["location"] = (data.get("location") or "").strip()
+    if "location_lat" in data:
+        update_fields["location_lat"] = data.get("location_lat")
+    if "location_lng" in data:
+        update_fields["location_lng"] = data.get("location_lng")
+    if "location_place_id" in data:
+        update_fields["location_place_id"] = (data.get("location_place_id") or "").strip()
+    if "travel_before_minutes" in data:
+        from .busy_intervals import clamp_travel_minutes
+        update_fields["travel_before_minutes"] = clamp_travel_minutes(data.get("travel_before_minutes"))
+    if "travel_after_minutes" in data:
+        from .busy_intervals import clamp_travel_minutes
+        update_fields["travel_after_minutes"] = clamp_travel_minutes(data.get("travel_after_minutes"))
+    if "all_day" in data:
+        update_fields["all_day"] = bool(data.get("all_day"))
+    if "visibility" in data:
+        update_fields["visibility"] = data.get("visibility")
+    if "description" in data:
+        update_fields["description"] = data.get("description") or ""
     if "tags" in data and isinstance(data.get("tags"), list):
         event.tags = data.get("tags")
     if "student_subject" in data or "student_subject_id" in data:
@@ -1208,6 +1257,9 @@ def api_schedule_check_conflicts(request):
         student_id=student_id,
         group_id=data.get("group_id"),
         exclude_event_id=exclude_id,
+        travel_before_minutes=data.get("travel_before_minutes") or 0,
+        travel_after_minutes=data.get("travel_after_minutes") or 0,
+        all_day=bool(data.get("all_day")),
     )
     return JsonResponse({
         "ok": True,

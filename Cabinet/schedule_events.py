@@ -423,6 +423,16 @@ def schedule_event_to_json(event, *, self_booked=None):
         "planWarningMessage": (plan_progress or {}).get("warning_message") or "",
         "selfBooked": bool(self_booked),
         "selfBookedLabel": "Записался самостоятельно" if self_booked else "",
+        "location": event.location or "",
+        "locationLat": float(event.location_lat) if getattr(event, "location_lat", None) is not None else None,
+        "locationLng": float(event.location_lng) if getattr(event, "location_lng", None) is not None else None,
+        "locationPlaceId": getattr(event, "location_place_id", "") or "",
+        "travelBeforeMinutes": int(getattr(event, "travel_before_minutes", 0) or 0),
+        "travelAfterMinutes": int(getattr(event, "travel_after_minutes", 0) or 0),
+        "allDay": bool(getattr(event, "all_day", False)),
+        "visibility": getattr(event, "visibility", None) or "public",
+        "kind": event.event_type if event.event_type in ("personal", "blocked") else "event",
+        "parentEventId": None,
     }
 
 
@@ -482,11 +492,62 @@ def list_schedule_events(*, user, date_from, date_to, include_cancelled=False):
         events = []
         for ev in event_rows:
             try:
-                events.append(schedule_event_to_json(ev, self_booked=ev.series_id in booked_series))
+                payload = schedule_event_to_json(ev, self_booked=ev.series_id in booked_series)
+                events.append(payload)
+                events.extend(_travel_events_for_payload(ev, payload))
             except Exception:
                 # Один битый урок не должен обнулять весь календарь.
                 continue
         return events
+
+
+def _travel_events_for_payload(event, payload):
+    from .busy_intervals import travel_segments
+    from .schedule_service import resolve_schedule_timezone
+
+    segments = travel_segments(
+        event.starts_at,
+        event.ends_at,
+        travel_before_minutes=getattr(event, "travel_before_minutes", 0),
+        travel_after_minutes=getattr(event, "travel_after_minutes", 0),
+        all_day=bool(getattr(event, "all_day", False)),
+    )
+    if not segments:
+        return []
+    tz = resolve_schedule_timezone(event=event)
+    today = timezone.now().astimezone(tz).date()
+    rows = []
+    for kind, start, end in segments:
+        local_start = start.astimezone(tz)
+        local_end = end.astimezone(tz)
+        rows.append({
+            "id": f"travel-{kind}-{payload['id']}",
+            "kind": "travel",
+            "travelKind": kind,
+            "parentEventId": payload["id"],
+            "linkedGroupId": payload["id"],
+            "dayOffset": (local_start.date() - today).days,
+            "startsAt": local_start.isoformat(),
+            "endsAt": local_end.isoformat(),
+            "startTime": local_start.strftime("%H:%M"),
+            "endTime": local_end.strftime("%H:%M"),
+            "title": "Дорога",
+            "topic": "",
+            "type": "travel",
+            "audience": payload.get("title") or "",
+            "format": "",
+            "link": None,
+            "status": "planned",
+            "statusLabel": "Дорога",
+            "source": "local",
+            "readOnly": True,
+            "seriesId": payload.get("seriesId"),
+            "isRecurring": payload.get("isRecurring"),
+            "location": payload.get("location") or "",
+            "visibility": payload.get("visibility") or "private",
+            "selfBooked": False,
+        })
+    return rows
 
 
 def _schedule_events_queryset(*, user, date_from, date_to, include_cancelled=False):

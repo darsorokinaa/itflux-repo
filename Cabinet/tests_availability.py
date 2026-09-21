@@ -201,38 +201,50 @@ class TeacherAvailabilityBookingTests(TestCase):
         )
         self.assertEqual(booked.status_code, 401)
 
-    def test_existing_series_hides_weekday_even_if_one_event_cancelled(self):
-        start = timezone.now().astimezone(MOSCOW).replace(
-            hour=17, minute=0, second=0, microsecond=0,
-        )
-        # Align created series to the same Wednesday weekday.
-        while start.date().weekday() != 2:
-            start += timedelta(days=1)
-        start += timedelta(days=7)
+    def test_cancelled_instance_frees_only_that_date(self):
         series, events = create_series(
             teacher=self.teacher,
             series_data={
                 "title": "Уже стоит",
                 "event_type": "individual_lesson",
                 "timezone": "Europe/Moscow",
-                "start_date": start.date(),
-                "start_time": start.time().replace(tzinfo=None),
-                "end_time": (start + timedelta(hours=1)).time().replace(tzinfo=None),
+                "start_date": self.wed,
+                "start_time": datetime.strptime("17:00", "%H:%M").time(),
+                "end_time": datetime.strptime("18:00", "%H:%M").time(),
                 "recurrence_type": "weekly",
+                "recurrence_until": self.period_to,
                 "notify_participants": False,
             },
             student_ids=[self.student.pk],
             notify=False,
         )
         self.assertTrue(events)
-        cancel_event(events[0], changed_by=self.teacher, notify=False)
+        first = next(
+            event for event in events
+            if event.starts_at.astimezone(MOSCOW).date() == self.wed
+        )
+        cancel_event(first, changed_by=self.teacher, notify=False)
         series.refresh_from_db()
         self.assertEqual(series.status, SeriesStatus.ACTIVE)
 
         self.client.force_login(self.other_user)
         data = self.client.get(f"/api/cabinet/booking/{self.token}/").json()
-        times = {slot["start_time"] for slot in data["slots"]}
-        self.assertNotIn("17:00", times)
+        wed_times = {
+            slot["start_time"]
+            for day in data["dates"]
+            if day["date"] == self.wed.isoformat()
+            for slot in day["slots"]
+        }
+        self.assertIn("17:00", wed_times)
+        later = self.wed + timedelta(days=7)
+        later_times = {
+            slot["start_time"]
+            for day in data["dates"]
+            if day["date"] == later.isoformat()
+            for slot in day["slots"]
+        }
+        if later <= self.period_to:
+            self.assertNotIn("17:00", later_times)
 
     def test_cancel_keeps_past_and_frees_future_slot(self):
         self.client.force_login(self.student_user)
@@ -323,8 +335,8 @@ class TeacherAvailabilityBookingTests(TestCase):
         """Free days outside a narrower publish window must still become bookable."""
         from Cabinet.availability_models import TeacherAvailability, TeacherBookingLink
 
-        painted = self.wed - timedelta(days=3)
-        self.assertLess(painted, self.wed)
+        painted = self.period_to + timedelta(days=1)
+        self.assertGreater(painted, self.period_to)
 
         self.client.force_login(self.teacher)
         created = self.client.post(
@@ -344,7 +356,7 @@ class TeacherAvailabilityBookingTests(TestCase):
             ).exists()
         )
 
-        # Simulate a publish window that starts after the painted free day.
+        # Simulate a publish window that ends before the painted free day.
         link = TeacherBookingLink.objects.get(teacher=self.teacher)
         link.date_from = self.wed
         link.date_to = self.period_to
@@ -355,7 +367,7 @@ class TeacherAvailabilityBookingTests(TestCase):
         data = self.client.get(f"/api/cabinet/booking/{self.token}/").json()
         available_dates = {day["date"] for day in data["dates"]}
         self.assertIn(painted.isoformat(), available_dates)
-        self.assertEqual(data["date_from"], painted.isoformat())
+        self.assertEqual(data["date_to"], painted.isoformat())
         painted_times = {
             slot["start_time"]
             for day in data["dates"]
@@ -514,6 +526,127 @@ class TeacherAvailabilityBookingTests(TestCase):
         }
         self.assertNotIn("12:00", wed_times)
 
+    def test_single_booking_does_not_repeat(self):
+        self.client.force_login(self.student_user)
+        response = self.client.post(
+            f"/api/cabinet/booking/{self.token}/book/",
+            {
+                "date": self.wed.isoformat(),
+                "start_time": "15:00",
+                "recurrence_type": "none",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        booking = TeacherBooking.objects.get()
+        self.assertEqual(booking.recurrence_type, "none")
+        self.assertEqual(
+            ScheduleEvent.objects.filter(series=booking.series).exclude(status="cancelled").count(),
+            1,
+        )
+
+    def test_weekly_booking_uses_default_until(self):
+        from Cabinet.availability_service import default_booking_until_date
+
+        self.client.force_login(self.student_user)
+        response = self.client.post(
+            f"/api/cabinet/booking/{self.token}/book/",
+            {"date": self.wed.isoformat(), "start_time": "16:00", "recurrence_type": "weekly"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        booking = TeacherBooking.objects.get()
+        expected = default_booking_until_date(self.teacher, self.wed)
+        self.assertEqual(booking.series.recurrence_until, expected)
+        self.assertGreater(
+            ScheduleEvent.objects.filter(series=booking.series).exclude(status="cancelled").count(),
+            1,
+        )
+
+    def test_student_can_choose_earlier_until(self):
+        until = self.wed + timedelta(days=14)
+        self.client.force_login(self.student_user)
+        response = self.client.post(
+            f"/api/cabinet/booking/{self.token}/book/",
+            {
+                "date": self.wed.isoformat(),
+                "start_time": "15:00",
+                "recurrence_type": "weekly",
+                "recurrence_until": until.isoformat(),
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        booking = TeacherBooking.objects.get()
+        self.assertEqual(booking.series.recurrence_until, until)
+
+    def test_preview_and_partial_occupied_series(self):
+        later = self.wed + timedelta(days=7)
+        create_single_event(
+            teacher=self.teacher,
+            data={
+                "title": "Чужой урок",
+                "event_type": "individual_lesson",
+                "timezone": "Europe/Moscow",
+                "starts_at": f"{later.isoformat()}T17:00:00",
+                "ends_at": f"{later.isoformat()}T18:00:00",
+                "notify_participants": False,
+            },
+            student_ids=[self.student.pk],
+            notify=False,
+        )
+        self.client.force_login(self.other_user)
+        until = self.wed + timedelta(days=21)
+        preview = self.client.post(
+            f"/api/cabinet/booking/{self.token}/preview/",
+            {
+                "date": self.wed.isoformat(),
+                "start_time": "17:00",
+                "recurrence_type": "weekly",
+                "recurrence_until": until.isoformat(),
+            },
+            format="json",
+        )
+        self.assertEqual(preview.status_code, 200, preview.content)
+        body = preview.json()
+        self.assertGreater(body["occupied_count"], 0)
+        self.assertLess(body["available_count"], body["total"])
+        occupied_dates = {item["date"] for item in body["occupied"]}
+        self.assertIn(later.isoformat(), occupied_dates)
+
+        blocked = self.client.post(
+            f"/api/cabinet/booking/{self.token}/book/",
+            {
+                "date": self.wed.isoformat(),
+                "start_time": "17:00",
+                "recurrence_type": "weekly",
+                "recurrence_until": until.isoformat(),
+            },
+            format="json",
+        )
+        self.assertEqual(blocked.status_code, 409)
+        self.assertEqual(blocked.json()["code"], "partial_unavailable")
+
+        booked = self.client.post(
+            f"/api/cabinet/booking/{self.token}/book/",
+            {
+                "date": self.wed.isoformat(),
+                "start_time": "17:00",
+                "recurrence_type": "weekly",
+                "recurrence_until": until.isoformat(),
+                "book_available_only": True,
+            },
+            format="json",
+        )
+        self.assertEqual(booked.status_code, 201, booked.content)
+        series_id = booked.json()["booking"]["series_id"]
+        dates = {
+            event.starts_at.astimezone(MOSCOW).date().isoformat()
+            for event in ScheduleEvent.objects.filter(series_id=series_id).exclude(status="cancelled")
+        }
+        self.assertNotIn(later.isoformat(), dates)
+        self.assertIn(self.wed.isoformat(), dates)
+
 
 class TeacherAvailabilityConcurrencyTests(TransactionTestCase):
     """Real DB concurrency — must not use TestCase's outer transaction."""
@@ -576,7 +709,7 @@ class TeacherAvailabilityConcurrencyTests(TransactionTestCase):
         def attempt(user):
             barrier.wait(timeout=5)
             try:
-                booking, _ = book_slot(
+                booking, _, _ = book_slot(
                     token=self.token,
                     user=user,
                     date_value=self.wed.isoformat(),

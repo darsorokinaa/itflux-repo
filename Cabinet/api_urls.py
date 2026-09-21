@@ -164,6 +164,11 @@ urlpatterns = [
         availability_api.PublicBookingCreateView.as_view(),
         name="public_booking_create",
     ),
+    path(
+        "booking/<str:token>/preview/",
+        availability_api.PublicBookingPreviewView.as_view(),
+        name="public_booking_preview",
+    ),
     path("student/progress/", student_api.StudentProgressView.as_view(), name="student_progress"),
     path("student/materials/", student_api.StudentMaterialsView.as_view(), name="student_materials"),
     path(

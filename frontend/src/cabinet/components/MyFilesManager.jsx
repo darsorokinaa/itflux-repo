@@ -20,6 +20,8 @@ import {
   uploadMyFile,
 } from "../../utils/cabinetAuth";
 import { mapApiStudent } from "../cabinetMappers";
+import { formatStorageBytes, isQuotaExceededError, quotaExceededMessage, quotaPayloadFromError } from "../storageFormat";
+import QuotaExceededNotice from "./QuotaExceededNotice";
 import CabinetModal from "./CabinetModal";
 import CabinetFloatingMenu from "./CabinetFloatingMenu";
 import ConfirmActionModal from "./ConfirmActionModal";
@@ -101,6 +103,7 @@ export default function MyFilesManager({
   const [items, setItems] = useState([]);
   const [breadcrumbs, setBreadcrumbs] = useState([{ id: null, name: "Мои файлы" }]);
   const [quota, setQuota] = useState(null);
+  const [quotaError, setQuotaError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -303,10 +306,27 @@ export default function MyFilesManager({
     const files = Array.from(fileList || []);
     if (!files.length) return;
     const targetFolderId = currentUploadFolderId();
+    const totalSize = files.reduce((sum, file) => sum + (Number(file.size) || 0), 0);
+    const used = Number(quota?.storage_used_bytes ?? quota?.used_bytes ?? 0);
+    const limit = Number(quota?.storage_limit_bytes ?? quota?.limit_bytes ?? 0);
+    if (limit > 0 && used + totalSize > limit) {
+      const payload = {
+        ...(quota || {}),
+        storage_used_bytes: used,
+        storage_limit_bytes: limit,
+      };
+      const message = quotaExceededMessage(payload);
+      setQuotaError({ message, quota: payload });
+      setError(message);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
     const jobs = files.map((file) => ({ name: file.name, progress: 0, error: "", done: false }));
     setUploads(jobs);
     setError("");
-    await Promise.all(files.map(async (file, index) => {
+    setQuotaError(null);
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
       try {
         await uploadMyFile(file, {
           folderId: targetFolderId,
@@ -317,13 +337,20 @@ export default function MyFilesManager({
         });
         setUploads((prev) => prev.map((job, i) => (i === index ? { ...job, progress: 100, done: true } : job)));
       } catch (err) {
+        const quotaHit = isQuotaExceededError(err);
+        const payload = quotaPayloadFromError(err, quota);
+        const message = quotaHit ? quotaExceededMessage(payload) : (err?.message || "Ошибка загрузки");
         setUploads((prev) => prev.map((job, i) => (
-          i === index ? { ...job, error: err?.message || "Ошибка загрузки", done: true } : job
+          i === index ? { ...job, error: message, done: true } : job
         )));
+        if (quotaHit) {
+          setQuotaError({ message, quota: payload });
+          setError(message);
+          break;
+        }
       }
-    }));
-    const failed = files.length && true;
-    if (failed) await load();
+    }
+    await load();
     window.setTimeout(() => setUploads([]), 1800);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -432,6 +459,13 @@ export default function MyFilesManager({
       showNotice("Копия создана");
       await load();
     } catch (err) {
+      if (isQuotaExceededError(err)) {
+        const payload = quotaPayloadFromError(err, quota);
+        const message = quotaExceededMessage(payload);
+        setQuotaError({ message, quota: payload });
+        setError(message);
+        return;
+      }
       setError(err?.message || "Не удалось скопировать");
     }
   };
@@ -501,6 +535,11 @@ export default function MyFilesManager({
   }, [compact, selectable, selectedItems, apiSection, items]);
 
   const quotaPercent = quota?.percent ?? 0;
+  const usedBytes = Number(quota?.storage_used_bytes ?? quota?.used_bytes ?? 0);
+  const limitBytes = Number(quota?.storage_limit_bytes ?? quota?.limit_bytes ?? 0);
+  const availableBytes = Number(quota?.available_bytes ?? Math.max(0, limitBytes - usedBytes));
+  const quotaBreakdown = Array.isArray(quota?.breakdown) ? quota.breakdown.filter((row) => row.used_bytes > 0) : [];
+  const canUpgradeStorage = Boolean(quota?.can_upgrade) && !student;
   const canWrite = apiSection !== "trash" && apiSection !== "recent";
   const filteredNavStudents = students.filter((s) => studentLabel(s).toLowerCase().includes(studentNavSearch.trim().toLowerCase()));
   const parentCrumb = breadcrumbs.length > 1 ? breadcrumbs[breadcrumbs.length - 2] : null;
@@ -775,12 +814,32 @@ export default function MyFilesManager({
             />
           ) : (
             <>
-              {quota && activeWorkspace === "my" ? (
+              {quota && activeWorkspace === "my" && !compact && !selectable ? (
                 <div className="cb-files__quota">
-                  Использовано {formatBytes(quota.used_bytes)} из {formatBytes(quota.limit_bytes)} ({quotaPercent}%)
-                  <div className={`cb-files__quota-bar${quota.warning ? " is-warn" : ""}`}>
+                  <div className="cb-files__quota-head">
+                    <span className="cb-files__quota-title">Хранилище</span>
+                    <span className="cb-files__quota-frac">
+                      {formatStorageBytes(usedBytes)} из {formatStorageBytes(limitBytes)}
+                    </span>
+                  </div>
+                  <div
+                    className={`cb-files__quota-bar${quota.warning || quota.over_limit ? " is-warn" : ""}`}
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.min(100, quotaPercent)}
+                    aria-label={`Хранилище: ${formatStorageBytes(usedBytes)} из ${formatStorageBytes(limitBytes)}`}
+                  >
                     <span style={{ width: `${Math.min(100, quotaPercent)}%` }} />
                   </div>
+                  <p className="cb-files__quota-left">Осталось {formatStorageBytes(availableBytes)}</p>
+                  {quotaBreakdown.length ? (
+                    <ul className="cb-files__quota-breakdown">
+                      {quotaBreakdown.map((row) => (
+                        <li key={row.key}>{row.label} — {formatStorageBytes(row.used_bytes)}</li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -918,7 +977,14 @@ export default function MyFilesManager({
               ) : null}
 
               {notice ? <p className="cb-page-sub">{notice}</p> : null}
-              {error ? <div className="cb-files__error">{error}</div> : null}
+              {quotaError ? (
+                <QuotaExceededNotice
+                  message={quotaError.message}
+                  quota={quotaError.quota}
+                  showOpenFiles={false}
+                  showUpgrade={canUpgradeStorage}
+                />
+              ) : error ? <div className="cb-files__error">{error}</div> : null}
 
               {loading ? (
                 <div className="cb-files__skeleton" aria-busy="true">

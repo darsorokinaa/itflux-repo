@@ -1200,7 +1200,9 @@ class HomeworkAssignmentUploadAnswerView(HomeworkAssignmentBaseView):
                     teacher=False,
                 )
             except HomeworkTaskFileError as exc:
-                return Response({"error": exc.message, "code": exc.code}, status=exc.status_code)
+                payload = {"error": exc.message, "detail": exc.message, "code": exc.code}
+                payload.update(exc.extra or {})
+                return Response(payload, status=exc.status_code)
 
         saved = [serialize_homework_task_attachment(row) for row in rows]
         first = saved[0]

@@ -411,6 +411,7 @@ class ParentDashboardView(APIView):
                 )
                 .filter(Q(student=student) | Q(group__students=student))
                 .exclude(status__in=["cancelled", "draft"])
+                .exclude(event_type__in=("personal", "blocked"))
                 .select_related("group", "lesson", "lesson_plan_item", "student_subject")
                 .order_by("starts_at")
                 .first()

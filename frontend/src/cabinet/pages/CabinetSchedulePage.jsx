@@ -33,6 +33,7 @@ import { isTelemostMeetingUrl } from "../telemostPopup";
 import { cabinetMeetingPathFromHref, isCabinetMeetingHref } from "../meetingNavigation";
 import CreateScheduleLessonModal from "../components/CreateScheduleLessonModal";
 import EditScheduleLessonModal from "../components/EditScheduleLessonModal";
+import PersonalEventModal from "../components/PersonalEventModal";
 import EventDetailCard from "../components/EventDetailCard";
 import AddAvailabilityModal from "../components/AddAvailabilityModal";
 import ShareScheduleModal from "../components/ShareScheduleModal";
@@ -113,7 +114,47 @@ const EVENT_TYPES = {
   homework: { label: "Домашнее задание", color: "#D97706" },
   review: { label: "Проверка работ", color: "#DC2626" },
   availability: { label: "Свободное время", color: "#1A73E8" },
+  personal: { label: "Личное дело", color: "#7C3AED" },
+  blocked: { label: "Блокировка", color: "#64748B" },
+  travel: { label: "Дорога", color: "#C4B5FD" },
 };
+
+function isCalendarTravelEvent(event) {
+  return event?.kind === "travel" || event?.type === "travel";
+}
+
+function isCalendarPersonalEvent(event) {
+  return event?.kind === "personal" || event?.type === "personal";
+}
+
+function isCalendarBlockedEvent(event) {
+  return event?.kind === "blocked" || event?.type === "blocked";
+}
+
+function isNonLessonCalendarEvent(event) {
+  return isCalendarPersonalEvent(event) || isCalendarBlockedEvent(event) || isCalendarTravelEvent(event);
+}
+
+function calendarEventDisplayTitle(event) {
+  if (event?.kind === "availability" || event?.type === "availability") return "Свободно";
+  if (isCalendarTravelEvent(event)) return "Дорога";
+  if (isCalendarPersonalEvent(event) || isCalendarBlockedEvent(event)) {
+    const title = String(event?.title || "").trim();
+    if (title) return title;
+    return isCalendarBlockedEvent(event) ? "Блокировка" : "Событие";
+  }
+  const subjectLabel = String(event?.studentSubjectLabel || "").trim();
+  return subjectLabel || eventDisplayTitle(event);
+}
+
+function travelMinutesLabel(minutes) {
+  const n = Number(minutes) || 0;
+  if (!n) return "нет";
+  if (n === 60) return "1 час";
+  if (n === 90) return "1 час 30 минут";
+  if (n % 60 === 0) return `${n / 60} ч`;
+  return `${n} мин`;
+}
 
 function availabilitySlotsToEvents(slots = []) {
   return slots.map((slot) => ({
@@ -155,6 +196,9 @@ async function fetchEventsForCalendarView(fetchEvents, view, focusDate) {
 
 function eventAccentColor(event) {
   if (event.kind === "availability" || event.type === "availability") return "#1A73E8";
+  if (isCalendarTravelEvent(event)) return "#C4B5FD";
+  if (isCalendarPersonalEvent(event)) return "#7C3AED";
+  if (isCalendarBlockedEvent(event)) return "#64748B";
   if (event.status === "cancelled") return "#EF4444";
   if (event.status === "done" || event.status === "completed") return "#10B981";
   const tags = event.tags || [];
@@ -505,6 +549,7 @@ function useScheduleEventResize({ enabled, events, onResize }) {
       // Check overlap
       const hasOverlap = events.some(ev => {
         if (String(ev.id) === String(session.eventId)) return false;
+        if (isCalendarTravelEvent(ev) && String(ev.parentEventId) === String(session.eventId)) return false;
         if (formatApiDate(eventDate(ev)) !== session.dayKey) return false;
         const evStart = parseTime(eventLocalStartTime(ev));
         const evEnd = parseTime(eventLocalEndTime(ev));
@@ -544,6 +589,7 @@ function useSchedulePointerDrag({ enabled, events, onDragOver, onDrop, onDragEnd
   const onEventPointerDown = useCallback((eventId, e) => {
     if (!enabled) return;
     if (e.button !== 0) return;
+    e.currentTarget?.setPointerCapture?.(e.pointerId);
     const mode = e.currentTarget.closest(".cb-sch-month") ? "month" : "time";
     sessionRef.current = {
       eventId,
@@ -817,6 +863,109 @@ function NavChevron({ direction }) {
   );
 }
 
+function CreateTypeMenu({ onLesson, onPersonal, compact = false, label = "Создать" }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="cb-sch-create-menu">
+      <button
+        type="button"
+        className={compact ? "cb-sch-fab" : "cb-btn cb-btn--primary cb-sch-btn--add"}
+        aria-label={label}
+        aria-expanded={open}
+        onClick={() => setOpen((prev) => !prev)}
+      >
+        <CabinetIcon name="plus" />
+        {compact ? null : <span>{label}</span>}
+      </button>
+      {open ? (
+        <div className="cb-sch-create-menu__list" role="menu">
+          <button type="button" role="menuitem" onClick={() => { setOpen(false); onLesson(); }}>Урок</button>
+          <button type="button" role="menuitem" onClick={() => { setOpen(false); onPersonal(); }}>Личное дело</button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const PERSONAL_RECURRENCE_LABELS = {
+  none: "Не повторяется",
+  daily: "Каждый день",
+  weekly: "Каждую неделю",
+  biweekly: "Каждые 2 недели",
+  monthly: "Каждый месяц",
+  weekdays: "По будням",
+  custom: "По расписанию",
+};
+
+function PersonalEventDetailCard({ event, onClose, onEdit, onRequestDelete }) {
+  const isTravel = isCalendarTravelEvent(event);
+  const isBlocked = isCalendarBlockedEvent(event);
+  const typeLabel = isTravel ? "Дорога" : isBlocked ? "Блокировка" : "Личное дело";
+  const typeIcon = isTravel ? "car" : isBlocked ? "lock" : "mapPin";
+  const recurrenceType = event.recurrence?.type || "none";
+  const recurrenceLabel = PERSONAL_RECURRENCE_LABELS[recurrenceType] || "Повторяется";
+  const travelParts = [
+    event.travelBeforeMinutes ? `до ${travelMinutesLabel(event.travelBeforeMinutes)}` : "",
+    event.travelAfterMinutes ? `после ${travelMinutesLabel(event.travelAfterMinutes)}` : "",
+  ].filter(Boolean);
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div className="cb-sch-overlay" onClick={onClose} role="presentation">
+      <div
+        className="cb-sch-modal cb-sch-modal--appt cb-sch-modal--appt-sm cb-sch-personal-card"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-labelledby="personal-card-title"
+      >
+        <div className="cb-sch-modal__head">
+          <div className="cb-sch-personal-card__heading">
+            <span className={`cb-sch-personal-card__badge${isBlocked ? " cb-sch-personal-card__badge--blocked" : ""}`}>
+              <CabinetIcon name={typeIcon} />
+            </span>
+            <h2 id="personal-card-title">{event.title || typeLabel}</h2>
+          </div>
+          <button type="button" className="cb-sch-popover__close" onClick={onClose} aria-label="Закрыть">
+            <CabinetIcon name="close" />
+          </button>
+        </div>
+        <div className="cb-sch-form">
+          <p className="cb-sch-appt-time">
+            {formatEventDateShort(event)} · {eventLocalTimeRange(event)}
+          </p>
+          <div className="cb-sch-personal-card__meta">
+            {event.location ? (
+              <p className="cb-sch-personal-card__row">
+                <CabinetIcon name="mapPin" />
+                <span>{event.location}</span>
+              </p>
+            ) : null}
+            {travelParts.length ? (
+              <p className="cb-sch-personal-card__row">
+                <CabinetIcon name="car" />
+                <span>Дорога {travelParts.join(" · ")}</span>
+              </p>
+            ) : null}
+            <p className="cb-sch-personal-card__row">
+              <CabinetIcon name="calendar" />
+              <span>{recurrenceLabel}</span>
+            </p>
+            {event.description ? (
+              <p className="cb-sch-personal-card__desc">{event.description}</p>
+            ) : null}
+          </div>
+          {isTravel ? null : (
+            <div className="cb-sch-modal__actions">
+              <button type="button" className="cb-btn cb-btn--outline" onClick={() => onEdit(event)}>Редактировать</button>
+              <button type="button" className="cb-btn cb-btn--danger" onClick={() => onRequestDelete(event)}>Удалить</button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function buildYandexEmbedUrl(view, layerIds, tzId) {
   const path = { day: "day", week: "week", month: "month", list: "week" }[view] || "week";
   const params = new URLSearchParams();
@@ -951,6 +1100,7 @@ function ScheduleToolbar({
   onPrev,
   onNext,
   onAddLesson,
+  onAddPersonal,
   paintMode,
   onTogglePaintMode,
   bookingAllowed,
@@ -962,7 +1112,7 @@ function ScheduleToolbar({
   onShare,
   onCloseBooking,
 }) {
-  const views = isMobile ? VIEWS.filter((v) => v.id !== "week") : VIEWS;
+  const views = VIEWS;
   const paintTip = !bookingAllowed
     ? "Отметить свободное время — доступно с тарифа «Учитель»"
     : paintMode
@@ -1038,10 +1188,10 @@ function ScheduleToolbar({
           ) : null}
         </div>
 
-        <button type="button" className="cb-btn cb-btn--primary cb-sch-btn--add" onClick={onAddLesson}>
-          <CabinetIcon name="plus" />
-          Добавить урок
-        </button>
+        <CreateTypeMenu
+          onLesson={onAddLesson}
+          onPersonal={onAddPersonal}
+        />
       </div>
     </div>
   );
@@ -1147,7 +1297,7 @@ function UpcomingLessons({ events, onEventClick, compact }) {
                     ) : null}
                   </span>
                   <span className="cb-sch-upcoming__text">
-                    <span className="cb-sch-upcoming__title">{eventDisplayTitle(ev)}</span>
+                    <span className="cb-sch-upcoming__title">{calendarEventDisplayTitle(ev)}</span>
                     {subtitle ? (
                       <span className="cb-sch-upcoming__meta">{subtitle}</span>
                     ) : null}
@@ -1237,14 +1387,16 @@ function CalendarEventBlock({
   const cancelled = event.status === "cancelled";
   const recurring = isRecurring(event);
   const isAvailability = event.kind === "availability";
-  const subjectLabel = String(event.studentSubjectLabel || "").trim();
-  const displayTitle = isAvailability
-    ? "Свободно"
-    : (subjectLabel || eventDisplayTitle(event));
-  const studentLabel = isAvailability ? "" : eventDisplayTitle(event);
-  const displaySubtitle = isAvailability
+  const isTravel = isCalendarTravelEvent(event);
+  const isPersonal = isCalendarPersonalEvent(event);
+  const isBlocked = isCalendarBlockedEvent(event);
+  const displayTitle = calendarEventDisplayTitle(event);
+  const studentLabel = isAvailability || isTravel || isPersonal || isBlocked ? "" : eventDisplayTitle(event);
+  const displaySubtitle = isAvailability || isTravel
     ? ""
-    : (studentLabel && studentLabel !== displayTitle ? studentLabel : "");
+    : isPersonal || isBlocked
+      ? (event.location || "")
+      : (studentLabel && studentLabel !== displayTitle ? studentLabel : "");
   const planTopic = resolveLessonTopic(event);
   const cardSubtitle = displaySubtitle || (planTopic && planTopic !== displayTitle ? planTopic : "");
   const eventTip = [
@@ -1261,10 +1413,33 @@ function CalendarEventBlock({
   };
 
   const content = !compact ? (
+    isTravel ? (
+      <>
+        {shortBlock ? null : (
+          <div className="cb-sch-event__head">
+            <span className="cb-sch-event__time">{eventLocalTimeRange(event)}</span>
+          </div>
+        )}
+        <span className="cb-sch-event__title cb-sch-event__title--with-icon">
+          <CabinetIcon name="car" />
+          Дорога
+        </span>
+      </>
+    ) : (
     <>
       <div className="cb-sch-event__head">
         <span className="cb-sch-event__time">{eventLocalTimeRange(event)}</span>
         <span className="cb-sch-event__badges">
+          {isPersonal ? (
+            <span className="cb-sch-event__badge" title="Личное дело">
+              <CabinetIcon name="mapPin" />
+            </span>
+          ) : null}
+          {isBlocked ? (
+            <span className="cb-sch-event__badge" title="Заблокировано">
+              <CabinetIcon name="lock" />
+            </span>
+          ) : null}
           {event.selfBooked && !cancelled ? (
             <span className="cb-sch-event__badge cb-sch-event__badge--self-booked" title="Записался самостоятельно">
               <CabinetIcon name="alert" />
@@ -1294,6 +1469,7 @@ function CalendarEventBlock({
       ) : null}
       {cancelled ? <span className="cb-sch-event__status">Отменено</span> : null}
     </>
+    )
   ) : (
     <>
       <span className="cb-sch-event__dot" style={{ background: accent }} aria-hidden="true" />
@@ -1318,6 +1494,10 @@ function CalendarEventBlock({
     cancelled ? "cb-sch-event--cancelled" : "",
     event.selfBooked && !cancelled ? "cb-sch-event--self-booked" : "",
     event.kind === "availability" ? "cb-sch-event--availability" : "",
+    isPersonal ? "cb-sch-event--personal" : "",
+    isBlocked ? "cb-sch-event--blocked" : "",
+    isTravel ? "cb-sch-event--travel" : "",
+    isTravel && shortBlock ? "cb-sch-event--travel-short" : "",
     canDrag ? "cb-sch-event--draggable" : "",
   ].filter(Boolean).join(" ");
 
@@ -1333,7 +1513,8 @@ function CalendarEventBlock({
     }
   };
 
-  const resizeHandle = event.kind === "availability" && !compact ? (
+  const canResize = !compact && !isTravel && (event.kind === "availability" || !event.readOnly);
+  const resizeHandle = canResize ? (
     <div
       className="cb-sch-event__resize-handle"
       onPointerDown={(e) => {
@@ -1370,7 +1551,8 @@ function CalendarEventBlock({
         onKeyDown={handleKeyDown}
         role="button"
         tabIndex={0}
-        title={eventTip}
+        title={isTravel ? undefined : eventTip}
+        aria-label={eventTip}
       >
         <div className={cardClass} style={{ borderLeftColor: accent }} aria-hidden="true">
           {content}
@@ -1388,7 +1570,8 @@ function CalendarEventBlock({
       style={cardStyle}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
-      title={eventTip}
+      title={isTravel ? undefined : eventTip}
+      aria-label={eventTip}
     >
       {content}
       {resizeHandle}
@@ -1878,7 +2061,9 @@ function ListView({ events, onOpen, onStart, onCreateLink, onAddLesson }) {
               else if (vmStatus === "scheduled") startLabel = "Начать урок";
               else if (canStart && !hasLink) startLabel = "Создать ссылку";
               else if (hasLink) startLabel = "Начать урок";
-              const studentName = (ev.audience || ev.title || "Занятие").trim();
+              const studentName = isNonLessonCalendarEvent(ev)
+                ? calendarEventDisplayTitle(ev)
+                : (ev.audience || ev.title || "Занятие").trim();
               const typeLabel = EVENT_TYPES[ev.type]?.label || "Занятие";
               const duration = eventDurationMinutes(eventLocalStartTime(ev), eventLocalEndTime(ev));
               const showStatus = Boolean(ev.statusLabel) && ev.status !== "planned";
@@ -1956,22 +2141,33 @@ function ConfirmActionModal({ action, onClose, onConfirm, saving = false }) {
   const hasPlan = Boolean(event.hasPlan || event.planItem || event.studentId || event.groupId);
   const planTopic = event.planItem?.topic || event.planItem?.title || event.topic || "";
 
+  const noun = isNonLessonCalendarEvent(event) ? "событие" : "занятие";
   const copy = {
     move: {
-      title: "Перенести занятие",
+      title: `Перенести ${noun}`,
       text: targetDate && targetStartTime
         ? `Перенести «${event.title}» на ${formatDayHeading(targetDate)}, ${targetStartTime}?`
         : `Перенести «${event.title}»?`,
-      single: "Только это занятие",
-      following: "Это и следующие",
+      single: "Только это событие",
+      following: "Это и последующие",
+      entire: "Всю серию",
+      danger: false,
+    },
+    resize: {
+      title: "Изменить длительность",
+      text: targetStartTime
+        ? `Новое окончание «${event.title}»: ${targetStartTime}?`
+        : `Изменить длительность «${event.title}»?`,
+      single: "Только это событие",
+      following: "Это и последующие",
       entire: "Всю серию",
       danger: false,
     },
     delete: {
-      title: "Удалить занятие",
+      title: `Удалить ${noun}`,
       text: `Удалить «${event.title}» (${formatEventWhen(event)})?`,
-      single: "Только это занятие",
-      following: "Это и следующие",
+      single: "Только это событие",
+      following: "Это и последующие",
       entire: "Всю серию",
       danger: true,
     },
@@ -1979,7 +2175,7 @@ function ConfirmActionModal({ action, onClose, onConfirm, saving = false }) {
       title: "Отменить занятие",
       text: `Отменить «${event.title}» (${formatEventWhen(event)})?`,
       single: "Только это занятие",
-      following: "Это и следующие",
+      following: "Это и последующие",
       entire: "Всю серию",
       danger: false,
     },
@@ -2283,7 +2479,7 @@ export default function CabinetSchedulePage() {
   const [yandexEmbedEnabled, setYandexEmbedEnabled] = useState(false);
   const [yandexLayerIds, setYandexLayerIds] = useState("");
   const [yandexTzId, setYandexTzId] = useState("Europe/Moscow");
-  const [view, setView] = useState(() => (typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches ? "list" : "week"));
+  const [view, setView] = useState("week");
   const [focusDate, setFocusDate] = useState(() => startOfDay(new Date()));
   const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()));
   const [sidebarOpen, setSidebarOpen] = useState(() =>
@@ -2296,6 +2492,8 @@ export default function CabinetSchedulePage() {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [prepareMaterialsPrompt, setPrepareMaterialsPrompt] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [personalOpen, setPersonalOpen] = useState(false);
+  const [personalEvent, setPersonalEvent] = useState(null);
   const [availabilityOpen, setAvailabilityOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [paintMode, setPaintMode] = useState(false);
@@ -2621,10 +2819,6 @@ export default function CabinetSchedulePage() {
     });
     setSelectedEvent(null);
   }, [handleAddMaterials]);
-
-  useEffect(() => {
-    if (isMobile && (view === "week" || view === "month")) setView("list");
-  }, [isMobile, view]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3023,7 +3217,7 @@ export default function CabinetSchedulePage() {
     setCreateOpen(false);
     setCreateDraft(null);
     refreshAvailability();
-    if (data?.event) {
+    if (data?.event && !isNonLessonCalendarEvent(data.event)) {
       setSelectedEvent(data.event);
       setPrepareMaterialsPrompt(true);
     }
@@ -3062,7 +3256,32 @@ export default function CabinetSchedulePage() {
   const openCreateLesson = useCallback((draft = {}) => {
     setCreateDraft(draft);
     setCreateOpen(true);
+    setPersonalOpen(false);
+    setPersonalEvent(null);
   }, []);
+
+  const openPersonalEvent = useCallback((draft = {}) => {
+    setPersonalEvent(draft.event || null);
+    setCreateDraft(draft);
+    setPersonalOpen(true);
+    setCreateOpen(false);
+    setSelectedEvent(null);
+  }, []);
+
+  const handleSavePersonalEvent = useCallback(async (payload, event) => {
+    if (event?.id && !String(event.id).startsWith("travel-")) {
+      await updateScheduleEvent(event.id, payload);
+    } else {
+      await createScheduleEvent(payload);
+    }
+    const refreshed = await fetchEventsForCalendarView(fetchScheduleEvents, view, focusDate);
+    setEvents(refreshed);
+    setPersonalOpen(false);
+    setPersonalEvent(null);
+    setCreateDraft(null);
+    refreshAvailability();
+    showStatus("Событие сохранено.");
+  }, [view, focusDate, refreshAvailability, showStatus]);
 
   const handleDuplicateLesson = useCallback((event) => {
     if (!event || event.readOnly) return;
@@ -3089,7 +3308,7 @@ export default function CabinetSchedulePage() {
   }, [openCreateLesson]);
 
   const handleSlotClick = useCallback((day, startTime) => {
-    const endTime = addMinutesToTime(startTime, 45);
+    const endTime = addMinutesToTime(startTime, 60);
     const startInFormTz = localClockToTimeZone(day, startTime, "Europe/Moscow");
     const endInFormTz = localClockToTimeZone(day, endTime, "Europe/Moscow");
     openCreateLesson({
@@ -3171,8 +3390,25 @@ export default function CabinetSchedulePage() {
       setSelectedAvailability(event);
       return;
     }
+    const target = isCalendarTravelEvent(event)
+      ? (events.find((ev) => String(ev.id) === String(event.parentEventId)) || event)
+      : event;
+    if (isCalendarPersonalEvent(target) || isCalendarBlockedEvent(target)) {
+      openPersonalEvent({
+        event: target,
+        date: formatApiDate(eventDate(target)),
+        startTime: eventLocalStartTime(target),
+        endTime: eventLocalEndTime(target),
+        type: target.type,
+      });
+      return;
+    }
+    if (isCalendarTravelEvent(target)) {
+      setSelectedEvent(target);
+      return;
+    }
     setSelectedEvent(event);
-  }, []);
+  }, [events, openPersonalEvent]);
 
   const handleDragEnd = useCallback(() => {
     setDropPreview(null);
@@ -3193,6 +3429,18 @@ export default function CabinetSchedulePage() {
       showStatus("События из Яндекс Календаря редактируются в calendar.yandex.ru.");
       return;
     }
+    if (isCalendarTravelEvent(event)) {
+      const parent = events.find((ev) => String(ev.id) === String(event.parentEventId));
+      if (parent) {
+        setPendingAction({
+          type: "move",
+          event: parent,
+          targetDate,
+          targetStartTime,
+        });
+      }
+      return;
+    }
     setDropPreview(null);
     setPendingAction({
       type: "move",
@@ -3202,7 +3450,7 @@ export default function CabinetSchedulePage() {
     });
   }, [events, showStatus]);
 
-  const dndEnabled = !isMobile;
+  const dndEnabled = true;
 
   const { draggingId, onEventPointerDown } = useSchedulePointerDrag({
     enabled: dndEnabled,
@@ -3293,19 +3541,28 @@ export default function CabinetSchedulePage() {
     events,
     onResize: async (eventId, newEndTime) => {
       const event = events.find((ev) => String(ev.id) === String(eventId));
-      if (!event || event.kind !== "availability") return;
-      try {
-        await updateTeacherAvailability(event.availabilityId, {
-          start_time: eventLocalStartTime(event),
-          end_time: newEndTime,
-          dates: [formatApiDate(eventDate(event))],
-        });
-        await refreshAvailability();
-        showStatus("Время изменено.");
-      } catch (err) {
-        if (openFromError(err)) return;
-        showStatus(err.message || "Не удалось изменить время.");
+      if (!event || isCalendarTravelEvent(event)) return;
+      if (event.kind === "availability") {
+        try {
+          await updateTeacherAvailability(event.availabilityId, {
+            start_time: eventLocalStartTime(event),
+            end_time: newEndTime,
+            dates: [formatApiDate(eventDate(event))],
+          });
+          await refreshAvailability();
+          showStatus("Время изменено.");
+        } catch (err) {
+          if (openFromError(err)) return;
+          showStatus(err.message || "Не удалось изменить время.");
+        }
+        return;
       }
+      setPendingAction({
+        type: "resize",
+        event,
+        targetDate: eventDate(event),
+        targetStartTime: newEndTime,
+      });
     }
   });
 
@@ -3357,24 +3614,34 @@ export default function CabinetSchedulePage() {
           const data = await updateScheduleEvent(event.id, {
             ...buildEventDateTime(updated),
             scope: apiScope,
-            notify_participants: true,
+            notify_participants: !isNonLessonCalendarEvent(event),
           });
-          if (apiScope === "series" || apiScope === "following") {
-            const range = getSeriesRefreshRange(focusDate);
-            const refreshed = await fetchScheduleEvents(range);
-            if (refreshed?.events) setEvents(refreshed.events);
+          if (apiScope === "series" || apiScope === "following" || isNonLessonCalendarEvent(event) || event.travelBeforeMinutes || event.travelAfterMinutes) {
+            const refreshed = await fetchEventsForCalendarView(fetchScheduleEvents, view, focusDate);
+            setEvents(refreshed);
           } else if (data?.event) {
             setEvents((prev) => prev.map((ev) => (ev.id === event.id ? data.event : ev)));
           }
         }
-        showStatus(scope === "entire" ? "Вся серия перенесена" : scope === "following" ? "Серия перенесена" : "Занятие перенесено");
-        // Перенос времени — не финансовое событие: урок ещё состоится.
+        showStatus(scope === "entire" ? "Вся серия перенесена" : scope === "following" ? "Серия перенесена" : "Событие перенесено");
+      } else if (type === "resize") {
+        const startDt = combineLocalDateAndTime(eventDate(event), eventLocalStartTime(event));
+        const endDt = combineLocalDateAndTime(eventDate(event), targetStartTime);
+        await updateScheduleEvent(event.id, {
+          starts_at: formatLocalDateTimeIso(startDt),
+          ends_at: formatLocalDateTimeIso(endDt),
+          scope: apiScope,
+          notify_participants: !isNonLessonCalendarEvent(event),
+        });
+        const refreshed = await fetchEventsForCalendarView(fetchScheduleEvents, view, focusDate);
+        setEvents(refreshed);
+        showStatus("Длительность обновлена.");
       } else if (type === "delete") {
         if (local) {
           await deleteScheduleEvent(event.id, { scope: apiScope, notifyParticipants: true });
         }
-        setEvents((prev) => applyRemoveEvents(prev, event, scope));
-        showStatus(scope === "entire" ? "Вся серия удалена" : scope === "following" ? "Серия удалена" : "Занятие удалено");
+        setEvents((prev) => applyRemoveEvents(prev, event, scope).filter((ev) => String(ev.parentEventId) !== String(event.id)));
+        showStatus(scope === "entire" ? "Вся серия удалена" : scope === "following" ? "Серия удалена" : "Событие удалено");
         setSelectedEvent(null);
       } else if (type === "cancel") {
         if (local) {
@@ -3394,7 +3661,9 @@ export default function CabinetSchedulePage() {
           : "Занятие отменено, тема перенесена на следующее занятие";
         showStatus(scope === "entire" ? "Вся серия отменена" : scope === "following" ? "Серия отменена" : planMsg);
         setSelectedEvent(null);
-        openBillingPrompt(event, "cancelled");
+        if (!isNonLessonCalendarEvent(event)) {
+          openBillingPrompt(event, "cancelled");
+        }
       }
       setPendingAction(null);
       refreshAvailability();
@@ -3429,6 +3698,7 @@ export default function CabinetSchedulePage() {
         onPrev={handlePrev}
         onNext={handleNext}
         onAddLesson={() => openCreateLesson()}
+        onAddPersonal={() => openPersonalEvent({ date: formatApiDate(selectedDate), type: "personal" })}
         paintMode={paintMode}
         onTogglePaintMode={handleTogglePaintMode}
         bookingAllowed={bookingAllowed}
@@ -3582,17 +3852,34 @@ export default function CabinetSchedulePage() {
       </div>
 
       {isMobile ? (
-        <button
-          type="button"
-          className="cb-sch-fab"
-          onClick={() => openCreateLesson()}
-          aria-label="Добавить урок"
-        >
-          <CabinetIcon name="plus" />
-        </button>
+        <CreateTypeMenu
+          compact
+          label="Создать"
+          onLesson={() => openCreateLesson()}
+          onPersonal={() => openPersonalEvent({ date: formatApiDate(selectedDate), type: "personal" })}
+        />
       ) : null}
 
-      {selectedEvent ? (
+      {selectedEvent && isNonLessonCalendarEvent(selectedEvent) ? (
+        <PersonalEventDetailCard
+          event={selectedEvent}
+          onClose={() => setSelectedEvent(null)}
+          onEdit={(event) => {
+            setSelectedEvent(null);
+            openPersonalEvent({
+              event,
+              date: formatApiDate(eventDate(event)),
+              startTime: eventLocalStartTime(event),
+              endTime: eventLocalEndTime(event),
+              type: event.type,
+            });
+          }}
+          onRequestDelete={(event) => {
+            setSelectedEvent(null);
+            setPendingAction({ type: "delete", event });
+          }}
+        />
+      ) : selectedEvent ? (
         <EventDetailPopover
           event={selectedEvent}
           isMobile={isMobile}
@@ -3773,6 +4060,15 @@ export default function CabinetSchedulePage() {
             setCreateDraft(null);
           }}
           onCreate={handleCreateLesson}
+          onSwitchToPersonal={(draft) => {
+            openPersonalEvent({
+              date: draft.date,
+              startTime: draft.startTime,
+              endTime: draft.endTime,
+              title: draft.title,
+              type: "personal",
+            });
+          }}
           dialogTitle={createDraft?.dialogTitle}
           defaultDate={createDraft?.date || formatApiDate(selectedDate)}
           defaultStartTime={createDraft?.startTime}
@@ -3784,6 +4080,36 @@ export default function CabinetSchedulePage() {
           defaultGroupId={createDraft?.groupId}
           defaultStudentId={createDraft?.studentId}
           defaultStudentIds={createDraft?.studentIds}
+        />
+      ) : null}
+
+      {personalOpen ? (
+        <PersonalEventModal
+          onClose={() => {
+            setPersonalOpen(false);
+            setPersonalEvent(null);
+            setCreateDraft(null);
+          }}
+          onSave={handleSavePersonalEvent}
+          onDelete={(event) => {
+            setPersonalOpen(false);
+            setPersonalEvent(null);
+            setCreateDraft(null);
+            setPendingAction({ type: "delete", event });
+          }}
+          onSwitchToLesson={(draft) => {
+            openCreateLesson({
+              date: draft.date,
+              startTime: draft.startTime,
+              endTime: draft.endTime,
+              lessonTitle: draft.title,
+            });
+          }}
+          event={personalEvent}
+          defaultTitle={createDraft?.title || personalEvent?.title || ""}
+          defaultDate={createDraft?.date || formatApiDate(selectedDate)}
+          defaultStartTime={createDraft?.startTime}
+          defaultEndTime={createDraft?.endTime}
         />
       ) : null}
 

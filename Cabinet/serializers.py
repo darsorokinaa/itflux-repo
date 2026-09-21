@@ -1,5 +1,6 @@
 from calendar import monthrange
-from datetime import datetime
+from datetime import datetime, timedelta
+import logging
 
 from django.db.models import Count, Q
 from django.utils import timezone
@@ -7,10 +8,12 @@ from rest_framework import serializers
 
 from .choices import (
     EnrollmentStatus,
+    HomeworkStatus,
     InvitationStatus,
     MaterialType,
     PlanItemStatus,
     PlanStatus,
+    ReviewPriority,
     ReviewStatus,
     StudentStatus,
     StudentSubjectStatus,
@@ -602,7 +605,11 @@ class MaterialWriteSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
+        from .files_models import CabinetFileRelation, CabinetFileRelationType
+        from .files_services import upload_file
+
         teacher = validated_data.pop("teacher", None) or self.context.get("teacher")
+        uploaded_file = validated_data.pop("file", None)
         material_type = validated_data.get("material_type")
         external_url = (validated_data.get("external_url") or "").strip()
         if material_type == MaterialType.LESSON and external_url:
@@ -611,6 +618,19 @@ class MaterialWriteSerializer(serializers.ModelSerializer):
                 material_type=MaterialType.LESSON,
                 external_url=external_url,
                 defaults={**validated_data, "teacher": teacher},
+            )
+            return material
+        if uploaded_file:
+            title = (validated_data.get("title") or getattr(uploaded_file, "name", "") or "file").strip()
+            file_obj = upload_file(teacher, uploaded_file, display_name=title)
+            material = Material(teacher=teacher, cabinet_file=file_obj, **validated_data)
+            material.file.name = file_obj.storage_key
+            material.save()
+            CabinetFileRelation.objects.get_or_create(
+                file=file_obj,
+                relation_type=CabinetFileRelationType.MATERIAL,
+                material=material,
+                defaults={"created_by": teacher},
             )
             return material
         return Material.objects.create(teacher=teacher, **validated_data)
@@ -1828,6 +1848,13 @@ class ScheduleEventSerializer(serializers.ModelSerializer):
             "meeting_url",
             "meeting_provider",
             "location",
+            "location_lat",
+            "location_lng",
+            "location_place_id",
+            "travel_before_minutes",
+            "travel_after_minutes",
+            "all_day",
+            "visibility",
             "audience",
             "materials",
             "status",
@@ -1889,6 +1916,15 @@ class ScheduleEventSeriesSerializer(serializers.ModelSerializer):
             "recurrence_weekdays",
             "recurrence_until",
             "recurrence_count",
+            "excluded_dates",
+            "location",
+            "location_lat",
+            "location_lng",
+            "location_place_id",
+            "travel_before_minutes",
+            "travel_after_minutes",
+            "all_day",
+            "visibility",
             "status",
             "status_label",
             "meeting_url",
@@ -1994,20 +2030,101 @@ class NotificationSerializer(serializers.ModelSerializer):
 
 
 class DashboardReviewItemSerializer(serializers.ModelSerializer):
-    student_name = serializers.CharField(source="student.full_name", read_only=True)
+    student_name = serializers.SerializerMethodField()
+    avatar_url = serializers.SerializerMethodField()
     source_type_label = serializers.CharField(source="get_source_type_display", read_only=True)
+    auto_correct = serializers.SerializerMethodField()
+    auto_total = serializers.SerializerMethodField()
+    subject_label = serializers.SerializerMethodField()
+    submitted_at = serializers.SerializerMethodField()
 
     class Meta:
         model = ReviewItem
         fields = [
             "id",
             "student_name",
+            "avatar_url",
             "title",
             "source_type",
             "source_type_label",
             "created_at",
+            "submitted_at",
             "priority",
+            "auto_correct",
+            "auto_total",
+            "subject_label",
         ]
+
+    def get_student_name(self, obj):
+        student = obj.student
+        if student:
+            name = f"{student.first_name} {student.last_name}".strip()
+            return name or student.full_name
+        if obj.group_id and obj.group:
+            return obj.group.title
+        return "Ученик"
+
+    def get_avatar_url(self, obj):
+        from .avatar_api import build_avatar_url
+
+        student = obj.student
+        user = getattr(student, "user", None) if student else None
+        if not user:
+            return ""
+        return build_avatar_url(user, self.context.get("request")) or ""
+
+    def _submission(self, obj):
+        if hasattr(obj, "_dashboard_submission"):
+            return obj._dashboard_submission
+        if obj.source_type != "homework" or not obj.source_id:
+            return None
+        return (
+            HomeworkSubmission.objects.filter(pk=obj.source_id)
+            .select_related("homework", "homework__student_subject")
+            .first()
+        )
+
+    def _auto_counts(self, obj):
+        from .homework_result import payload_checked_counts
+
+        submission = self._submission(obj)
+        if not submission:
+            return None, None
+        payload = submission.result_payload if isinstance(submission.result_payload, dict) else {}
+        correct, total = payload_checked_counts(payload)
+        if total:
+            return correct, total
+        total = payload.get("checked_count")
+        correct = payload.get("correct_count")
+        try:
+            total_n = int(total) if total is not None else None
+            correct_n = int(correct) if correct is not None else None
+        except (TypeError, ValueError):
+            return None, None
+        if total_n and total_n > 0 and correct_n is not None:
+            return correct_n, total_n
+        return None, None
+
+    def get_auto_correct(self, obj):
+        correct, _total = self._auto_counts(obj)
+        return correct
+
+    def get_auto_total(self, obj):
+        _correct, total = self._auto_counts(obj)
+        return total
+
+    def get_subject_label(self, obj):
+        submission = self._submission(obj)
+        homework = getattr(submission, "homework", None) if submission else None
+        if homework is not None and homework.student_subject_id and homework.student_subject:
+            return homework.student_subject.display_label
+        return ""
+
+    def get_submitted_at(self, obj):
+        submission = self._submission(obj)
+        if submission and submission.submitted_at:
+            return submission.submitted_at
+        return obj.created_at
 
 
 class DashboardSerializer(serializers.Serializer):
@@ -2022,17 +2139,159 @@ class DashboardSerializer(serializers.Serializer):
     progress_overview = serializers.ListField()
     upcoming_actions = serializers.ListField()
     calendar_event_days = serializers.ListField(child=serializers.IntegerField())
+    calendar_personal_days = serializers.ListField(child=serializers.IntegerField(), required=False)
+    calendar_lesson_days = serializers.ListField(child=serializers.IntegerField(), required=False)
     onboarding = serializers.DictField(required=False)
+    attention_students = serializers.ListField(required=False)
+    upcoming_events = ScheduleEventSerializer(many=True, required=False)
+    new_bookings_count = serializers.IntegerField(required=False)
+    new_bookings_today = serializers.IntegerField(required=False)
+    urgent_reviews_count = serializers.IntegerField(required=False)
+    suggested_materials = serializers.ListField(required=False)
+    engagement = serializers.DictField(required=False, allow_null=True)
 
 
-def build_dashboard_payload(teacher):
-    from .homework_api import exclude_live_meeting_review_items, review_items_ready_to_check
+def _dashboard_plural_ru(n, one, few, many):
+    abs_n = abs(int(n)) % 100
+    n1 = abs_n % 10
+    if 10 < abs_n < 20:
+        return many
+    if n1 == 1:
+        return one
+    if 2 <= n1 <= 4:
+        return few
+    return many
+
+
+def _build_dashboard_attention_students(teacher, *, now, limit=5):
+    from collections import defaultdict
+
+    from .journal_models import AttendanceStatus, JournalAttentionMarker, StudentLessonRecord
+
+    items = []
+    seen = set()
+
+    def push(student_id, student_name, reason, action_label, href, action="open", status="Нужно действие"):
+        if not student_id or student_id in seen or len(items) >= limit:
+            return
+        seen.add(student_id)
+        items.append({
+            "student_id": student_id,
+            "student_name": student_name or "Ученик",
+            "reason": reason,
+            "action_label": action_label,
+            "href": href,
+            "action": action,
+            "status": status,
+        })
+
+    markers = (
+        JournalAttentionMarker.objects.filter(teacher=teacher, is_active=True)
+        .select_related("student")
+        .order_by("-updated_at")[:limit]
+    )
+    for marker in markers:
+        student = marker.student
+        if not student:
+            continue
+        reason = (marker.custom_reason or marker.get_reason_display() or "требует внимания").strip()
+        assign = marker.reason in {"homework_not_done", "activity_drop"}
+        push(
+            student.id,
+            student.full_name,
+            reason[0].lower() + reason[1:] if reason else "требует внимания",
+            "Напомнить" if assign else "Открыть",
+            f"/cabinet/journal?student={student.id}",
+            "assign" if assign else "open",
+            "Внимание",
+        )
+
+    overdue = list(
+        Homework.objects.filter(
+            teacher=teacher,
+            status=HomeworkStatus.ASSIGNED,
+            due_at__lt=now,
+        ).select_related("student", "group").prefetch_related("group__students")[:40]
+    )
+    if overdue:
+        hw_ids = [hw.id for hw in overdue]
+        submitted = set(
+            HomeworkSubmission.objects.filter(
+                homework_id__in=hw_ids,
+                submitted_at__isnull=False,
+            ).values_list("homework_id", "student_id")
+        )
+        overdue_counts = defaultdict(lambda: {"name": "", "count": 0})
+        for hw in overdue:
+            recipients = []
+            if hw.student_id:
+                recipients.append((
+                    hw.student_id,
+                    hw.student.full_name if hw.student else "Ученик",
+                ))
+            elif hw.group_id and hw.group:
+                for student in hw.group.students.all():
+                    if student.status == StudentStatus.ARCHIVED:
+                        continue
+                    recipients.append((student.id, student.full_name))
+            for student_id, name in recipients:
+                if (hw.id, student_id) in submitted:
+                    continue
+                overdue_counts[student_id]["name"] = name
+                overdue_counts[student_id]["count"] += 1
+        for student_id, info in sorted(overdue_counts.items(), key=lambda row: -row[1]["count"]):
+            count = info["count"]
+            noun = _dashboard_plural_ru(count, "домашнее задание не сдано", "домашних задания не сданы", "домашних заданий не сданы")
+            reason = f"{count} {noun}" if count > 1 else noun
+            push(
+                student_id,
+                info["name"],
+                reason,
+                "Открыть",
+                f"/cabinet/journal?student={student_id}",
+                "open",
+                "Не сдано",
+            )
+
+    absents = (
+        StudentLessonRecord.objects.filter(
+            journal__teacher=teacher,
+            attendance_status=AttendanceStatus.ABSENT_UNEXCUSED,
+            journal__lesson_date__gte=(now.date() - timedelta(days=14)),
+        )
+        .select_related("student")
+        .order_by("-journal__lesson_date")[:12]
+    )
+    for record in absents:
+        student = record.student
+        if not student:
+            continue
+        push(
+            student.id,
+            student.full_name,
+            "пропустил занятие",
+            "Открыть",
+            f"/cabinet/journal?student={student.id}",
+            "open",
+            "Пропуск",
+        )
+
+    return items[:limit]
+
+
+def build_dashboard_payload(teacher, request=None):
+    from .availability_models import TeacherBooking
+    from .homework_api import (
+        exclude_live_meeting_review_items,
+        prefetch_submissions_for_review_items,
+        review_items_ready_to_check,
+    )
     from .plan_schedule import AUTO_MATERIALS_PLAN_DESCRIPTION
 
     today = timezone.localdate()
     now = timezone.now()
     start_of_day = timezone.make_aware(datetime.combine(today, datetime.min.time()))
-    end_of_day = timezone.make_aware(datetime.combine(today, datetime.max.time()))
+    week_ago = now - timedelta(days=7)
 
     active_students = Student.objects.filter(
         teacher=teacher,
@@ -2069,7 +2328,19 @@ def build_dashboard_payload(teacher):
         homework__description__contains="live-meeting:",
     ).select_related("student", "homework").order_by("-submitted_at", "-id")[:5]
 
-    pending_reviews_list = pending_reviews.select_related("student", "group").order_by("-created_at")[:8]
+    pending_reviews_list = list(
+        pending_reviews.select_related(
+            "student",
+            "student__user",
+            "student__user__profile",
+            "group",
+        ).order_by("-created_at")[:8]
+    )
+    submissions_by_id = prefetch_submissions_for_review_items(pending_reviews_list)
+    for item in pending_reviews_list:
+        item._dashboard_submission = (
+            submissions_by_id.get(item.source_id) if item.source_type == "homework" else None
+        )
 
     groups = StudentGroup.objects.filter(teacher=teacher, status="active").annotate(
         students_count=Count(
@@ -2107,16 +2378,42 @@ def build_dashboard_payload(teacher):
         starts_at__date__gte=today.replace(day=1),
         starts_at__date__lte=today.replace(day=month_last_day),
     ).exclude(status=ScheduleEvent.Status.CANCELLED)
-    calendar_event_days = sorted({
-        timezone.localtime(ev.starts_at).day
-        for ev in month_events_qs.only("starts_at")
-    })
+    lesson_days = set()
+    personal_days = set()
+    for ev in month_events_qs.only("starts_at", "event_type"):
+        day = timezone.localtime(ev.starts_at).day
+        if ev.event_type in (ScheduleEvent.EventType.PERSONAL, ScheduleEvent.EventType.BLOCKED):
+            personal_days.add(day)
+        else:
+            lesson_days.add(day)
+    calendar_event_days = sorted(lesson_days | personal_days)
+    calendar_lesson_days = sorted(lesson_days)
+    calendar_personal_days = sorted(personal_days)
+
+    tomorrow = start_of_day + timedelta(days=1)
+    upcoming_events = ScheduleEvent.objects.filter(
+        owner=teacher,
+        starts_at__gte=tomorrow,
+    ).exclude(status=ScheduleEvent.Status.CANCELLED).select_related(
+        "student", "student_subject", "group",
+    ).order_by("starts_at")[:4]
+
+    bookings_qs = TeacherBooking.objects.filter(
+        teacher=teacher,
+        status=TeacherBooking.Status.ACTIVE,
+        booked_at__gte=week_ago,
+    )
+    new_bookings_count = bookings_qs.count()
+    new_bookings_today = bookings_qs.filter(booked_at__gte=start_of_day).count()
 
     return {
         "active_students_count": active_students.count(),
         "pending_reviews_count": pending_reviews.count(),
+        "urgent_reviews_count": pending_reviews.filter(priority=ReviewPriority.HIGH).count(),
         "drafts_count": drafts_count,
-        "today_lessons_count": today_events_qs.count(),
+        "today_lessons_count": today_events_qs.exclude(
+            event_type__in=[ScheduleEvent.EventType.PERSONAL, ScheduleEvent.EventType.BLOCKED],
+        ).count(),
         "attention_items": attention_items,
         "today_events": today_events_qs,
         "new_submissions": new_submissions,
@@ -2124,7 +2421,15 @@ def build_dashboard_payload(teacher):
         "progress_overview": progress_overview,
         "upcoming_actions": upcoming_actions,
         "calendar_event_days": calendar_event_days,
+        "calendar_lesson_days": calendar_lesson_days,
+        "calendar_personal_days": calendar_personal_days,
+        "attention_students": _build_dashboard_attention_students(teacher, now=now),
+        "upcoming_events": upcoming_events,
+        "new_bookings_count": new_bookings_count,
+        "new_bookings_today": new_bookings_today,
         "onboarding": _build_onboarding_payload(teacher),
+        "suggested_materials": _build_suggested_materials(teacher, request),
+        "engagement": _build_engagement_payload(teacher, now=now),
     }
 
 
@@ -2132,3 +2437,23 @@ def _build_onboarding_payload(teacher):
     from .onboarding_service import build_teacher_onboarding_state
 
     return build_teacher_onboarding_state(teacher)
+
+
+def _build_engagement_payload(teacher, now=None):
+    from .dashboard_engagement import build_engagement
+
+    try:
+        return build_engagement(teacher, now=now)
+    except Exception:
+        logging.getLogger(__name__).exception("dashboard engagement failed")
+        return None
+
+
+def _build_suggested_materials(teacher, request=None):
+    from .dashboard_suggestions import build_suggested_materials
+
+    try:
+        return build_suggested_materials(teacher, request)
+    except Exception:
+        logging.getLogger(__name__).exception("dashboard suggested materials failed")
+        return []

@@ -3,16 +3,12 @@
  * Компактная одна строка метрик на главной и на странице тарифов.
  */
 
+import { formatUsageItemFrac } from "../storageFormat";
+
 const NEAR_LIMIT_PERCENT = 80;
 
 function formatUsed(item) {
-  const used = item.used ?? 0;
-  if (item.unlimited) {
-    return `${used} / ∞`;
-  }
-  const limit = item.limit ?? 0;
-  const unit = item.unit === "MB" ? " МБ" : "";
-  return `${used} / ${limit}${unit}`;
+  return formatUsageItemFrac(item);
 }
 
 function exhaustedCaption(item) {

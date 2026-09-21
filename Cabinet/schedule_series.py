@@ -22,96 +22,187 @@ def _series_tz(series):
 
 def _combine(series, d: date):
     tz = _series_tz(series)
-    start = datetime.combine(d, series.start_time, tzinfo=tz)
-    end = datetime.combine(d, series.end_time, tzinfo=tz)
+    if getattr(series, "all_day", False):
+        start = timezone.make_aware(datetime.combine(d, time.min), tz)
+        end = timezone.make_aware(datetime.combine(d + timedelta(days=1), time.min), tz)
+        return start, end
+    start = timezone.make_aware(datetime.combine(d, series.start_time), tz)
+    end = timezone.make_aware(datetime.combine(d, series.end_time), tz)
     if end <= start:
         end += timedelta(days=1)
     return start, end
 
 
+def _normalize_weekdays(raw, fallback=None):
+    days = []
+    for value in raw or []:
+        try:
+            day = int(value)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= day <= 6:
+            days.append(day)
+    if days:
+        return sorted(set(days))
+    if fallback is None:
+        return []
+    return [fallback]
+
+
 def _weekdays_for_series(series):
     if series.recurrence_type == RecurrenceType.WEEKDAYS:
         return [0, 1, 2, 3, 4]
-    if series.recurrence_type == RecurrenceType.CUSTOM_WEEKDAYS:
-        raw = series.recurrence_weekdays or []
-        return [int(x) for x in raw if str(x).isdigit() and 0 <= int(x) <= 6]
-    if series.recurrence_type == RecurrenceType.WEEKLY:
-        return [series.start_date.weekday()]
-    if series.recurrence_type == RecurrenceType.BIWEEKLY:
-        return [series.start_date.weekday()]
+    if series.recurrence_type in (
+        RecurrenceType.CUSTOM_WEEKDAYS,
+        RecurrenceType.CUSTOM,
+        RecurrenceType.WEEKLY,
+        RecurrenceType.BIWEEKLY,
+    ):
+        fallback = series.start_date.weekday() if series.start_date else None
+        return _normalize_weekdays(series.recurrence_weekdays, fallback=fallback)
     return []
 
 
-def _iter_dates(series, date_from: date, date_to: date):
-    if series.recurrence_type == RecurrenceType.NONE:
-        if series.start_date >= date_from and series.start_date <= date_to:
-            yield series.start_date
+def _excluded_date_set(raw):
+    excluded = set()
+    for value in raw or []:
+        if isinstance(value, date) and not isinstance(value, datetime):
+            excluded.add(value)
+            continue
+        text = str(value or "").strip()[:10]
+        if not text:
+            continue
+        try:
+            excluded.add(date.fromisoformat(text))
+        except ValueError:
+            continue
+    return excluded
+
+
+def _week_step_for_series(series):
+    if series.recurrence_type == RecurrenceType.BIWEEKLY:
+        return 2
+    if series.recurrence_type in (
+        RecurrenceType.WEEKLY,
+        RecurrenceType.CUSTOM_WEEKDAYS,
+        RecurrenceType.CUSTOM,
+        RecurrenceType.WEEKDAYS,
+    ):
+        return max(1, series.recurrence_interval or 1)
+    return 1
+
+
+def iter_occurrence_dates(
+    *,
+    start_date: date,
+    recurrence_type: str,
+    date_from: date,
+    date_to: date,
+    recurrence_until=None,
+    recurrence_count=None,
+    recurrence_interval=1,
+    recurrence_weekdays=None,
+    excluded_dates=None,
+):
+    """Даты серии без материализации тысяч лет вперёд: только [date_from, date_to]."""
+    excluded = _excluded_date_set(excluded_dates)
+    if recurrence_type in ("", RecurrenceType.NONE, None):
+        if date_from <= start_date <= date_to and start_date not in excluded:
+            yield start_date
         return
 
-    current = max(series.start_date, date_from)
-    end = min(date_to, series.recurrence_until or date_to)
+    end = min(date_to, recurrence_until or date_to)
+    if end < start_date or date_to < start_date:
+        return
     count = 0
-    max_count = series.recurrence_count
+    max_count = recurrence_count
+    interval = max(1, recurrence_interval or 1)
 
-    if series.recurrence_type == RecurrenceType.DAILY:
-        interval = max(1, series.recurrence_interval or 1)
-        d = series.start_date
+    if recurrence_type == RecurrenceType.DAILY:
+        d = start_date
         while d < date_from:
             d += timedelta(days=interval)
         while d <= end:
             if max_count and count >= max_count:
                 break
-            yield d
-            count += 1
+            if d >= date_from and d not in excluded:
+                yield d
+                count += 1
+            elif d >= date_from:
+                count += 1
             d += timedelta(days=interval)
         return
 
-    if series.recurrence_type in (
+    if recurrence_type in (
         RecurrenceType.WEEKLY,
         RecurrenceType.WEEKDAYS,
         RecurrenceType.CUSTOM_WEEKDAYS,
         RecurrenceType.BIWEEKLY,
+        RecurrenceType.CUSTOM,
     ):
-        weekdays = _weekdays_for_series(series)
-        if not weekdays and series.recurrence_type != RecurrenceType.WEEKDAYS:
-            weekdays = [series.start_date.weekday()]
-        week_step = 2 if series.recurrence_type == RecurrenceType.BIWEEKLY else 1
-        d = current
+        if recurrence_type == RecurrenceType.WEEKDAYS:
+            weekdays = [0, 1, 2, 3, 4]
+        else:
+            weekdays = _normalize_weekdays(recurrence_weekdays, fallback=start_date.weekday())
+        week_step = 2 if recurrence_type == RecurrenceType.BIWEEKLY else interval
+        d = max(start_date, date_from)
+        # Count occurrences before date_from so recurrence_count stays correct.
+        if max_count:
+            cursor = start_date
+            while cursor < d:
+                if cursor.weekday() in weekdays:
+                    weeks_from_start = (cursor - start_date).days // 7
+                    if weeks_from_start % week_step == 0 and cursor not in excluded:
+                        count += 1
+                    elif weeks_from_start % week_step == 0:
+                        count += 1
+                cursor += timedelta(days=1)
         while d <= end:
             if max_count and count >= max_count:
                 break
             if d.weekday() in weekdays:
-                weeks_from_start = (d - series.start_date).days // 7
-                if series.recurrence_type == RecurrenceType.BIWEEKLY:
-                    if weeks_from_start % 2 == 0:
+                weeks_from_start = (d - start_date).days // 7
+                if weeks_from_start % week_step == 0:
+                    if d not in excluded:
                         yield d
-                        count += 1
-                else:
-                    yield d
                     count += 1
             d += timedelta(days=1)
         return
 
-    if series.recurrence_type == RecurrenceType.MONTHLY:
-        d = series.start_date
+    if recurrence_type == RecurrenceType.MONTHLY:
+        d = start_date
         while d < date_from:
-            month = d.month + (series.recurrence_interval or 1)
+            month = d.month + interval
             year = d.year + (month - 1) // 12
             month = ((month - 1) % 12) + 1
-            day = min(series.start_date.day, 28)
+            day = min(start_date.day, 28)
             d = date(year, month, day)
         while d <= end:
             if max_count and count >= max_count:
                 break
             if d >= date_from:
-                yield d
+                if d not in excluded:
+                    yield d
                 count += 1
-            month = d.month + (series.recurrence_interval or 1)
+            month = d.month + interval
             year = d.year + (month - 1) // 12
             month = ((month - 1) % 12) + 1
-            day = min(series.start_date.day, 28)
+            day = min(start_date.day, 28)
             d = date(year, month, day)
-        return
+
+
+def _iter_dates(series, date_from: date, date_to: date):
+    yield from iter_occurrence_dates(
+        start_date=series.start_date,
+        recurrence_type=series.recurrence_type,
+        date_from=date_from,
+        date_to=date_to,
+        recurrence_until=series.recurrence_until,
+        recurrence_count=series.recurrence_count,
+        recurrence_interval=series.recurrence_interval,
+        recurrence_weekdays=series.recurrence_weekdays,
+        excluded_dates=getattr(series, "excluded_dates", None),
+    )
 
 
 def generate_events_for_series(series, date_from=None, date_to=None, *, copy_participants_from=None):
@@ -162,6 +253,14 @@ def generate_events_for_series(series, date_from=None, date_to=None, *, copy_par
                 is_recurring_instance=series.recurrence_type != RecurrenceType.NONE,
                 original_start_at=starts_at,
                 reminder_minutes=series.reminder_minutes,
+                location=getattr(series, "location", "") or "",
+                location_lat=getattr(series, "location_lat", None),
+                location_lng=getattr(series, "location_lng", None),
+                location_place_id=getattr(series, "location_place_id", "") or "",
+                travel_before_minutes=getattr(series, "travel_before_minutes", 0) or 0,
+                travel_after_minutes=getattr(series, "travel_after_minutes", 0) or 0,
+                all_day=bool(getattr(series, "all_day", False)),
+                visibility=getattr(series, "visibility", None) or "public",
             )
             _ensure_organizer(event, series.teacher)
             if series.group_id:

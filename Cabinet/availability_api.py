@@ -11,6 +11,7 @@ from django.utils import timezone
 from .availability_models import TeacherAvailability
 from .availability_service import (
     AvailabilityError,
+    PartialUnavailableError,
     SlotTakenError,
     book_slot_and_notify,
     cancel_student_booking,
@@ -20,6 +21,7 @@ from .availability_service import (
     default_slot_duration,
     ensure_booking_link,
     parse_date_value,
+    preview_booking,
     public_booking_page,
     publish_booking_link,
     serialize_availability,
@@ -35,10 +37,20 @@ from .subscription_access import AccessDenied, SubscriptionAccessService
 
 def _error_response(exc):
     status_code = getattr(exc, "status", 400)
-    return Response(
-        {"error": getattr(exc, "message", str(exc)), "code": getattr(exc, "code", "availability_error")},
-        status=status_code,
-    )
+    payload = {
+        "error": getattr(exc, "message", str(exc)),
+        "code": getattr(exc, "code", "availability_error"),
+    }
+    preview = getattr(exc, "preview", None)
+    if preview:
+        payload["preview"] = preview
+        payload.update({
+            "available_count": preview.get("available_count"),
+            "total": preview.get("total"),
+            "occupied": preview.get("occupied"),
+            "available_dates": preview.get("available_dates"),
+        })
+    return Response(payload, status=status_code)
 
 
 def _access_denied_response(exc: AccessDenied):
@@ -159,17 +171,38 @@ class PublicBookingCreateView(APIView):
     def post(self, request, token):
         data = request.data or {}
         try:
-            booking = book_slot_and_notify(
+            booking, preview = book_slot_and_notify(
                 token=token,
                 user=request.user,
                 date_value=data.get("date"),
                 start_time_value=data.get("start_time"),
+                payload=data,
+                book_available_only=bool(data.get("book_available_only") or data.get("skip_occupied")),
             )
+        except PartialUnavailableError as exc:
+            return _error_response(exc)
         except SlotTakenError as exc:
             return _error_response(exc)
         except AvailabilityError as exc:
             return _error_response(exc)
-        return Response({"ok": True, "booking": serialize_booking(booking)}, status=201)
+        return Response({
+            "ok": True,
+            "booking": serialize_booking(booking),
+            "preview": preview,
+        }, status=201)
+
+
+class PublicBookingPreviewView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request, token):
+        try:
+            preview = preview_booking(token=token, user=request.user, payload=request.data or {})
+        except SlotTakenError as exc:
+            return _error_response(exc)
+        except AvailabilityError as exc:
+            return _error_response(exc)
+        return Response({"ok": True, **preview})
 
 
 class StudentPermanentScheduleView(APIView):

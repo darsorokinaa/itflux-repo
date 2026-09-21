@@ -59,7 +59,24 @@ function formatApiError(data, fallback = "Ошибка запроса") {
   if (typeof data.detail === "string" && data.detail.trim()) return data.detail;
   if (typeof data.message === "string" && data.message.trim()) return data.message;
   const fieldMessages = Object.entries(data)
-    .filter(([key]) => !["error", "detail", "message", "code", "conflicts"].includes(key))
+    .filter(([key]) => ![
+      "error",
+      "detail",
+      "message",
+      "code",
+      "conflicts",
+      "storage_used_bytes",
+      "storage_limit_bytes",
+      "used_bytes",
+      "limit_bytes",
+      "available_bytes",
+      "percent",
+      "warning",
+      "over_limit",
+      "breakdown",
+      "can_upgrade",
+      "actions",
+    ].includes(key))
     .flatMap(([, value]) => collectApiMessages(value))
     .filter(Boolean);
   if (fieldMessages.length) return fieldMessages.join(" ");
@@ -619,6 +636,13 @@ export function bookPublicSlot(token, payload) {
   });
 }
 
+export function previewPublicBooking(token, payload) {
+  return cabinetFetch(`/booking/${encodeURIComponent(token)}/preview/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function fetchStudentPermanentSchedule() {
   return cabinetFetch("/student/permanent-schedule/", { method: "GET" });
 }
@@ -1088,6 +1112,7 @@ async function cabinetFetchMultipart(path, formData, { method = "POST" } = {}) {
     const err = new Error(message);
     err.status = res.status;
     err.data = data;
+    err.code = data?.code;
     throw err;
   }
   return data;

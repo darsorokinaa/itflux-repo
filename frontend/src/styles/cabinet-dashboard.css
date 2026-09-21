@@ -5803,6 +5803,175 @@ button.cb-sch-event {
   border-color: #CBD5E1;
   border-left-color: #D97706;
 }
+.cb-sch-event--personal {
+  background: #F5F3FF;
+  border-color: #DDD6FE;
+  border-left-color: #7C3AED;
+}
+.cb-sch-event--personal .cb-sch-event__badge {
+  color: #7C3AED;
+}
+.cb-sch-event--blocked {
+  background: #F8FAFC;
+  border-color: #E2E8F0;
+  border-left-color: #64748B;
+}
+.cb-sch-event--travel {
+  background: repeating-linear-gradient(
+    -52deg,
+    #F5F3FF 0 5px,
+    #EDE9FE 5px 10px
+  );
+  border-color: #DDD6FE;
+  border-style: dashed;
+  border-left-style: solid;
+  border-left-color: #A78BFA;
+  box-shadow: none;
+  color: #6D28D9;
+}
+.cb-sch-event--travel:hover {
+  box-shadow: none;
+  border-color: #C4B5FD;
+  border-left-color: #8B5CF6;
+}
+.cb-sch-event--travel .cb-sch-event__time,
+.cb-sch-event--travel .cb-sch-event__title {
+  color: #6D28D9;
+}
+.cb-sch-event-wrap--short .cb-sch-event--travel,
+.cb-sch-event--travel-short {
+  padding: 1px 6px;
+  justify-content: center;
+  gap: 0;
+}
+.cb-sch-event__title--with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  -webkit-line-clamp: 1;
+  white-space: nowrap;
+}
+.cb-sch-event__title--with-icon svg {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+}
+.cb-sch-event-wrap--draggable {
+  touch-action: none;
+}
+.cb-sch-event__resize-handle {
+  touch-action: none;
+}
+
+.cb-sch-create-menu {
+  position: relative;
+  display: inline-flex;
+}
+.cb-sch-create-menu__list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  min-width: 220px;
+  padding: 6px;
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
+  display: flex;
+  flex-direction: column;
+}
+.cb-sch-create-menu__list button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font: inherit;
+  cursor: pointer;
+}
+.cb-sch-create-menu__list button:hover {
+  background: #F8FAFC;
+}
+
+.cb-sch-personal-card .cb-sch-modal__head,
+.cb-sch-quick-create .cb-sch-modal__head {
+  align-items: flex-start;
+}
+.cb-sch-personal-card__heading {
+  min-width: 0;
+  flex: 1;
+}
+.cb-sch-personal-card__heading h2 {
+  margin: 4px 0 0;
+  font-size: 1.2rem;
+  line-height: 1.25;
+  word-break: break-word;
+}
+.cb-sch-personal-card__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #F5F3FF;
+  color: #6D28D9;
+  font-size: 0.75rem;
+  font-weight: 650;
+  line-height: 1.2;
+}
+.cb-sch-personal-card__badge svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.cb-sch-personal-card__badge--blocked {
+  background: #F1F5F9;
+  color: #475569;
+}
+.cb-sch-personal-card .cb-sch-appt-time {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+}
+.cb-sch-personal-card__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 4px 0 8px;
+}
+.cb-sch-personal-card__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  color: #334155;
+  font-size: 0.88rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.cb-sch-personal-card__row svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: #64748B;
+}
+.cb-sch-personal-card__desc {
+  margin: 0;
+  white-space: pre-wrap;
+  color: #475569;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.cb-sch-form__conflict {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  background: #FFF7ED;
+  border: 1px solid #FED7AA;
+  border-radius: 12px;
+}
 .cb-sch-event--availability {
   border-style: solid;
   border-color: #D2E3FC;
@@ -9743,7 +9912,8 @@ select.cb-lesson-card__about-input.is-empty {
   gap: 8px;
 }
 
-.cb-sch-modal__actions {
+.cb-sch-modal__actions,
+.cb-sch-form__actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -15192,18 +15362,30 @@ select.cb-lesson-card__about-input.is-empty {
 }
 
 .cb-sch-chip {
-  padding: 4px 10px;
+  min-height: 32px;
+  padding: 6px 12px;
   border-radius: 999px;
   border: 1px solid #CBD5E1;
   background: #fff;
+  font: inherit;
   font-size: 0.78rem;
+  font-weight: 600;
+  color: #0F172A;
   cursor: pointer;
 }
 
+.cb-sch-chip:hover {
+  background: #F8FAFC;
+  border-color: #94A3B8;
+}
 .cb-sch-chip--active {
   background: #EFF6FF;
   border-color: #2563EB;
   color: #1D4ED8;
+}
+.cb-sch-chip--active:hover {
+  background: #DBEAFE;
+  border-color: #2563EB;
 }
 
 .cb-sch-check {

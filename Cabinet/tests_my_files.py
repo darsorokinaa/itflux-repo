@@ -178,7 +178,7 @@ class MyFilesApiTests(TestCase):
         self.assertIn(file_id, ids2)
 
     @override_settings(CABINET_FILE_STORAGE_QUOTA_BYTES=50)
-    @patch("Cabinet.files_services.get_quota_bytes", return_value=50)
+    @patch("Cabinet.storage_usage.storage_limit_bytes", return_value=50)
     def test_quota_blocks_upload(self, _quota):
         res = self._upload(self.teacher, content=b"x" * 80)
         self.assertEqual(res.status_code, 400)

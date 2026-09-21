@@ -12,6 +12,14 @@ describe("TariffUsageBlock", () => {
     expect(formatUsed({ used: 7, limit: 20 })).toBe("7 / 20");
     expect(formatUsed({ used: 12, unlimited: true })).toBe("12 / ∞");
     expect(formatUsed({ used: 12.4, limit: 512, unit: "MB" })).toBe("12.4 / 512 МБ");
+    expect(formatUsed({
+      key: "storage",
+      unit: "MB",
+      used: 12.4,
+      limit: 512,
+      storage_used_bytes: 1.24 * 1024 * 1024 * 1024,
+      storage_limit_bytes: 5 * 1024 * 1024 * 1024,
+    })).toBe("1,24 ГБ / 5 ГБ");
   });
 
   it("uses period-aware exhausted caption", () => {

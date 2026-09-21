@@ -46,18 +46,26 @@ export default function ScreenShareControlBar({
   const isController = Boolean(localId && rcState?.remoteControllerId === localId);
   const isSharer = Boolean(localSharing || (localId && rcState?.screenSharerId === localId));
 
-  let statusText = localSharing ? "Вы демонстрируете экран" : "Идёт демонстрация экрана";
+  let statusText = localSharing ? "Вы демонстрируете экран" : "";
   if (active && isController) statusText = "Вы управляете экраном";
   if (active && isSharer && controllerName) statusText = `${controllerName} управляет`;
   if (active && isSharer && !controllerName) statusText = "Участник управляет экраном";
   if (requested && isSharer) statusText = "Запрос управления экраном";
   if (requested && !isSharer) statusText = "Ожидание разрешения";
 
+  const showShareControls = isSharer && localSharing && native && !active;
+  const showRequestControl = !isSharer && shareActive && native && !active && !requested;
+  const showStopControl = active || requested;
+  const showStopShare = Boolean(localSharing && onToggleShare);
+  if (!statusText && !showShareControls && !showRequestControl && !showStopControl && !showStopShare) {
+    return null;
+  }
+
   return (
     <div className="vl-ss-control" role="status">
-      <span className="vl-ss-control__label">{statusText}</span>
+      {statusText ? <span className="vl-ss-control__label">{statusText}</span> : null}
       <div className="vl-ss-control__actions">
-        {isSharer && localSharing && native && !active ? (
+        {showShareControls ? (
           <div className="vl-ss-control__picker" ref={pickerRef}>
             <button
               type="button"
@@ -95,7 +103,7 @@ export default function ScreenShareControlBar({
           </div>
         ) : null}
 
-        {!isSharer && shareActive && native && !active && !requested ? (
+        {showRequestControl ? (
           <button
             type="button"
             className="video-lesson-btn video-lesson-btn--secondary vl-ss-control__btn"
@@ -105,7 +113,7 @@ export default function ScreenShareControlBar({
           </button>
         ) : null}
 
-        {active || requested ? (
+        {showStopControl ? (
           <button
             type="button"
             className="video-lesson-btn video-lesson-btn--secondary vl-ss-control__btn"
@@ -115,7 +123,7 @@ export default function ScreenShareControlBar({
           </button>
         ) : null}
 
-        {localSharing && onToggleShare ? (
+        {showStopShare ? (
           <button
             type="button"
             className="video-lesson-btn video-lesson-btn--ghost vl-ss-control__btn"

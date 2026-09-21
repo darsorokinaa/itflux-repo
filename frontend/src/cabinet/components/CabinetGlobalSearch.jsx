@@ -7,7 +7,7 @@ import {
   fetchStudents,
 } from "../../utils/cabinetAuth";
 
-const PLACEHOLDER = "Поиск: ученики, интерактивы, материалы…";
+const PLACEHOLDER = "Поиск: ученики, задания, материалы, уроки…";
 const MIN_QUERY = 2;
 const LIMIT = 5;
 
@@ -41,6 +41,7 @@ export default function CabinetGlobalSearch({
   inputRef,
   mobile = false,
   onClose,
+  placeholder = PLACEHOLDER,
 }) {
   const navigate = useNavigate();
   const wrapRef = useRef(null);
@@ -152,8 +153,8 @@ export default function CabinetGlobalSearch({
           ref={inputRef}
           type="search"
           value={query}
-          placeholder={PLACEHOLDER}
-          aria-label={PLACEHOLDER}
+          placeholder={placeholder}
+          aria-label={placeholder}
           aria-expanded={showDropdown}
           aria-controls="cabinet-global-search-results"
           onChange={(e) => {

@@ -150,8 +150,8 @@ class TariffUsageService:
                 "used_bytes": int(counts.get("storage_bytes") or 0),
                 "limit_bytes": 0,
             }
-        used_bytes = int(info.get("used_bytes") or counts.get("storage_bytes") or 0)
-        limit_bytes = int(info.get("limit_bytes") or 0)
+        used_bytes = int(info.get("storage_used_bytes") or info.get("used_bytes") or counts.get("storage_bytes") or 0)
+        limit_bytes = int(info.get("storage_limit_bytes") or info.get("limit_bytes") or 0)
         used_mb = _bytes_to_mb(used_bytes)
         limit_mb = round(limit_bytes / (1024 * 1024), 1) if limit_bytes else None
         if limit_mb is not None and limit_mb == int(limit_mb):
@@ -164,6 +164,12 @@ class TariffUsageService:
             period="current",
             unit="MB",
         )
+        item["storage_used_bytes"] = used_bytes
+        item["storage_limit_bytes"] = limit_bytes
+        item["used_bytes"] = used_bytes
+        item["limit_bytes"] = limit_bytes
+        item["breakdown"] = info.get("breakdown") or []
+        item["can_upgrade"] = bool(info.get("can_upgrade"))
         if limit_bytes:
             percent = int(min(100, round((used_bytes / limit_bytes) * 100)))
             exhausted = used_bytes >= limit_bytes

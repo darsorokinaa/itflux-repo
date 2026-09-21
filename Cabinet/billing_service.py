@@ -5036,6 +5036,11 @@ def serialize_teacher_settings(settings: TeacherBillingSettings) -> dict:
         "currency": settings.currency,
         "default_billing_type": settings.default_billing_type,
         "default_lesson_duration_minutes": settings.default_lesson_duration_minutes,
+        "default_booking_until": (
+            settings.default_booking_until.isoformat()
+            if getattr(settings, "default_booking_until", None)
+            else None
+        ),
         "default_lesson_price": (
             str(settings.default_lesson_price)
             if settings.default_lesson_price is not None
@@ -5082,6 +5087,7 @@ def update_teacher_settings(teacher: User, data: dict) -> TeacherBillingSettings
         "currency",
         "default_billing_type",
         "default_lesson_duration_minutes",
+        "default_booking_until",
         "default_lesson_price",
         "hourly_rate",
         "late_cancel_rule",
@@ -5119,6 +5125,13 @@ def update_teacher_settings(teacher: User, data: dict) -> TeacherBillingSettings
                 val = D(val)
             elif key in nullable_ints:
                 val = _parse_optional_int(val)
+            elif key == "default_booking_until":
+                if val in (None, ""):
+                    val = None
+                else:
+                    from datetime import date as date_cls
+                    if not isinstance(val, date_cls):
+                        val = date_cls.fromisoformat(str(val)[:10])
             setattr(settings, key, val)
     settings.save()
     return settings

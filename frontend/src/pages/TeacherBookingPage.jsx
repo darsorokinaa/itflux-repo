@@ -1,12 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { bookPublicSlot, fetchPublicBookingPage } from "../utils/cabinetAuth";
+import { bookPublicSlot, fetchPublicBookingPage, previewPublicBooking } from "../utils/cabinetAuth";
 import { rememberReturnPath } from "../accessGate/accessGate";
 import { usePageTitle } from "../cabinet/hooks/usePageTitle";
 import CabinetIcon from "../cabinet/CabinetIcons";
 import "../styles/teacher-booking.css";
 
 const WEEKDAY_SHORT = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"];
+const WEEKDAYS = [
+  { value: 0, label: "Пн" },
+  { value: 1, label: "Вт" },
+  { value: 2, label: "Ср" },
+  { value: 3, label: "Чт" },
+  { value: 4, label: "Пт" },
+  { value: 5, label: "Сб" },
+  { value: 6, label: "Вс" },
+];
 
 function parseDay(iso) {
   return new Date(`${iso}T12:00:00`);
@@ -95,6 +104,13 @@ export default function TeacherBookingPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [doneBooking, setDoneBooking] = useState(null);
+  const [repeat, setRepeat] = useState("weekly");
+  const [repeatInterval, setRepeatInterval] = useState("1");
+  const [repeatWeekdays, setRepeatWeekdays] = useState([]);
+  const [repeatUntil, setRepeatUntil] = useState("");
+  const [preview, setPreview] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [partialChoice, setPartialChoice] = useState(false);
   const [viewMonth, setViewMonth] = useState({
     year: now.getFullYear(),
     month: now.getMonth(),
@@ -173,33 +189,94 @@ export default function TeacherBookingPage() {
   const handleSlotClick = (slot) => {
     setSelectedSlot(slot);
     setError("");
+    setPartialChoice(false);
+    setPreview(null);
     if (needsAuth) {
       handleLogin();
       return;
     }
     if (notStudent || notLinked) return;
+    const weekday = parseDay(slot.date).getDay();
+    const mondayBased = weekday === 0 ? 6 : weekday - 1;
+    setRepeat("weekly");
+    setRepeatInterval("1");
+    setRepeatWeekdays([mondayBased]);
+    setRepeatUntil(page?.default_repeat_until || "");
     setConfirmOpen(true);
   };
 
-  const handleConfirm = async () => {
+  const recurrencePayload = () => {
+    if (!selectedSlot) return {};
+    const payload = {
+      date: selectedSlot.date,
+      start_time: selectedSlot.start_time,
+      recurrence_type: repeat,
+      recurrence_until: repeat === "none" ? selectedSlot.date : (repeatUntil || undefined),
+    };
+    if (repeat === "custom") {
+      payload.recurrence_interval = Number(repeatInterval) || 1;
+      payload.recurrence_weekdays = repeatWeekdays.length ? repeatWeekdays : undefined;
+    }
+    return payload;
+  };
+
+  useEffect(() => {
+    if (!confirmOpen || !selectedSlot || needsAuth || notStudent || notLinked) return undefined;
+    let cancelled = false;
+    setPreviewLoading(true);
+    previewPublicBooking(token, recurrencePayload())
+      .then((data) => {
+        if (cancelled) return;
+        setPreview(data);
+        if (!repeatUntil && data.default_repeat_until) {
+          setRepeatUntil(data.default_repeat_until);
+        }
+        setPartialChoice(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setPreview(null);
+        setError(err.message || "Не удалось проверить доступность серии.");
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [confirmOpen, selectedSlot, repeat, repeatInterval, repeatWeekdays, repeatUntil, token]);
+
+  const handleConfirm = async (bookAvailableOnly = false) => {
     if (!selectedSlot) return;
     setSaving(true);
     setError("");
     try {
       const data = await bookPublicSlot(token, {
-        date: selectedSlot.date,
-        start_time: selectedSlot.start_time,
+        ...recurrencePayload(),
+        book_available_only: bookAvailableOnly,
       });
-      setDoneBooking(data.booking);
+      setDoneBooking({ ...data.booking, preview: data.preview });
       setConfirmOpen(false);
       setSelectedSlot(null);
       load();
     } catch (err) {
-      setError(err.message || "Не удалось записаться.");
-      if (err.code === "slot_taken") {
-        setConfirmOpen(false);
-        setSelectedSlot(null);
-        load();
+      const nextPreview = err.data?.preview || err.preview || {
+        available_count: err.data?.available_count ?? err.available_count,
+        total: err.data?.total ?? err.total,
+        occupied: err.data?.occupied ?? err.occupied,
+        available_dates: err.data?.available_dates ?? err.available_dates,
+      };
+      if (err.code === "partial_unavailable") {
+        setPreview(nextPreview);
+        setPartialChoice(true);
+        setError(err.message || "Часть дат занята.");
+      } else {
+        setError(err.message || "Не удалось записаться.");
+        if (err.code === "slot_taken") {
+          setConfirmOpen(false);
+          setSelectedSlot(null);
+          load();
+        }
       }
     } finally {
       setSaving(false);
@@ -247,12 +324,25 @@ export default function TeacherBookingPage() {
   }
 
   if (doneBooking) {
+    const preview = doneBooking.preview;
+    const count = preview?.available_count || preview?.total || doneBooking.events_count || 1;
+    const summary = preview?.summary;
     return (
       <div className="cb-booking-page">
         <div className="cb-booking-success cb-card">
           <CabinetIcon name="check" />
           <h2>Вы записаны</h2>
-          <p>Занятие с {teacherName} запланировано на {formatDayHeading(doneBooking.first_date || doneBooking.date)} в {doneBooking.start_time}</p>
+          {count > 1 && summary ? (
+            <>
+              <h3>{preview.title || summary.title || "Занятия"}</h3>
+              <p>{summary.cadence}</p>
+              <p>{summary.time_range}</p>
+              <p>{summary.period}</p>
+              <p>Всего: {count} {count === 1 ? "занятие" : count < 5 ? "занятия" : "занятий"}</p>
+            </>
+          ) : (
+            <p>Занятие с {teacherName} запланировано на {formatDayHeading(doneBooking.first_date || doneBooking.date)} в {doneBooking.start_time}</p>
+          )}
           <Link className="cb-btn cb-btn--primary" to="/cabinet/student/lessons">
             Перейти в расписание
           </Link>
@@ -405,12 +495,12 @@ export default function TeacherBookingPage() {
         <div className="cb-sch-overlay" onClick={() => !saving && setConfirmOpen(false)} role="presentation">
           <div className="cb-sch-modal cb-sch-modal--appt" onClick={(ev) => ev.stopPropagation()} role="dialog" aria-labelledby="booking-confirm-title">
             <div className="cb-sch-modal__head">
-              <h2 id="booking-confirm-title">Подтвердить запись</h2>
+              <h2 id="booking-confirm-title">Запись на занятия</h2>
               <button type="button" className="cb-sch-popover__close" onClick={() => !saving && setConfirmOpen(false)} aria-label="Закрыть">
                 <CabinetIcon name="close" />
               </button>
             </div>
-            
+
             <div className="cb-booking-dialog-facts">
               <li>
                 <CabinetIcon name="user" />
@@ -418,7 +508,7 @@ export default function TeacherBookingPage() {
               </li>
               <li>
                 <CabinetIcon name="calendar" />
-                {formatDayHeading(selectedSlot.date)}
+                Дата первого занятия: {formatDayHeading(selectedSlot.date)}
               </li>
               <li>
                 <CabinetIcon name="clock" />
@@ -426,15 +516,116 @@ export default function TeacherBookingPage() {
               </li>
             </div>
 
+            <div className="cb-booking-repeat">
+              <label className="cb-sch-field">
+                <span>Повторение</span>
+                <select value={repeat} onChange={(e) => setRepeat(e.target.value)}>
+                  <option value="none">Не повторять</option>
+                  <option value="weekly">Каждую неделю</option>
+                  <option value="biweekly">Каждые 2 недели</option>
+                  <option value="custom">Настроить</option>
+                </select>
+              </label>
+              {repeat === "custom" ? (
+                <>
+                  <label className="cb-sch-field">
+                    <span>Каждые N недель</span>
+                    <input type="number" min="1" max="12" value={repeatInterval} onChange={(e) => setRepeatInterval(e.target.value)} />
+                  </label>
+                  <div className="cb-sch-field">
+                    <span>Дни недели</span>
+                    <div className="cb-sch-chip-list">
+                      {WEEKDAYS.map((d) => (
+                        <button
+                          key={d.value}
+                          type="button"
+                          className={`cb-sch-chip ${repeatWeekdays.includes(d.value) ? "cb-sch-chip--active" : ""}`}
+                          onClick={() => setRepeatWeekdays((prev) => (
+                            prev.includes(d.value) ? prev.filter((v) => v !== d.value) : [...prev, d.value].sort()
+                          ))}
+                        >
+                          {d.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              ) : null}
+              {repeat !== "none" ? (
+                <label className="cb-sch-field">
+                  <span>Повторять до</span>
+                  <input
+                    type="date"
+                    value={repeatUntil}
+                    min={selectedSlot.date}
+                    onChange={(e) => setRepeatUntil(e.target.value)}
+                  />
+                </label>
+              ) : null}
+            </div>
+
+            {previewLoading ? <p className="cb-booking-dialog-warning">Проверяем доступность серии…</p> : null}
+            {preview?.summary && !previewLoading ? (
+              <div className="cb-booking-preview">
+                <h3>{preview.title || page.subject_label || "Занятия"}</h3>
+                <p>{preview.summary.cadence}</p>
+                <p>{preview.summary.time_range}</p>
+                <p>{preview.summary.period}</p>
+                <p>Всего: {preview.total} {preview.total === 1 ? "занятие" : preview.total < 5 ? "занятия" : "занятий"}</p>
+              </div>
+            ) : null}
+
+            {preview && preview.occupied_count > 0 ? (
+              <div className="cb-booking-partial" role="alert">
+                <p><strong>{preview.available_count} из {preview.total} занятий доступны.</strong></p>
+                <p>Заняты:</p>
+                <ul>
+                  {(preview.occupied || []).map((item) => (
+                    <li key={item.date}>{formatLongDate(item.date)} — {item.start_time}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {error && !(preview && preview.occupied_count > 0) ? (
+              <p className="cb-sch-form__error" role="alert">{error}</p>
+            ) : null}
+
             <p className="cb-booking-dialog-warning">{page.confirm_warning}</p>
 
-            <div className="cb-sch-form__actions">
-              <button type="button" className="cb-btn cb-btn--outline" onClick={() => setConfirmOpen(false)} disabled={saving}>
-                Назад
-              </button>
-              <button type="button" className="cb-btn cb-btn--primary" onClick={handleConfirm} disabled={saving}>
-                {saving ? "Запись…" : "Подтвердить запись"}
-              </button>
+            <div className="cb-sch-form__actions cb-booking-confirm-actions">
+              {preview && preview.occupied_count > 0 ? (
+                <>
+                  {preview.available_count > 0 ? (
+                    <button type="button" className="cb-btn cb-btn--primary" onClick={() => handleConfirm(true)} disabled={saving}>
+                      {saving ? "Запись…" : "Забронировать доступные даты"}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="cb-btn cb-btn--outline"
+                    onClick={() => {
+                      setConfirmOpen(false);
+                      setSelectedSlot(null);
+                    }}
+                    disabled={saving}
+                  >
+                    Выбрать другое время
+                  </button>
+                  <button type="button" className="cb-btn cb-btn--outline" onClick={() => setConfirmOpen(false)} disabled={saving}>
+                    Отменить бронирование
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button type="button" className="cb-btn cb-btn--outline" onClick={() => setConfirmOpen(false)} disabled={saving}>
+                    Назад
+                  </button>
+                  <button type="button" className="cb-btn cb-btn--primary" onClick={() => handleConfirm(false)} disabled={saving || previewLoading}>
+                    {saving ? "Запись…" : "Подтвердить бронирование"}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

@@ -41,11 +41,12 @@ ATTACHMENT_PAYLOAD_KEYS = (
 
 
 class HomeworkTaskFileError(Exception):
-    def __init__(self, message: str, code: str = "attachment_error", status_code: int = 400):
+    def __init__(self, message: str, code: str = "attachment_error", status_code: int = 400, extra=None):
         super().__init__(message)
         self.message = message
         self.code = code
         self.status_code = status_code
+        self.extra = extra or {}
 
 
 def _settings_max_count() -> int:
@@ -593,45 +594,64 @@ def create_task_attachments(
     homework = submission.homework
     homework_task = resolve_homework_task(homework, task_key)
     created = []
+    from .files_services import FileServiceError, assert_quota_allows, lock_user_storage
+
+    total_size = 0
     for uploaded in uploaded_files:
-        validate_uploaded_file(uploaded)
-        checksum, size = _file_checksum_and_size(uploaded)
-        filename = sanitize_filename(getattr(uploaded, "name", "") or "file")
-        mime = str(getattr(uploaded, "content_type", "") or "").split(";")[0].strip()
-        owner_role = (
-            HomeworkAttachmentOwnerRole.TEACHER
-            if teacher or comment
-            else HomeworkAttachmentOwnerRole.STUDENT
-        )
-        if attachment_type:
-            chosen_type = attachment_type
-        elif comment:
-            chosen_type = HomeworkAttachmentType.TEACHER_COMMENT
-        elif teacher:
-            chosen_type = HomeworkAttachmentType.TEACHER_CHECKED_FILE
-        else:
-            chosen_type = HomeworkAttachmentType.STUDENT_ANSWER
-        row = HomeworkAttachment(
-            submission=submission,
-            homework=homework,
-            homework_task=homework_task,
-            task_key=task_key,
-            task_number=str(task_number or ""),
-            uploaded_by=user if getattr(user, "is_authenticated", False) else None,
-            owner_role=owner_role,
-            attachment_type=chosen_type,
-            original_filename=filename,
-            mime_type=mime,
-            file_size=size,
-            checksum=checksum,
-        )
-        row.file.save(filename, uploaded, save=False)
-        if row.file and row.file.name:
-            row.storage_path = row.file.name
-        row.save()
-        created.append(row)
-    sync_payload_attachment_maps(submission)
-    submission.save(update_fields=["result_payload", "updated_at"])
+        total_size += int(getattr(uploaded, "size", 0) or 0)
+
+    with transaction.atomic():
+        if user and total_size:
+            try:
+                lock_user_storage(user)
+                assert_quota_allows(user, total_size)
+            except FileServiceError as exc:
+                raise HomeworkTaskFileError(
+                    exc.message,
+                    code=exc.code,
+                    status_code=exc.status,
+                    extra=exc.extra,
+                ) from exc
+
+        for uploaded in uploaded_files:
+            validate_uploaded_file(uploaded)
+            checksum, size = _file_checksum_and_size(uploaded)
+            filename = sanitize_filename(getattr(uploaded, "name", "") or "file")
+            mime = str(getattr(uploaded, "content_type", "") or "").split(";")[0].strip()
+            owner_role = (
+                HomeworkAttachmentOwnerRole.TEACHER
+                if teacher or comment
+                else HomeworkAttachmentOwnerRole.STUDENT
+            )
+            if attachment_type:
+                chosen_type = attachment_type
+            elif comment:
+                chosen_type = HomeworkAttachmentType.TEACHER_COMMENT
+            elif teacher:
+                chosen_type = HomeworkAttachmentType.TEACHER_CHECKED_FILE
+            else:
+                chosen_type = HomeworkAttachmentType.STUDENT_ANSWER
+            row = HomeworkAttachment(
+                submission=submission,
+                homework=homework,
+                homework_task=homework_task,
+                task_key=task_key,
+                task_number=str(task_number or ""),
+                uploaded_by=user if getattr(user, "is_authenticated", False) else None,
+                owner_role=owner_role,
+                attachment_type=chosen_type,
+                original_filename=filename,
+                mime_type=mime,
+                file_size=size,
+                checksum=checksum,
+            )
+            row.file.save(filename, uploaded, save=False)
+            if row.file and row.file.name:
+                row.storage_path = row.file.name
+            row.save()
+            created.append(row)
+        sync_payload_attachment_maps(submission)
+        submission.save(update_fields=["result_payload", "updated_at"])
     return created
 
 
@@ -817,7 +837,9 @@ class HomeworkSubmissionTaskAttachmentsView(APIView):
         except UploadValidationError as exc:
             return Response({"error": exc.message, "code": exc.code}, status=status.HTTP_400_BAD_REQUEST)
         except HomeworkTaskFileError as exc:
-            return Response({"error": exc.message, "code": exc.code}, status=exc.status_code)
+            payload = {"error": exc.message, "detail": exc.message, "code": exc.code}
+            payload.update(exc.extra or {})
+            return Response(payload, status=exc.status_code)
         first = serialize_homework_task_attachment(rows[0])
         return Response(
             {

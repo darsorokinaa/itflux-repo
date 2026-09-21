@@ -281,7 +281,17 @@ def add_homework_attachments(homework: Homework, teacher, uploaded_files: list) 
                     relation.material = material
                     relation.save(update_fields=["material"])
             created.append(serialize_homework_attachment(relation))
-        except (HomeworkAttachmentError, UploadValidationError, FileServiceError) as exc:
+        except FileServiceError as exc:
+            if exc.code == "QUOTA_EXCEEDED":
+                raise
+            errors.append(
+                {
+                    "name": filename,
+                    "detail": getattr(exc, "message", None) or str(exc),
+                    "code": getattr(exc, "code", "upload_error"),
+                }
+            )
+        except (HomeworkAttachmentError, UploadValidationError) as exc:
             errors.append(
                 {
                     "name": filename,
@@ -419,10 +429,10 @@ class HomeworkAttachmentsView(APIView):
                 body.update(exc.extra)
             return Response(body, status=exc.status)
         except FileServiceError as exc:
-            return Response(
-                {"detail": exc.message, "code": exc.code},
-                status=exc.status,
-            )
+            body = {"detail": exc.message, "error": exc.message, "code": exc.code}
+            if exc.extra:
+                body.update(exc.extra)
+            return Response(body, status=exc.status)
         return Response(result, status=status.HTTP_201_CREATED)
 
 

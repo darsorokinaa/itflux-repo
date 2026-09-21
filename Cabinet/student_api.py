@@ -152,7 +152,9 @@ def _schedule_qs(students):
             participants__student_id__in=student_ids,
             participants__status__in=["invited", "accepted"],
         )
-    ).exclude(status=ScheduleEvent.Status.CANCELLED).select_related(
+    ).exclude(status=ScheduleEvent.Status.CANCELLED).exclude(
+        event_type__in=("personal", "blocked"),
+    ).select_related(
         "owner", "owner__profile", "lesson", "student", "student_subject", "group",
         "lesson_plan_item", "lesson_plan_item__plan",
         "series", "series__lesson_plan_item", "series__lesson_plan_item__plan",

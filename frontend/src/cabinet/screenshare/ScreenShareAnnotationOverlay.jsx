@@ -552,7 +552,7 @@ export default function ScreenShareAnnotationOverlay({
         height: visibleRect.height,
         pointerEvents: capturing ? "auto" : "none",
         touchAction: capturing ? "none" : "auto",
-        zIndex: 11000,
+        zIndex: 11120,
       }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

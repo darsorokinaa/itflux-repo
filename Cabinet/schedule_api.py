@@ -592,6 +592,9 @@ class ScheduleEventViewSetExtended(TeacherScopedMixin, viewsets.ModelViewSet):
             student_id=request.data.get("student_id"),
             group_id=request.data.get("group_id"),
             exclude_event_id=request.data.get("exclude_event_id"),
+            travel_before_minutes=request.data.get("travel_before_minutes") or 0,
+            travel_after_minutes=request.data.get("travel_after_minutes") or 0,
+            all_day=bool(request.data.get("all_day")),
         )
         return Response({"conflicts": conflicts, "has_conflicts": bool(conflicts)})
 

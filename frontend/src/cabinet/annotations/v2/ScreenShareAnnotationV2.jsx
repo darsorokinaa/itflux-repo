@@ -562,7 +562,7 @@ export default function ScreenShareAnnotationV2({
         top: content.top,
         width: content.width,
         height: content.height,
-        zIndex: 11000,
+        zIndex: 11120,
         pointerEvents: drawing && !usePlatformOverlay ? "auto" : "none",
       }}
     />

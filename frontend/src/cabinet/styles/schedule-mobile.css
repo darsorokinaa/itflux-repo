@@ -23,10 +23,20 @@
     margin: 0 !important;
   }
 
-  /* —— Hide week chrome / sidebar —— */
-  .cb-sch-week > .cb-sch-week__head,
+  /* —— Week grid is the primary working view on mobile too —— */
+  .cb-sch-week {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .cb-sch-week > .cb-sch-week__head {
+    display: grid !important;
+    min-width: 720px;
+  }
+
   .cb-sch-week > .cb-sch-week__body {
-    display: none !important;
+    display: flex !important;
+    min-width: 720px;
   }
 
   .cb-sch-day > .cb-sch-week__body,
@@ -367,6 +377,33 @@
     bottom: calc(var(--cb-mobile-nav-height, 64px) + 16px);
     z-index: 1100;
     box-shadow: 0 8px 20px rgba(37, 99, 235, 0.32);
+  }
+
+  .cb-sch-create-menu:has(.cb-sch-fab) {
+    position: fixed;
+    right: max(16px, env(safe-area-inset-right, 0px));
+    bottom: calc(var(--cb-mobile-nav-height, 64px) + 16px);
+    z-index: 1100;
+  }
+
+  .cb-sch-create-menu:has(.cb-sch-fab) .cb-sch-fab {
+    position: static;
+  }
+
+  .cb-sch-create-menu:has(.cb-sch-fab) .cb-sch-create-menu__list {
+    top: auto;
+    bottom: calc(100% + 8px);
+  }
+
+  .cb-sch-field input,
+  .cb-sch-field select,
+  .cb-sch-field textarea {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .cb-sch-chip {
+    min-height: 36px;
   }
 }
 

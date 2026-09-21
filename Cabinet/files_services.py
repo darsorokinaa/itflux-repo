@@ -19,7 +19,14 @@ from .files_models import (
     CabinetFileStatus,
     CabinetFileVersion,
     CabinetFolder,
-    UserStorageQuota,
+)
+from .storage_usage import (
+    calc_usage_bytes,
+    get_quota_info,
+    lock_user_storage,
+    physical_size,
+    quota_exceeded_message,
+    storage_limit_bytes,
 )
 from .files_storage import (
     build_storage_key,
@@ -73,68 +80,18 @@ def sanitize_item_name(name: str, *, max_len: int = 255) -> str:
 
 
 def get_quota_bytes(user) -> int:
-    """Лимит хранилища: актуальный тариф подписки, иначе ручная квота / settings."""
-    try:
-        from .subscription_service import SubscriptionLimitService
-
-        plan = SubscriptionLimitService.get_current_plan(user)
-        mb = int(getattr(plan, "max_storage_mb", 0) or 0) if plan else 0
-        if mb > 0:
-            return mb * 1024 * 1024
-    except Exception:
-        pass
-    try:
-        quota = user.storage_quota
-        return quota.effective_quota_bytes()
-    except UserStorageQuota.DoesNotExist:
-        return int(getattr(settings, "CABINET_FILE_STORAGE_QUOTA_BYTES", 1024 * 1024 * 1024))
-
-
-def calc_usage_bytes(user) -> int:
-    # Учитываем active и trashed; после purge запись исчезает.
-    total = CabinetFile.objects.filter(owner=user).aggregate(total=Sum("size")).get("total")
-    used = int(total or 0)
-    try:
-        from .teacher_task_entitlements import teacher_task_bank_bytes
-
-        used += int(teacher_task_bank_bytes(user) or 0)
-    except Exception:
-        pass
-    return used
-
-
-def get_quota_info(user) -> dict:
-    used = calc_usage_bytes(user)
-    limit = get_quota_bytes(user)
-    percent = round((used / limit) * 100, 1) if limit else 0
-    over = used > limit > 0
-    return {
-        "used_bytes": used,
-        "limit_bytes": limit,
-        "available_bytes": max(0, limit - used),
-        "percent": percent,
-        "warning": percent >= 90,
-        "over_limit": over,
-    }
+    """Лимит хранилища из текущего тарифа. Совместимая обёртка."""
+    return storage_limit_bytes(user)
 
 
 def assert_quota_allows(user, additional_bytes: int) -> None:
     info = get_quota_info(user)
-    if info["used_bytes"] + int(additional_bytes or 0) > info["limit_bytes"]:
-        used_gb = round(info["used_bytes"] / (1024 * 1024 * 1024), 2)
-        limit_gb = round(info["limit_bytes"] / (1024 * 1024 * 1024), 2)
-        if info.get("over_limit") and not additional_bytes:
-            msg = (
-                f"Использовано {used_gb} ГБ из {limit_gb} ГБ. "
-                "Новые файлы нельзя загружать, пока объём не станет меньше лимита."
-            )
-        else:
-            msg = (
-                f"Недостаточно места в хранилище (использовано {used_gb} ГБ из {limit_gb} ГБ). "
-                "Удалите ненужные файлы или повысьте тариф."
-            )
+    extra = int(additional_bytes or 0)
+    if extra < 0:
+        extra = 0
+    if info["storage_used_bytes"] + extra > info["storage_limit_bytes"] > 0:
         raise FileServiceError(
-            msg,
+            quota_exceeded_message(info),
             code="QUOTA_EXCEEDED",
             status=400,
             extra=info,
@@ -329,13 +286,16 @@ def create_folder(user, name: str, parent_id=None) -> CabinetFolder:
 
 @transaction.atomic
 def upload_file(user, uploaded, *, folder_id=None, display_name: str | None = None) -> CabinetFile:
+    if not uploaded:
+        raise FileServiceError("Файл не передан", code="FILE_REQUIRED", status=400)
     try:
         validate_uploaded_file(uploaded)
     except UploadValidationError as exc:
         raise FileServiceError(exc.message, code=exc.code, status=400) from exc
 
-    size = int(getattr(uploaded, "size", 0) or 0)
-    assert_quota_allows(user, size)
+    declared = int(getattr(uploaded, "size", 0) or 0)
+    lock_user_storage(user)
+    assert_quota_allows(user, declared)
 
     folder = None
     if folder_id:
@@ -348,6 +308,13 @@ def upload_file(user, uploaded, *, folder_id=None, display_name: str | None = No
     checksum = compute_checksum(uploaded)
     storage_key = build_storage_key(user.id, original)
     saved_key = save_bytes(storage_key, uploaded)
+    size = physical_size(saved_key, declared)
+    if size > declared:
+        try:
+            assert_quota_allows(user, size)
+        except FileServiceError:
+            delete_key(saved_key)
+            raise
 
     file_obj = CabinetFile.objects.create(
         owner=user,
@@ -439,6 +406,7 @@ def move_folder(user, folder_id, target_folder_id=None) -> CabinetFolder:
 @transaction.atomic
 def copy_file(user, file_id, target_folder_id=None) -> CabinetFile:
     source = get_owned_file(user, file_id)
+    lock_user_storage(user)
     assert_quota_allows(user, source.size)
     target = None
     if target_folder_id:
@@ -494,6 +462,7 @@ def copy_folder(user, folder_id, target_parent_id=None) -> CabinetFolder:
         assert_no_folder_cycle(source, target_parent)
     total_size = _folder_file_size(user, source)
     if total_size:
+        lock_user_storage(user)
         assert_quota_allows(user, total_size)
     name = source.name
     if (target_parent_id or None) == (source.parent_id or None):

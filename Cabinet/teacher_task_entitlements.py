@@ -193,9 +193,13 @@ def enforce_teacher_task_attachments(teacher: User) -> None:
 
 
 def enforce_teacher_task_storage(teacher: User, additional_bytes: int) -> None:
-    from .files_services import assert_quota_allows
+    from django.db import transaction
 
-    assert_quota_allows(teacher, additional_bytes)
+    from .files_services import assert_quota_allows, lock_user_storage
+
+    with transaction.atomic():
+        lock_user_storage(teacher)
+        assert_quota_allows(teacher, additional_bytes)
 
 
 def lock_and_enforce_create(teacher: User) -> None:

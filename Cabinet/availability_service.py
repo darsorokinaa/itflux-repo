@@ -10,7 +10,7 @@ from django.utils import timezone
 from .availability_models import TeacherAvailability, TeacherBooking, TeacherBookingLink
 from .choices import RecurrenceType, SeriesStatus, StudentStatus
 from .models import ScheduleEvent, ScheduleEventSeries, Student
-from .schedule_series import _weekdays_for_series
+from .schedule_series import _weekdays_for_series, iter_occurrence_dates
 from .schedule_service import (
     cancel_series,
     check_conflicts,
@@ -36,6 +36,9 @@ WEEKDAY_NAMES = (
 MIN_SLOT_MINUTES = 15
 MAX_SLOT_MINUTES = 240
 MAX_HORIZON_DAYS = 90
+MAX_SERIES_OCCURRENCES = 60
+DEFAULT_BOOKING_UNTIL_MONTH = 12
+DEFAULT_BOOKING_UNTIL_DAY = 27
 
 
 class AvailabilityError(Exception):
@@ -49,6 +52,18 @@ class AvailabilityError(Exception):
 class SlotTakenError(AvailabilityError):
     def __init__(self, message=SLOT_TAKEN_MESSAGE):
         super().__init__(message, code="slot_taken", status=409)
+
+
+class PartialUnavailableError(AvailabilityError):
+    def __init__(self, preview):
+        available = preview.get("available_count") or 0
+        total = preview.get("total") or 0
+        super().__init__(
+            f"{available} из {total} занятий доступны.",
+            code="partial_unavailable",
+            status=409,
+        )
+        self.preview = preview
 
 
 def teacher_timezone(teacher):
@@ -106,6 +121,24 @@ def format_slot_label(weekday, start):
     hhmm = parse_time_value(start).strftime("%H:%M")
     name = weekday_name(weekday)
     return f"{name}, {hhmm}" if name else hhmm
+
+
+def default_booking_until_date(teacher, from_date):
+    """Дата «повторять до»: настройка преподавателя, иначе 27 декабря учебного периода."""
+    try:
+        from .billing_service import get_or_create_teacher_settings
+
+        settings_obj = get_or_create_teacher_settings(teacher)
+        configured = getattr(settings_obj, "default_booking_until", None)
+        if configured and configured >= from_date:
+            return configured
+    except Exception:
+        pass
+    year = from_date.year
+    candidate = date(year, DEFAULT_BOOKING_UNTIL_MONTH, DEFAULT_BOOKING_UNTIL_DAY)
+    if candidate < from_date:
+        candidate = date(year + 1, DEFAULT_BOOKING_UNTIL_MONTH, DEFAULT_BOOKING_UNTIL_DAY)
+    return candidate
 
 
 def default_slot_duration(teacher):
@@ -352,9 +385,14 @@ def compute_available_slots(
     windows=None,
     series_list=None,
     events=None,
+    exclude_event_ids=None,
+    exclude_series_ids=None,
 ):
+    del series_list, events  # occupancy comes from get_busy_intervals
     if date_from is None or date_to is None or date_to < date_from:
         return []
+    from .busy_intervals import find_overlapping_intervals, get_busy_intervals
+
     tz = teacher_timezone(teacher)
     windows = list(windows if windows is not None else TeacherAvailability.objects.filter(
         teacher=teacher,
@@ -362,16 +400,20 @@ def compute_available_slots(
         valid_until__gte=date_from,
         valid_from__lte=date_to,
     ))
-    series_list = series_list if series_list is not None else active_series_for_teacher(teacher)
-    events = events if events is not None else blocking_events_for_range(teacher, date_from, date_to, tz)
-    active_bookings = list(TeacherBooking.objects.filter(
-        teacher=teacher,
-        status=TeacherBooking.Status.ACTIVE
-    ))
+    busy = get_busy_intervals(
+        teacher,
+        date_from,
+        date_to,
+        tz=tz,
+        exclude_event_ids=exclude_event_ids,
+        exclude_series_ids=exclude_series_ids,
+    )
     slots = []
     seen = set()
+    now = timezone.now()
+    today = now.astimezone(tz).date()
     for day in _iter_days(date_from, date_to):
-        if day < timezone.now().astimezone(tz).date():
+        if day < today:
             continue
         for window in windows:
             if not availability_covers_date(window, day):
@@ -382,15 +424,11 @@ def compute_available_slots(
                 key = (day.isoformat(), start.strftime("%H:%M"))
                 if key in seen:
                     continue
-                if any(series_occupies_weekday_time(series, day.weekday(), start, end) for series in series_list):
-                    continue
                 slot_start = combine_local(day, start, tz)
-                if slot_start < timezone.now():
+                if slot_start < now:
                     continue
                 slot_end = combine_local(day, end, tz)
-                if any(event_blocks_slot(event, slot_start, slot_end) for event in events):
-                    continue
-                if any(booking_occupies_weekday_time(b, day.weekday(), start, end) for b in active_bookings):
+                if find_overlapping_intervals(busy, slot_start, slot_end):
                     continue
                 seen.add(key)
                 slots.append({
@@ -620,6 +658,20 @@ def serialize_booking(booking, *, teacher=None):
         "teacher_name": teacher_display_name(teacher),
         "label": format_slot_label(weekday, start_time),
         "self_booked": True,
+        "recurrence_type": getattr(booking, "recurrence_type", None) or (
+            series.recurrence_type if series else RecurrenceType.WEEKLY
+        ),
+        "recurrence_until": (
+            (series.recurrence_until.isoformat() if series and series.recurrence_until else None)
+            or (booking.recurrence_until.isoformat() if getattr(booking, "recurrence_until", None) else None)
+        ),
+        "events_count": (
+            ScheduleEvent.objects.filter(series=series)
+            .exclude(status=ScheduleEvent.Status.CANCELLED)
+            .count()
+            if series
+            else None
+        ),
     }
 
 
@@ -701,12 +753,297 @@ def public_booking_page(token, *, user=None, request=None):
         "my_bookings": my_bookings,
         "not_linked_message": NOT_LINKED_MESSAGE,
         "auth_required_message": AUTH_REQUIRED_MESSAGE,
+        "default_repeat_until": default_booking_until_date(teacher, today).isoformat(),
+        "subject_label": booking_subject_label(student) if student else "",
         "confirm_warning": (
-            "Вы выбираете постоянное время занятий. Это время будет закреплено за вами "
-            "на период обучения. Если в дальнейшем потребуется изменить расписание, "
-            "согласуйте это с преподавателем лично."
+            "Вы выбираете время занятий. Если вы оформили серию, это время будет "
+            "закреплено за вами до указанной даты. Чтобы изменить расписание позже, "
+            "согласуйте это с преподавателем."
         ),
     }
+
+
+def booking_subject_label(student):
+    subjects = list(active_subjects_for_student(student)[:1])
+    if not subjects:
+        return ""
+    return subjects[0].display_label or ""
+
+
+MONTHS_GENITIVE = (
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+)
+ALLOWED_BOOKING_RECURRENCE = frozenset({
+    RecurrenceType.NONE,
+    RecurrenceType.WEEKLY,
+    RecurrenceType.BIWEEKLY,
+    RecurrenceType.CUSTOM,
+    RecurrenceType.CUSTOM_WEEKDAYS,
+})
+
+
+def format_human_date(day):
+    return f"{day.day} {MONTHS_GENITIVE[day.month - 1]}"
+
+
+def format_human_date_year(day):
+    return f"{format_human_date(day)} {day.year}"
+
+
+def parse_weekdays(raw, fallback=None):
+    days = []
+    for value in raw or []:
+        try:
+            day = int(value)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= day <= 6:
+            days.append(day)
+    if days:
+        return sorted(set(days))
+    if fallback is None:
+        return []
+    return [fallback]
+
+
+def normalize_booking_recurrence(payload, *, first_date, teacher):
+    payload = payload or {}
+    recurrence_type = str(
+        payload.get("recurrence_type") or payload.get("repeat") or RecurrenceType.WEEKLY
+    ).strip().lower()
+    if recurrence_type in ("never", "off", "once", "single"):
+        recurrence_type = RecurrenceType.NONE
+    if recurrence_type not in ALLOWED_BOOKING_RECURRENCE:
+        raise AvailabilityError("Некорректный вариант повторения.")
+    interval = 1
+    try:
+        interval = max(1, int(payload.get("recurrence_interval") or payload.get("interval") or 1))
+    except (TypeError, ValueError) as exc:
+        raise AvailabilityError("Некорректный интервал повторения.") from exc
+    if interval > 12:
+        raise AvailabilityError("Интервал повторения слишком большой.")
+    weekdays = parse_weekdays(
+        payload.get("recurrence_weekdays") or payload.get("weekdays"),
+        fallback=first_date.weekday(),
+    )
+    until = payload.get("recurrence_until") or payload.get("repeat_until")
+    if until:
+        until = parse_date_value(until)
+    elif recurrence_type == RecurrenceType.NONE:
+        until = first_date
+    else:
+        until = default_booking_until_date(teacher, first_date)
+    if until < first_date:
+        raise AvailabilityError("Дата окончания не может быть раньше первого занятия.")
+    if (until - first_date).days > 366:
+        raise AvailabilityError("Серия не может быть длиннее одного года.")
+    if recurrence_type == RecurrenceType.NONE:
+        weekdays = [first_date.weekday()]
+        interval = 1
+        until = first_date
+    return {
+        "recurrence_type": recurrence_type,
+        "recurrence_interval": interval,
+        "recurrence_weekdays": weekdays,
+        "recurrence_until": until,
+    }
+
+
+def booking_occurrence_dates(first_date, recurrence, date_to=None):
+    until = recurrence["recurrence_until"]
+    end = until if date_to is None else min(until, date_to)
+    dates = list(
+        iter_occurrence_dates(
+            start_date=first_date,
+            recurrence_type=recurrence["recurrence_type"],
+            date_from=first_date,
+            date_to=end,
+            recurrence_until=until,
+            recurrence_interval=recurrence["recurrence_interval"],
+            recurrence_weekdays=recurrence["recurrence_weekdays"],
+        )
+    )
+    if len(dates) > MAX_SERIES_OCCURRENCES:
+        raise AvailabilityError(
+            f"Слишком много занятий в серии (максимум {MAX_SERIES_OCCURRENCES}). Выберите более раннюю дату окончания."
+        )
+    if not dates:
+        dates = [first_date]
+    return dates
+
+
+def weekday_list_label(weekdays):
+    names = [weekday_name(day) for day in weekdays if weekday_name(day)]
+    if not names:
+        return ""
+    if len(names) == 1:
+        return names[0]
+    return ", ".join(names)
+
+
+def recurrence_summary_text(first_date, start_time, end_time, recurrence, last_date=None):
+    start_s = parse_time_value(start_time).strftime("%H:%M")
+    end_s = parse_time_value(end_time).strftime("%H:%M")
+    last_date = last_date or recurrence.get("recurrence_until") or first_date
+    rtype = recurrence["recurrence_type"]
+    weekdays = recurrence.get("recurrence_weekdays") or [first_date.weekday()]
+    if rtype == RecurrenceType.NONE:
+        cadence = "Разовое занятие"
+    elif rtype == RecurrenceType.BIWEEKLY:
+        cadence = f"Каждые 2 недели по {weekday_list_label(weekdays)}"
+    elif rtype == RecurrenceType.CUSTOM or (
+        rtype == RecurrenceType.WEEKLY and (recurrence.get("recurrence_interval") or 1) > 1
+    ):
+        interval = recurrence.get("recurrence_interval") or 1
+        cadence = f"Каждые {interval} нед. ({weekday_list_label(weekdays)})"
+    else:
+        cadence = f"Каждый {weekday_list_label(weekdays)}"
+    period = f"с {format_human_date(first_date)} по {format_human_date(last_date)}"
+    if first_date.year != last_date.year or last_date.month == 12:
+        period = f"с {format_human_date(first_date)} по {format_human_date_year(last_date)}"
+    return {
+        "cadence": cadence,
+        "time_range": f"{start_s}–{end_s}",
+        "period": period,
+        "title": "",
+    }
+
+
+def classify_occurrence_dates(*, teacher, dates, start_time, end_time, tz):
+    from .busy_intervals import find_overlapping_intervals, get_busy_intervals
+
+    if not dates:
+        return [], []
+    busy = get_busy_intervals(teacher, dates[0], dates[-1], tz=tz)
+    available = []
+    occupied = []
+    for day in dates:
+        slot_start = combine_local(day, start_time, tz)
+        slot_end = combine_local(day, end_time, tz)
+        hits = find_overlapping_intervals(busy, slot_start, slot_end)
+        item = {
+            "date": day.isoformat(),
+            "weekday": day.weekday(),
+            "weekday_label": weekday_name(day.weekday()),
+            "start_time": parse_time_value(start_time).strftime("%H:%M"),
+            "end_time": parse_time_value(end_time).strftime("%H:%M"),
+        }
+        if hits:
+            occupied.append(item)
+        else:
+            available.append(item)
+    return available, occupied
+
+
+def match_offered_slot(*, teacher, windows, slot_date, start_time, tz):
+    matching = None
+    end_time = None
+    duration = 60
+    for window in windows:
+        if not availability_covers_date(window, slot_date):
+            continue
+        duration = window.slot_duration_minutes or 60
+        for start in generate_slot_starts(window.start_time, window.end_time, duration):
+            if start != start_time:
+                continue
+            matching = window
+            end_time = minutes_to_time(time_to_minutes(start) + duration)
+            break
+        if matching:
+            break
+    return matching, end_time, duration
+
+
+def build_booking_preview(
+    *,
+    teacher,
+    student,
+    slot_date,
+    start_time,
+    end_time,
+    recurrence,
+    tz,
+):
+    dates = booking_occurrence_dates(slot_date, recurrence)
+    available, occupied = classify_occurrence_dates(
+        teacher=teacher,
+        dates=dates,
+        start_time=start_time,
+        end_time=end_time,
+        tz=tz,
+    )
+    last_date = dates[-1] if dates else slot_date
+    summary = recurrence_summary_text(slot_date, start_time, end_time, recurrence, last_date=last_date)
+    subject = booking_subject_label(student) if student else ""
+    title = f"Занятия по {subject.lower()}" if subject else "Занятия"
+    summary["title"] = title
+    return {
+        "first_date": slot_date.isoformat(),
+        "first_date_label": format_human_date_year(slot_date),
+        "start_time": parse_time_value(start_time).strftime("%H:%M"),
+        "end_time": parse_time_value(end_time).strftime("%H:%M"),
+        "timezone": str(tz),
+        "recurrence": {
+            "type": recurrence["recurrence_type"],
+            "interval": recurrence["recurrence_interval"],
+            "weekdays": recurrence["recurrence_weekdays"],
+            "until": recurrence["recurrence_until"].isoformat(),
+        },
+        "default_repeat_until": default_booking_until_date(teacher, slot_date).isoformat(),
+        "subject_label": subject,
+        "title": title,
+        "summary": summary,
+        "total": len(dates),
+        "available_count": len(available),
+        "occupied_count": len(occupied),
+        "available_dates": available,
+        "occupied": occupied,
+        "all_available": len(occupied) == 0 and len(available) > 0,
+    }
+
+
+def preview_booking(*, token, user, payload):
+    if not user or not user.is_authenticated:
+        raise AvailabilityError(AUTH_REQUIRED_MESSAGE, code="auth_required", status=401)
+    profile = getattr(user, "profile", None)
+    if profile is None or profile.role != profile.Role.STUDENT:
+        raise AvailabilityError(NOT_LINKED_MESSAGE, code="not_linked", status=403)
+
+    slot_date = parse_date_value(payload.get("date"))
+    start_time = parse_time_value(payload.get("start_time"))
+    link = TeacherBookingLink.objects.filter(token=token, is_active=True).select_related("teacher").first()
+    if link is None:
+        raise AvailabilityError("Ссылка на запись не найдена или больше не действует.", code="not_found", status=404)
+    teacher = link.teacher
+    if not teacher_booking_entitled(teacher):
+        raise AvailabilityError("Ссылка на запись не найдена или больше не действует.", code="not_found", status=404)
+    student = resolve_linked_student(user, teacher)
+    if student is None:
+        raise AvailabilityError(NOT_LINKED_MESSAGE, code="not_linked", status=403)
+    tz = teacher_timezone(teacher)
+    today = timezone.now().astimezone(tz).date()
+    date_from, date_to = published_range(link, today)
+    if date_from is None or slot_date < date_from or slot_date > date_to:
+        raise AvailabilityError("Эта дата больше не доступна для записи.", code="period_closed", status=409)
+    windows = list(TeacherAvailability.objects.filter(
+        teacher=teacher, is_active=True, valid_until__gte=slot_date, valid_from__lte=slot_date,
+    ))
+    matching, end_time, _duration = match_offered_slot(
+        teacher=teacher, windows=windows, slot_date=slot_date, start_time=start_time, tz=tz,
+    )
+    if matching is None or end_time is None:
+        raise SlotTakenError()
+    recurrence = normalize_booking_recurrence(payload, first_date=slot_date, teacher=teacher)
+    return build_booking_preview(
+        teacher=teacher,
+        student=student,
+        slot_date=slot_date,
+        start_time=start_time,
+        end_time=end_time,
+        recurrence=recurrence,
+        tz=tz,
+    )
 
 
 def _notify_booking(booking, *, kind):
@@ -770,7 +1107,7 @@ def _notify_booking(booking, *, kind):
             pass
 
 
-def book_slot(*, token, user, date_value, start_time_value):
+def book_slot(*, token, user, date_value, start_time_value, payload=None, book_available_only=False):
     if not user or not user.is_authenticated:
         raise AvailabilityError(AUTH_REQUIRED_MESSAGE, code="auth_required", status=401)
     profile = getattr(user, "profile", None)
@@ -779,6 +1116,11 @@ def book_slot(*, token, user, date_value, start_time_value):
 
     slot_date = parse_date_value(date_value)
     start_time = parse_time_value(start_time_value)
+    payload = payload or {}
+    if book_available_only is False:
+        book_available_only = bool(
+            payload.get("book_available_only") or payload.get("skip_occupied")
+        )
 
     with transaction.atomic():
             link = TeacherBookingLink.objects.select_for_update().filter(
@@ -808,54 +1150,46 @@ def book_slot(*, token, user, date_value, start_time_value):
                 valid_from__lte=slot_date,
             ))
 
-            # Lock the booking slot itself to prevent double booking
-            # We use select_for_update on a dummy query or just rely on the unique constraint
-            # Actually, the unique constraint `cabinet_unique_active_teacher_weekday_slot` will prevent double booking at the DB level.
-            # But we can also lock the teacher record to serialize bookings for this teacher.
             from django.contrib.auth.models import User
             User.objects.select_for_update().get(pk=teacher.pk)
-            series_list = active_series_for_teacher(teacher)
-            events = blocking_events_for_range(teacher, slot_date, slot_date, tz)
-            matching = None
-            end_time = None
-            for window in windows:
-                if not availability_covers_date(window, slot_date):
-                    continue
-                duration = window.slot_duration_minutes or 60
-                for start in generate_slot_starts(window.start_time, window.end_time, duration):
-                    if start != start_time:
-                        continue
-                    candidate_end = minutes_to_time(time_to_minutes(start) + duration)
-                    matching = window
-                    end_time = candidate_end
-                    break
-                if matching:
-                    break
-            if matching is None or end_time is None:
-                raise SlotTakenError()
 
-            weekday = slot_date.weekday()
-            if any(series_occupies_weekday_time(series, weekday, start_time, end_time) for series in series_list):
+            matching, end_time, _duration = match_offered_slot(
+                teacher=teacher,
+                windows=windows,
+                slot_date=slot_date,
+                start_time=start_time,
+                tz=tz,
+            )
+            if matching is None or end_time is None:
                 raise SlotTakenError()
 
             slot_start = combine_local(slot_date, start_time, tz)
             if slot_start < timezone.now():
                 raise AvailabilityError("Нельзя записаться на прошедшее время.", code="past_time", status=409)
-            slot_end = combine_local(slot_date, end_time, tz)
-            if any(event_blocks_slot(event, slot_start, slot_end) for event in events):
-                raise SlotTakenError()
-            if check_conflicts(teacher=teacher, starts_at=slot_start, ends_at=slot_end, student_id=student.pk):
-                raise SlotTakenError()
 
-            for existing in TeacherBooking.objects.filter(
+            recurrence = normalize_booking_recurrence(payload, first_date=slot_date, teacher=teacher)
+            preview = build_booking_preview(
                 teacher=teacher,
-                weekday=weekday,
-                status=TeacherBooking.Status.ACTIVE,
-            ):
-                if booking_occupies_weekday_time(existing, weekday, start_time, end_time):
-                    raise SlotTakenError()
+                student=student,
+                slot_date=slot_date,
+                start_time=start_time,
+                end_time=end_time,
+                recurrence=recurrence,
+                tz=tz,
+            )
+            if preview["available_count"] == 0:
+                raise SlotTakenError()
+            first_busy = any(item["date"] == slot_date.isoformat() for item in preview["occupied"])
+            if first_busy:
+                raise SlotTakenError()
+            if preview["occupied"] and not book_available_only:
+                raise PartialUnavailableError(preview)
 
+            excluded_dates = [item["date"] for item in preview["occupied"]]
+            weekday = slot_date.weekday()
             subjects = list(active_subjects_for_student(student)[:1])
+            subject_label = subjects[0].display_label if subjects else ""
+            topic = subject_label or "Занятие"
             series_data = {
                 "title": student.full_name,
                 "event_type": "individual_lesson",
@@ -863,11 +1197,13 @@ def book_slot(*, token, user, date_value, start_time_value):
                 "start_date": slot_date,
                 "start_time": start_time,
                 "end_time": end_time,
-                "recurrence_type": RecurrenceType.WEEKLY,
-                "recurrence_weekdays": [weekday],
-                "recurrence_until": date(slot_date.year, 12, 31),
+                "recurrence_type": recurrence["recurrence_type"],
+                "recurrence_interval": recurrence["recurrence_interval"],
+                "recurrence_weekdays": recurrence["recurrence_weekdays"],
+                "recurrence_until": recurrence["recurrence_until"],
+                "excluded_dates": excluded_dates,
                 "format": "online",
-                "topic": "Постоянное занятие",
+                "topic": topic,
                 "notify_participants": False,
             }
             if subjects:
@@ -895,24 +1231,30 @@ def book_slot(*, token, user, date_value, start_time_value):
                     start_time=start_time,
                     end_time=end_time,
                     first_date=slot_date,
+                    recurrence_type=recurrence["recurrence_type"],
+                    recurrence_interval=recurrence["recurrence_interval"],
+                    recurrence_weekdays=recurrence["recurrence_weekdays"],
+                    recurrence_until=recurrence["recurrence_until"],
                     status=TeacherBooking.Status.ACTIVE,
                     source=TeacherBooking.Source.SELF_SERVICE,
                 )
             except IntegrityError as exc:
                 raise SlotTakenError() from exc
 
-            return booking, events_created
+            return booking, events_created, preview
 
 
-def book_slot_and_notify(*, token, user, date_value, start_time_value):
-    booking, _events = book_slot(
+def book_slot_and_notify(*, token, user, date_value, start_time_value, payload=None, book_available_only=False):
+    booking, _events, preview = book_slot(
         token=token,
         user=user,
         date_value=date_value,
         start_time_value=start_time_value,
+        payload=payload,
+        book_available_only=book_available_only,
     )
     _notify_booking(booking, kind="booked")
-    return booking
+    return booking, preview
 
 
 def student_bookings(user):

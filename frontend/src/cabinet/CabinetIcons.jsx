@@ -35,6 +35,8 @@ const ICON_PATHS = {
   plan:      "M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2 M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2 M9 12h6 M9 16h6",
   link:      "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71 M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71",
   lock:      "M19 11H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2z M7 11V7a5 5 0 0 1 10 0v4",
+  mapPin:    "M12 21s7-4.5 7-11a7 7 0 1 0-14 0c0 6.5 7 11 7 11z M12 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
+  car:       "M5 17h2 M17 17h2 M3 11l2-5h14l2 5 M3 11v5h18v-5 M7 16a1 1 0 1 0 0-2 1 1 0 0 0 0 2z M17 16a1 1 0 1 0 0-2 1 1 0 0 0 0 2z",
   lockOpen:  "M7 11V7a5 5 0 0 1 9.9-1 M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z",
   share:     "M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8 M16 6l-4-4-4 4 M12 2v13",
   video:     "M15 10l4.553-2.276A1 1 0 0 1 21 8.618v6.764a1 1 0 0 1-1.447.894L15 14M5 18h8a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2z",
@@ -74,7 +76,17 @@ const ICON_PATHS = {
 export default function CabinetIcon({ name }) {
   const path = ICON_PATHS[name] || "";
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       {path.split(" M").map((seg, i) => (
         <path key={i} d={i === 0 ? seg : `M${seg}`} />
       ))}

@@ -121,6 +121,12 @@ class TeacherBillingSettings(models.Model):
         default=BillingType.PER_LESSON,
     )
     default_lesson_duration_minutes = models.PositiveIntegerField(default=60)
+    default_booking_until = models.DateField(
+        "Повторять бронирования учеников до",
+        null=True,
+        blank=True,
+        help_text="Если не задано, используется 27 декабря текущего учебного периода.",
+    )
     default_lesson_price = models.DecimalField(
         max_digits=12, decimal_places=2, null=True, blank=True
     )

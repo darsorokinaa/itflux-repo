@@ -1069,6 +1069,15 @@ class HomeworkNotebookPageCreateView(APIView):
                     validate_uploaded_file(uploaded)
                 except UploadValidationError as exc:
                     return Response({"error": exc.message, "code": exc.code}, status=400)
+                from .files_services import FileServiceError, assert_quota_allows, lock_user_storage
+
+                try:
+                    lock_user_storage(request.user)
+                    assert_quota_allows(request.user, int(getattr(uploaded, "size", 0) or 0))
+                except FileServiceError as exc:
+                    payload = {"error": exc.message, "detail": exc.message, "code": exc.code}
+                    payload.update(exc.extra or {})
+                    return Response(payload, status=exc.status)
                 name = (uploaded.name or "").lower()
                 mime = (getattr(uploaded, "content_type", "") or "").lower()
                 if mime in NOTEBOOK_PDF_TYPES or name.endswith(".pdf"):
@@ -1082,7 +1091,9 @@ class HomeworkNotebookPageCreateView(APIView):
                             attachment_type=HomeworkAttachmentType.NOTEBOOK_SOURCE,
                         )
                     except HomeworkTaskFileError as exc:
-                        return Response({"error": exc.message, "code": exc.code}, status=exc.status_code)
+                        payload = {"error": exc.message, "detail": exc.message, "code": exc.code}
+                        payload.update(exc.extra or {})
+                        return Response(payload, status=exc.status_code)
                     created_pages = _add_pages_from_attachment(locked, created[0])
                 else:
                     page = create_blank_page(locked)
@@ -1278,7 +1289,9 @@ class HomeworkNotebookCompleteView(APIView):
                 export_file=export_file,
             )
         except HomeworkTaskFileError as exc:
-            return Response({"error": exc.message, "code": exc.code}, status=exc.status_code)
+            payload = {"error": exc.message, "detail": exc.message, "code": exc.code}
+            payload.update(exc.extra or {})
+            return Response(payload, status=exc.status_code)
         except Exception:
             logger.exception("notebook complete failed notebook=%s", notebook.id)
             return Response({"error": "Не удалось сформировать файл проверки."}, status=500)
