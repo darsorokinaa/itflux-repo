@@ -64,7 +64,9 @@ import {
   getSeriesRefreshRange,
   getCalendarFetchRange,
   getCalendarFetchWindows,
+  layoutOverlappingCalendarEvents,
   mergeScheduleEventLists,
+  overlappingEventBoxStyle,
   localClockToTimeZone,
   parseScheduleScope,
   upcomingEventDateLabel,
@@ -1377,6 +1379,7 @@ function CalendarEventBlock({
   canDrag,
   dragging,
   resizing,
+  split,
   onClick,
   onPointerDown,
   onResizeStart,
@@ -1499,6 +1502,7 @@ function CalendarEventBlock({
     isTravel ? "cb-sch-event--travel" : "",
     isTravel && shortBlock ? "cb-sch-event--travel-short" : "",
     canDrag ? "cb-sch-event--draggable" : "",
+    split ? "cb-sch-event--split" : "",
   ].filter(Boolean).join(" ");
 
   const handleClick = (e) => {
@@ -1539,6 +1543,7 @@ function CalendarEventBlock({
       shortBlock ? "cb-sch-event-wrap--short" : "",
       dragging ? "cb-sch-event-wrap--dragging" : "",
       resizing ? "cb-sch-event-wrap--resizing" : "",
+      split ? "cb-sch-event-wrap--split" : "",
       "cb-sch-event-wrap--draggable",
     ].filter(Boolean).join(" ");
 
@@ -1603,6 +1608,16 @@ function TimeGridColumn({
   );
 
   const dayKey = formatApiDate(day);
+  const overlapLayout = useMemo(
+    () => layoutOverlappingCalendarEvents(events, {
+      endTimeFor: (event) => (
+        String(resizingId) === String(event.id) && resizePreview?.endTime
+          ? resizePreview.endTime
+          : null
+      ),
+    }),
+    [events, resizingId, resizePreview],
+  );
   const isDropTarget = dropPreview?.dayKey === dayKey;
   const showNow = isToday(day) && nowTop != null;
   const weekend = isWeekend(day);
@@ -1720,6 +1735,8 @@ function TimeGridColumn({
       {events.map((ev) => {
         const isResizing = String(resizingId) === String(ev.id);
         const endTime = isResizing && resizePreview ? resizePreview.endTime : eventLocalEndTime(ev);
+        const placement = overlapLayout.get(String(ev.id));
+        const splitStyle = overlappingEventBoxStyle(placement);
         return (
           <CalendarEventBlock
             key={ev.id}
@@ -1727,12 +1744,14 @@ function TimeGridColumn({
             canDrag={dndEnabled && !ev.readOnly}
             dragging={String(draggingId) === String(ev.id)}
             resizing={isResizing}
+            split={Boolean(splitStyle)}
             onClick={onEventClick}
             onPointerDown={onPointerDown}
             onResizeStart={onResizeStart}
             style={{
               top: timeToTop(eventLocalStartTime(ev)),
               height: eventHeight(eventLocalStartTime(ev), endTime),
+              ...splitStyle,
             }}
           />
         );

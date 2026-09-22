@@ -5681,6 +5681,19 @@ body.cb-sch-dragging .cb-sch-event-wrap--draggable {
   height: 100%;
   min-height: 0;
 }
+.cb-sch-event-wrap--split,
+.cb-sch-event--split:not(.cb-sch-event--compact) {
+  min-width: 0;
+}
+.cb-sch-event-wrap--split .cb-sch-event,
+.cb-sch-event--split:not(.cb-sch-event--compact) {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+.cb-sch-event.cb-sch-event--availability:not(.cb-sch-event--compact),
+.cb-sch-event-wrap:has(.cb-sch-event--availability) {
+  z-index: 1;
+}
 
 .cb-sch-event,
 button.cb-sch-event,

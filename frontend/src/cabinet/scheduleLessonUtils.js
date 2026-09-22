@@ -144,6 +144,90 @@ export function eventLocalTimeRange(event) {
   return end ? `${start}–${end}` : start;
 }
 
+function clockToMinutes(time) {
+  const [hours, minutes] = normalizeTimeValue(time).split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function isAvailabilityCalendarEvent(event) {
+  return event?.kind === "availability" || event?.type === "availability";
+}
+
+function overlapLaneRank(event) {
+  const kind = event?.kind || event?.type || "";
+  if (kind === "personal" || kind === "blocked") return 2;
+  if (kind === "travel") return 3;
+  return 1;
+}
+
+/**
+ * Колонки для событий, которые пересекаются по времени.
+ * Свободные слоты остаются на всю ширину и в раскладку не входят.
+ * @returns {Map<string, { column: number, columns: number }>}
+ */
+export function layoutOverlappingCalendarEvents(events, options = {}) {
+  const endTimeFor = options.endTimeFor || (() => null);
+  const items = [];
+  for (const event of events || []) {
+    if (!event || event.id == null || isAvailabilityCalendarEvent(event)) continue;
+    const start = clockToMinutes(eventLocalStartTime(event));
+    const end = clockToMinutes(endTimeFor(event) || eventLocalEndTime(event));
+    if (!(end > start)) continue;
+    items.push({
+      id: String(event.id),
+      start,
+      end,
+      rank: overlapLaneRank(event),
+    });
+  }
+  items.sort((a, b) => a.start - b.start || a.rank - b.rank || b.end - a.end || a.id.localeCompare(b.id));
+
+  const layout = new Map();
+  let cluster = [];
+  let clusterEnd = -1;
+
+  const flush = () => {
+    if (!cluster.length) return;
+    const columnEnds = [];
+    for (const item of cluster) {
+      let column = columnEnds.findIndex((end) => end <= item.start);
+      if (column === -1) {
+        column = columnEnds.length;
+        columnEnds.push(item.end);
+      } else {
+        columnEnds[column] = item.end;
+      }
+      item.column = column;
+    }
+    const columns = Math.max(columnEnds.length, 1);
+    for (const item of cluster) {
+      layout.set(item.id, { column: item.column, columns });
+    }
+    cluster = [];
+    clusterEnd = -1;
+  };
+
+  for (const item of items) {
+    if (cluster.length && item.start >= clusterEnd) flush();
+    cluster.push(item);
+    clusterEnd = Math.max(clusterEnd, item.end);
+  }
+  flush();
+  return layout;
+}
+
+/** Позиция события внутри ячейки, разделённой на вертикальные части. */
+export function overlappingEventBoxStyle(placement) {
+  if (!placement || placement.columns <= 1) return null;
+  const width = 100 / placement.columns;
+  const inset = 2;
+  return {
+    left: `calc(${placement.column * width}% + ${inset}px)`,
+    width: `calc(${width}% - ${inset * 2}px)`,
+    right: "auto",
+  };
+}
+
 export function eventStartDateTime(event, now = new Date()) {
   if (event?.startsAt) {
     const dt = new Date(event.startsAt);

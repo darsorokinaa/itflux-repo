@@ -6,7 +6,9 @@ import {
   upcomingEventDateLabel,
   getCalendarFetchWindows,
   getCalendarFetchRange,
+  layoutOverlappingCalendarEvents,
   mergeScheduleEventLists,
+  overlappingEventBoxStyle,
 } from "./scheduleLessonUtils";
 
 describe("eventDisplayTitle", () => {
@@ -149,5 +151,59 @@ describe("getCalendarFetchWindows", () => {
     ]);
     expect(merged.map((ev) => ev.id)).toEqual([1, 2, 3]);
     expect(merged[0].title).toBe("from-upcoming");
+  });
+});
+
+describe("layoutOverlappingCalendarEvents", () => {
+  const slot = (partial) => ({ startTime: "10:00", endTime: "11:00", ...partial });
+
+  it("keeps events that do not overlap at full width", () => {
+    const layout = layoutOverlappingCalendarEvents([
+      slot({ id: "lesson", type: "individual", endTime: "11:00" }),
+      slot({ id: "personal", kind: "personal", startTime: "11:00", endTime: "12:00" }),
+    ]);
+    expect(layout.get("lesson")).toEqual({ column: 0, columns: 1 });
+    expect(layout.get("personal")).toEqual({ column: 0, columns: 1 });
+    expect(overlappingEventBoxStyle(layout.get("lesson"))).toBeNull();
+  });
+
+  it("splits a lesson and a personal event that share the same time", () => {
+    const layout = layoutOverlappingCalendarEvents([
+      slot({ id: "personal", kind: "personal" }),
+      slot({ id: "lesson", type: "individual" }),
+    ]);
+    expect(layout.get("lesson")).toEqual({ column: 0, columns: 2 });
+    expect(layout.get("personal")).toEqual({ column: 1, columns: 2 });
+    expect(overlappingEventBoxStyle(layout.get("lesson"))).toEqual({
+      left: "calc(0% + 2px)",
+      width: "calc(50% - 4px)",
+      right: "auto",
+    });
+    expect(overlappingEventBoxStyle(layout.get("personal")).left).toBe("calc(50% + 2px)");
+  });
+
+  it("divides the cell into one part per overlapping event", () => {
+    const layout = layoutOverlappingCalendarEvents([
+      slot({ id: "lesson", type: "group" }),
+      slot({ id: "personal", kind: "personal" }),
+      slot({ id: "blocked", kind: "blocked", startTime: "10:30", endTime: "11:30" }),
+    ]);
+    expect(layout.get("lesson").columns).toBe(3);
+    expect(layout.get("personal").columns).toBe(3);
+    expect(layout.get("blocked").columns).toBe(3);
+    expect(new Set([
+      layout.get("lesson").column,
+      layout.get("personal").column,
+      layout.get("blocked").column,
+    ]).size).toBe(3);
+  });
+
+  it("leaves availability on the full cell", () => {
+    const layout = layoutOverlappingCalendarEvents([
+      slot({ id: "free", kind: "availability", startTime: "09:00", endTime: "18:00" }),
+      slot({ id: "lesson", type: "individual" }),
+    ]);
+    expect(layout.has("free")).toBe(false);
+    expect(layout.get("lesson")).toEqual({ column: 0, columns: 1 });
   });
 });
