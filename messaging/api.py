@@ -298,6 +298,7 @@ class MessageListCreateView(MessagingGateMixin, APIView):
                     mention_ids.append(int(item))
                 except (TypeError, ValueError):
                     continue
+            from .library_cards import parse_library_payload
             message = post_user_message(
                 request.user,
                 conversation,
@@ -306,6 +307,7 @@ class MessageListCreateView(MessagingGateMixin, APIView):
                 client_message_id=(request.data.get("client_message_id") or "").strip(),
                 uploads=request.FILES.getlist("files"),
                 mention_user_ids=mention_ids,
+                library=parse_library_payload(request.data.get("library")),
             )
         except (MessagingError, MessageBlocked, UploadValidationError, PurposeRejected) as exc:
             return _rejected_response(exc)
@@ -525,6 +527,35 @@ class MessageImportantView(MessagingGateMixin, APIView):
         message.save(update_fields=["is_important", "updated_at"])
         publish_message_event(message, "message.updated")
         return Response({"message": serialize_message(message, request.user)})
+
+
+class LibraryFileView(MessagingGateMixin, APIView):
+    """Файл из «Моих файлов», прикреплённый к сообщению. Только участник диалога."""
+
+    permission_classes = [IsAuthenticated, IsMessagingParticipant]
+
+    def get(self, request, message_id, file_id):
+        blocked = self._blocked()
+        if blocked:
+            return blocked
+        from Cabinet.files_models import CabinetFileAuditAction
+        from Cabinet.files_services import download_filename, log_action
+        from Cabinet.files_storage import content_disposition, open_file
+        from .library_cards import library_file_for_participant
+
+        file_obj = library_file_for_participant(request.user, message_id, file_id)
+        if file_obj is None:
+            return Response({"detail": "Файл не найден"}, status=404)
+        try:
+            handle = open_file(file_obj.storage_key, "rb")
+        except Exception:
+            return Response({"detail": "Файл не найден"}, status=404)
+        log_action(request.user, CabinetFileAuditAction.DOWNLOAD, file=file_obj)
+        response = FileResponse(handle, content_type=file_obj.mime_type or "application/octet-stream")
+        response["Content-Disposition"] = content_disposition(download_filename(file_obj), inline=False)
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Cache-Control"] = "private, no-store"
+        return response
 
 
 def parse_typing_payload(raw: str) -> dict | None:

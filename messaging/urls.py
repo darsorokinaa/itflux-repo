@@ -3,6 +3,7 @@ from django.urls import path
 from .community_api import (
     CommunityCollectionView,
     CommunityDetailView,
+    CommunityImageView,
     CommunityInviteCreateView,
     CommunityInviteRevokeView,
     CommunityLeaveView,
@@ -22,6 +23,7 @@ from .api import (
     ConversationListView,
     MessageSearchView,
     DirectConversationView,
+    LibraryFileView,
     MessageDeliveredView,
     MessageDetailView,
     MessageImportantView,
@@ -47,6 +49,11 @@ urlpatterns = [
         "conversations/<uuid:conversation_id>/community/",
         CommunityDetailView.as_view(),
         name="messaging_community_detail",
+    ),
+    path(
+        "conversations/<uuid:conversation_id>/community-image/",
+        CommunityImageView.as_view(),
+        name="messaging_community_image",
     ),
     path(
         "conversations/<uuid:conversation_id>/invites/",
@@ -112,6 +119,11 @@ urlpatterns = [
         "conversations/<uuid:conversation_id>/delivered/",
         MessageDeliveredView.as_view(),
         name="messaging_delivered",
+    ),
+    path(
+        "library-files/<int:message_id>/<uuid:file_id>/",
+        LibraryFileView.as_view(),
+        name="messaging_library_file",
     ),
     path(
         "attachments/<uuid:attachment_id>/",

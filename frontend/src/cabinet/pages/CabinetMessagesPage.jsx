@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { sendMessagingFrame } from "../messages/live";
+import MessageLibraryPicker from "../messages/MessageLibraryPicker";
 import "../styles/messages.css";
 import { CommunityAdmin, CommunityInfo } from "../messages/CommunityPanels";
 import {
@@ -178,6 +179,8 @@ export default function CabinetMessagesPage() {
   const [replyTo, setReplyTo] = useState(null);
   const [editing, setEditing] = useState(null);
   const [files, setFiles] = useState([]);
+  const [libraryPicks, setLibraryPicks] = useState([]);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [error, setError] = useState("");
   const [blockedSend, setBlockedSend] = useState(false);
   const [sending, setSending] = useState(false);
@@ -368,6 +371,8 @@ export default function CabinetMessagesPage() {
   useEffect(() => {
     if (!activeId) return undefined;
     setText(window.localStorage.getItem(`msg-draft:${activeId}`) || "");
+    setLibraryPicks([]);
+    setLibraryOpen(false);
     setReplyTo(null);
     setEditing(null);
     setError("");
@@ -495,6 +500,7 @@ export default function CabinetMessagesPage() {
           replyTo: replyTo?.id,
           clientMessageId: crypto.randomUUID(),
           files: files.map((item) => item.file),
+          library: libraryPicks,
           mentionUserIds: mentions.filter((item) => snapshot.includes(`@${item.name}`)).map((item) => item.user_id),
         });
         setMessages((current) => (
@@ -502,6 +508,8 @@ export default function CabinetMessagesPage() {
         ));
         setText("");
         clearFiles();
+        setLibraryPicks([]);
+        setLibraryOpen(false);
         setReplyTo(null);
         setMentions([]);
         window.localStorage.removeItem(`msg-draft:${activeId}`);
@@ -576,7 +584,7 @@ export default function CabinetMessagesPage() {
   const shownMessages = messages.filter((item) => {
     if (chatQuery.trim() && !(item.text || "").toLowerCase().includes(chatQuery.trim().toLowerCase())) return false;
     if (authorFilter && String(item.author_user_id) !== String(authorFilter)) return false;
-    if (filesOnly && !(item.attachments || []).length) return false;
+    if (filesOnly && !(item.attachments || []).length && !(item.materials || []).length) return false;
     if (dateFilter && !(item.created_at || "").startsWith(dateFilter)) return false;
     return true;
   });
@@ -595,7 +603,8 @@ export default function CabinetMessagesPage() {
     return () => window.clearTimeout(timer);
   }, [activeId, active?.type, chatQuery, authorFilter, dateFilter, filesOnly]);
   const historyOnly = active?.type === "direct" && active?.can_compose === false;
-  const composerLocked = historyOnly || (active?.type === "developer" && !(replyTo && !replyTo.reply_disabled));
+  const developerReplyOnly = active?.type === "developer" && active?.can_compose !== true;
+  const composerLocked = historyOnly || (developerReplyOnly && !(replyTo && !replyTo.reply_disabled));
   const peerTyping = Boolean(activeId && (typingUntil[activeId] || 0) > typingNow);
 
   const noteTyping = (hasText) => {
@@ -691,12 +700,12 @@ export default function CabinetMessagesPage() {
                   onClick={() => { setComposing(false); setPickerOpen(false); setActiveId(item.id); }}
                 >
                   <span className={`cb-msg__avatar is-${item.type}`}>
-                    {item.type === "community" ? "#" : item.initials}
+                    {item.image_url ? <img src={item.image_url} alt="" /> : (item.type === "community" && (!item.initials || item.initials === "#") ? (item.title || "С").trim().charAt(0) : item.initials)}
                     {item.presence === "online" ? <span className="cb-msg__online" /> : null}
                   </span>
                   <span className="cb-msg__dialog-main">
                     <span className="cb-msg__name-row">
-                      <span className="cb-msg__name">{item.type === "community" ? `# ${item.title}` : item.title}</span>
+                      <span className="cb-msg__name">{item.title}</span>
                       {item.type === "developer" ? <span className="cb-msg__verify" title="Официальный канал">✓</span> : null}
                     </span>
                     {item.subtitle && item.type === "direct" ? <span className="cb-msg__role">{item.subtitle}</span> : null}
@@ -853,7 +862,7 @@ export default function CabinetMessagesPage() {
             <header className="cb-msg__chat-head">
               <button type="button" className="cb-msg__icon cb-msg__back" onClick={() => setActiveId(null)} aria-label="Назад">←</button>
               <button type="button" className={`cb-msg__avatar is-${active.type} cb-msg__avatar-btn`} onClick={() => active.type === "community" && setInfoOpen(true)}>
-                {active.type === "community" ? "#" : active.initials}
+                {active.image_url ? <img src={active.image_url} alt="" /> : (active.type === "community" && (!active.initials || active.initials === "#") ? (active.title || "С").trim().charAt(0) : active.initials)}
               </button>
               <div className="cb-msg__who">
                 <h2>
@@ -978,6 +987,19 @@ export default function CabinetMessagesPage() {
                                 </button>
                               ) : null}
                               {message.text ? <p>{message.text}</p> : null}
+                              {(message.materials || []).map((item) => (
+                                item.href ? (
+                                  <a key={`${item.kind}-${item.href}`} className="cb-msg__material" href={item.href}>
+                                    <span>{item.title}</span>
+                                    <small>{item.label}</small>
+                                  </a>
+                                ) : (
+                                  <span key={`${item.kind}-${item.title}`} className="cb-msg__material">
+                                    <span>{item.title}</span>
+                                    <small>{item.label}</small>
+                                  </span>
+                                )
+                              ))}
                               {message.attachments?.map((file) => (
                                 file.is_image ? (
                                   <a key={file.id} className="cb-msg__image" href={attachmentUrl(file.id)} target="_blank" rel="noreferrer">
@@ -1057,6 +1079,19 @@ export default function CabinetMessagesPage() {
               {peerTyping ? <p className="cb-msg__typing-line">печатает…</p> : null}
             </div>
             <div className="cb-msg__composer-wrap">
+              <MessageLibraryPicker
+                open={libraryOpen && !editing}
+                viewerRole={viewerRole}
+                onClose={() => setLibraryOpen(false)}
+                onPick={(item) => {
+                  setLibraryPicks((current) => {
+                    const key = `${item.kind}:${item.id || item.slug}`;
+                    if (current.some((row) => `${row.kind}:${row.id || row.slug}` === key)) return current;
+                    return [...current, item].slice(0, 5);
+                  });
+                  setLibraryOpen(false);
+                }}
+              />
               {editing ? (
                 <div className="cb-msg__reply">
                   <div><strong>Редактирование</strong><span>Можно изменить в течение 15 минут</span></div>
@@ -1070,6 +1105,21 @@ export default function CabinetMessagesPage() {
                     <span>{replyTo.author_label}: {(replyTo.text || replyTo.excerpt || "").slice(0, 120)}</span>
                   </div>
                   <button type="button" onClick={() => setReplyTo(null)} aria-label="Отменить ответ">×</button>
+                </div>
+              ) : null}
+              {libraryPicks.length ? (
+                <div className="cb-msg__previews">
+                  {libraryPicks.map((item) => (
+                    <div key={`${item.kind}-${item.id || item.slug}`} className="cb-msg__preview-card">
+                      <div>
+                        <strong>{item.title}</strong>
+                        <span>{item.label}</span>
+                      </div>
+                      <button type="button" aria-label="Убрать материал" onClick={() => {
+                        setLibraryPicks((current) => current.filter((row) => row !== item));
+                      }}>×</button>
+                    </div>
+                  ))}
                 </div>
               ) : null}
               {files.length ? (
@@ -1107,6 +1157,14 @@ export default function CabinetMessagesPage() {
                     }}
                   />
                 </label>
+                <button
+                  type="button"
+                  className="cb-msg__library-btn"
+                  disabled={composerLocked || Boolean(editing)}
+                  onClick={() => setLibraryOpen((value) => !value)}
+                >
+                  Библиотека
+                </button>
                 {active?.type === "community" && /(?:^|\s)@([^\s@]*)$/.test(text) ? (
                   <div className="cb-msg__mentions">
                     {(communityInfo?.members || [])
@@ -1142,7 +1200,7 @@ export default function CabinetMessagesPage() {
                   }}
                   onKeyDown={onComposerKey}
                 />
-                <button type="submit" className="cb-msg__send" disabled={sending || composerLocked || (!text.trim() && files.length === 0)} aria-label={sending ? "Отправляется" : "Отправить"}>
+                <button type="submit" className="cb-msg__send" disabled={sending || composerLocked || (!text.trim() && files.length === 0 && libraryPicks.length === 0)} aria-label={sending ? "Отправляется" : "Отправить"}>
                   <IconSend />
                 </button>
               </form>

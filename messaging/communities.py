@@ -277,6 +277,12 @@ def member_count(community: Community) -> int:
     return community.members.filter(left_at__isnull=True, is_banned=False).count()
 
 
+def community_image_path(community: Community) -> str:
+    if community is None or not community.image_key:
+        return ""
+    return f"/api/cabinet/messages/conversations/{community.conversation_id}/community-image/"
+
+
 def mention_count_for(community: Community, user) -> int:
     member = active_member(community, user)
     if member is None:
@@ -660,12 +666,14 @@ def report_message(user, conversation: Conversation, message_id: int, *, reason:
 
 def serialize_members(community: Community) -> list[dict]:
     rows = community.members.filter(left_at__isnull=True, is_banned=False).select_related("user__profile")
+    from Cabinet.avatar_api import build_avatar_url
     payload = []
     for row in rows[:300]:
         payload.append({
             "user_id": row.user_id,
             "name": display_name_of(row.user),
             "initials": initials_of(display_name_of(row.user)),
+            "avatar_url": build_avatar_url(row.user) or "",
             "role": row.role,
             "subtitle": teacher_subject_line(row.user),
             "role_label": "Администратор" if row.role == CommunityMember.Role.ADMIN else (
@@ -686,7 +694,8 @@ def serialize_community_detail(community: Community, user) -> dict:
         "name": community.name,
         "description": community.description,
         "subject": community.subject,
-        "icon": community.icon or "#",
+        "icon": community.icon or "",
+        "image_url": community_image_path(community),
         "member_count": member_count(community),
         "messages_enabled": community.messages_enabled,
         "is_archived": community.is_archived,

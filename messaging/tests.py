@@ -369,6 +369,110 @@ class MessagingDirectAccessTests(TestCase):
         self.assertEqual(denied_teacher.status_code, 404)
         self.assertEqual(denied_peer.status_code, 404)
 
+    def test_message_can_attach_library_sections(self):
+        from Cabinet.models import Interactive
+        from Generator.models import InterestingItem
+
+        opened = self.client.post(
+            "/api/cabinet/messages/conversations/direct/",
+            {"user_id": self.student.id},
+            format="json",
+        )
+        self.assertEqual(opened.status_code, 200, opened.content)
+        conversation_id = opened.json()["conversation"]["id"]
+        interactive = Interactive.objects.create(
+            teacher=self.teacher,
+            title="Дроби",
+            interactive_type="quiz",
+            status="published",
+        )
+        trainer = InterestingItem.objects.create(
+            title="Счёт",
+            slug="library-trainer-test",
+            status=InterestingItem.Status.PUBLISHED,
+        )
+        sent = self.client.post(
+            f"/api/cabinet/messages/conversations/{conversation_id}/messages/",
+            {
+                "text": "",
+                "library": [
+                    {"kind": "interactive", "id": interactive.id},
+                    {"kind": "trainer", "slug": trainer.slug},
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(sent.status_code, 201, sent.content)
+        own_cards = sent.json()["message"]["materials"]
+        self.assertEqual(own_cards[0]["href"], f"/cabinet/interactives/{interactive.id}/play")
+        self.assertEqual(own_cards[1]["href"], "/interesting/library-trainer-test/view")
+        pupil = APIClient()
+        pupil.force_login(self.student)
+        listed = pupil.get(f"/api/cabinet/messages/conversations/{conversation_id}/messages/")
+        self.assertEqual(listed.status_code, 200, listed.content)
+        student_card = listed.json()["messages"][-1]["materials"][0]
+        self.assertIn("/cabinet/student/interactives/", student_card["href"])
+        self.assertTrue(student_card["href"].endswith("/play"))
+        foreign = Interactive.objects.create(
+            teacher=self.colleague,
+            title="Чужой",
+            interactive_type="quiz",
+            status="published",
+        )
+        denied = self.client.post(
+            f"/api/cabinet/messages/conversations/{conversation_id}/messages/",
+            {"text": "смотри", "library": [{"kind": "interactive", "id": foreign.id}]},
+            format="json",
+        )
+        self.assertEqual(denied.status_code, 400, denied.content)
+
+    def test_platform_admin_answers_support_and_writes_as_developer(self):
+        admin = make_user("desk_admin", Profile.Role.TEACHER)
+        admin.is_superuser = True
+        admin.is_staff = True
+        admin.save(update_fields=["is_superuser", "is_staff"])
+        pupil = APIClient()
+        pupil.force_login(self.student)
+        desk = APIClient()
+        desk.force_login(admin)
+        with override_settings(MESSAGING_PLATFORM_ADMIN_ID=admin.id):
+            ticket = pupil.post(
+                "/api/cabinet/messages/support/tickets/",
+                {"category": "technical", "subject": "Не открывается урок", "text": "Урок не загружается"},
+                format="json",
+            )
+            self.assertEqual(ticket.status_code, 201, ticket.content)
+            support_id = ticket.json()["conversation"]["id"]
+            pupil.get("/api/cabinet/messages/conversations/")
+            rows = desk.get("/api/cabinet/messages/conversations/").json()["conversations"]
+            support = next(row for row in rows if row["id"] == support_id)
+            self.assertIn("Поддержка ·", support["title"])
+            self.assertTrue(support["can_compose"])
+            reply = desk.post(
+                f"/api/cabinet/messages/conversations/{support_id}/messages/",
+                {"text": "Посмотрели обращение, урок уже открывается"},
+                format="json",
+            )
+            self.assertEqual(reply.status_code, 201, reply.content)
+            seen = pupil.get(f"/api/cabinet/messages/conversations/{support_id}/messages/")
+            self.assertEqual(seen.json()["messages"][-1]["author_label"], "Поддержка")
+            developer = next(row for row in rows if row["title"].startswith("От разработчика ·"))
+            self.assertTrue(developer["can_compose"])
+            note = desk.post(
+                f"/api/cabinet/messages/conversations/{developer['id']}/messages/",
+                {"text": "Обновление кабинета уже на месте"},
+                format="json",
+            )
+            self.assertEqual(note.status_code, 201, note.content)
+            own = pupil.get(f"/api/cabinet/messages/conversations/{developer['id']}/messages/")
+            self.assertEqual(own.json()["messages"][-1]["author_label"], "От разработчика")
+            blocked = pupil.post(
+                f"/api/cabinet/messages/conversations/{developer['id']}/messages/",
+                {"text": "Хочу написать первым"},
+                format="json",
+            )
+            self.assertEqual(blocked.status_code, 400, blocked.content)
+
     def test_direct_chat_is_unique_and_foreign_student_is_hidden(self):
         foreign = self.client.post(
             "/api/cabinet/messages/conversations/direct/",

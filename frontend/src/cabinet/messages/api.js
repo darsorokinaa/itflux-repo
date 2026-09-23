@@ -83,14 +83,16 @@ export function searchMessages(q) {
   return messagingFetch(`/search/?q=${encodeURIComponent(q)}`);
 }
 
-export function sendMessage(conversationId, { text, replyTo, clientMessageId, files, mentionUserIds }) {
+export function sendMessage(conversationId, { text, replyTo, clientMessageId, files, library, mentionUserIds }) {
   const mentions = (mentionUserIds || []).join(",");
+  const cards = library || [];
   if (files?.length) {
     const form = new FormData();
     form.set("text", text || "");
     if (replyTo) form.set("reply_to", String(replyTo));
     if (clientMessageId) form.set("client_message_id", clientMessageId);
     if (mentions) form.set("mention_user_ids", mentions);
+    if (cards.length) form.set("library", JSON.stringify(cards));
     for (const file of files) form.append("files", file);
     return messagingFetch(`/conversations/${conversationId}/messages/`, { method: "POST", form });
   }
@@ -101,6 +103,7 @@ export function sendMessage(conversationId, { text, replyTo, clientMessageId, fi
       reply_to: replyTo || null,
       client_message_id: clientMessageId || "",
       mention_user_ids: mentionUserIds || [],
+      library: cards,
     },
   });
 }
@@ -174,7 +177,10 @@ export function createCommunity(fields) {
   return messagingFetch("/communities/", { method: "POST", form });
 }
 
-export function updateCommunity(conversationId, fields) {
+export function updateCommunity(conversationId, fields, form) {
+  if (form) {
+    return messagingFetch(`/conversations/${conversationId}/community/`, { method: "PATCH", form });
+  }
   return messagingFetch(`/conversations/${conversationId}/community/`, { method: "PATCH", json: fields });
 }
 

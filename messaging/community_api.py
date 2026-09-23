@@ -1,5 +1,9 @@
 """HTTP сообщества. Чужое сообщество не отличается от несуществующего."""
 
+import mimetypes
+
+from django.core.files.storage import default_storage
+from django.http import FileResponse
 from django.utils.dateparse import parse_datetime
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -123,11 +127,36 @@ class CommunityDetailView(MessagingGateMixin, APIView):
                 if key in {"messages_enabled", "is_active", "is_archived"}:
                     value = str(value).lower() in {"1", "true", "yes", "on"}
                 fields[key] = value
+        upload = request.FILES.get("image")
+        if upload:
+            try:
+                image_key, _, _ = store_message_file(conversation_id="community-icons", uploaded=upload)
+            except Exception as exc:
+                message = getattr(exc, "message", "Картинка не принята")
+                return Response({"detail": message}, status=400)
+            fields["image_key"] = image_key
         try:
             update_community(request.user, community, **fields)
         except CommunityError as exc:
             return _error(exc)
         return Response(serialize_community_detail(community, request.user))
+
+
+class CommunityImageView(MessagingGateMixin, APIView):
+    permission_classes = [IsAuthenticated, IsMessagingParticipant]
+
+    def get(self, request, conversation_id):
+        blocked = self._blocked()
+        if blocked:
+            return blocked
+        conversation = get_owned_conversation(request.user, conversation_id)
+        community = community_for_conversation(conversation) if conversation else None
+        if community is None or not community.image_key or not community_still_allowed(conversation, request.user):
+            return Response({"detail": "Не найдено"}, status=404)
+        if not default_storage.exists(community.image_key):
+            return Response({"detail": "Не найдено"}, status=404)
+        content_type = mimetypes.guess_type(community.image_key)[0] or "application/octet-stream"
+        return FileResponse(default_storage.open(community.image_key, "rb"), content_type=content_type)
 
 
 class CommunityInviteCreateView(MessagingGateMixin, APIView):

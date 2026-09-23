@@ -160,7 +160,65 @@ def get_or_create_conversation(user, kind: str) -> Conversation:
     )
     if created:
         ensure_participant(conversation, user)
+    if kind in (Conversation.Kind.SUPPORT, Conversation.Kind.PLATFORM):
+        attach_platform_admin(conversation)
     return conversation
+
+
+def service_desk_user():
+    """Кто в кабинете отвечает в поддержку и пишет от разработчика.
+
+    Сначала суперпользователь из MESSAGING_PLATFORM_ADMIN_ID, если у него есть
+    роль учителя или ученика. Иначе первый суперпользователь с такой ролью:
+    голый admin без профиля в раздел сообщений не входит.
+    """
+    from django.contrib.auth.models import User
+
+    from .communities import platform_admin_user
+
+    admin = platform_admin_user()
+    if admin is not None and role_of(admin) in {"teacher", "student"}:
+        return admin
+    return (
+        User.objects.filter(
+            is_superuser=True,
+            is_active=True,
+            profile__role__in=["teacher", "student"],
+            profile__account_active=True,
+            profile__account_blocked=False,
+        )
+        .order_by("id")
+        .first()
+    )
+
+
+def is_service_desk(user) -> bool:
+    desk = service_desk_user()
+    return bool(user and getattr(user, "is_authenticated", False) and desk and desk.id == user.id)
+
+
+def attach_platform_admin(conversation: Conversation) -> None:
+    """Стол поддержки видит чужие «Поддержку» и «От разработчика» в своём кабинете."""
+    admin = service_desk_user()
+    if admin is None or admin.id == conversation.subject_user_id:
+        return
+    participant, _created = ConversationParticipant.objects.get_or_create(
+        conversation=conversation,
+        user=admin,
+        defaults={"participant_role": ConversationParticipant.Role.STAFF},
+    )
+    if participant.hidden_at is not None or participant.participant_role != ConversationParticipant.Role.STAFF:
+        participant.hidden_at = None
+        participant.participant_role = ConversationParticipant.Role.STAFF
+        participant.save(update_fields=["hidden_at", "participant_role"])
+
+
+def ensure_platform_admin_service_desk(admin) -> None:
+    missing = Conversation.objects.filter(
+        kind__in=(Conversation.Kind.SUPPORT, Conversation.Kind.PLATFORM),
+    ).exclude(subject_user=admin)
+    for conversation in missing:
+        attach_platform_admin(conversation)
 
 
 def visible_messages(conversation: Conversation):
@@ -208,9 +266,12 @@ def _peer_participant(conversation: Conversation, viewer):
 def author_label(message: Message, viewer) -> str:
     if message.sender_id and message.sender_id == viewer.id:
         return "Вы"
-    if message.conversation.kind == Conversation.Kind.SUPPORT:
-        return "Поддержка"
-    if message.conversation.kind == Conversation.Kind.PLATFORM:
+    if message.conversation.kind in (Conversation.Kind.SUPPORT, Conversation.Kind.PLATFORM):
+        desk = is_service_desk(viewer) and message.conversation.subject_user_id != viewer.id
+        if desk and message.sender_id == message.conversation.subject_user_id and message.sender_id:
+            return display_name_of(message.sender)
+        if message.conversation.kind == Conversation.Kind.SUPPORT:
+            return "Поддержка"
         return "От разработчика"
     if message.sender_id:
         return display_name_of(message.sender)
@@ -283,6 +344,7 @@ def serialize_message(message: Message, viewer) -> dict:
             "category_label": message.ticket.get_category_display(),
         }
     own = bool(message.sender_id and message.sender_id == viewer.id)
+    from .library_cards import library_cards_for
     can_moderate = False
     if message.conversation.kind == Conversation.Kind.COMMUNITY and not message.deleted_at:
         from .communities import active_member, community_for_conversation
@@ -310,6 +372,7 @@ def serialize_message(message: Message, viewer) -> dict:
         "reply_to": None if message.deleted_at else reply,
         "ticket": ticket,
         "attachments": [] if message.deleted_at else [serialize_attachment(item) for item in message.attachments.all()],
+        "materials": [] if message.deleted_at else library_cards_for(message, viewer),
         "delivery_status": delivery_status_for(message, viewer),
         "button_text": message.button_text,
         "button_route": message.button_route,
@@ -347,19 +410,21 @@ def serialize_conversation(conversation: Conversation, user) -> dict:
         .first()
     )
     viewer_role = role_of(user)
+    staff_desk = is_service_desk(user) and conversation.subject_user_id != user.id
+    subject_name = display_name_of(conversation.subject_user) if staff_desk else ""
     community_meta = None
     peer = _conversation_peer(conversation, user)
     peer_user = peer.user if peer is not None else None
     peer_role = role_of(peer_user) if peer_user is not None else ""
     if conversation.kind == Conversation.Kind.SUPPORT:
-        title = "Поддержка"
-        subtitle = "Обычно отвечаем в течение рабочего дня"
+        title = f"Поддержка · {subject_name}" if staff_desk else "Поддержка"
+        subtitle = subject_name and "Обращение пользователя" or "Обычно отвечаем в течение рабочего дня"
         section = "service"
         initials = "П"
         presence = ""
     elif conversation.kind == Conversation.Kind.PLATFORM:
-        title = "От разработчика"
-        subtitle = "Официальные сообщения платформы"
+        title = f"От разработчика · {subject_name}" if staff_desk else "От разработчика"
+        subtitle = subject_name and "Сообщения этому пользователю" or "Официальные сообщения платформы"
         section = "service"
         initials = "D"
         presence = ""
@@ -370,7 +435,7 @@ def serialize_conversation(conversation: Conversation, user) -> dict:
         count = member_count(community) if community else 0
         subtitle = f"Сообщество преподавателей · {count}"
         section = "communities"
-        initials = (community.icon if community and community.icon else "#")
+        initials = (community.icon if community and community.icon else (title[:1] or "С"))
         presence = ""
         peer_role = ""
         community_meta = community
@@ -403,23 +468,29 @@ def serialize_conversation(conversation: Conversation, user) -> dict:
         last_status = delivery_status_for(last, user) if last_own else ""
     else:
         excerpt = _excerpt(last.text) or ("Вложение" if last.attachments.exists() else "")
+        if not excerpt:
+            library = (last.metadata or {}).get("library") or []
+            if library and isinstance(library, list) and isinstance(library[0], dict):
+                excerpt = str(library[0].get("title") or "Материал")
         last_at = last.created_at.isoformat()
         last_own = last.sender_id == user.id
         last_status = delivery_status_for(last, user) if last_own else ""
-    can_compose = conversation.kind != Conversation.Kind.PLATFORM
+    can_compose = conversation.kind != Conversation.Kind.PLATFORM or staff_desk
     if conversation.kind == Conversation.Kind.DIRECT and peer_user is not None:
         can_compose = can_direct_message(user, peer_user)
     mention_count = 0
     member_total = 0
     my_role = ""
     community_id = ""
+    image_url = ""
     if community_meta is not None:
-        from .communities import active_member, mention_count_for
+        from .communities import active_member, community_image_path, mention_count_for
         member = active_member(community_meta, user)
         mention_count = mention_count_for(community_meta, user)
         member_total = count
         my_role = member.role if member else ""
         community_id = str(community_meta.id)
+        image_url = community_image_path(community_meta)
         if not community_meta.messages_enabled or community_meta.is_archived or not community_meta.is_active:
             can_compose = False
         elif member and member.muted_until and member.muted_until > timezone.now():
@@ -443,6 +514,7 @@ def serialize_conversation(conversation: Conversation, user) -> dict:
         "unread_count": unread_count_for_conversation(conversation, user),
         "mention_count": mention_count,
         "member_count": member_total,
+        "image_url": image_url,
         "my_role": my_role,
         "community_id": community_id,
         "last_read_message_id": read_state.last_read_message_id if read_state else None,
@@ -451,8 +523,10 @@ def serialize_conversation(conversation: Conversation, user) -> dict:
 
 def list_conversations(user) -> list[dict]:
     from .communities import community_still_allowed, ensure_platform_admin_everywhere, is_platform_admin
-    if is_platform_admin(user):
+    if is_platform_admin(user) or is_service_desk(user):
         ensure_platform_admin_everywhere()
+    if is_service_desk(user):
+        ensure_platform_admin_service_desk(user)
     for kind in (Conversation.Kind.SUPPORT, Conversation.Kind.PLATFORM):
         get_or_create_conversation(user, kind)
     order = {Conversation.Kind.SUPPORT: 0, Conversation.Kind.PLATFORM: 1, Conversation.Kind.COMMUNITY: 2}
@@ -569,9 +643,13 @@ def _create_message(
     uploads=None,
     button_text: str = "",
     button_route: str = "",
+    library=None,
 ) -> Message:
+    from .library_cards import resolve_library_items
+
     cleaned = _clean_text(text)
-    if not cleaned and not uploads:
+    library_refs = resolve_library_items(sender, conversation, library or []) if library else []
+    if not cleaned and not uploads and not library_refs:
         raise MessagingError("Введите текст или прикрепите файл", "empty_message")
     assert_internal_route(button_route)
     if sender_type == Message.SenderType.USER and cleaned:
@@ -613,6 +691,7 @@ def _create_message(
                 metadata_retention_until=retention_until_for(KIND_MESSAGE_METADATA),
                 button_text=button_text[:80],
                 button_route=button_route[:300],
+                metadata={"library": library_refs} if library_refs else {},
             )
             _store_attachments(message, uploads)
     except IntegrityError:
@@ -674,6 +753,7 @@ def post_user_message(
     client_message_id: str = "",
     uploads=None,
     mention_user_ids=None,
+    library=None,
 ):
     reply = None
     if reply_to_id:
@@ -689,7 +769,8 @@ def post_user_message(
         if reply is None:
             raise MessagingError("Исходное сообщение не найдено", "bad_reply")
     if conversation.kind == Conversation.Kind.PLATFORM:
-        if reply is None or reply.reply_disabled or reply.sender_id == user.id:
+        staff_desk = is_service_desk(user) and conversation.subject_user_id != user.id
+        if not staff_desk and (reply is None or reply.reply_disabled or reply.sender_id == user.id):
             raise MessagingError(
                 "Ответить можно только на сообщение, где это разрешено",
                 "reply_closed",
@@ -721,6 +802,7 @@ def post_user_message(
         reply_to=reply,
         client_message_id=client_message_id,
         uploads=uploads,
+        library=library,
     )
     if conversation.kind == Conversation.Kind.COMMUNITY and mention_user_ids:
         from .communities import store_mentions
