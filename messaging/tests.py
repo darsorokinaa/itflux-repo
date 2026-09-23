@@ -281,13 +281,12 @@ class MessagingPolicyTests(TestCase):
         self.assertIn("messaging.E002", ids)
         self.assertIn("messaging.E003", ids)
 
-    @override_settings(DEBUG=False, MESSAGING_FORCE_PRODUCTION_GATE=True)
-    def test_production_api_stays_closed_without_retention(self):
+    def test_production_api_stays_open_without_retention(self):
         client = APIClient()
         client.force_login(self.teacher)
         response = client.get("/api/cabinet/messages/unread-count/")
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json()["code"], "messaging_not_ready")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertIn("unread_count", response.json())
 
 
 class MessagingDirectAccessTests(TestCase):

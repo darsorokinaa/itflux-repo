@@ -1,7 +1,6 @@
-from django.conf import settings
 from django.core.checks import Error, Tags, register
 
-from .retention import REQUIRED_RETENTION_KINDS, missing_retention_kinds, production_blockers
+from .retention import REQUIRED_RETENTION_KINDS, missing_retention_kinds
 
 
 def _retention_errors():
@@ -65,13 +64,10 @@ def messaging_deploy_checks(app_configs, **kwargs):
 
 
 def messaging_is_blocked() -> bool:
-    """В тестах Django DEBUG принудительно False, поэтому шлюз там выключен.
+    """Раздел открыт и на production.
 
-    Боевой запуск с DEBUG=False шлюз включает. Тест production ставит
-    MESSAGING_FORCE_PRODUCTION_GATE.
+    Сроки хранения и Redis по-прежнему видны в manage.py check --deploy
+    (messaging.E001–E003). Пока сроки не заданы, сообщения не удаляются.
+    Один процесс Daphne обслуживает сокеты и без Redis.
     """
-    import sys
-
-    if "test" in sys.argv and not getattr(settings, "MESSAGING_FORCE_PRODUCTION_GATE", False):
-        return False
-    return bool(production_blockers())
+    return False

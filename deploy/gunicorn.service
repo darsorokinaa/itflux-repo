@@ -31,10 +31,9 @@ ExecStart=/opt/itfluxacademy/itflux/venv/bin/python3 -m daphne \
 Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 Environment="DJANGO_SETTINGS_MODULE=Generator.settings"
 Environment="DEBUG=false"
-# Несекретные defaults (EnvironmentFile=/etc/itflux/itflux.env перекрывает их).
-# Для нескольких воркеров сообщений в env-файле: CHANNEL_LAYER_BACKEND=redis
-# Тогда и WebSocket, и лимиты отправки используют Redis. InMemory — один процесс.
-Environment="CHANNEL_LAYER_BACKEND=inmemory"
+# Канал по умолчанию — inmemory в Generator/settings.py (один процесс Daphne).
+# Для нескольких воркеров задайте CHANNEL_LAYER_BACKEND=redis в /etc/itflux/itflux.env.
+# Не дублируйте эту переменную ниже: более поздний Environment= перебивает env-файл.
 Environment="ITFLUX_PUBLIC_HOME_URL=https://test.itflux.ru"
 Environment="ADMIN_OTP_REQUIRED=true"
 

@@ -335,7 +335,7 @@ export default function CabinetMessagesPage() {
   useEffect(() => {
     let cancelled = false;
     loadList()
-      .catch(() => { if (!cancelled) setError("Не удалось загрузить диалоги"); })
+      .catch((err) => { if (!cancelled) setError(err.message || "Не удалось загрузить диалоги"); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [loadList]);
@@ -355,7 +355,12 @@ export default function CabinetMessagesPage() {
   useEffect(() => {
     if (!pickerOpen) return undefined;
     const timer = window.setTimeout(() => {
-      fetchContacts(pickerQuery.trim()).then((data) => setPickerContacts(data.contacts || [])).catch(() => setPickerContacts([]));
+      fetchContacts(pickerQuery.trim())
+        .then((data) => setPickerContacts(data.contacts || []))
+        .catch((err) => {
+          setPickerContacts([]);
+          setError(err.message || "Не удалось загрузить контакты");
+        });
     }, 200);
     return () => window.clearTimeout(timer);
   }, [pickerOpen, pickerQuery]);
