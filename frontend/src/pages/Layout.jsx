@@ -170,6 +170,8 @@ function Layout() {
           <div className="site-footer-links">
             <Link to="/privacy" className="site-footer-link">Политика конфиденциальности</Link>
             <span className="site-footer-sep" aria-hidden="true">·</span>
+            <Link to="/messages-agreement" className="site-footer-link">Соглашение о сообщениях</Link>
+            <span className="site-footer-sep" aria-hidden="true">·</span>
             <Link to="/privacy#pd" className="site-footer-link">Согласие на обработку ПД</Link>
           </div>
           )}

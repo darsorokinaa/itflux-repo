@@ -14,6 +14,7 @@ import ExamPage from "./pages/ExamPage";
 import SearchTaskPage from "./pages/SearchTaskPage";
 import SearchVariantPage from "./pages/SearchVariantPage";
 import PrivacyPage from "./pages/PrivacyPage";
+import MessagingAgreementPage from "./pages/MessagingAgreementPage";
 import PricingPage from "./pages/PricingPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import LessonJoinBridge from "./pages/LessonJoinBridge";
@@ -125,6 +126,9 @@ function getMetaDescriptionForPath(pathname) {
   }
   if (path === "/privacy") {
     return "Политика конфиденциальности платформы «Цифровой поток».";
+  }
+  if (path === "/messages-agreement") {
+    return "Соглашение об использовании сообщений на платформе «Цифровой поток».";
   }
   if (path === "/pricing" || path.startsWith("/pricing/")) {
     return "Тарифы «Цифровой поток»: Старт, Учитель, Профи, Премиум и Школа — кабинет, библиотека и лимиты для преподавателей.";
@@ -289,6 +293,7 @@ function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/about" element={<Navigate to="/" replace />} />
           <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/messages-agreement" element={<MessagingAgreementPage />} />
           <Route path="/pricing" element={<PricingPage />} />
           <Route path="/pricing/" element={<PricingPage />} />
           <Route path="/tasks" element={<AllTasksPage />} />

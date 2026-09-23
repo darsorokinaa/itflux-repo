@@ -49,6 +49,10 @@ export function fetchMessageConversations() {
   return messagingFetch("/conversations/");
 }
 
+export function acceptMessagingConsent() {
+  return messagingFetch("/consent/", { method: "POST", json: { accepted: true } });
+}
+
 export function fetchContacts(query = "") {
   const params = new URLSearchParams();
   if (query) params.set("q", query);

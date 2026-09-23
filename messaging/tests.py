@@ -35,13 +35,16 @@ PNG = (
 )
 
 
-def make_user(username, role):
+def make_user(username, role, *, consent=True):
     user = User.objects.create_user(username=username, password="pass12345", email=f"{username}@test.ru")
     profile = user.profile
     profile.role = role
     profile.account_active = True
     profile.account_blocked = False
     profile.save(update_fields=["role", "account_active", "account_blocked"])
+    if consent:
+        from messaging.services import accept_messaging_consent
+        accept_messaging_consent(user, source="test")
     return user
 
 
@@ -213,7 +216,12 @@ class MessagingPolicyTests(TestCase):
     def setUp(self):
         self.teacher = make_user("policy_teacher", Profile.Role.TEACHER)
 
+    def _clear_consent(self):
+        UserConsent.objects.filter(user=self.teacher).delete()
+        UserConsentLog.objects.filter(user=self.teacher).delete()
+
     def test_empty_prompt_choice_is_not_consent(self):
+        self._clear_consent()
         state = record_prompt_decision(
             user=self.teacher,
             email_opt_in=False,
@@ -231,7 +239,48 @@ class MessagingPolicyTests(TestCase):
         definition = get_consent_definition()
         self.assertIn("специальные предложения", definition["inapp_text"])
 
+    def test_messages_stay_closed_until_mailing_consent(self):
+        self._clear_consent()
+        client = APIClient()
+        client.force_login(self.teacher)
+        closed = client.get("/api/cabinet/messages/conversations/")
+        self.assertEqual(closed.status_code, 200)
+        self.assertFalse(closed.json()["messaging_consent"]["accepted"])
+        self.assertEqual(closed.json()["conversations"], [])
+        self.assertIn("электронной почте", closed.json()["messaging_consent"]["agreement"]["body"])
+        conversation = Conversation.objects.create(subject_user=self.teacher, kind=Conversation.Kind.SUPPORT)
+        ConversationParticipant.objects.create(
+            conversation=conversation,
+            user=self.teacher,
+            participant_role=ConversationParticipant.Role.OWNER,
+        )
+        blocked_read = client.get(f"/api/cabinet/messages/conversations/{conversation.id}/messages/")
+        self.assertEqual(blocked_read.status_code, 403)
+        self.assertEqual(blocked_read.json()["code"], "consent_required")
+        blocked_send = client.post(
+            f"/api/cabinet/messages/conversations/{conversation.id}/messages/",
+            {"text": "привет"},
+            format="json",
+        )
+        self.assertEqual(blocked_send.status_code, 403)
+        self.assertEqual(blocked_send.json()["code"], "consent_required")
+        public = client.get("/api/cabinet/messages/agreement/")
+        self.assertEqual(public.status_code, 200)
+        self.assertIn("Соглашение", public.json()["title"])
+        refused = client.post("/api/cabinet/messages/consent/", {"accepted": False}, format="json")
+        self.assertEqual(refused.status_code, 400)
+        accepted = client.post("/api/cabinet/messages/consent/", {"accepted": True}, format="json")
+        self.assertEqual(accepted.status_code, 200, accepted.content)
+        channels = set(UserConsent.objects.filter(user=self.teacher, granted=True).values_list("channel", flat=True))
+        self.assertEqual(channels, {"personal_data", "email_marketing", "inapp_marketing"})
+        for row in UserConsent.objects.filter(user=self.teacher):
+            self.assertIsNotNone(row.consented_at)
+        opened = client.get("/api/cabinet/messages/conversations/")
+        self.assertTrue(opened.json()["messaging_consent"]["accepted"])
+        self.assertGreaterEqual(len(opened.json()["conversations"]), 1)
+
     def test_opt_in_writes_grant_and_keeps_ip_on_the_log_only(self):
+        self._clear_consent()
         record_prompt_decision(
             user=self.teacher,
             email_opt_in=False,

@@ -29,12 +29,16 @@ from .api import (
     MessageImportantView,
     MessageListCreateView,
     MessageReadView,
+    MessagingAgreementView,
+    MessagingConsentView,
     SupportTicketCreateView,
     UnreadCountView,
 )
 
 urlpatterns = [
     path("conversations/", ConversationListView.as_view(), name="messaging_conversations"),
+    path("agreement/", MessagingAgreementView.as_view(), name="messaging_agreement"),
+    path("consent/", MessagingConsentView.as_view(), name="messaging_consent"),
     path("search/", MessageSearchView.as_view(), name="messaging_search"),
     path("conversations/direct/", DirectConversationView.as_view(), name="messaging_direct"),
     path("contacts/", ContactSearchView.as_view(), name="messaging_contacts"),

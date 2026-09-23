@@ -23,7 +23,7 @@ from .access import (
     teacher_subject_line,
 )
 from .attachments import download_headers, is_image_ext, safe_original_name, store_message_file
-from .consent_texts import MARKETING_CONSENT_V1, consent_snapshot
+from .consent_texts import MARKETING_CONSENT_V1, MESSAGING_GATE_V1, consent_snapshot
 from .models import (
     ConsentPromptState,
     Conversation,
@@ -573,6 +573,7 @@ def mark_delivered(user, conversation: Conversation, message_id: int) -> None:
 
 
 def page_messages(conversation: Conversation, viewer, *, before=None, after=None, limit=50, query: str = "", author_id=None, has_files="", on_date=""):
+    require_messaging_consent(viewer)
     limit = max(1, min(int(limit or 50), 100))
     qs = (
         Message.objects.filter(
@@ -712,6 +713,7 @@ def _create_message(
 
 
 def create_support_ticket(user, *, category: str, subject: str, text: str, uploads=None, client_message_id: str = ""):
+    require_messaging_consent(user)
     if category not in SupportTicket.Category.values:
         raise MessagingError("Выберите категорию", "bad_category")
     subject_clean = _clean_text(subject)
@@ -755,6 +757,7 @@ def post_user_message(
     mention_user_ids=None,
     library=None,
 ):
+    require_messaging_consent(user)
     reply = None
     if reply_to_id:
         reply = (
@@ -811,6 +814,7 @@ def post_user_message(
 
 
 def open_direct_conversation(user, target_id) -> Conversation:
+    require_messaging_consent(user)
     try:
         target_pk = int(target_id)
     except (TypeError, ValueError):
@@ -970,7 +974,7 @@ def record_prompt_decision(
     return state
 
 
-def _grant_channel(*, user, channel: str, version: str, digest: str, source: str, ip_address, user_agent: str):
+def _grant_channel(*, user, channel: str, version: str, digest: str, source: str, ip_address, user_agent: str, consent_type: str = "marketing"):
     now = timezone.now()
     consent, _ = UserConsent.objects.get_or_create(user=user, channel=channel)
     consent.granted = True
@@ -982,7 +986,7 @@ def _grant_channel(*, user, channel: str, version: str, digest: str, source: str
     consent.save()
     UserConsentLog.objects.create(
         user=user,
-        consent_type="marketing",
+        consent_type=consent_type,
         channel=channel,
         action=UserConsentLog.Action.GRANTED,
         consent_text_version=version,
@@ -993,3 +997,68 @@ def _grant_channel(*, user, channel: str, version: str, digest: str, source: str
         log_retention_until=retention_until_for(KIND_CONSENT_LOGS),
         evidence_retention_until=retention_until_for(KIND_CONSENT_EVIDENCE),
     )
+
+
+MESSAGING_GATE_CHANNELS = (
+    UserConsent.Channel.PERSONAL,
+    UserConsent.Channel.EMAIL,
+    UserConsent.Channel.INAPP,
+)
+
+
+def messaging_agreement_payload() -> dict:
+    definition, _digest = consent_snapshot(MESSAGING_GATE_V1)
+    return {
+        "version": definition["version"],
+        "title": definition["title"],
+        "updated": definition["updated"],
+        "body": definition["body"],
+        "checkbox_label": definition["checkbox_label"],
+    }
+
+
+def has_messaging_consent(user) -> bool:
+    rows = {
+        row.channel: row
+        for row in UserConsent.objects.filter(user=user, channel__in=MESSAGING_GATE_CHANNELS)
+    }
+    return all(
+        (row := rows.get(channel)) and row.granted and row.consented_at
+        for channel in MESSAGING_GATE_CHANNELS
+    )
+
+
+def require_messaging_consent(user) -> None:
+    if not has_messaging_consent(user):
+        raise MessagingError(
+            "Чтобы писать и получать сообщения, примите соглашение",
+            "consent_required",
+        )
+
+
+def accept_messaging_consent(user, *, source: str, ip_address=None, user_agent: str = "") -> dict:
+    definition, digest = consent_snapshot(MESSAGING_GATE_V1)
+    for channel, consent_type in (
+        (UserConsent.Channel.PERSONAL, "personal_data"),
+        (UserConsent.Channel.EMAIL, "marketing"),
+        (UserConsent.Channel.INAPP, "marketing"),
+    ):
+        _grant_channel(
+            user=user,
+            channel=channel,
+            version=MESSAGING_GATE_V1,
+            digest=digest,
+            source=source,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            consent_type=consent_type,
+        )
+    personal = UserConsent.objects.get(user=user, channel=UserConsent.Channel.PERSONAL)
+    return {
+        "accepted": True,
+        "consented_at": personal.consented_at.isoformat(),
+        "agreement": {
+            "version": definition["version"],
+            "title": definition["title"],
+        },
+    }

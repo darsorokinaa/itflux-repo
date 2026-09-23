@@ -7,7 +7,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.http import FileResponse, HttpResponse
 from django.core.files.storage import default_storage
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -46,6 +46,8 @@ logger = logging.getLogger("messaging")
 
 
 def _rejected_response(exc, status=400):
+    if getattr(exc, "code", "") == "consent_required":
+        status = 403
     payload = {
         "detail": getattr(exc, "message", "Некорректный запрос"),
         "code": getattr(exc, "code", "invalid"),
@@ -142,6 +144,9 @@ class MessageSearchView(MessagingGateMixin, APIView):
         blocked = self._blocked()
         if blocked:
             return blocked
+        from .services import has_messaging_consent
+        if not has_messaging_consent(request.user):
+            return Response({"results": []})
         if not _allow_action(request.user.id, "search", 30, 60):
             return rate_limit_drf_response()
         needle = (request.query_params.get("q") or "").strip()[:100]
@@ -187,11 +192,23 @@ class ConversationListView(MessagingGateMixin, APIView):
         if blocked:
             return blocked
         from .communities import can_manage_all_communities, list_my_invites
+        from .services import has_messaging_consent, messaging_agreement_payload
+        accepted = has_messaging_consent(request.user)
+        agreement = messaging_agreement_payload()
+        if not accepted:
+            return Response({
+                "viewer_role": role_of(request.user),
+                "can_manage_communities": False,
+                "invitations": [],
+                "conversations": [],
+                "messaging_consent": {"accepted": False, "agreement": agreement},
+            })
         return Response({
             "viewer_role": role_of(request.user),
             "can_manage_communities": can_manage_all_communities(request.user),
             "invitations": list_my_invites(request.user),
             "conversations": list_conversations(request.user),
+            "messaging_consent": {"accepted": True, "agreement": agreement},
         })
 
 
@@ -202,6 +219,9 @@ class UnreadCountView(MessagingGateMixin, APIView):
         blocked = self._blocked()
         if blocked:
             return blocked
+        from .services import has_messaging_consent
+        if not has_messaging_consent(request.user):
+            return Response({"unread_count": 0})
         return Response({"unread_count": unread_count_for_user(request.user)})
 
 
@@ -266,7 +286,9 @@ class MessageListCreateView(MessagingGateMixin, APIView):
                 has_files=request.query_params.get("has_files") or "",
                 on_date=request.query_params.get("date") or "",
             )
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, MessagingError) as exc:
+            if isinstance(exc, MessagingError):
+                return _rejected_response(exc)
             return Response({"detail": "Некорректная страница"}, status=400)
         return Response({
             "conversation": serialize_conversation(conversation, request.user),
@@ -556,6 +578,34 @@ class LibraryFileView(MessagingGateMixin, APIView):
         response["X-Content-Type-Options"] = "nosniff"
         response["Cache-Control"] = "private, no-store"
         return response
+
+
+class MessagingAgreementView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        from .services import messaging_agreement_payload
+        return Response(messaging_agreement_payload())
+
+
+class MessagingConsentView(MessagingGateMixin, APIView):
+    permission_classes = [IsAuthenticated, IsMessagingParticipant]
+
+    def post(self, request):
+        blocked = self._blocked()
+        if blocked:
+            return blocked
+        if request.data.get("accepted") is not True:
+            return Response({"detail": "Отметьте согласие, чтобы пользоваться сообщениями", "code": "consent_required"}, status=400)
+        from .services import accept_messaging_consent
+        payload = accept_messaging_consent(
+            request.user,
+            source="messages_gate",
+            ip_address=request.META.get("REMOTE_ADDR"),
+            user_agent=request.META.get("HTTP_USER_AGENT") or "",
+        )
+        return Response(payload)
 
 
 def parse_typing_payload(raw: str) -> dict | None:

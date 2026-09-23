@@ -22,6 +22,9 @@ def connection_still_valid(user, scope) -> bool:
     fresh = User.objects.filter(pk=user.id, is_active=True).select_related("profile").first()
     if fresh is None or not messaging_role_allowed(fresh):
         return False
+    from .services import has_messaging_consent
+    if not has_messaging_consent(fresh):
+        return False
     session = scope.get("session") if isinstance(scope, dict) else None
     key = getattr(session, "session_key", None) if session is not None else None
     if not key:

@@ -326,6 +326,7 @@ class UserConsent(models.Model):
     class Channel(models.TextChoices):
         EMAIL = "email_marketing", "Email"
         INAPP = "inapp_marketing", "Сообщения платформы"
+        PERSONAL = "personal_data", "Обработка персональных данных"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

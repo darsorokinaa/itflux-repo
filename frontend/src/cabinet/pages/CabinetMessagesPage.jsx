@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, Link } from "react-router-dom";
 import { sendMessagingFrame } from "../messages/live";
 import MessageLibraryPicker from "../messages/MessageLibraryPicker";
 import "../styles/messages.css";
@@ -7,6 +7,7 @@ import { CommunityAdmin, CommunityInfo } from "../messages/CommunityPanels";
 import {
   SUPPORT_CATEGORIES,
   acceptCommunityInvite,
+  acceptMessagingConsent,
   attachmentUrl,
   createSupportTicket,
   declineCommunityInvite,
@@ -184,6 +185,9 @@ export default function CabinetMessagesPage() {
   const [error, setError] = useState("");
   const [blockedSend, setBlockedSend] = useState(false);
   const [sending, setSending] = useState(false);
+  const [messagingConsent, setMessagingConsent] = useState(null);
+  const [consentChecked, setConsentChecked] = useState(false);
+  const [consentSaving, setConsentSaving] = useState(false);
   const [offline, setOffline] = useState(!window.navigator.onLine);
   const [menuId, setMenuId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
@@ -229,7 +233,7 @@ export default function CabinetMessagesPage() {
     const needle = query.trim().toLowerCase();
     return conversations.filter((item) => {
       if (tab === "unread" && !item.unread_count && !item.mention_count) return false;
-      if (tab === "direct" && item.section !== "teachers") return false;
+      if (tab === "direct" && item.type !== "direct") return false;
       if (tab === "communities" && item.section !== "communities") return false;
       if (tab !== "all" && tab !== "unread" && tab !== "direct" && tab !== "communities" && item.section !== tab) return false;
       if (!needle) return true;
@@ -261,6 +265,13 @@ export default function CabinetMessagesPage() {
   const loadList = useCallback(async () => {
     const data = await fetchMessageConversations();
     setViewerRole(data.viewer_role || "");
+    setMessagingConsent(data.messaging_consent || { accepted: true });
+    if (data.messaging_consent && data.messaging_consent.accepted === false) {
+      setCanManage(false);
+      setInvitations([]);
+      setConversations([]);
+      return [];
+    }
     setCanManage(Boolean(data.can_manage_communities));
     setInvitations(data.invitations || []);
     setConversations(data.conversations || []);
@@ -637,6 +648,48 @@ export default function CabinetMessagesPage() {
     .filter((group) => group.items.length);
 
   return (
+    messagingConsent && messagingConsent.accepted === false ? (
+      <form
+        className="cb-msg cb-msg--consent"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          if (!consentChecked) return;
+          setConsentSaving(true);
+          setError("");
+          try {
+            await acceptMessagingConsent();
+            await loadList();
+          } catch (err) {
+            setError(err.message || "Не удалось сохранить согласие");
+          } finally {
+            setConsentSaving(false);
+          }
+        }}
+      >
+        <div className="cb-msg__consent">
+          <h1>{messagingConsent.agreement?.title || "Соглашение"}</h1>
+          <p className="cb-msg__hint">{messagingConsent.agreement?.updated}</p>
+          {(messagingConsent.agreement?.body || "").split(/\n\n+/).filter(Boolean).map((paragraph) => (
+            <p key={paragraph.slice(0, 24)}>{paragraph}</p>
+          ))}
+          <label className="cb-msg__consent-check">
+            <input
+              type="checkbox"
+              checked={consentChecked}
+              onChange={(event) => setConsentChecked(event.target.checked)}
+            />
+            <span>{messagingConsent.agreement?.checkbox_label}</span>
+          </label>
+          <p className="cb-msg__hint">
+            <Link to="/messages-agreement">Текст соглашения на платформе</Link>
+          </p>
+          {error ? <p className="cb-msg__error">{error}</p> : null}
+          <button type="submit" className="cb-msg__new" disabled={!consentChecked || consentSaving}>
+            {consentSaving ? "Сохраняем…" : "Продолжить"}
+          </button>
+        </div>
+      </form>
+    ) : (
     <div className={`cb-msg${threadOpen ? " is-thread" : ""}`}>
       <aside className="cb-msg__sidebar" aria-label="Список диалогов">
         <div className="cb-msg__head">
@@ -1262,5 +1315,6 @@ export default function CabinetMessagesPage() {
         ) : null}
       </section>
     </div>
+    )
   );
 }
