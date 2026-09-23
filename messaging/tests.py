@@ -320,11 +320,18 @@ class MessagingDirectAccessTests(TestCase):
         self.client.force_login(self.teacher)
 
     def test_teacher_is_found_by_email_or_login_not_name(self):
+        Student.objects.create(
+            teacher=self.teacher,
+            first_name="Пётр",
+            last_name="Без аккаунта",
+            email="roster-only@example.test",
+        )
         idle = self.client.get("/api/cabinet/messages/contacts/").json()["contacts"]
         self.assertTrue(any(row["user_id"] == self.student.id for row in idle))
+        self.assertTrue(any(row["can_message"] is False and row["name"].startswith("Пётр") for row in idle))
         self.assertFalse(any(row["role"] == "teacher" for row in idle))
         by_name = self.client.get("/api/cabinet/messages/contacts/?q=Морозова").json()["contacts"]
-        self.assertFalse(any(row["user_id"] == self.colleague.id for row in by_name))
+        self.assertEqual([row["user_id"] for row in by_name if row["role"] == "teacher"], [self.colleague.id])
         by_login = self.client.get("/api/cabinet/messages/contacts/?q=direct_colleague").json()["contacts"]
         self.assertEqual([row["user_id"] for row in by_login if row["role"] == "teacher"], [self.colleague.id])
         by_email = self.client.get("/api/cabinet/messages/contacts/?q=direct_colleague@test.ru").json()["contacts"]
@@ -333,8 +340,10 @@ class MessagingDirectAccessTests(TestCase):
         self.assertTrue(any(row["user_id"] == self.student.id for row in students))
         pupil = APIClient()
         pupil.force_login(self.student)
-        hidden = pupil.get("/api/cabinet/messages/contacts/?q=Витальевна").json()["contacts"]
-        self.assertFalse(any(row["user_id"] == self.teacher.id for row in hidden))
+        found_by_name = pupil.get("/api/cabinet/messages/contacts/?q=Витальевна").json()["contacts"]
+        self.assertEqual([row["user_id"] for row in found_by_name], [self.teacher.id])
+        hidden = pupil.get("/api/cabinet/messages/contacts/?q=Морозова").json()["contacts"]
+        self.assertFalse(any(row["user_id"] == self.colleague.id for row in hidden))
         found = pupil.get("/api/cabinet/messages/contacts/?q=direct_teacher@test.ru").json()["contacts"]
         self.assertEqual([row["user_id"] for row in found], [self.teacher.id])
 
@@ -343,7 +352,7 @@ class MessagingDirectAccessTests(TestCase):
         student.force_login(self.student)
         contacts = student.get("/api/cabinet/messages/contacts/").json()["contacts"]
         ids = {row["user_id"] for row in contacts}
-        self.assertEqual(ids, set())
+        self.assertEqual(ids, {self.teacher.id})
         found = student.get("/api/cabinet/messages/contacts/?q=direct_teacher@test.ru").json()["contacts"]
         self.assertEqual({row["user_id"] for row in found}, {self.teacher.id})
         self.assertNotIn(self.colleague.id, {row["user_id"] for row in found})

@@ -733,7 +733,7 @@ export default function CabinetMessagesPage() {
             <div className="cb-msg__group">
               <p className="cb-msg__group-title">Начать диалог</p>
               {startable.map((item) => (
-                <button key={item.user_id} type="button" className="cb-msg__dialog" onClick={() => chooseContact(item)}>
+                <button key={item.user_id || `roster-${item.student_id}`} type="button" className="cb-msg__dialog" disabled={item.can_message === false} onClick={() => chooseContact(item)}>
                   <span className={`cb-msg__avatar is-${item.role}`}>{item.initials}</span>
                   <span className="cb-msg__dialog-main">
                     <span className="cb-msg__name">{contactLines(item).title}</span>
@@ -762,7 +762,7 @@ export default function CabinetMessagesPage() {
               <button type="button" className="cb-msg__icon" onClick={() => setPickerOpen(false)} aria-label="Закрыть">×</button>
               <div>
                 <h2>Новое сообщение</h2>
-                <p>{viewerRole === "student" ? "Найдите преподавателя по почте или логину" : "Ученики в списке, преподавателя — по почте или логину"}</p>
+                <p>{viewerRole === "student" ? "Ваши преподаватели в списке. Можно искать по имени, почте или логину" : "Ученики в списке. Преподавателя — по имени, почте или логину"}</p>
               </div>
             </header>
             <label className="cb-msg__search">
@@ -770,13 +770,13 @@ export default function CabinetMessagesPage() {
               <input
                 value={pickerQuery}
                 onChange={(event) => setPickerQuery(event.target.value)}
-                placeholder={viewerRole === "student" ? "Почта или логин" : "Почта или логин преподавателя"}
+                placeholder="Имя, почта или логин"
               />
             </label>
             <div className="cb-msg__picker-list">
               {pickerGroups.length === 0 ? (
                 <p className="cb-msg__hint">
-                  {pickerQuery.trim().length >= 3 ? "Никого не найдено" : "Введите почту или логин преподавателя"}
+                  {pickerQuery.trim().length >= 2 ? "Никого не найдено" : "Введите имя, почту или логин"}
                 </p>
               ) : null}
               {pickerGroups.map((group) => (
@@ -784,8 +784,15 @@ export default function CabinetMessagesPage() {
                   <p className="cb-msg__group-title">{group.title}</p>
                   {group.items.map((item) => {
                     const lines = contactLines(item);
+                    const locked = item.can_message === false;
                     return (
-                      <button key={item.user_id} type="button" className="cb-msg__dialog" onClick={() => chooseContact(item)}>
+                      <button
+                        key={item.user_id || `roster-${item.student_id}`}
+                        type="button"
+                        className="cb-msg__dialog"
+                        disabled={locked}
+                        onClick={() => chooseContact(item)}
+                      >
                         <span className={`cb-msg__avatar is-${item.role}`}>
                           {item.initials}
                           {item.presence === "online" ? <span className="cb-msg__online" /> : null}

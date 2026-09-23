@@ -195,6 +195,7 @@ def _contact_payload(viewer, person, *, conversation_id=None) -> dict:
         "initials": initials_of(name),
         "presence": presence_of(person),
         "conversation_id": str(conversation_id) if conversation_id else None,
+        "can_message": True,
     }
     if peer_role == "teacher":
         payload["login"] = person.username
@@ -210,8 +211,52 @@ def _matches(query: str, *parts: str) -> bool:
     return needle in haystack
 
 
+def _person_query(needle: str) -> Q:
+    return (
+        Q(username__icontains=needle)
+        | Q(email__icontains=needle)
+        | Q(first_name__icontains=needle)
+        | Q(last_name__icontains=needle)
+        | Q(profile__name__icontains=needle)
+        | Q(profile__surname__icontains=needle)
+        | Q(profile__display_name__icontains=needle)
+    )
+
+
+def _roster_query(needle: str) -> Q:
+    return (
+        Q(first_name__icontains=needle)
+        | Q(last_name__icontains=needle)
+        | Q(email__icontains=needle)
+        | Q(user__username__icontains=needle)
+        | Q(user__email__icontains=needle)
+        | Q(user__first_name__icontains=needle)
+        | Q(user__last_name__icontains=needle)
+        | Q(user__profile__display_name__icontains=needle)
+        | Q(user__profile__name__icontains=needle)
+        | Q(user__profile__surname__icontains=needle)
+    )
+
+
+def _unlinked_student_payload(row: Student) -> dict:
+    name = f"{row.first_name} {row.last_name}".strip() or "Ученик"
+    return {
+        "user_id": None,
+        "student_id": row.id,
+        "name": name,
+        "role": "student",
+        "section": "students",
+        "subtitle": "Нет аккаунта на платформе",
+        "initials": initials_of(name),
+        "presence": "",
+        "conversation_id": None,
+        "can_message": False,
+        "email": row.email or "",
+    }
+
+
 def search_contacts(viewer, query: str = "", limit: int = 30) -> list[dict]:
-    """Только люди, которым viewer реально может написать. Чужие ученики не попадают."""
+    """Свои ученики видны сразу. Чужие ученики и полный список преподавателей — нет."""
     from .models import Conversation
 
     viewer_role = role_of(viewer)
@@ -229,24 +274,20 @@ def search_contacts(viewer, query: str = "", limit: int = 30) -> list[dict]:
         return direct_ids.get(pair_key(viewer.id, person_id))
 
     people: list[User] = []
+    unlinked: list[Student] = []
     if viewer_role == "teacher":
         students = Student.objects.filter(
             teacher=viewer,
-            user__isnull=False,
             status__in=LINKED_STATUSES,
         ).select_related("user__profile")
         if needle:
-            students = students.filter(
-                Q(first_name__icontains=needle)
-                | Q(last_name__icontains=needle)
-                | Q(user__profile__display_name__icontains=needle)
-                | Q(user__profile__name__icontains=needle)
-                | Q(user__profile__surname__icontains=needle)
-                | Q(user__first_name__icontains=needle)
-                | Q(user__last_name__icontains=needle)
-            )
-        people.extend(row.user for row in students.order_by("last_name", "first_name")[:limit])
-        if len(needle) >= 3:
+            students = students.filter(_roster_query(needle))
+        for row in students.order_by("last_name", "first_name", "id")[:200]:
+            if row.user_id:
+                people.append(row.user)
+            else:
+                unlinked.append(row)
+        if len(needle) >= 2:
             teachers = (
                 User.objects.filter(
                     profile__role="teacher",
@@ -255,7 +296,7 @@ def search_contacts(viewer, query: str = "", limit: int = 30) -> list[dict]:
                 )
                 .exclude(pk=viewer.pk)
                 .select_related("profile")
-                .filter(Q(username__icontains=needle) | Q(email__icontains=needle))
+                .filter(_person_query(needle))
                 .order_by("username")[:limit]
             )
             people.extend(teachers)
@@ -264,32 +305,42 @@ def search_contacts(viewer, query: str = "", limit: int = 30) -> list[dict]:
             user=viewer,
             status__in=LINKED_STATUSES,
         ).values_list("teacher_id", flat=True)
-        if len(needle) >= 3:
-            teachers = (
-                User.objects.filter(
-                    pk__in=teacher_ids,
-                    profile__role="teacher",
-                    profile__account_active=True,
-                    profile__account_blocked=False,
-                )
-                .select_related("profile")
-                .filter(Q(username__icontains=needle) | Q(email__icontains=needle))
-                .order_by("username")[:limit]
+        teachers = (
+            User.objects.filter(
+                pk__in=teacher_ids,
+                profile__role="teacher",
+                profile__account_active=True,
+                profile__account_blocked=False,
             )
-            people.extend(teachers)
+            .select_related("profile")
+            .order_by("username")
+        )
+        if needle:
+            teachers = teachers.filter(_person_query(needle))
+        people.extend(teachers[:limit])
 
     seen = set()
     contacts = []
     for person in people:
-        if person.id in seen or not can_direct_message(viewer, person):
+        if person is None or person.id in seen or not can_direct_message(viewer, person):
             continue
         seen.add(person.id)
         payload = _contact_payload(viewer, person, conversation_id=existing_id(person.id))
-        if needle and payload["role"] == "teacher" and not _matches(needle, payload.get("login"), payload.get("email")):
-            continue
-        if needle and payload["role"] != "teacher" and not _matches(needle, payload["name"], payload["subtitle"]):
+        if needle and payload["role"] == "teacher" and not _matches(
+            needle, payload.get("login"), payload.get("email"), payload["name"],
+        ):
             continue
         contacts.append(payload)
-        if len(contacts) >= limit:
+        if len(contacts) >= limit and viewer_role != "teacher":
             break
+    if viewer_role == "teacher":
+        linked = [row for row in contacts if row["role"] == "student"]
+        teachers = [row for row in contacts if row["role"] == "teacher"][:limit]
+        roster = []
+        for row in unlinked:
+            payload = _unlinked_student_payload(row)
+            if needle and not _matches(needle, payload["name"], payload["email"]):
+                continue
+            roster.append(payload)
+        contacts = (linked + roster)[:200] + teachers
     return contacts
