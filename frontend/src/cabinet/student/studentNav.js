@@ -2,6 +2,7 @@
 
 export const STUDENT_NAV = [
   { id: "home",        label: "Главная",             path: "/cabinet/student",             icon: "home"     },
+  { id: "messages",    label: "Сообщения",           path: "/cabinet/student/messages",    icon: "message"  },
   { id: "assignments", label: "Домашние задания",    path: "/cabinet/student/assignments", icon: "check"    },
   { id: "materials",   label: "Материалы",           path: "/cabinet/student/materials",   icon: "folder"   },
   { id: "topics",      label: "Пройденные темы",     path: "/cabinet/student/topics",      icon: "book"     },
@@ -35,6 +36,7 @@ export const STUDENT_MORE_GROUPS = [
     id: "account",
     label: "Аккаунт",
     items: [
+      { id: "messages", label: "Сообщения", path: "/cabinet/student/messages", icon: "message" },
       { id: "profile", label: "Профиль", path: "/cabinet/student/profile", icon: "settings" },
       { id: "appearance", label: "Оформление", path: null, icon: "spark", action: "appearance" },
     ],
@@ -69,6 +71,7 @@ export function isStudentMobileNavActive(pathname, item) {
 export function getStudentSectionTitle(pathname) {
   if (pathname === "/cabinet/student" || pathname === "/cabinet/student/") return "Главная";
   if (pathname.startsWith("/cabinet/student/settings/notifications")) return "Настройки уведомлений";
+  if (pathname.startsWith("/cabinet/student/messages")) return "Сообщения";
   if (pathname === "/cabinet/student/more" || pathname.startsWith("/cabinet/student/more/")) {
     return "Ещё";
   }

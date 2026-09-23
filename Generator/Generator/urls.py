@@ -31,6 +31,7 @@ def media_serve(request, path):
         or normalized.startswith("cabinet/my-files/")
         or normalized.startswith("cabinet/homework/")
         or normalized.startswith("cabinet/materials/")
+        or normalized.startswith("cabinet/messages/")
         or normalized.startswith("lessons/files/")
         or normalized.startswith("lessons/archives/")
     ):

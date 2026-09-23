@@ -197,6 +197,7 @@ INSTALLED_APPS = [
     'Generator.apps.GeneratorConfig',
     'Board',
     'Cabinet.apps.CabinetConfig',
+    'messaging',
     'corsheaders',
     "django_ckeditor_5",
 ]
@@ -250,6 +251,7 @@ MIDDLEWARE = [
     'django_otp.middleware.OTPMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "Generator.middleware.ContentSecurityPolicyReportOnlyMiddleware",
     "Generator.middleware.NoStoreApiMiddleware",
     "Generator.middleware.MinimumClientVersionMiddleware",
     "Generator.middleware.PerformanceTimingMiddleware",
@@ -374,6 +376,18 @@ else:
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
             "CONFIG": {"hosts": [(_redis_host, _redis_port)]},
+        }
+    }
+
+# Общий cache лимитов только если Redis включён явно. Иначе тесты остаются на LocMem,
+# хотя слой каналов по умолчанию здесь Redis и подключается лениво.
+if (os.environ.get("CHANNEL_LAYER_BACKEND") or "").strip().lower() == "redis":
+    _cache_host = os.environ.get("REDIS_HOST", "127.0.0.1")
+    _cache_port = os.environ.get("REDIS_PORT", "6379")
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": f"redis://{_cache_host}:{_cache_port}/1",
         }
     }
 

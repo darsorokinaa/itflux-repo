@@ -63,26 +63,22 @@ class Command(BaseCommand):
                 if not prefs.notify_daily_schedule_empty:
                     continue
                 title = "Расписание на сегодня"
-                message = "Сегодня уроков нет."
+                message = "Сегодня занятий нет."
             else:
-                first = events[0]
-                first_time = first.starts_at.astimezone(tz).strftime("%H:%M")
-                audience = first.title or "занятие"
-                for p in first.participants.select_related("student").all()[:1]:
-                    if p.student_id and p.student:
-                        audience = p.student.full_name
-                        break
+                from Cabinet.schedule_notification_text import daily_schedule_line, plural_ru
+
                 title = "Расписание на сегодня"
-                message = (
-                    f"Сегодня {len(events)} "
-                    f"{_plural(len(events), 'урок', 'урока', 'уроков')}. "
-                    f"Первый урок в {first_time} с {audience}."
-                )
+                word = plural_ru(len(events), "событие", "события", "событий")
+                lines = [f"Сегодня {len(events)} {word}:"]
+                lines.extend(daily_schedule_line(event, tz) for event in events)
+                message = "\n".join(lines)
 
             notify_user_channels(
                 teacher,
                 title=title,
                 message=message,
+                private_title=title,
+                private_message=message,
                 payload={
                     "type": "daily_schedule",
                     "event_type": "daily_schedule",
@@ -118,15 +114,3 @@ class Command(BaseCommand):
                 f"Daily schedule notifications sent: {sent}; journal digests: {journal_sent}"
             )
         )
-
-
-def _plural(n, one, few, many):
-    abs_n = abs(n) % 100
-    last = abs_n % 10
-    if 10 < abs_n < 20:
-        return many
-    if last == 1:
-        return one
-    if 2 <= last <= 4:
-        return few
-    return many

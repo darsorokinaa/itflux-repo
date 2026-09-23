@@ -119,3 +119,30 @@ class PerformanceTimingMiddleware:
         response["X-Request-ID"] = request_id
         response["Server-Timing"] = f"total;dur={total_ms:.1f}, db;dur={db_ms:.1f}"
         return response
+
+
+# Report-Only: не блокирует кабинет. Enforcement не включать, пока отчёты не разобраны.
+CABINET_CSP_REPORT_ONLY = "; ".join([
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://mc.yandex.ru https://lesson.itflux-academy.ru",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https://mc.yandex.ru https://lesson.itflux-academy.ru",
+    "font-src 'self' data:",
+    "connect-src 'self' https://mc.yandex.ru wss://mc.yandex.ru https://lesson.itflux-academy.ru wss://lesson.itflux-academy.ru wss://itflux.ru wss://test.itflux.ru wss://lk-test.itflux.ru wss://lesson.itflux.ru",
+    "frame-src 'self' https://lesson.itflux-academy.ru",
+    "media-src 'self' blob:",
+    "worker-src 'self' blob:",
+])
+
+
+class ContentSecurityPolicyReportOnlyMiddleware:
+    """Совместим с React-кабинетом, MathJax и Jitsi. Это не enforcing CSP."""
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        response = self.get_response(request)
+        if "Content-Security-Policy-Report-Only" not in response:
+            response["Content-Security-Policy-Report-Only"] = CABINET_CSP_REPORT_ONLY
+        return response

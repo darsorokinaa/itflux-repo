@@ -15,7 +15,7 @@ export const NAV_TABS: ReadonlyArray<NavTabDef> = [
   { key: "my-tasks", label: "Мой банк задач", to: "/tasks/my" },
   { key: "generator", label: "Генератор вариантов", to: "/generator" },
   { key: "lessons", label: "Готовые уроки", to: "/lessons" },
-  { key: "interesting", label: "Интересное", to: "/interesting" },
+  { key: "interesting", label: "Тренажёры и интерактивы", to: "/interesting" },
   { key: "teachers", label: "Сообщество учителей", to: "/teachers" },
 ];
 

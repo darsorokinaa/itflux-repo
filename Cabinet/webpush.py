@@ -109,10 +109,25 @@ def _priority_allows_push(priority: str, urgent: bool, prefs, user: User | None 
     return priority in ("critical", "important", "normal", "")
 
 
-def _privacy_push_copy(title: str, body: str, prefs) -> tuple[str, str]:
-    if not getattr(prefs, "push_privacy_mode", False):
-        return title, body
-    return "Новое уведомление", "На платформе появилось новое событие"
+_PUSH_TITLE_LIMIT = 140
+_PUSH_BODY_LIMIT = 700
+
+
+def clip_push_field(text: str, limit: int) -> str:
+    """Обрезает пуш по границе строки, чтобы в баннере остался целый текст события."""
+    value = (text or "").strip()
+    if len(value) <= limit:
+        return value
+    clipped = value[:limit]
+    newline = clipped.rfind("\n")
+    if newline >= limit // 2:
+        clipped = clipped[:newline]
+    else:
+        clipped = clipped.rsplit(" ", 1)[0] or clipped
+    clipped = clipped.rstrip()
+    if clipped.endswith("…"):
+        return clipped
+    return f"{clipped}…"
 
 
 def vapid_key_fingerprint() -> str:
@@ -229,10 +244,11 @@ def send_web_push_to_user(
         or (payload_extra or {}).get("type")
         or ""
     )
-    push_title, push_body = (title, body) if force else _privacy_push_copy(title, body, prefs)
+    push_title = clip_push_field(title, _PUSH_TITLE_LIMIT)
+    push_body = clip_push_field(body, _PUSH_BODY_LIMIT)
     data = {
-        "title": push_title[:120],
-        "body": (push_body or "")[:180],
+        "title": push_title,
+        "body": push_body,
         "url": url or "/cabinet",
         "tag": tag or "",
         "role": getattr(getattr(user, "profile", None), "role", "") or "",
@@ -394,6 +410,8 @@ def notify_user_channels(
     skip_actor: bool = False,
     force: bool = False,
     check_preferences: bool = True,
+    private_title: str | None = None,
+    private_message: str | None = None,
 ) -> list[Notification]:
     """
     Create in-app notification and optionally send web push for any role.
@@ -445,6 +463,8 @@ def notify_user_channels(
             create_in_app=in_app,
             create_push=push,
             create_telegram=None,
+            private_title=private_title,
+            private_message=private_message,
         )
         return [result.in_app] if result.in_app else []
 

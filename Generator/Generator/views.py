@@ -5217,6 +5217,7 @@ def api_interesting_view(request, slug):
     from .lesson_archive import (
         archive_base_dir,
         find_html_entry,
+        inject_lesson_drawing_assets,
         open_lesson_archive,
         read_plain_archive_html,
         read_plain_file_html,
@@ -5232,6 +5233,7 @@ def api_interesting_view(request, slug):
             if not base_href.endswith("/"):
                 base_href += "/"
             html = read_plain_archive_html(zf, html_entry, base_href)
+        html = inject_lesson_drawing_assets(html, request, f"interesting:{slug}")
         return HttpResponse(html, content_type="text/html; charset=utf-8")
 
     if item.file:
@@ -5249,6 +5251,7 @@ def api_interesting_view(request, slug):
         if not base_href.endswith("/"):
             base_href += "/"
         html = read_plain_file_html(file_path, base_href)
+        html = inject_lesson_drawing_assets(html, request, f"interesting:{slug}")
         return HttpResponse(html, content_type="text/html; charset=utf-8")
 
     raise Http404("Материал не найден")

@@ -56,39 +56,56 @@ class VKNotificationService:
 
     @staticmethod
     def format_lesson_created(event):
-        return f'Новое занятие «{event.title}»: {_format_event_time(event)}.'
+        from .schedule_notification_text import schedule_notification_copy
+
+        _title, message = schedule_notification_copy(event, "created")
+        return message
 
     @staticmethod
     def format_lesson_moved(event, old_start_at=None, old_end_at=None):
-        return f'Занятие «{event.title}» перенесено: теперь {_format_event_time(event)}.'
+        from .schedule_notification_text import schedule_notification_copy
+
+        _title, message = schedule_notification_copy(
+            event,
+            "moved",
+            old_start_at=old_start_at,
+            old_end_at=old_end_at,
+        )
+        return message
 
     @staticmethod
     def format_lesson_cancelled(event):
-        return f'Занятие «{event.title}» отменено.'
+        from .schedule_notification_text import schedule_notification_copy
+
+        _title, message = schedule_notification_copy(event, "cancelled")
+        return message
 
     @staticmethod
     def format_lesson_updated(event):
-        return f'Занятие «{event.title}» изменено: {_format_event_time(event)}.'
+        from .schedule_notification_text import schedule_notification_copy
+
+        _title, message = schedule_notification_copy(event, "updated")
+        return message
 
     @staticmethod
     def format_participant_added(event):
-        return f'Вы добавлены на занятие «{event.title}», {_format_event_time(event)}.'
+        from .schedule_notification_text import schedule_notification_copy
+
+        _title, message = schedule_notification_copy(event, "added")
+        return message
 
     @staticmethod
     def format_participant_removed(event):
-        return f'Вы больше не участвуете в занятии «{event.title}».'
+        from .schedule_notification_text import schedule_notification_copy
+
+        _title, message = schedule_notification_copy(event, "removed")
+        return message
 
     @staticmethod
     def format_before_lesson(event, minutes):
-        return f'Напоминание: занятие «{event.title}» через {minutes} мин ({_format_event_time(event)}).'
+        from .schedule_notification_text import event_detail_lines
 
-
-def _format_event_time(event):
-    from django.utils import timezone
-
-    start = timezone.localtime(event.starts_at)
-    end = timezone.localtime(event.ends_at) if event.ends_at else None
-    date_part = start.strftime("%-d %B, %H:%M") if hasattr(start, "strftime") else str(start)
-    if end:
-        return f"{start.strftime('%d.%m.%Y, %H:%M')}–{end.strftime('%H:%M')}"
-    return start.strftime("%d.%m.%Y, %H:%M")
+        return "\n".join(event_detail_lines(
+            event,
+            extra_lines=[f"Через {minutes} мин"],
+        ))

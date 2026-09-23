@@ -3,8 +3,6 @@
 import hashlib
 import html
 import logging
-from datetime import datetime
-from zoneinfo import ZoneInfo
 
 from django.utils import timezone
 
@@ -194,9 +192,6 @@ def _dispatch_to_user(
             change == "reminder" and reminder_minutes is not None and reminder_minutes <= 15
         )
         push_title, push_body = title, message
-        if getattr(prefs, "push_privacy_mode", False):
-            push_title = "Новое уведомление"
-            push_body = "На платформе появилось новое событие"
         send_web_push_to_user(
             user,
             title=push_title,
@@ -297,36 +292,44 @@ def _notify_all(
 class NotificationService:
     @staticmethod
     def notify_event_created(event):
-        title = "Новое занятие"
-        message = f'Занятие «{event.title}» запланировано на {_local_time(event.starts_at, event)}.'
+        from .schedule_notification_text import schedule_notification_copy
+
+        title, message = schedule_notification_copy(event, "created")
         return _notify_all(
             event,
             title,
             message,
-            vk_formatter=lambda: VKNotificationService.format_lesson_created(event),
+            vk_formatter=lambda: message,
             change_type="created",
         )
 
     @staticmethod
     def notify_event_moved(event, old_start_at=None, old_end_at=None):
-        title = "Занятие перенесено"
-        message = VKNotificationService.format_lesson_moved(event, old_start_at, old_end_at)
+        from .schedule_notification_text import schedule_notification_copy
+
+        title, message = schedule_notification_copy(
+            event,
+            "moved",
+            old_start_at=old_start_at,
+            old_end_at=old_end_at,
+        )
         return _notify_all(
             event,
             title,
             message,
-            vk_formatter=lambda: VKNotificationService.format_lesson_moved(event, old_start_at, old_end_at),
+            vk_formatter=lambda: message,
             change_type="moved",
         )
 
     @staticmethod
     def notify_event_cancelled(event, *, events_count=1, skip_user_id=None):
-        if events_count > 1:
-            title = "Занятия отменены"
-            message = f'Занятия «{event.title}» отменены ({events_count} шт.).'
-        else:
-            title = "Занятие отменено"
-            message = VKNotificationService.format_lesson_cancelled(event)
+        from .schedule_notification_text import schedule_notification_copy
+
+        title, message = schedule_notification_copy(
+            event,
+            "cancelled",
+            events_count=events_count,
+        )
         return _notify_all(
             event,
             title,
@@ -338,17 +341,16 @@ class NotificationService:
 
     @staticmethod
     def notify_event_updated(event, changes=None):
-        title = "Занятие изменено"
-        message = VKNotificationService.format_lesson_updated(event)
-        payload = _event_payload(event)
-        if changes:
-            payload["changes"] = changes
+        from .schedule_notification_text import schedule_notification_copy
+
+        title, message = schedule_notification_copy(event, "updated", changes=changes)
         return _notify_all(
             event,
             title,
             message,
-            vk_formatter=lambda: VKNotificationService.format_lesson_updated(event),
+            vk_formatter=lambda: message,
             change_type="updated",
+            extra_payload={"changes": list(changes.keys()) if isinstance(changes, dict) else []},
         )
 
     @staticmethod
@@ -369,8 +371,9 @@ class NotificationService:
             if not getattr(get_or_create_preferences(user), prefs_field, True):
                 continue
             touched_ids.add(user.pk)
-            title = "Вас добавили на занятие"
-            message = VKNotificationService.format_participant_added(event)
+            from .schedule_notification_text import schedule_notification_copy
+
+            title, message = schedule_notification_copy(event, "added")
             payload = _event_payload(event)
             payload["change_type"] = "participants_changed"
             payload["event_type"] = NotificationEventType.LESSON_PARTICIPANTS
@@ -381,7 +384,7 @@ class NotificationService:
                     title,
                     message,
                     payload,
-                    vk_formatter=lambda: VKNotificationService.format_participant_added(event),
+                    vk_formatter=lambda: message,
                     event_type=NotificationEventType.LESSON_PARTICIPANTS,
                     event_key=f"lesson_participants:{event.pk}:{user.pk}:added",
                 )
@@ -397,8 +400,9 @@ class NotificationService:
             if not getattr(get_or_create_preferences(user), prefs_field, True):
                 continue
             touched_ids.add(user.pk)
-            title = "Изменение участников"
-            message = VKNotificationService.format_participant_removed(event)
+            from .schedule_notification_text import schedule_notification_copy
+
+            title, message = schedule_notification_copy(event, "removed")
             payload = _event_payload(event)
             payload["change_type"] = "participants_changed"
             payload["event_type"] = NotificationEventType.LESSON_PARTICIPANTS
@@ -409,17 +413,20 @@ class NotificationService:
                     title,
                     message,
                     payload,
-                    vk_formatter=lambda: VKNotificationService.format_participant_removed(event),
+                    vk_formatter=lambda: message,
                     event_type=NotificationEventType.LESSON_PARTICIPANTS,
                     event_key=f"lesson_participants:{event.pk}:{user.pk}:removed",
                 )
             )
         # Broadcast to remaining participants once (skip those already notified as added/removed)
         if added or removed:
+            from .schedule_notification_text import schedule_notification_copy
+
+            title, message = schedule_notification_copy(event, "broadcast")
             _notify_all(
                 event,
-                "Изменён состав участников",
-                f'Состав занятия «{event.title}» обновлён.',
+                title,
+                message,
                 change_type="participants_changed",
                 skip_user_id=skip_user_id,
                 dedup_suffix="broadcast",
@@ -429,74 +436,31 @@ class NotificationService:
 
     @staticmethod
     def notify_before_lesson(event, minutes):
-        audience = _event_audience_label(event)
-        topic = (getattr(event, "topic", None) or "").strip()
-        time_only = _local_dt(event.starts_at, event).strftime("%H:%M") if event.starts_at else ""
+        from .schedule_notification_text import event_detail_lines, event_kind
 
         if minutes >= 1400:
             title = "Урок завтра"
-            message = f"{audience} · {time_only}" if audience else f"Занятие в {time_only}"
         elif minutes >= 50:
             title = "Урок начнётся через 1 час"
-            message = f"{audience} · {time_only}" if audience else f"Занятие в {time_only}"
         elif minutes <= 15:
             title = "До урока осталось 10 минут"
-            message = "Комната занятия уже доступна" if audience else f"Занятие в {time_only}"
-            if audience:
-                message = f"{audience} · {message}"
         else:
             title = "Напоминание о занятии"
-            message = VKNotificationService.format_before_lesson(event, minutes)
 
-        if topic:
-            message = f"{message}\nТема: {topic}" if message else f"Тема: {topic}"
+        extra = []
+        if minutes <= 15 and event_kind(event) not in ("personal", "blocked"):
+            extra.append("Комната занятия уже доступна")
+        message = "\n".join(event_detail_lines(event, extra_lines=extra))
 
         return _notify_all(
             event,
             title,
             message,
-            vk_formatter=lambda: VKNotificationService.format_before_lesson(event, minutes),
+            vk_formatter=lambda: message,
             change_type="reminder",
             extra_payload={"reminder_minutes": minutes, "change_type": "reminder"},
             dedup_suffix=f"{minutes}_minutes",
         )
-
-
-def _event_audience_label(event):
-    names = []
-    for p in event.participants.select_related("student").all()[:6]:
-        if p.student_id and p.student:
-            names.append(p.student.full_name)
-        elif getattr(p, "group_id", None) and getattr(p, "group", None):
-            names.append(getattr(p.group, "title", None) or "Группа")
-    if not names:
-        return (event.title or "").strip()
-    if len(names) == 1:
-        return names[0]
-    return f"{names[0]} и ещё {len(names) - 1}"
-
-
-def _event_tz(event):
-    name = (getattr(event, "timezone", None) or "").strip() or "Europe/Moscow"
-    try:
-        return ZoneInfo(name)
-    except Exception:
-        return timezone.get_current_timezone()
-
-
-def _local_dt(dt, event=None):
-    if not isinstance(dt, datetime):
-        return dt
-    tzinfo = _event_tz(event) if event is not None else None
-    if tzinfo is not None:
-        return timezone.localtime(dt, tzinfo)
-    return timezone.localtime(dt)
-
-
-def _local_time(dt, event=None):
-    if isinstance(dt, datetime):
-        return _local_dt(dt, event).strftime("%d.%m.%Y, %H:%M")
-    return str(dt)
 
 
 def _schedule_event_key(

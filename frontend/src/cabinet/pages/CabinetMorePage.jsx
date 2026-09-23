@@ -127,6 +127,7 @@ export default function CabinetMorePage() {
     assignedPlan,
     subscriptionLoading,
     navCounts,
+    messageUnread,
     refreshUser,
   } = useOutletContext();
   const name = user ? displayName(user) : "";
@@ -164,6 +165,7 @@ export default function CabinetMorePage() {
   const badgeForItem = (itemId) => {
     if (itemId === "review") return navCounts?.reviews || 0;
     if (itemId === "students") return navCounts?.students || 0;
+    if (itemId === "messages") return messageUnread || 0;
     return 0;
   };
 

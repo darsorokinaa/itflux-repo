@@ -543,7 +543,7 @@ export default function ReadyLessonsPage() {
 
   const situationChips = useMemo(() => [
     { id: "60", label: "Урок на 45–60 минут", duration: "long" },
-    { id: "interesting", label: "Интересное", to: "/interesting" },
+    { id: "interesting", label: "Тренажёры и интерактивы", to: "/interesting" },
     { id: "oge", label: "ОГЭ", exam: "ОГЭ" },
     { id: "ege", label: "ЕГЭ", exam: "ЕГЭ" },
     ...subjectOptions.map((value) => ({

@@ -160,6 +160,7 @@ INSTALLED_APPS = [
     "Generator",
     "Board",
     "Cabinet",
+    "messaging",
 
     # third-party
     "corsheaders",
@@ -192,6 +193,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     # manage.py кладёт Generator/ в sys.path → пакет называется Generator (= Generator/Generator/)
+    "Generator.middleware.ContentSecurityPolicyReportOnlyMiddleware",
     "Generator.middleware.NoStoreApiMiddleware",
     "Generator.middleware.MinimumClientVersionMiddleware",
     "Generator.middleware.PerformanceTimingMiddleware",
@@ -246,11 +248,33 @@ TEMPLATES = [
 WSGI_APPLICATION = "Generator.wsgi.application"
 ASGI_APPLICATION = "Generator.asgi.application"
 
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer"
+# По умолчанию InMemory — так сейчас работают доски, созвоны и уроки.
+# Сообщения в production требуют Redis: CHANNEL_LAYER_BACKEND=redis
+# (проверка messaging.E002). Глобально слой здесь не переключается.
+_channel_backend = (os.environ.get("CHANNEL_LAYER_BACKEND") or "inmemory").strip().lower()
+if _channel_backend == "redis":
+    _redis_host = os.environ.get("REDIS_HOST", "127.0.0.1")
+    _redis_port = int(os.environ.get("REDIS_PORT", "6379"))
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {"hosts": [(_redis_host, _redis_port)]},
+        }
     }
-}
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        }
+    }
+
+MESSAGING_PARTICIPANT_ROLES = ["teacher", "student"]
+# Поддомены сравниваются по границе имени, не через поиск подстроки.
+MESSAGING_LINK_ALLOWLIST = ["itflux.ru"]
+MESSAGING_SPAM_FANOUT = 12
+MESSAGING_MAX_ATTACHMENT_BYTES = int(os.environ.get("MESSAGING_MAX_ATTACHMENT_BYTES", str(10 * 1024 * 1024)))
+MESSAGING_USE_X_ACCEL = (os.environ.get("MESSAGING_USE_X_ACCEL") or "").strip().lower() in ("1", "true", "yes", "on")
+MESSAGING_X_ACCEL_PREFIX = os.environ.get("MESSAGING_X_ACCEL_PREFIX", "/internal-messaging-files/")
 
 # # Database (те же параметры, что в Generator/Generator/settings.py — одна БД для дампа)
 DATABASES = {
@@ -421,13 +445,22 @@ TASK_TAG_EDITOR_USERNAMES = tuple(
     if name.strip()
 )
 
-# Cache for rate limiting (LocMem — один процесс; в prod лучше Redis)
-CACHES = {
-    "default": {
-        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-        "LOCATION": "itflux-cabinet-rl",
+# Лимиты сообщений живут в cache. LocMem не общий для нескольких воркеров.
+# CHANNEL_LAYER_BACKEND=redis включает и канал, и общий cache (база Redis 1).
+if _channel_backend == "redis":
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": f"redis://{_redis_host}:{_redis_port}/1",
+        }
     }
-}
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "itflux-cabinet-rl",
+        }
+    }
 
 if not DEBUG and not _TESTING and not LESSON_SECRET:
     import warnings

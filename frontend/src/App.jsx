@@ -37,6 +37,8 @@ import CabinetReviewDetailPage from "./cabinet/pages/CabinetReviewDetailPage";
 import CabinetHomeworkEditPage from "./cabinet/pages/CabinetHomeworkEditPage";
 import CabinetLibraryPage from "./cabinet/pages/CabinetLibraryPage";
 import CabinetSchedulePage from "./cabinet/pages/CabinetSchedulePage";
+import CabinetMessagesPage from "./cabinet/pages/CabinetMessagesPage";
+import CommunityInvitePage from "./cabinet/pages/CommunityInvitePage";
 import CabinetLessonPlansPage from "./cabinet/pages/CabinetLessonPlansPage";
 import CabinetLessonPlanDetailPage from "./cabinet/pages/CabinetLessonPlanDetailPage";
 import CabinetLessonPlanEditorPage from "./cabinet/pages/CabinetLessonPlanEditorPage";
@@ -116,7 +118,7 @@ function getMetaDescriptionForPath(pathname) {
     return "Готовые уроки и материалы: откройте занятие, просмотрите файл и используйте контент в учебном процессе.";
   }
   if (path === "/interesting" || path.startsWith("/interesting/")) {
-    return "Интересное: интерактивные материалы и факты об информатике на платформе «Цифровой поток».";
+    return "Тренажёры и интерактивы: материалы и факты об информатике на платформе «Цифровой поток».";
   }
   if (path === "/teachers" || path === "/for-teachers") {
     return "Решения для учителей: управление классами, планами, домашними заданиями и интерактивными материалами.";
@@ -310,6 +312,8 @@ function App() {
           <Route path="/book/:token/" element={<TeacherBookingPage />} />
           <Route path="/invite/:token" element={<CabinetJoinPage />} />
           <Route path="/invite/:token/" element={<CabinetJoinPage />} />
+          <Route path="/community/invite/:token" element={<CommunityInvitePage />} />
+          <Route path="/community/invite/:token/" element={<CommunityInvitePage />} />
           <Route path="/parent/invite/accept/:token" element={<ParentInviteAcceptPage />} />
           <Route path="/parent/invite/accept/:token/" element={<ParentInviteAcceptPage />} />
           <Route path="/cabinet/join/:token" element={<LegacyInviteRedirect />} />
@@ -376,6 +380,8 @@ function App() {
             <Route path="interactives" element={<Navigate to="/cabinet/student/assignments" replace />} />
             <Route path="schedule"     element={<Navigate to="/cabinet/student/lessons" replace />} />
             <Route path="more"         element={<StudentMorePage />} />
+            <Route path="messages" element={<CabinetMessagesPage />} />
+            <Route path="messages/" element={<CabinetMessagesPage />} />
             <Route path="settings/notifications" element={<CabinetNotificationsSettingsPage />} />
             <Route path="settings/notifications/" element={<CabinetNotificationsSettingsPage />} />
           </Route>
@@ -394,6 +400,8 @@ function App() {
             <Route index element={<CabinetDashboard />} />
             <Route path="settings/notifications" element={<CabinetNotificationsSettingsPage />} />
             <Route path="settings/notifications/" element={<CabinetNotificationsSettingsPage />} />
+            <Route path="messages" element={<CabinetMessagesPage />} />
+            <Route path="messages/" element={<CabinetMessagesPage />} />
             <Route path="students" element={<CabinetStudentsPage />} />
             <Route path="students/:studentId/materials" element={<CabinetStudentMaterialsPage />} />
             <Route path="lessons" element={<CabinetLessonsPage />} />

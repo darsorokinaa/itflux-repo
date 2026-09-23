@@ -356,9 +356,9 @@ class NotificationDispatcher:
 
         push_title = title
         push_body = message
-        if getattr(prefs, "push_privacy_mode", False) and not force:
-            push_title = private_title or "Новое уведомление"
-            push_body = private_message or "На платформе появилось новое событие"
+        if getattr(prefs, "push_privacy_mode", False) and not force and (private_title or private_message):
+            push_title = private_title or title
+            push_body = private_message or message
 
         push_result = {"sent": 0, "active": 0, "reason": ""}
         if CHANNEL_PUSH in channels or (force and create_push is not False):
@@ -417,10 +417,10 @@ class NotificationDispatcher:
                 try:
                     from .telegram_connect import send_telegram_to_user
 
-                    if getattr(prefs, "push_privacy_mode", False) and not force:
+                    if getattr(prefs, "push_privacy_mode", False) and not force and (private_title or private_message):
                         text = telegram_text or (
-                            f"{private_title or 'Новое уведомление'}\n\n"
-                            f"{private_message or 'На платформе появилось новое событие'}"
+                            f"{private_title or title}\n\n"
+                            f"{private_message or message}"
                         )
                     else:
                         text = telegram_text or f"{title}\n\n{message}"

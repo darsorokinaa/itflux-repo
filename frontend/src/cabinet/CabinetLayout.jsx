@@ -2,7 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
 import { displayName } from "../pages/CabinetAuthPage";
 import { fetchCabinetSession, fetchNavCounts, logoutCabinetAndDetachPush, ensureCabinetPushSubscription } from "../utils/cabinetAuth";
+import { fetchMessageUnread } from "./messages/api";
+import { connectMessagingSocket } from "./messages/live";
 import CabinetIcon from "./CabinetIcons";
+import "./styles/messages.css";
 import {
   CABINET_MOBILE_NAV,
   CABINET_NAV_GROUPS,
@@ -121,6 +124,8 @@ export default function CabinetLayout() {
   const [headerMoreOpen, setHeaderMoreOpen] = useState(false);
   const [isMobileShell, setIsMobileShell] = useState(false);
   const [navCounts, setNavCounts] = useState({ students: 0, reviews: 0 });
+  const [messageUnread, setMessageUnread] = useState(0);
+  const [messageToast, setMessageToast] = useState(null);
   const searchInputRef = useRef(null);
   const [headerMoreAnchor, setHeaderMoreAnchor] = useState(null);
   const subscription = useSubscription();
@@ -182,6 +187,46 @@ export default function CabinetLayout() {
       window.removeEventListener("focus", onRefresh);
     };
   }, [loading, user, loadNavCounts, location.pathname]);
+
+  const loadMessageUnread = useCallback(async () => {
+    try {
+      const data = await fetchMessageUnread();
+      setMessageUnread(Number(data?.unread_count) || 0);
+    } catch {
+      /* раздел сообщений не должен ломать остальной кабинет */
+    }
+  }, []);
+
+  const messagePathRef = useRef(location.pathname);
+  messagePathRef.current = location.pathname;
+
+  useEffect(() => {
+    if (loading || !user || user.role !== "teacher") return undefined;
+    loadMessageUnread();
+    const id = setInterval(loadMessageUnread, 20000);
+    const onUnread = (event) => {
+      const next = Number(event.detail?.unread_count);
+      if (Number.isFinite(next)) setMessageUnread(next);
+    };
+    window.addEventListener("cabinet:messages-unread", onUnread);
+    const disconnect = connectMessagingSocket({
+      onOpenChange: () => {},
+      onEvent: (frame) => {
+        window.dispatchEvent(new CustomEvent("cabinet:messaging", { detail: frame }));
+        const count = Number(frame?.payload?.unread_count);
+        if (Number.isFinite(count)) setMessageUnread(count);
+        const onMessagesPage = messagePathRef.current.startsWith("/cabinet/messages");
+        if (frame?.type === "message.new" && frame?.payload?.notify !== false && !frame?.payload?.message?.is_own && !onMessagesPage) {
+          setMessageToast({ title: "Новое сообщение", href: "/cabinet/messages" });
+        }
+      },
+    });
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("cabinet:messages-unread", onUnread);
+      disconnect();
+    };
+  }, [loading, user, loadMessageUnread]);
 
   useEffect(() => {
     setSearchOpen(false);
@@ -292,6 +337,7 @@ export default function CabinetLayout() {
   const navBadgeForItem = (itemId) => {
     if (itemId === "students") return navCounts.students;
     if (itemId === "review") return navCounts.reviews;
+    if (itemId === "messages") return messageUnread;
     return 0;
   };
 
@@ -309,6 +355,7 @@ export default function CabinetLayout() {
     usageItems: subscription.usageItems,
     refreshSubscription: subscription.refreshUsage,
     navCounts,
+    messageUnread,
   };
 
   return (
@@ -571,7 +618,9 @@ export default function CabinetLayout() {
             ? navCounts.students
             : item.id === "review"
               ? navCounts.reviews
-              : 0;
+              : item.id === "more"
+                ? messageUnread
+                : 0;
           const mobileCount = formatNavCount(mobileBadge);
           const ariaLabel = mobileCount ? `${item.label}, ${mobileCount}` : item.label;
           return (
@@ -602,6 +651,13 @@ export default function CabinetLayout() {
       <TimewebAiEmbed
         enabled={!subscription.loading && planHasTimewebAi(subscription.currentPlan)}
       />
+      {messageToast ? (
+        <div className="cb-msg-toast" role="status">
+          <p>{messageToast.title}</p>
+          <Link to={messageToast.href} onClick={() => setMessageToast(null)}>Открыть</Link>
+          <button type="button" onClick={() => setMessageToast(null)} aria-label="Закрыть">×</button>
+        </div>
+      ) : null}
       <ConfirmActionModal
         open={logoutConfirm}
         title="Выйти из аккаунта?"

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
 import { displayName } from "../../pages/CabinetAuthPage";
 import {
@@ -22,6 +22,9 @@ import {
   isStudentMobileNavActive,
   isStudentNavActive,
 } from "./studentNav";
+import { fetchMessageUnread } from "../messages/api";
+import { connectMessagingSocket } from "../messages/live";
+import "../styles/messages.css";
 import { PageTitleProvider } from "../hooks/usePageTitle";
 import "../../styles/cabinet-dashboard.css";
 import "./styles/student-cabinet.css";
@@ -69,6 +72,8 @@ export default function StudentCabinetLayout() {
   const [navOpen, setNavOpen] = useState(false);
   const [isMobileShell, setIsMobileShell] = useState(false);
   const [assignmentsDue, setAssignmentsDue] = useState(0);
+  const [messageUnread, setMessageUnread] = useState(0);
+  const [messageToast, setMessageToast] = useState(null);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return undefined;
@@ -119,6 +124,44 @@ export default function StudentCabinetLayout() {
       window.removeEventListener("focus", onRefresh);
     };
   }, [user, refreshNavCounts]);
+
+  const messagePathRef = useRef(location.pathname);
+  messagePathRef.current = location.pathname;
+
+  useEffect(() => {
+    if (loading || !user || user.role !== "student") return undefined;
+    let cancelled = false;
+    const loadUnread = () => {
+      fetchMessageUnread()
+        .then((data) => { if (!cancelled) setMessageUnread(Number(data?.unread_count) || 0); })
+        .catch(() => null);
+    };
+    loadUnread();
+    const id = window.setInterval(loadUnread, 20000);
+    const onUnread = (event) => {
+      const next = Number(event.detail?.unread_count);
+      if (Number.isFinite(next)) setMessageUnread(next);
+    };
+    window.addEventListener("cabinet:messages-unread", onUnread);
+    const disconnect = connectMessagingSocket({
+      onOpenChange: () => {},
+      onEvent: (frame) => {
+        window.dispatchEvent(new CustomEvent("cabinet:messaging", { detail: frame }));
+        const count = Number(frame?.payload?.unread_count);
+        if (Number.isFinite(count)) setMessageUnread(count);
+        const onMessagesPage = messagePathRef.current.startsWith("/cabinet/student/messages");
+        if (frame?.type === "message.new" && frame?.payload?.notify !== false && !frame?.payload?.message?.is_own && !onMessagesPage) {
+          setMessageToast({ title: "Новое сообщение", href: "/cabinet/student/messages" });
+        }
+      },
+    });
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+      window.removeEventListener("cabinet:messages-unread", onUnread);
+      disconnect();
+    };
+  }, [loading, user]);
 
   useEffect(() => {
     setNavOpen(false);
@@ -184,7 +227,7 @@ export default function StudentCabinetLayout() {
 
   if (isPlayPage) return <Outlet />;
 
-  const outletContext = { user, handleLogout, loggingOut, refreshUser };
+  const outletContext = { user, handleLogout, loggingOut, refreshUser, messageUnread };
 
   return (
     <PageTitleProvider defaultTitle={sectionTitle}>
@@ -221,7 +264,7 @@ export default function StudentCabinetLayout() {
               key={item.id}
               item={item}
               active={isStudentNavActive(location.pathname, item)}
-              badgeCount={item.id === "assignments" ? assignmentsDue : 0}
+              badgeCount={item.id === "assignments" ? assignmentsDue : item.id === "messages" ? messageUnread : 0}
             />
           ))}
         </nav>
@@ -315,6 +358,13 @@ export default function StudentCabinetLayout() {
         })}
       </nav>
 
+      {messageToast ? (
+        <div className="cb-msg-toast" role="status">
+          <p>{messageToast.title}</p>
+          <Link to={messageToast.href} onClick={() => setMessageToast(null)}>Открыть</Link>
+          <button type="button" onClick={() => setMessageToast(null)} aria-label="Закрыть">×</button>
+        </div>
+      ) : null}
       <ConnectionCheckHost />
       <ConfirmActionModal
         open={logoutConfirm}

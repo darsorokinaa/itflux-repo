@@ -4,6 +4,7 @@ export const CABINET_NAV_GROUPS = [
     label: "Обзор",
     items: [
       { id: "home", label: "Главная", path: "/cabinet", icon: "home" },
+      { id: "messages", label: "Сообщения", path: "/cabinet/messages", icon: "message" },
     ],
   },
   {
@@ -87,6 +88,7 @@ export const CABINET_MORE_GROUPS = [
     id: "account",
     label: "Аккаунт",
     items: [
+      { id: "messages", label: "Сообщения", path: "/cabinet/messages", icon: "message" },
       { id: "notifications", label: "Уведомления", path: null, icon: "bell", action: "notifications" },
       { id: "appearance", label: "Оформление", path: null, icon: "spark", action: "appearance" },
       { id: "settings", label: "Настройки", path: null, icon: "settings", action: "settings" },
@@ -123,6 +125,7 @@ export function isCabinetMobileNavActive(pathname, item) {
 export function getCabinetSectionTitle(pathname) {
   if (pathname === "/cabinet/more") return "Ещё";
   if (pathname.startsWith("/cabinet/settings/notifications")) return "Настройки уведомлений";
+  if (pathname.startsWith("/cabinet/messages")) return "Сообщения";
   if (pathname.startsWith("/cabinet/library")) return "Библиотека";
   if (pathname.startsWith("/cabinet/upgrade")) return "Подписка и оплата";
   if (pathname.startsWith("/cabinet/homework/")) return "Редактировать ДЗ";

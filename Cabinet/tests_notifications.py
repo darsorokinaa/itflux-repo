@@ -794,8 +794,8 @@ class ReminderMinutesAndQuietHoursTests(TestCase):
             )
         self.assertFalse(result.skipped, result.reason)
         self.assertTrue(mock_push.called)
-        self.assertEqual(mock_push.call_args.kwargs["title"], "Новое уведомление")
-        self.assertIn("новое событие", mock_push.call_args.kwargs["body"].lower())
+        self.assertEqual(mock_push.call_args.kwargs["title"], "Новый ученик Александр")
+        self.assertIn("Системы счисления", mock_push.call_args.kwargs["body"])
 
 
 class PushSubscriptionDedupTests(TestCase):
@@ -1220,3 +1220,78 @@ class NotificationRegressionScenariosTests(TestCase):
         self.assertFalse(sub.is_active)
         self.assertTrue(prefs.push_enabled)
         self.assertFalse(sub.disabled_by_user)
+
+
+class ScheduleNotificationTextTests(TestCase):
+    def test_personal_event_notification_lists_details(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from Cabinet.models import ScheduleEvent
+        from Cabinet.schedule_notification_text import schedule_notification_copy
+
+        tz = ZoneInfo("Europe/Moscow")
+        event = ScheduleEvent(
+            title="Врач",
+            event_type=ScheduleEvent.EventType.PERSONAL,
+            starts_at=datetime(2026, 9, 22, 10, 0, tzinfo=tz),
+            ends_at=datetime(2026, 9, 22, 11, 30, tzinfo=tz),
+            location="Клиника на Ленина",
+            description="Плановый осмотр",
+            travel_before_minutes=20,
+            timezone="Europe/Moscow",
+            format=ScheduleEvent.Format.OFFLINE,
+        )
+        title, message = schedule_notification_copy(event, "created")
+        self.assertEqual(title, "Новое личное дело")
+        self.assertIn("Личное дело «Врач»", message)
+        self.assertIn("22.09.2026, 10:00–11:30", message)
+        self.assertIn("Место: Клиника на Ленина", message)
+        self.assertIn("Плановый осмотр", message)
+        self.assertIn("20 мин до", message)
+
+    def test_moved_lesson_names_old_and_new_time(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from Cabinet.models import ScheduleEvent
+        from Cabinet.schedule_notification_text import schedule_notification_copy
+
+        tz = ZoneInfo("Europe/Moscow")
+        event = ScheduleEvent(
+            title="Алгебра",
+            event_type=ScheduleEvent.EventType.INDIVIDUAL,
+            starts_at=datetime(2026, 9, 22, 12, 0, tzinfo=tz),
+            ends_at=datetime(2026, 9, 22, 13, 0, tzinfo=tz),
+            topic="Квадратные уравнения",
+            timezone="Europe/Moscow",
+            format=ScheduleEvent.Format.ONLINE,
+        )
+        title, message = schedule_notification_copy(
+            event,
+            "moved",
+            old_start_at=datetime(2026, 9, 22, 10, 0, tzinfo=tz),
+            old_end_at=datetime(2026, 9, 22, 11, 0, tzinfo=tz),
+        )
+        self.assertEqual(title, "Занятие перенесено")
+        self.assertIn("Алгебра", message)
+        self.assertIn("перенесено", message)
+        self.assertIn("Было: 22.09.2026, 10:00–11:00", message)
+        self.assertIn("Стало: 22.09.2026, 12:00–13:00", message)
+        self.assertIn("Тема: Квадратные уравнения", message)
+        self.assertIn("Онлайн", message)
+
+    def test_push_body_keeps_event_details(self):
+        from Cabinet.webpush import clip_push_field
+
+        body = "\n".join([
+            "Личное дело «Врач»",
+            "22.09.2026, 10:00–11:30",
+            "Место: Клиника на Ленина",
+            "Дорога: 20 мин до",
+            "Плановый осмотр",
+        ])
+        self.assertEqual(clip_push_field(body, 700), body)
+        self.assertLess(len(clip_push_field(body, 180)), 180)
+        self.assertTrue(clip_push_field(body, 80).endswith("…"))
+        self.assertNotIn("новое событие", clip_push_field(body, 700))

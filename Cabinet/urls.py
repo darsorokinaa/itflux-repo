@@ -29,5 +29,6 @@ urlpatterns = [
     path("schedule/events/<str:event_id>/", views.api_schedule_update, name="cabinet_api_schedule_update"),
     path("schedule/events/<str:event_id>/delete/", views.api_schedule_delete, name="cabinet_api_schedule_delete"),
     path("schedule/check-conflicts/", views.api_schedule_check_conflicts, name="cabinet_api_schedule_check_conflicts"),
+    path("messages/", include("messaging.urls")),
     path("", include("Cabinet.api_urls")),
 ]
