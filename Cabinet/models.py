@@ -596,6 +596,91 @@ class LessonPurchase(models.Model):
         return self.valid_until > tz.now()
 
 
+class CollectionPurchase(models.Model):
+    """Покупка набора готовых уроков. Уроки не копируются: доступ считается по составу набора."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Ожидает"
+        PAID = "paid", "Оплачена"
+        REFUNDED = "refunded", "Возврат"
+        CANCELLED = "cancelled", "Отменена"
+
+    class Source(models.TextChoices):
+        PAYMENT = "payment", "Оплата"
+        ADMIN = "admin", "Выдан вручную"
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="collection_purchases",
+        verbose_name="Пользователь",
+    )
+    collection = models.ForeignKey(
+        "Generator.LessonCollection",
+        on_delete=models.CASCADE,
+        related_name="purchases",
+        verbose_name="Набор",
+    )
+    payment = models.OneToOneField(
+        "Payment",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="collection_purchase",
+        verbose_name="Платёж",
+    )
+    source = models.CharField(
+        "Источник",
+        max_length=20,
+        choices=Source.choices,
+        default=Source.PAYMENT,
+    )
+    amount = models.DecimalField("Сумма", max_digits=10, decimal_places=2, default=0)
+    currency = models.CharField("Валюта", max_length=8, default="RUB")
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    purchased_at = models.DateTimeField("Куплено", null=True, blank=True)
+    valid_until = models.DateTimeField(
+        "Действует до",
+        null=True,
+        blank=True,
+        help_text="Пусто — бессрочный доступ.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Покупка набора уроков"
+        verbose_name_plural = "Покупки наборов уроков"
+        ordering = ["-purchased_at", "-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "collection"],
+                condition=models.Q(status="paid"),
+                name="cab_col_purchase_user_col_paid_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["user", "status"], name="cab_col_purch_user_status_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} → collection {self.collection_id} [{self.status}]"
+
+    def is_active(self) -> bool:
+        if self.status != self.Status.PAID:
+            return False
+        if self.valid_until is None:
+            return True
+        from django.utils import timezone as tz
+
+        return self.valid_until > tz.now()
+
+
 class LessonDemoAccess(models.Model):
     """Одноразовая demo-session готового урока: UNIQUE(user, lesson)."""
 
@@ -3891,6 +3976,7 @@ class Payment(models.Model):
         SUBSCRIPTION = "subscription", "Подписка"
         MATERIAL = "material", "Покупка материала"
         LESSON = "lesson", "Покупка готового урока"
+        COLLECTION = "collection", "Покупка набора уроков"
 
     teacher = models.ForeignKey(
         User,

@@ -25,6 +25,7 @@ import {
   reactToMessage,
   reportCommunityMessage,
   searchMessages,
+  sendDeveloperBroadcast,
   sendMessage,
 } from "../messages/api";
 
@@ -139,6 +140,151 @@ function IconAttach() {
   );
 }
 
+function DeveloperBroadcast({ viewerRole, onClose }) {
+  const [text, setText] = useState("");
+  const [files, setFiles] = useState([]);
+  const [libraryPicks, setLibraryPicks] = useState([]);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [sent, setSent] = useState(0);
+  const canSend = Boolean(text.trim() || files.length || libraryPicks.length);
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!canSend) return;
+    setBusy(true);
+    setError("");
+    try {
+      const data = await sendDeveloperBroadcast({
+        text,
+        files: files.map((item) => item.file),
+        library: libraryPicks,
+      });
+      setSent(data.sent || 0);
+      setText("");
+      files.forEach((item) => { if (item.url) URL.revokeObjectURL(item.url); });
+      setFiles([]);
+      setLibraryPicks([]);
+    } catch (err) {
+      setError(err.message || "Не удалось отправить");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form className="cb-msg__picker cb-msg__broadcast" onSubmit={submit}>
+      <header className="cb-msg__chat-head">
+        <button type="button" className="cb-msg__icon cb-msg__back" onClick={onClose} aria-label="Назад">←</button>
+        <span className="cb-msg__avatar is-developer">Р</span>
+        <div className="cb-msg__who">
+          <h2>Рассылка <span className="cb-msg__verify" title="Официальный канал">✓</span></h2>
+          <p>Всем, кто согласился на рассылку и персональные данные</p>
+        </div>
+      </header>
+      <div className="cb-msg__log cb-msg__broadcast-body">
+        <div className="cb-msg__broadcast-audience">
+          <p className="cb-msg__hint">
+            Сообщение появится в «От разработчика» и даст значок непрочитанного.
+            Его увидят только те, кто отметил согласие на рассылку и обработку персональных данных.
+          </p>
+          {sent ? <p className="cb-msg__hint">Отправлено: {sent}</p> : null}
+        </div>
+      </div>
+      <div className="cb-msg__composer-wrap">
+        <MessageLibraryPicker
+          open={libraryOpen}
+          viewerRole={viewerRole}
+          onClose={() => setLibraryOpen(false)}
+          onPick={(item) => {
+            setLibraryPicks((current) => {
+              const key = `${item.kind}:${item.id || item.slug}`;
+              if (current.some((row) => `${row.kind}:${row.id || row.slug}` === key)) return current;
+              return [...current, item].slice(0, 5);
+            });
+            setLibraryOpen(false);
+          }}
+        />
+        {libraryPicks.length ? (
+          <div className="cb-msg__previews">
+            {libraryPicks.map((item) => (
+              <div key={`${item.kind}-${item.id || item.slug}`} className="cb-msg__preview-card">
+                <div>
+                  <strong>{item.title}</strong>
+                  <span>{item.label}</span>
+                </div>
+                <button type="button" aria-label="Убрать материал" onClick={() => {
+                  setLibraryPicks((current) => current.filter((row) => row !== item));
+                }}>×</button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {files.length ? (
+          <div className="cb-msg__previews">
+            {files.map((item) => (
+              <div key={item.url || item.file.name} className="cb-msg__preview-card">
+                {item.url ? <img src={item.url} alt="" /> : null}
+                <div>
+                  <strong>{item.file.name}</strong>
+                  <span>{fileKind(item.file)} · {formatSize(item.file.size)}</span>
+                </div>
+                <button type="button" aria-label="Убрать файл" onClick={() => {
+                  if (item.url) URL.revokeObjectURL(item.url);
+                  setFiles((current) => current.filter((file) => file !== item));
+                }}>×</button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <div className="cb-msg__composer">
+          <label className="cb-msg__attach" title="Прикрепить файл">
+            <IconAttach />
+            <input
+              type="file"
+              accept={FILE_ACCEPT}
+              multiple
+              disabled={busy}
+              onChange={(event) => {
+                const next = [...event.target.files].map((file) => ({
+                  file,
+                  url: file.type.startsWith("image/") ? URL.createObjectURL(file) : "",
+                }));
+                setFiles((current) => [...current, ...next].slice(0, 5));
+                event.target.value = "";
+              }}
+            />
+          </label>
+          <button type="button" className="cb-msg__library-btn" disabled={busy} onClick={() => setLibraryOpen((value) => !value)}>
+            Библиотека
+          </button>
+          <textarea
+            value={text}
+            rows={1}
+            disabled={busy}
+            placeholder="Напишите сообщение…"
+            onChange={(event) => setText(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
+          />
+          <button type="submit" className="cb-msg__send" disabled={busy || !canSend} aria-label={busy ? "Отправляется" : "Отправить"}>
+            <IconSend />
+          </button>
+        </div>
+        <div className="cb-msg__note">
+          <span>{busy ? "Сообщение отправляется…" : "Enter — отправить · Shift+Enter — новая строка"}</span>
+        </div>
+        {error ? <p className="cb-msg__error">{error}</p> : null}
+      </div>
+    </form>
+  );
+}
+
 function IconSend() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
@@ -153,6 +299,8 @@ export default function CabinetMessagesPage() {
   const [conversations, setConversations] = useState([]);
   const [invitations, setInvitations] = useState([]);
   const [canManage, setCanManage] = useState(false);
+  const [canBroadcast, setCanBroadcast] = useState(false);
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [communityInfo, setCommunityInfo] = useState(null);
   const [infoOpen, setInfoOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
@@ -268,11 +416,13 @@ export default function CabinetMessagesPage() {
     setMessagingConsent(data.messaging_consent || { accepted: true });
     if (data.messaging_consent && data.messaging_consent.accepted === false) {
       setCanManage(false);
+      setCanBroadcast(false);
       setInvitations([]);
       setConversations([]);
       return [];
     }
     setCanManage(Boolean(data.can_manage_communities));
+    setCanBroadcast(Boolean(data.can_broadcast));
     setInvitations(data.invitations || []);
     setConversations(data.conversations || []);
     return data.conversations || [];
@@ -636,7 +786,7 @@ export default function CabinetMessagesPage() {
     window.clearTimeout(typingStopRef.current);
     typingStopRef.current = window.setTimeout(() => stopOwnTyping(activeId), 2500);
   };
-  const threadOpen = Boolean(activeId || composing || pickerOpen);
+  const threadOpen = Boolean(activeId || composing || pickerOpen || broadcastOpen);
   let lastDay = "";
 
   const pickerGroups = ["teachers", "students"]
@@ -750,7 +900,7 @@ export default function CabinetMessagesPage() {
                   key={item.id}
                   type="button"
                   className={`cb-msg__dialog${item.type === "community" ? " is-community" : ""}${item.id === activeId && !composing ? " is-active" : ""}`}
-                  onClick={() => { setComposing(false); setPickerOpen(false); setActiveId(item.id); }}
+                  onClick={() => { setComposing(false); setPickerOpen(false); setBroadcastOpen(false); setActiveId(item.id); }}
                 >
                   <span className={`cb-msg__avatar is-${item.type}`}>
                     {item.image_url ? <img src={item.image_url} alt="" /> : (item.type === "community" && (!item.initials || item.initials === "#") ? (item.title || "С").trim().charAt(0) : item.initials)}
@@ -815,6 +965,11 @@ export default function CabinetMessagesPage() {
           {canManage ? (
             <button type="button" className="cb-msg__quiet-btn" onClick={() => setManageOpen(true)}>Сообщества</button>
           ) : null}
+          {canBroadcast ? (
+            <button type="button" className="cb-msg__quiet-btn" onClick={() => { setBroadcastOpen(true); setPickerOpen(false); setComposing(false); setActiveId(null); }}>
+              Рассылка
+            </button>
+          ) : null}
           <button type="button" className="cb-msg__new" onClick={() => { setPickerOpen(true); setPickerQuery(""); }}>
             Новое сообщение
           </button>
@@ -823,7 +978,9 @@ export default function CabinetMessagesPage() {
 
       <section className="cb-msg__chat" aria-label="Диалог">
         {offline ? <p className="cb-msg__banner">Нет сети. Сообщение отправится, когда связь появится.</p> : null}
-        {pickerOpen ? (
+        {broadcastOpen ? (
+          <DeveloperBroadcast viewerRole={viewerRole} onClose={() => setBroadcastOpen(false)} />
+        ) : pickerOpen ? (
           <div className="cb-msg__picker">
             <header className="cb-msg__chat-head">
               <button type="button" className="cb-msg__icon" onClick={() => setPickerOpen(false)} aria-label="Закрыть">×</button>
@@ -1040,19 +1197,32 @@ export default function CabinetMessagesPage() {
                                 </button>
                               ) : null}
                               {message.text ? <p>{message.text}</p> : null}
-                              {(message.materials || []).map((item) => (
-                                item.href ? (
-                                  <a key={`${item.kind}-${item.href}`} className="cb-msg__material" href={item.href}>
-                                    <span>{item.title}</span>
+                              {(message.materials || []).map((item) => {
+                                const cover = item.cover_url ? (
+                                  <img className="cb-msg__material-cover" src={item.cover_url} alt="" />
+                                ) : (
+                                  <span className="cb-msg__material-cover" style={{ background: item.accent || "#1F3A8A" }}>{item.label}</span>
+                                );
+                                const body = (
+                                  <span className="cb-msg__material-body">
                                     <small>{item.label}</small>
+                                    <strong>{item.title}</strong>
+                                    {item.description ? <span>{item.description}</span> : null}
+                                    {item.href ? <span className="cb-msg__material-go">Перейти</span> : null}
+                                  </span>
+                                );
+                                return item.href ? (
+                                  <a key={`${item.kind}-${item.href}`} className="cb-msg__material" href={item.href}>
+                                    {cover}
+                                    {body}
                                   </a>
                                 ) : (
                                   <span key={`${item.kind}-${item.title}`} className="cb-msg__material">
-                                    <span>{item.title}</span>
-                                    <small>{item.label}</small>
+                                    {cover}
+                                    {body}
                                   </span>
-                                )
-                              ))}
+                                );
+                              })}
                               {message.attachments?.map((file) => (
                                 file.is_image ? (
                                   <a key={file.id} className="cb-msg__image" href={attachmentUrl(file.id)} target="_blank" rel="noreferrer">

@@ -86,7 +86,7 @@ function formatApiError(data, fallback = "Ошибка запроса") {
   return fallback;
 }
 
-function getCsrfToken() {
+export function getCsrfToken() {
   const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
   return match ? decodeURIComponent(match[1]) : "";
 }
@@ -1515,8 +1515,9 @@ export function updateMaterial(id, payload) {
   });
 }
 
-export async function fetchReadyLesson(slug) {
-  const res = await fetch(`/api/lessons/${encodeURIComponent(slug)}/`, {
+export async function fetchReadyLesson(slug, { collection } = {}) {
+  const qs = collection ? `?collection=${encodeURIComponent(collection)}` : "";
+  const res = await fetch(`/api/lessons/${encodeURIComponent(slug)}/${qs}`, {
     credentials: "same-origin",
     cache: "no-store",
     headers: { Accept: "application/json" },
@@ -1529,8 +1530,9 @@ export async function fetchReadyLesson(slug) {
   return data?.lesson || data;
 }
 
-export async function fetchInterestingItem(slug) {
-  const res = await fetch(`/api/interesting/${encodeURIComponent(slug)}/`, {
+export async function fetchInterestingItem(slug, { collection } = {}) {
+  const qs = collection ? `?collection=${encodeURIComponent(collection)}` : "";
+  const res = await fetch(`/api/interesting/${encodeURIComponent(slug)}/${qs}`, {
     credentials: "same-origin",
     cache: "no-store",
     headers: { Accept: "application/json" },

@@ -912,6 +912,15 @@ class Lesson(models.Model):
         default=40,
         help_text="В этом релизе demo-session всегда 40 минут.",
     )
+    primary_collection = models.ForeignKey(
+        "LessonCollection",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="primary_for_lessons",
+        verbose_name="Основной набор",
+        help_text="Какой набор показывать, если урок открыт не со страницы набора.",
+    )
     views_count = models.PositiveIntegerField("Просмотры", default=0, db_index=True)
     likes = GenericRelation(
         "CatalogContentLike",
@@ -1152,6 +1161,264 @@ class CatalogContentViewDedup(models.Model):
 
     def __str__(self):
         return f"view {self.content_type_id}:{self.object_id} at {self.viewed_at}"
+
+
+class LessonCollection(models.Model):
+    """Тематическая группа существующих готовых уроков. Уроки не копируются."""
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Черновик"
+        PUBLISHED = "published", "Опубликован"
+        HIDDEN = "hidden", "Скрыт"
+        ARCHIVED = "archived", "Архив"
+
+    class AccessMode(models.TextChoices):
+        FREE = "free", "Бесплатно"
+        SUBSCRIPTION = "subscription", "По тарифу"
+        PURCHASE = "purchase", "Отдельная покупка"
+        SUBSCRIPTION_OR_PURCHASE = "subscription_or_purchase", "Тариф или покупка"
+
+    title = models.CharField("Название", max_length=255, db_index=True)
+    slug = models.SlugField("Slug", max_length=255, unique=True, db_index=True)
+    short_description = models.TextField("Краткое описание", blank=True, default="")
+    description = models.TextField("Полное описание", blank=True, default="")
+    cover_image = models.ImageField(
+        "Обложка",
+        upload_to=lesson_cover_upload_to,
+        blank=True,
+        null=True,
+    )
+    subject = models.CharField("Предмет", max_length=120, blank=True, default="", db_index=True)
+    grade = models.PositiveSmallIntegerField("Класс", null=True, blank=True, db_index=True)
+    level = models.CharField("Направление", max_length=120, blank=True, default="", db_index=True)
+    exam_type = models.CharField(
+        "Экзамен",
+        max_length=10,
+        choices=Lesson.ExamType.choices,
+        blank=True,
+        default=Lesson.ExamType.NONE,
+        db_index=True,
+    )
+    author = models.CharField("Автор", max_length=255, blank=True, default="")
+    status = models.CharField(
+        "Статус",
+        max_length=20,
+        choices=Status.choices,
+        default=Status.DRAFT,
+        db_index=True,
+    )
+    access_mode = models.CharField(
+        "Режим доступа",
+        max_length=32,
+        choices=AccessMode.choices,
+        default=AccessMode.SUBSCRIPTION,
+        db_index=True,
+    )
+    plan_slugs = models.JSONField(
+        "Тарифы",
+        default=list,
+        blank=True,
+        help_text="Slug тарифов, с которых набор доступен. Более высокий тариф включает нижние.",
+    )
+    price = models.DecimalField(
+        "Цена",
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    compare_at_price = models.DecimalField(
+        "Старая цена",
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    currency = models.CharField("Валюта", max_length=8, default="RUB")
+    purchase_valid_days = models.PositiveIntegerField(
+        "Срок покупки, дни",
+        null=True,
+        blank=True,
+        help_text="Пусто — доступ после покупки бессрочный.",
+    )
+    next_collection = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="previous_collections",
+        verbose_name="Следующий набор",
+    )
+    published_at = models.DateTimeField("Опубликован", null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-published_at", "-created_at", "id")
+        verbose_name = "Набор уроков"
+        verbose_name_plural = "Наборы уроков"
+        indexes = [
+            models.Index(fields=["status", "subject"], name="lcol_status_subject_idx"),
+            models.Index(fields=["status", "grade"], name="lcol_status_grade_idx"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base_slug = slugify(self.title) or f"collection-{uuid4().hex[:8]}"
+            candidate = base_slug
+            index = 2
+            while LessonCollection.objects.exclude(pk=self.pk).filter(slug=candidate).exists():
+                candidate = f"{base_slug}-{index}"
+                index += 1
+            self.slug = candidate
+        if self.status == self.Status.PUBLISHED and self.published_at is None:
+            self.published_at = timezone.now()
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        errors = {}
+        sells = self.access_mode in (
+            self.AccessMode.PURCHASE,
+            self.AccessMode.SUBSCRIPTION_OR_PURCHASE,
+        )
+        if sells and (self.price is None or self.price <= 0):
+            errors["price"] = "Укажите цену больше 0."
+        if self.compare_at_price is not None and self.price is not None and self.compare_at_price <= self.price:
+            errors["compare_at_price"] = "Старая цена должна быть больше текущей."
+        if self.next_collection_id and self.next_collection_id == self.pk:
+            errors["next_collection"] = "Набор не может ссылаться сам на себя."
+        if errors:
+            raise ValidationError(errors)
+
+    def __str__(self):
+        return self.title
+
+
+class LessonCollectionSection(models.Model):
+    collection = models.ForeignKey(
+        LessonCollection,
+        on_delete=models.CASCADE,
+        related_name="sections",
+        verbose_name="Набор",
+    )
+    title = models.CharField("Название", max_length=255)
+    position = models.PositiveIntegerField("Порядок", default=0, db_index=True)
+
+    class Meta:
+        ordering = ("position", "id")
+        verbose_name = "Раздел набора"
+        verbose_name_plural = "Разделы набора"
+
+    def __str__(self):
+        return self.title
+
+
+class LessonCollectionItem(models.Model):
+    collection = models.ForeignKey(
+        LessonCollection,
+        on_delete=models.CASCADE,
+        related_name="items",
+        verbose_name="Набор",
+    )
+    lesson = models.ForeignKey(
+        Lesson,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="collection_items",
+        verbose_name="Урок",
+    )
+    interesting_item = models.ForeignKey(
+        "InterestingItem",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="collection_items",
+        verbose_name="Тренажёр",
+    )
+    material = models.ForeignKey(
+        "Cabinet.Material",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="collection_items",
+        verbose_name="Файл",
+    )
+    variant = models.ForeignKey(
+        "Variant",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="collection_items",
+        verbose_name="Вариант",
+    )
+    section = models.ForeignKey(
+        LessonCollectionSection,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="items",
+        verbose_name="Раздел",
+    )
+    position = models.PositiveIntegerField("Порядок", default=0, db_index=True)
+    is_demo = models.BooleanField(
+        "Демо",
+        default=False,
+        help_text="Этот материал можно открыть без покупки набора.",
+    )
+
+    class Meta:
+        ordering = ("position", "id")
+        verbose_name = "Материал в наборе"
+        verbose_name_plural = "Материалы в наборе"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["collection", "lesson"],
+                condition=models.Q(lesson__isnull=False),
+                name="lcol_item_collection_lesson_uniq",
+            ),
+            models.UniqueConstraint(
+                fields=["collection", "interesting_item"],
+                condition=models.Q(interesting_item__isnull=False),
+                name="lcol_item_collection_trainer_uniq",
+            ),
+            models.UniqueConstraint(
+                fields=["collection", "material"],
+                condition=models.Q(material__isnull=False),
+                name="lcol_item_collection_material_uniq",
+            ),
+            models.UniqueConstraint(
+                fields=["collection", "variant"],
+                condition=models.Q(variant__isnull=False),
+                name="lcol_item_collection_variant_uniq",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(lesson__isnull=False, interesting_item__isnull=True, material__isnull=True, variant__isnull=True)
+                    | models.Q(lesson__isnull=True, interesting_item__isnull=False, material__isnull=True, variant__isnull=True)
+                    | models.Q(lesson__isnull=True, interesting_item__isnull=True, material__isnull=False, variant__isnull=True)
+                    | models.Q(lesson__isnull=True, interesting_item__isnull=True, material__isnull=True, variant__isnull=False)
+                ),
+                name="lcol_item_one_target",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["lesson", "collection"], name="lcol_item_lesson_col_idx"),
+            models.Index(fields=["collection", "position"], name="lcol_item_col_pos_idx"),
+        ]
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        filled = [self.lesson_id, self.interesting_item_id, self.material_id, self.variant_id]
+        if sum(bool(value) for value in filled) != 1:
+            raise ValidationError("Укажите один материал: урок, тренажёр, файл или вариант.")
+
+    def __str__(self):
+        target = self.lesson_id or self.interesting_item_id or self.material_id or self.variant_id
+        return f"{self.collection_id}:{target}"
 
 
 def username_for_created_by(request):

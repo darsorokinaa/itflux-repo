@@ -169,6 +169,20 @@ export function fetchCommunity(conversationId) {
   return messagingFetch(`/conversations/${conversationId}/community/`);
 }
 
+export function fetchBroadcastGroups() {
+  return messagingFetch("/broadcast/");
+}
+
+export function sendDeveloperBroadcast({ audience, text, groupIds, files, library }) {
+  const form = new FormData();
+  form.set("audience", audience || "");
+  form.set("text", text || "");
+  form.set("group_ids", JSON.stringify(groupIds || []));
+  if (library?.length) form.set("library", JSON.stringify(library));
+  for (const file of files || []) form.append("files", file);
+  return messagingFetch("/broadcast/", { method: "POST", form });
+}
+
 export function fetchCommunities() {
   return messagingFetch("/communities/");
 }

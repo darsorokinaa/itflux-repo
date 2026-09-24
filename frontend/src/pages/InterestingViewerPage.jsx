@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import CatalogMaterialViewer from "../components/CatalogMaterialViewer";
+import LessonCollectionNavigation from "../components/collections/LessonCollectionNavigation";
+import RelatedCollectionLessons from "../components/collections/RelatedCollectionLessons";
 import { fetchInterestingItem } from "../utils/cabinetAuth";
+import "./lesson-collections.css";
 
 function previewUrl(slug) {
   return `/interesting?preview=${encodeURIComponent(slug)}`;
@@ -22,6 +25,7 @@ function canOpenInteresting(item) {
 export default function InterestingViewerPage() {
   const { slug } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [item, setItem] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -34,7 +38,8 @@ export default function InterestingViewerPage() {
     let cancelled = false;
     setLoading(true);
     setError("");
-    fetchInterestingItem(slug)
+    const collection = searchParams.get("collection") || "";
+    fetchInterestingItem(slug, { collection })
       .then((data) => {
         if (cancelled) return;
         if (!canOpenInteresting(data)) {
@@ -55,7 +60,7 @@ export default function InterestingViewerPage() {
     return () => {
       cancelled = true;
     };
-  }, [slug, navigate]);
+  }, [slug, searchParams, navigate]);
 
   return (
     <CatalogMaterialViewer
@@ -66,6 +71,8 @@ export default function InterestingViewerPage() {
       loading={loading}
       error={error}
       engagement={item?.slug ? { kind: "interesting", slug: item.slug } : null}
+      banner={item ? <LessonCollectionNavigation lesson={item} /> : null}
+      footer={item ? <RelatedCollectionLessons lesson={item} /> : null}
     />
   );
 }

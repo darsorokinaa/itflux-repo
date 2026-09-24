@@ -96,6 +96,13 @@ from .serializers import (
     LessonAdminSerializer,
     LessonCatalogSerializer,
 )
+from .lesson_collection_api import (
+    api_lesson_collection_detail,
+    api_lesson_collection_event,
+    api_lesson_collection_file,
+    api_lesson_collection_purchase,
+    api_lesson_collections,
+)
 from .latex_utils import process_latex
 from . import pdf_utils
 from . import telegram_utils
@@ -115,6 +122,7 @@ _SPA_KNOWN_PATH_PATTERNS = (
     re.compile(r"^/tasks/?$"),
     re.compile(r"^/generator/?$"),
     re.compile(r"^/lessons/?$"),
+    re.compile(r"^/lessons/collections/[^/]+/?$"),
     re.compile(r"^/lessons/[^/]+/view/?$"),
     re.compile(r"^/interesting/?$"),
     re.compile(r"^/interesting/[^/]+/view/?$"),
@@ -4209,6 +4217,13 @@ def api_variant_detail(request, level, subject, variant_id):
         )
         response["Cache-Control"] = "private, no-store"
         return response
+    collection_key = (request.GET.get("collection") or "").strip()
+    if collection_key and getattr(request.user, "is_authenticated", False):
+        from .lesson_collection_api import mark_catalog_opened
+        from .models import LessonCollectionItem
+
+        if LessonCollectionItem.objects.filter(variant=variant, collection__slug=collection_key).exists():
+            mark_catalog_opened(request.user, variant)
     response = JsonResponse(
         _variant_detail_payload(
             request,
@@ -4718,8 +4733,15 @@ def api_lessons(request):
         default_order=("-created_at", "id"),
     )
     lessons = list(qs)
+    from Cabinet.lesson_access import LessonAccessService
 
-    serializer = LessonCatalogSerializer(lessons, many=True, context={"request": request})
+    user = request.user if getattr(request.user, "is_authenticated", False) else None
+    access_map = LessonAccessService.serialize_list(user, lessons)
+    serializer = LessonCatalogSerializer(
+        lessons,
+        many=True,
+        context={"request": request, "lesson_access_map": access_map},
+    )
     return JsonResponse({"lessons": serializer.data, "total": len(serializer.data)})
 
 
@@ -4875,6 +4897,8 @@ def api_lesson_detail(request, slug):
         **access_result.to_dict(),
     }
     lesson_data = LessonCatalogSerializer(lesson, context={"request": request}).data
+    from .lesson_collection_api import collection_context_for_lesson
+
     lesson_data.update(
         {
             "teacher_goal": lesson.teacher_goal,
@@ -4882,6 +4906,11 @@ def api_lesson_detail(request, slug):
             "viewer": {"is_teacher_or_admin": _lesson_viewer_is_teacher_or_admin(request)},
             "access": access,
             "locked": not access_result.can_view,
+            "collection_context": collection_context_for_lesson(
+                request,
+                lesson,
+                request.GET.get("collection") or "",
+            ),
         }
     )
     if not access_result.is_full:
@@ -5102,6 +5131,10 @@ def _interesting_content_access_denied(request, item):
     try:
         SubscriptionAccessService.raise_if_cannot_access_content(user, item)
     except AccessDenied as exc:
+        from Cabinet.lesson_collection_access import LessonCollectionAccess
+
+        if LessonCollectionAccess.grant_for_interesting(user, item) in ("full", "demo"):
+            return None
         if _is_browser_document_request(request):
             return _catalog_preview_redirect(f"/interesting?preview={item.slug}")
         return JsonResponse({"error": exc.to_dict()}, status=403)
@@ -5184,8 +5217,20 @@ def api_interesting_detail(request, slug):
 
     user = request.user if getattr(request.user, "is_authenticated", False) else None
     access = SubscriptionAccessService.serialize_access_gate(user, item)
+    from Cabinet.lesson_collection_access import LessonCollectionAccess
+
+    if not access["allowed"] and LessonCollectionAccess.grant_for_interesting(user, item) in ("full", "demo"):
+        access = {**access, "allowed": True, "via_collection": True}
     data = InterestingCatalogSerializer(item, context={"request": request}).data
     data["access"] = access
+    from .lesson_collection_api import collection_context_for_lesson
+
+    data["collection_context"] = collection_context_for_lesson(
+        request,
+        item,
+        request.GET.get("collection") or "",
+        interesting=item,
+    )
     if not access["allowed"] and not _lesson_viewer_is_teacher_or_admin(request):
         data["locked"] = True
         data["file_url"] = None

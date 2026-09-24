@@ -1120,6 +1120,119 @@ class MessagingSecurityRegressionTests(TestCase):
         self.assertEqual(results, [])
 
 
+class MessagingPushTests(TestCase):
+    def setUp(self):
+        self.teacher = make_user("push_teacher", Profile.Role.TEACHER)
+        self.teacher.profile.name = "Дарья"
+        self.teacher.profile.surname = "Витальевна"
+        self.teacher.profile.save(update_fields=["name", "surname"])
+        self.student = make_user("push_student", Profile.Role.STUDENT)
+        self.student.profile.name = "София"
+        self.student.profile.surname = "К"
+        self.student.profile.save(update_fields=["name", "surname"])
+        Student.objects.create(
+            teacher=self.teacher,
+            user=self.student,
+            first_name="София",
+            last_name="К",
+            grade=11,
+        )
+        self.client = APIClient()
+        self.client.force_login(self.student)
+
+    def test_direct_message_push_includes_sender_and_text(self):
+        from unittest.mock import patch
+
+        opened = self.client.post(
+            "/api/cabinet/messages/conversations/direct/",
+            {"user_id": self.teacher.id},
+            format="json",
+        )
+        self.assertEqual(opened.status_code, 200, opened.content)
+        conversation_id = opened.json()["conversation"]["id"]
+        with patch("Cabinet.webpush.send_web_push_to_user") as push:
+            sent = self.client.post(
+                f"/api/cabinet/messages/conversations/{conversation_id}/messages/",
+                {"text": "Добрый день, отправила работу"},
+                format="json",
+            )
+        self.assertEqual(sent.status_code, 201, sent.content)
+        self.assertEqual(push.call_count, 1)
+        recipient = push.call_args.args[0]
+        kwargs = push.call_args.kwargs
+        self.assertEqual(recipient.id, self.teacher.id)
+        self.assertEqual(kwargs["title"], "София К")
+        self.assertEqual(kwargs["body"], "Добрый день, отправила работу")
+        self.assertEqual(kwargs["url"], f"/cabinet/messages?conversation={conversation_id}")
+
+
+class DeveloperBroadcastTests(TestCase):
+    def setUp(self):
+        self.admin = make_user("broadcast_admin", Profile.Role.TEACHER)
+        self.admin.is_superuser = True
+        self.admin.is_staff = True
+        self.admin.save(update_fields=["is_superuser", "is_staff"])
+        self.teacher = make_user("broadcast_teacher", Profile.Role.TEACHER)
+        self.student = make_user("broadcast_student", Profile.Role.STUDENT)
+        self.pupil = Student.objects.create(
+            teacher=self.teacher,
+            user=self.student,
+            first_name="София",
+            last_name="К",
+            grade=11,
+        )
+        from Cabinet.models import StudentGroup
+        self.group = StudentGroup.objects.create(teacher=self.teacher, title="ОГЭ-11")
+        self.group.students.add(self.pupil)
+        self.client = APIClient()
+        self.client.force_login(self.admin)
+
+    def test_broadcast_reaches_only_users_with_mailing_and_personal_consent(self):
+        silent = make_user("broadcast_silent", Profile.Role.STUDENT, consent=False)
+        with override_settings(MESSAGING_PLATFORM_ADMIN_ID=self.admin.id):
+            denied = APIClient()
+            denied.force_login(self.teacher)
+            self.assertEqual(denied.post("/api/cabinet/messages/broadcast/", {"text": "нет"}, format="json").status_code, 403)
+            sent = self.client.post(
+                "/api/cabinet/messages/broadcast/",
+                {"text": "Обновление кабинета"},
+                format="json",
+            )
+            self.assertEqual(sent.status_code, 200, sent.content)
+            self.assertEqual(sent.json()["sent"], 2)
+            inbox = APIClient()
+            inbox.force_login(self.teacher)
+            rows = inbox.get("/api/cabinet/messages/conversations/").json()["conversations"]
+            developer = next(row for row in rows if row["type"] == "developer")
+            self.assertEqual(developer["title"], "От разработчика")
+            self.assertGreaterEqual(developer["unread_count"], 1)
+            self.assertGreaterEqual(inbox.get("/api/cabinet/messages/unread-count/").json()["unread_count"], 1)
+            messages = inbox.get(f"/api/cabinet/messages/conversations/{developer['id']}/messages/").json()["messages"]
+            self.assertEqual(messages[-1]["text"], "Обновление кабинета")
+            self.assertEqual(messages[-1]["author_label"], "От разработчика")
+            pupil = APIClient()
+            pupil.force_login(self.student)
+            pupil_rows = pupil.get("/api/cabinet/messages/conversations/").json()["conversations"]
+            pupil_developer = next(row for row in pupil_rows if row["type"] == "developer")
+            pupil_messages = pupil.get(f"/api/cabinet/messages/conversations/{pupil_developer['id']}/messages/").json()["messages"]
+            self.assertEqual(pupil_messages[-1]["text"], "Обновление кабинета")
+            hidden = APIClient()
+            hidden.force_login(silent)
+            closed = hidden.get("/api/cabinet/messages/conversations/")
+            self.assertFalse(closed.json()["messaging_consent"]["accepted"])
+            self.assertEqual(hidden.get("/api/cabinet/messages/unread-count/").json()["unread_count"], 0)
+            upload = SimpleUploadedFile("note.png", PNG, content_type="image/png")
+            with_file = self.client.post(
+                "/api/cabinet/messages/broadcast/",
+                {"audience": "teachers", "text": "Скриншот", "files": upload},
+                format="multipart",
+            )
+            self.assertEqual(with_file.status_code, 200, with_file.content)
+            messages = inbox.get(f"/api/cabinet/messages/conversations/{developer['id']}/messages/").json()["messages"]
+            self.assertEqual(messages[-1]["text"], "Скриншот")
+            self.assertEqual(messages[-1]["attachments"][0]["name"], "note.png")
+
+
 class MessagingSocketTests(TestCase):
     def test_anonymous_socket_is_rejected(self):
         from channels.testing import WebsocketCommunicator

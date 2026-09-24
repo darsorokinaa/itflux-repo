@@ -1022,7 +1022,8 @@ function ExamPage() {
     setVariant(null);
     const idWanted = String(variant_id);
     // Через Vite-прокси (/api → Django), без прямого :8000 — иначе CORS на :5001 режет ответ как Failed to fetch.
-    const variantUrl = `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/variant/${encodeURIComponent(String(variant_id))}/`;
+    const collectionKey = new URLSearchParams(window.location.search).get("collection");
+    const variantUrl = `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/variant/${encodeURIComponent(String(variant_id))}/${collectionKey ? `?collection=${encodeURIComponent(collectionKey)}` : ""}`;
     setVariantLoadingUrl(variantUrl);
     const ac = new AbortController();
     fetch(variantUrl, {

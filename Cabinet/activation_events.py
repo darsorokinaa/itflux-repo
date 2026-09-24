@@ -73,6 +73,16 @@ LESSON_OPENED_PURCHASE = "lesson_opened_purchase"
 LESSON_OPENED_FREE = "lesson_opened_free"
 LESSON_OPENED_DEMO = "lesson_opened_demo"
 
+COLLECTION_VIEW = "collection_view"
+COLLECTION_LESSON_OPEN = "collection_lesson_open"
+COLLECTION_DEMO_OPEN = "collection_demo_open"
+COLLECTION_PURCHASE_CLICK = "collection_purchase_click"
+COLLECTION_PURCHASE_STARTED = "collection_purchase_started"
+COLLECTION_PURCHASED = "collection_purchased"
+RELATED_COLLECTION_OPENED = "related_collection_opened_from_lesson"
+NEXT_COLLECTION_LESSON_CLICKED = "next_collection_lesson_clicked"
+PREVIOUS_COLLECTION_LESSON_CLICKED = "previous_collection_lesson_clicked"
+
 TEACHER_TASK_CREATED = "teacher_task_created"
 TEACHER_TASK_EDITED = "teacher_task_edited"
 TEACHER_TASK_DUPLICATED = "teacher_task_duplicated"
@@ -130,6 +140,15 @@ CONFIRMED_EVENTS = frozenset(
         LESSON_OPENED_PURCHASE,
         LESSON_OPENED_FREE,
         LESSON_OPENED_DEMO,
+        COLLECTION_VIEW,
+        COLLECTION_LESSON_OPEN,
+        COLLECTION_DEMO_OPEN,
+        COLLECTION_PURCHASE_CLICK,
+        COLLECTION_PURCHASE_STARTED,
+        COLLECTION_PURCHASED,
+        RELATED_COLLECTION_OPENED,
+        NEXT_COLLECTION_LESSON_CLICKED,
+        PREVIOUS_COLLECTION_LESSON_CLICKED,
         TEACHER_TASK_CREATED,
         TEACHER_TASK_EDITED,
         TEACHER_TASK_DUPLICATED,
@@ -182,6 +201,8 @@ ONCE_PER_OBJECT_EVENTS = frozenset(
         LESSON_OPENED_PURCHASE,
         LESSON_OPENED_FREE,
         LESSON_OPENED_DEMO,
+        COLLECTION_VIEW,
+        COLLECTION_PURCHASED,
     }
 )
 

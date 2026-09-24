@@ -61,6 +61,49 @@ def resolve_library_items(sender, conversation, raw_items: list) -> list[dict]:
     return refs
 
 
+def _clip_text(text: str, limit: int = 140) -> str:
+    compact = " ".join((text or "").split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 1].rstrip() + "…"
+
+
+def _image_url(field) -> str:
+    name = getattr(field, "name", "") or ""
+    if not name:
+        return ""
+    try:
+        return field.url or ""
+    except Exception:
+        from django.conf import settings
+        base = settings.MEDIA_URL or "/media/"
+        return f"{base.rstrip('/')}/{name.lstrip('/')}"
+
+
+def _card_preview(item: dict) -> dict:
+    kind = str(item.get("kind") or "")
+    cover_url = ""
+    description = ""
+    accent = "#1F3A8A"
+    if kind == "trainer" and item.get("slug"):
+        trainer = InterestingItem.objects.filter(slug=item["slug"]).first()
+        if trainer is not None:
+            cover_url = _image_url(trainer.cover_image)
+            description = _clip_text(trainer.short_description)
+            accent = (trainer.accent_color or accent).strip() or accent
+    elif kind == "interactive" and item.get("id"):
+        interactive = Interactive.objects.filter(pk=item["id"]).first()
+        if interactive is not None:
+            description = _clip_text(interactive.description)
+            cover_url = (getattr(interactive, "custom_background_image_url", "") or "").strip()
+    elif kind == "variant" and item.get("id"):
+        variant = Variant.objects.filter(pk=item["id"]).select_related("var_subject").first()
+        subject = getattr(variant, "var_subject", None) if variant is not None else None
+        if subject is not None:
+            description = _clip_text(getattr(subject, "subject_short", "") or "")
+    return {"cover_url": cover_url, "description": description, "accent": accent}
+
+
 def library_cards_for(message: Message, viewer) -> list[dict]:
     if message.deleted_at:
         return []
@@ -73,12 +116,15 @@ def library_cards_for(message: Message, viewer) -> list[dict]:
             continue
         kind = str(item.get("kind") or "")
         title = str(item.get("title") or "").strip() or _KIND_LABEL.get(kind, "Материал")
-        href = _href_for(message, viewer, item)
+        preview = _card_preview(item)
         cards.append({
             "kind": kind,
             "title": title,
             "label": _KIND_LABEL.get(kind, "Материал"),
-            "href": href,
+            "href": _href_for(message, viewer, item),
+            "cover_url": preview["cover_url"],
+            "description": preview["description"],
+            "accent": preview["accent"],
         })
     return cards
 

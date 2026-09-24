@@ -39,6 +39,8 @@ ACCESS_SUBSCRIPTION = "subscription"
 ACCESS_FREE_START = "free_start"
 ACCESS_STUDENT = "student"
 ACCESS_OWNER = "owner"
+ACCESS_COLLECTION = "collection"
+ACCESS_COLLECTION_DEMO = "collection_demo"
 ACCESS_DEMO = "demo"
 ACCESS_MEETING = "meeting_live"
 ACCESS_LOCKED = "locked"
@@ -183,6 +185,7 @@ class LessonAccessResult:
             ACCESS_FREE_START,
             ACCESS_STUDENT,
             ACCESS_OWNER,
+            ACCESS_COLLECTION,
         )
 
     @property
@@ -286,7 +289,15 @@ class LessonAccessService:
         return bool(getattr(lesson, "demo_enabled", False))
 
     @classmethod
-    def get_access(cls, user, lesson, *, _demo=None, _purchased: bool | None = None) -> LessonAccessResult:
+    def get_access(
+        cls,
+        user,
+        lesson,
+        *,
+        _demo=None,
+        _purchased: bool | None = None,
+        _collection_grant: str | None = None,
+    ) -> LessonAccessResult:
         required = cls.required_plan_slug(lesson)
         result = LessonAccessResult(
             required_plan=required,
@@ -320,6 +331,22 @@ class LessonAccessService:
         if cls.subscription_covers(user, lesson):
             access_type = ACCESS_FREE_START if cls.is_free_lesson(lesson) else ACCESS_SUBSCRIPTION
             return cls._full(result, access_type)
+
+        if _collection_grant is None and lesson is not None:
+            from .lesson_collection_access import LessonCollectionAccess
+
+            _collection_grant = LessonCollectionAccess.grant_for_lesson(user, lesson) or ""
+        if _collection_grant == "full":
+            return cls._full(result, ACCESS_COLLECTION)
+        if _collection_grant == "demo":
+            result.access_type = ACCESS_COLLECTION_DEMO
+            result.can_view = True
+            result.can_download = False
+            result.can_purchase = cls.is_authenticated(user) and result.standalone_purchase_available
+            result.reason_code = "COLLECTION_DEMO"
+            result.message = "Этот урок открыт как демоурок набора."
+            result.cta = [{"type": "open", "label": "Открыть урок", "primary": True}]
+            return result
 
         demo = _demo if _demo is not None else cls.get_demo_row(user, lesson)
         if demo is not None:
@@ -795,6 +822,9 @@ class LessonAccessService:
         ids = [m.pk for m in lessons if m is not None]
         purchased_ids: set[int] = set()
         demo_map: dict[int, Any] = {}
+        from .lesson_collection_access import LessonCollectionAccess
+
+        collection_grants = LessonCollectionAccess.grants_for_lessons(user, ids)
         if cls.is_authenticated(user) and ids:
             from .models import LessonDemoAccess, LessonPurchase
 
@@ -818,6 +848,7 @@ class LessonAccessService:
                 lesson,
                 _demo=demo_map.get(lesson.pk),
                 _purchased=lesson.pk in purchased_ids,
+                _collection_grant=collection_grants.get(lesson.pk) or "",
             )
             for lesson in lessons
             if lesson is not None

@@ -12,6 +12,8 @@ export default function CatalogMaterialViewer({
   loading = false,
   error = "",
   engagement = null,
+  banner = null,
+  footer = null,
 }) {
   useRegisterCatalogView(
     engagement?.kind,
@@ -42,6 +44,7 @@ export default function CatalogMaterialViewer({
 
   return (
     <div className="lesson-viewer-page lesson-viewer-page--doc">
+      {banner}
       <div className="lesson-viewer-page__doc-main">
         <iframe
           className="lesson-viewer-page__pdf-frame"
@@ -50,6 +53,7 @@ export default function CatalogMaterialViewer({
           allow="autoplay; fullscreen"
         />
       </div>
+      {footer}
     </div>
   );
 }

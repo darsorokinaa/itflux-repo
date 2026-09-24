@@ -221,6 +221,27 @@ urlpatterns = [
         variant_theme_api.VariantThemeAdminDetailView.as_view(),
         name="variant_theme_admin_detail",
     ),
+    path("api/lesson-collections/", views.api_lesson_collections, name="api_lesson_collections"),
+    path(
+        "api/lesson-collections/<slug:slug>/purchase/",
+        views.api_lesson_collection_purchase,
+        name="api_lesson_collection_purchase",
+    ),
+    path(
+        "api/lesson-collections/<slug:slug>/events/",
+        views.api_lesson_collection_event,
+        name="api_lesson_collection_event",
+    ),
+    path(
+        "api/lesson-collections/<slug:slug>/files/<int:item_id>/",
+        views.api_lesson_collection_file,
+        name="api_lesson_collection_file",
+    ),
+    path(
+        "api/lesson-collections/<slug:slug>/",
+        views.api_lesson_collection_detail,
+        name="api_lesson_collection_detail",
+    ),
     path("api/lessons/", views.api_lessons, name="api_lessons"),
     path("api/lessons/purchases/", views.api_lesson_purchases, name="api_lesson_purchases"),
     path("api/lessons/<slug:slug>/view/", views.api_lesson_archive_view, name="api_lesson_archive_view"),

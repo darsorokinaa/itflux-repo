@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import CatalogMaterialViewer from "../components/CatalogMaterialViewer";
+import LessonCollectionNavigation from "../components/collections/LessonCollectionNavigation";
+import RelatedCollectionLessons from "../components/collections/RelatedCollectionLessons";
 import { getLessonContentUrl, lessonPreviewUrl } from "../cabinet/lessonCardUtils";
 import { fetchReadyLesson } from "../utils/cabinetAuth";
 import { rememberRecentLesson } from "../utils/recentLessons";
+import "./lesson-collections.css";
 
 function previewExtras(searchParams) {
   const extra = {};
@@ -40,7 +43,7 @@ export default function LessonViewerPage() {
     let cancelled = false;
     setLoading(true);
     setError("");
-    fetchReadyLesson(slug)
+    fetchReadyLesson(slug, { collection: searchParams.get("collection") || "" })
       .then((data) => {
         if (cancelled) return;
         if (!canOpenLessonContent(data)) {
@@ -73,6 +76,8 @@ export default function LessonViewerPage() {
       loading={loading}
       error={error}
       engagement={lesson?.slug ? { kind: "lessons", slug: lesson.slug } : null}
+      banner={<LessonCollectionNavigation lesson={lesson} />}
+      footer={<RelatedCollectionLessons lesson={lesson} />}
     />
   );
 }

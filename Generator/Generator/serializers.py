@@ -21,7 +21,8 @@ class CatalogAccessMixin:
         if instance._meta.app_label == "Generator" and instance._meta.model_name == "lesson":
             from Cabinet.lesson_access import LessonAccessService
 
-            result = LessonAccessService.get_access(user, instance)
+            access_map = self.context.get("lesson_access_map") or {}
+            result = access_map.get(instance.pk) or LessonAccessService.get_access(user, instance)
             data["access"] = {
                 "allowed": result.is_full,
                 "min_plan": result.required_plan,

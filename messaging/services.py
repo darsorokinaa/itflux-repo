@@ -999,6 +999,93 @@ def _grant_channel(*, user, channel: str, version: str, digest: str, source: str
     )
 
 
+def broadcast_audience(actor) -> dict:
+    """Списки для рассылки «От разработчика». Доступны только столу поддержки."""
+    if not is_service_desk(actor):
+        raise MessagingError("Рассылка недоступна", "forbidden")
+    from Cabinet.choices import GroupStatus, StudentStatus
+    from Cabinet.models import StudentGroup
+
+    groups = []
+    rows = (
+        StudentGroup.objects.filter(status=GroupStatus.ACTIVE)
+        .select_related("teacher", "teacher__profile")
+        .prefetch_related("students")
+        .order_by("title")
+    )
+    for group in rows:
+        linked = sum(1 for student in group.students.all() if student.user_id and student.status == StudentStatus.ACTIVE)
+        teacher = display_name_of(group.teacher) if group.teacher_id else ""
+        groups.append({
+            "id": group.id,
+            "title": group.title,
+            "teacher_name": teacher,
+            "students_count": linked,
+        })
+    return {"groups": groups}
+
+
+def _broadcast_recipients() -> list:
+    """Все активные аккаунты, которые согласились и на рассылку, и на персональные данные."""
+    from django.db.models import Count
+
+    channels = (
+        UserConsent.Channel.PERSONAL,
+        UserConsent.Channel.EMAIL,
+        UserConsent.Channel.INAPP,
+    )
+    consented_ids = (
+        UserConsent.objects.filter(
+            channel__in=channels,
+            granted=True,
+            consented_at__isnull=False,
+        )
+        .values("user_id")
+        .annotate(channels_granted=Count("channel", distinct=True))
+        .filter(channels_granted=len(channels))
+        .values_list("user_id", flat=True)
+    )
+    return list(
+        User.objects.filter(
+            id__in=consented_ids,
+            is_active=True,
+            profile__account_active=True,
+            profile__account_blocked=False,
+        ).order_by("id")
+    )
+
+
+def broadcast_developer_message(actor, *, text: str, audience: str, group_ids=None, uploads=None, library=None) -> dict:
+    """То же сообщение, что в обычном диалоге: текст, файлы и материалы библиотеки."""
+    if not is_service_desk(actor):
+        raise MessagingError("Рассылка недоступна", "forbidden")
+    require_messaging_consent(actor)
+    recipients = [user for user in _broadcast_recipients() if user.id != actor.id]
+    if not recipients:
+        raise MessagingError("Некому отправить: нет аккаунтов в этой выборке", "empty_audience")
+    from .api import publish_message_event
+
+    files = [item for item in (uploads or []) if item]
+    sent = 0
+    for user in recipients:
+        for uploaded in files:
+            try:
+                uploaded.seek(0)
+            except Exception:
+                pass
+        conversation = get_or_create_conversation(user, Conversation.Kind.PLATFORM)
+        message = post_user_message(
+            actor,
+            conversation,
+            text=text,
+            uploads=files,
+            library=library or [],
+        )
+        publish_message_event(message, "message.new")
+        sent += 1
+    return {"sent": sent, "audience": "consented"}
+
+
 MESSAGING_GATE_CHANNELS = (
     UserConsent.Channel.PERSONAL,
     UserConsent.Channel.EMAIL,

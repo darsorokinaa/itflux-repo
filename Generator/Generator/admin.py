@@ -21,6 +21,9 @@ from .models import (
     InterestingItem,
     Level,
     Lesson,
+    LessonCollection,
+    LessonCollectionItem,
+    LessonCollectionSection,
     LinkedTaskGroup,
     Mark,
     MarkComment,
@@ -600,6 +603,7 @@ class LessonAdmin(AdminStoredFileDownloadMixin, admin.ModelAdmin):
         "status",
     )
     search_fields = ("title", "slug", "topic", "subtopic", "short_description")
+    autocomplete_fields = ("primary_collection",)
     prepopulated_fields = {"slug": ("title",)}
     list_editable = ("status", "access_level")
     ordering = ("-updated_at",)
@@ -637,6 +641,7 @@ class LessonAdmin(AdminStoredFileDownloadMixin, admin.ModelAdmin):
                     "demo_page_count",
                     "demo_fragment",
                     "demo_duration_minutes",
+                    "primary_collection",
                 ),
                 "description": (
                     "Бесплатно после регистрации = уровень «Бесплатный (Старт)». "
@@ -669,6 +674,127 @@ class LessonAdmin(AdminStoredFileDownloadMixin, admin.ModelAdmin):
     @admin.display(description="Лайки", ordering="_likes_count")
     def likes_count_display(self, obj):
         return int(getattr(obj, "_likes_count", 0) or 0)
+
+
+PLAN_SLUG_CHOICES = (
+    ("teacher", "Учитель"),
+    ("pro", "Профи"),
+    ("premium", "Премиум"),
+    ("school", "Школа"),
+)
+
+
+class LessonCollectionAdminForm(forms.ModelForm):
+    plan_slugs = forms.MultipleChoiceField(
+        label="Тарифы",
+        required=False,
+        choices=PLAN_SLUG_CHOICES,
+        widget=forms.CheckboxSelectMultiple,
+        help_text="Набор открывается с выбранного тарифа и со всех тарифов выше.",
+    )
+
+    class Meta:
+        model = LessonCollection
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        current = self.instance.plan_slugs if self.instance and self.instance.pk else []
+        self.initial["plan_slugs"] = list(current or [])
+
+    def clean_plan_slugs(self):
+        return list(self.cleaned_data.get("plan_slugs") or [])
+
+
+class LessonCollectionSectionInline(admin.TabularInline):
+    model = LessonCollectionSection
+    extra = 0
+    fields = ("title", "position")
+    ordering = ("position", "id")
+
+
+class LessonCollectionItemInline(admin.TabularInline):
+    model = LessonCollectionItem
+    extra = 0
+    autocomplete_fields = ("lesson", "interesting_item", "material", "variant")
+    fields = ("lesson", "interesting_item", "material", "variant", "section", "position", "is_demo")
+    ordering = ("position", "id")
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "section":
+            object_id = request.resolver_match.kwargs.get("object_id") if request.resolver_match else None
+            if object_id:
+                kwargs["queryset"] = LessonCollectionSection.objects.filter(collection_id=object_id)
+            else:
+                kwargs["queryset"] = LessonCollectionSection.objects.none()
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+
+@admin.register(LessonCollection)
+class LessonCollectionAdmin(AdminStoredFileDownloadMixin, admin.ModelAdmin):
+    form = LessonCollectionAdminForm
+    list_display = (
+        "id",
+        "title",
+        "subject",
+        "grade",
+        "access_mode",
+        "status",
+        "lessons_count_display",
+        "price",
+        "updated_at",
+        "public_link",
+    )
+    list_filter = ("status", "access_mode", "subject", "grade", "exam_type")
+    search_fields = ("title", "slug", "short_description", "author", "subject")
+    prepopulated_fields = {"slug": ("title",)}
+    autocomplete_fields = ("next_collection",)
+    list_editable = ("status",)
+    ordering = ("-updated_at",)
+    readonly_fields = ("created_at", "updated_at", "public_link")
+    inlines = (LessonCollectionSectionInline, LessonCollectionItemInline)
+    fieldsets = (
+        (None, {"fields": ("title", "slug", "author", "status", "public_link")}),
+        (
+            "Обложка",
+            {"fields": ("cover_image",)},
+        ),
+        (
+            "Описание",
+            {"fields": ("short_description", "description", "subject", "grade", "level", "exam_type")},
+        ),
+        (
+            "Доступ и цена",
+            {
+                "fields": (
+                    "access_mode",
+                    "plan_slugs",
+                    "price",
+                    "compare_at_price",
+                    "currency",
+                    "purchase_valid_days",
+                )
+            },
+        ),
+        ("Продолжение", {"fields": ("next_collection",)}),
+        ("Служебное", {"fields": ("created_at", "updated_at")}),
+    )
+
+    class Media:
+        js = ("generator/lesson_collection_admin.js",)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(_lessons_count=Count("items", distinct=True))
+
+    @admin.display(description="Уроков", ordering="_lessons_count")
+    def lessons_count_display(self, obj):
+        return int(getattr(obj, "_lessons_count", 0) or 0)
+
+    @admin.display(description="Страница")
+    def public_link(self, obj):
+        if not obj or not obj.pk or not obj.slug:
+            return "Сохраните набор, чтобы открыть страницу"
+        return format_html('<a href="/lessons/collections/{}/" target="_blank">Открыть страницу</a>', obj.slug)
 
 
 @admin.register(InterestingItem)

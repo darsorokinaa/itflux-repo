@@ -19,6 +19,7 @@ import PricingPage from "./pages/PricingPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import LessonJoinBridge from "./pages/LessonJoinBridge";
 import ReadyLessonsPage from "./pages/ReadyLessonsPage";
+import LessonCollectionPage from "./pages/LessonCollectionPage";
 import LessonViewerPage from "./pages/LessonViewerPage";
 import InterestingPage from "./pages/InterestingPage";
 import InterestingViewerPage from "./pages/InterestingViewerPage";
@@ -115,7 +116,7 @@ function getMetaDescriptionForPath(pathname) {
   if (path === "/subject" || /^\/subject\/(oge|ege|vpr)\/?$/.test(path)) {
     return "Выберите уровень и предмет для подготовки к экзаменам на платформе «Цифровой поток».";
   }
-  if (path === "/lessons" || /^\/lessons\/[^/]+\/view\/?$/.test(path)) {
+  if (path === "/lessons" || /^\/lessons\/collections\/[^/]+\/?$/.test(path) || /^\/lessons\/[^/]+\/view\/?$/.test(path)) {
     return "Готовые уроки и материалы: откройте занятие, просмотрите файл и используйте контент в учебном процессе.";
   }
   if (path === "/interesting" || path.startsWith("/interesting/")) {
@@ -307,6 +308,7 @@ function App() {
           <Route path="/repetitor" element={<TutorLandingPage />} />
           <Route path="/repetitor/" element={<TutorLandingPage />} />
           <Route path="/lessons" element={<ReadyLessonsPage />} />
+          <Route path="/lessons/collections/:slug" element={<LessonCollectionPage />} />
           <Route path="/lessons/:slug/view" element={<LessonViewerPage />} />
           <Route path="/interesting" element={<InterestingPage />} />
           <Route path="/interesting/:slug/view" element={<InterestingViewerPage />} />

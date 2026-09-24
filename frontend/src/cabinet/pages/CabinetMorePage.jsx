@@ -84,7 +84,7 @@ function MoreCard({ item, onSettings, onGuide, onSupport, onNotifications, onApp
         </span>
         {countLabel ? (
           <span
-            className={`cb-more-card__badge${item.id === "review" ? " cb-more-card__badge--accent" : ""}`}
+            className={`cb-more-card__badge${item.id === "review" || item.id === "messages" ? " cb-more-card__badge--accent" : ""}`}
             aria-hidden="true"
           >
             {countLabel}

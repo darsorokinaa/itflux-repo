@@ -280,6 +280,9 @@ def _safe_description(plan, billing_period: str, payment=None) -> str:
         if meta.get("purpose") == "lesson":
             title = re.sub(r"[«»\"']", "", str(meta.get("lesson_title") or "урок"))
             return f"Цифровой поток - урок: {title}"[:250]
+        if meta.get("purpose") == "collection":
+            title = re.sub(r"[«»\"']", "", str(meta.get("collection_title") or "набор"))
+            return f"Цифровой поток - набор: {title}"[:250]
     period_label = "год" if billing_period == "year" else "месяц"
     name = re.sub(r"[«»\"']", "", str(getattr(plan, "name", "") or "tariff"))
     text = f"Цифровой поток - тариф:  {name} / {period_label}"
@@ -295,6 +298,9 @@ def _item_name(plan, billing_period: str, payment=None) -> str:
         if meta.get("purpose") == "lesson":
             title = str(meta.get("lesson_title") or "Урок").strip()
             return f"Цифровой поток — урок «{title}»"[:128]
+        if meta.get("purpose") == "collection":
+            title = str(meta.get("collection_title") or "Набор").strip()
+            return f"Цифровой поток — набор «{title}»"[:128]
     period_label = "год" if billing_period == "year" else "месяц"
     name = str(getattr(plan, "name", "") or "Подписка").strip()
     text = f"Цифровой поток - тариф: «{name}» на {period_label}"
@@ -528,7 +534,7 @@ class TBankPaymentProvider(PaymentProviderInterface):
     def create_checkout(self, payment, plan) -> str:
         """Init платежа → PaymentURL для редиректа."""
         meta = payment.metadata if isinstance(getattr(payment, "metadata", None), dict) else {}
-        recurrent = meta.get("purpose") not in ("material", "lesson")
+        recurrent = meta.get("purpose") not in ("material", "lesson", "collection")
         result = self._init_payment(
             payment, plan, recurrent_parent=recurrent, include_return_urls=True
         )

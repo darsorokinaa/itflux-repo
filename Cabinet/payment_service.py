@@ -70,6 +70,9 @@ class MockPaymentProvider(PaymentProviderInterface):
             return f"/lessons?preview={slug}&payment_id={payment.pk}&status=mock"
         if meta.get("purpose") == "lesson" and meta.get("lesson_id"):
             return f"/lessons?preview={meta['lesson_id']}&payment_id={payment.pk}&status=mock"
+        if meta.get("purpose") == "collection" and meta.get("collection_slug"):
+            slug = meta["collection_slug"]
+            return f"/lessons/collections/{slug}?payment_id={payment.pk}&status=mock"
         return f"/cabinet/upgrade?payment_id={payment.pk}&status=mock"
 
     def check_status(self, payment) -> dict:
@@ -713,9 +716,12 @@ class PaymentProviderService:
                 pan_mask=parsed.get("pan_mask") or "",
             )
             from .lesson_access import LessonPurchaseService, is_lesson_payment
+            from .lesson_collection_access import LessonCollectionPurchaseService, is_collection_payment
 
             if is_lesson_payment(payment):
                 LessonPurchaseService.fulfill_payment(payment)
+            elif is_collection_payment(payment):
+                LessonCollectionPurchaseService.fulfill_payment(payment)
             elif _is_legacy_material_shop_payment(payment):
                 logger.info(
                     "legacy_material_shop_payment_ignored payment_id=%s",

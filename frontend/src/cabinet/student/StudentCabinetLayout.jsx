@@ -38,6 +38,8 @@ function formatNavCount(count) {
 function NavSidebarItem({ item, active, badgeCount = 0 }) {
   const countLabel = formatNavCount(badgeCount);
   const ariaLabel = countLabel ? `${item.label}, ${countLabel}` : item.label;
+  const badgeAccent = item.id === "messages";
+  const badgeClass = `cabinet-nav-item__badge${badgeAccent ? " cabinet-nav-item__badge--accent" : ""}`;
   return (
     <Link
       to={item.path}
@@ -48,14 +50,14 @@ function NavSidebarItem({ item, active, badgeCount = 0 }) {
       <span className="cabinet-nav-item__icon">
         <CabinetIcon name={item.icon} />
         {countLabel ? (
-          <span className="cabinet-nav-item__badge cabinet-nav-item__badge--icon" aria-hidden="true">
+          <span className={`${badgeClass} cabinet-nav-item__badge--icon`} aria-hidden="true">
             {countLabel}
           </span>
         ) : null}
       </span>
       <span className="cabinet-nav-item__label">{item.label}</span>
       {countLabel ? (
-        <span className="cabinet-nav-item__badge cabinet-nav-item__badge--label" aria-hidden="true">
+        <span className={`${badgeClass} cabinet-nav-item__badge--label`} aria-hidden="true">
           {countLabel}
         </span>
       ) : null}
@@ -151,7 +153,16 @@ export default function StudentCabinetLayout() {
         if (Number.isFinite(count)) setMessageUnread(count);
         const onMessagesPage = messagePathRef.current.startsWith("/cabinet/student/messages");
         if (frame?.type === "message.new" && frame?.payload?.notify !== false && !frame?.payload?.message?.is_own && !onMessagesPage) {
-          setMessageToast({ title: "Новое сообщение", href: "/cabinet/student/messages" });
+          const incoming = frame.payload.message || {};
+          const conversationId = frame.payload.conversation_id;
+          const preview = String(incoming.text || "").replace(/\s+/g, " ").trim();
+          setMessageToast({
+            title: incoming.author_label || "Собеседник",
+            body: preview || (incoming.attachments?.length ? "Вложение" : "Новое сообщение"),
+            href: conversationId
+              ? `/cabinet/student/messages?conversation=${conversationId}`
+              : "/cabinet/student/messages",
+          });
         }
       },
     });
@@ -335,7 +346,11 @@ export default function StudentCabinetLayout() {
       {/* Mobile bottom navigation — 5 tabs */}
       <nav className="cb-mobile-nav st-mobile-nav" aria-label="Навигация">
         {STUDENT_MOBILE_NAV.map((item) => {
-          const mobileCount = item.id === "assignments" ? formatNavCount(assignmentsDue) : null;
+          const mobileCount = item.id === "assignments"
+            ? formatNavCount(assignmentsDue)
+            : item.id === "more"
+              ? formatNavCount(messageUnread)
+              : null;
           const ariaLabel = mobileCount ? `${item.label}, ${mobileCount}` : item.label;
           return (
             <Link
@@ -360,7 +375,10 @@ export default function StudentCabinetLayout() {
 
       {messageToast ? (
         <div className="cb-msg-toast" role="status">
-          <p>{messageToast.title}</p>
+          <p>
+            <strong>{messageToast.title}</strong>
+            {messageToast.body ? <span>{messageToast.body}</span> : null}
+          </p>
           <Link to={messageToast.href} onClick={() => setMessageToast(null)}>Открыть</Link>
           <button type="button" onClick={() => setMessageToast(null)} aria-label="Закрыть">×</button>
         </div>

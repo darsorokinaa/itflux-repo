@@ -57,7 +57,7 @@ function NavSidebarItem({ item, active, badgeCount = 0 }) {
 
   const countLabel = formatNavCount(badgeCount);
   const ariaLabel = countLabel ? `${item.label}, ${countLabel}` : item.label;
-  const badgeAccent = item.id === "review";
+  const badgeAccent = item.id === "review" || item.id === "messages";
 
   const content = (
     <>
@@ -217,7 +217,14 @@ export default function CabinetLayout() {
         if (Number.isFinite(count)) setMessageUnread(count);
         const onMessagesPage = messagePathRef.current.startsWith("/cabinet/messages");
         if (frame?.type === "message.new" && frame?.payload?.notify !== false && !frame?.payload?.message?.is_own && !onMessagesPage) {
-          setMessageToast({ title: "Новое сообщение", href: "/cabinet/messages" });
+          const incoming = frame.payload.message || {};
+          const conversationId = frame.payload.conversation_id;
+          const preview = String(incoming.text || "").replace(/\s+/g, " ").trim();
+          setMessageToast({
+            title: incoming.author_label || "Собеседник",
+            body: preview || (incoming.attachments?.length ? "Вложение" : "Новое сообщение"),
+            href: conversationId ? `/cabinet/messages?conversation=${conversationId}` : "/cabinet/messages",
+          });
         }
       },
     });
@@ -634,7 +641,7 @@ export default function CabinetLayout() {
                 <CabinetIcon name={item.icon} />
                 {mobileCount ? (
                   <span
-                    className={`cb-mobile-nav__badge${item.id === "review" ? " cb-mobile-nav__badge--accent" : ""}`}
+                    className={`cb-mobile-nav__badge${item.id === "review" || item.id === "more" ? " cb-mobile-nav__badge--accent" : ""}`}
                     aria-hidden="true"
                   >
                     {mobileCount}
@@ -653,7 +660,10 @@ export default function CabinetLayout() {
       />
       {messageToast ? (
         <div className="cb-msg-toast" role="status">
-          <p>{messageToast.title}</p>
+          <p>
+            <strong>{messageToast.title}</strong>
+            {messageToast.body ? <span>{messageToast.body}</span> : null}
+          </p>
           <Link to={messageToast.href} onClick={() => setMessageToast(null)}>Открыть</Link>
           <button type="button" onClick={() => setMessageToast(null)} aria-label="Закрыть">×</button>
         </div>

@@ -67,13 +67,75 @@ def _community_file_allowed(conversation, user) -> bool:
     return community_still_allowed(conversation, user)
 
 
+def _message_push_preview(message: Message) -> str:
+    text = " ".join((message.text or "").split())
+    if text:
+        if len(text) > 180:
+            return text[:177].rstrip() + "…"
+        return text
+    if message.attachments.exists():
+        return "Вложение"
+    return "Новое сообщение"
+
+
+def _messages_url(user, conversation_id) -> str:
+    from .access import role_of
+    base = "/cabinet/student/messages" if role_of(user) == "student" else "/cabinet/messages"
+    return f"{base}?conversation={conversation_id}"
+
+
+def _teacher_allows_student_message(teacher, sender) -> bool:
+    if sender is None:
+        return True
+    from Cabinet.models import Student
+    from Cabinet.notifications import get_or_create_preferences
+    from Cabinet.teacher_notifications import _override_allows
+
+    prefs = get_or_create_preferences(teacher)
+    if not getattr(prefs, "notify_student_message", True):
+        return False
+    student = Student.objects.filter(teacher=teacher, user=sender).first()
+    if student is None:
+        return True
+    return _override_allows(student, "messages", True)
+
+
+def push_incoming_message(message: Message, recipient) -> None:
+    """Web Push с именем отправителя и текстом. Свои сообщения не шлём."""
+    if message.sender_id and recipient.id == message.sender_id:
+        return
+    from Cabinet.notifications import get_or_create_preferences
+    from Cabinet.webpush import send_web_push_to_user
+    from .access import display_name_of, role_of
+
+    if role_of(recipient) == "teacher" and not _teacher_allows_student_message(recipient, message.sender):
+        return
+    prefs = get_or_create_preferences(recipient)
+    sender_name = display_name_of(message.sender) if message.sender_id else "Собеседник"
+    body = _message_push_preview(message)
+    title = sender_name
+    if getattr(prefs, "push_privacy_mode", False):
+        title = "Новое сообщение"
+        body = "Вам написали"
+    send_web_push_to_user(
+        recipient,
+        title=title,
+        body=body,
+        url=_messages_url(recipient, message.conversation_id),
+        tag=f"chat-{message.conversation_id}",
+        priority="normal",
+        payload_extra={"type": "chat_message", "event_type": "chat_message"},
+        event_type="chat_message",
+    )
+
+
 def publish_message_event(message: Message, event: str) -> None:
     from .communities import active_member, community_for_conversation, should_notify_member
     from .models import MessageMention
     participants = ConversationParticipant.objects.filter(
         conversation_id=message.conversation_id,
         hidden_at__isnull=True,
-    ).select_related("user")
+    ).select_related("user", "user__profile")
     community = community_for_conversation(message.conversation)
     mentioned_ids = set(MessageMention.objects.filter(message=message).values_list("user_id", flat=True))
     for participant in participants:
@@ -87,6 +149,16 @@ def publish_message_event(message: Message, event: str) -> None:
             "unread_count": unread_count_for_user(participant.user),
             "notify": notify,
         })
+        if event == "message.new" and notify:
+            try:
+                push_incoming_message(message, participant.user)
+            except Exception:
+                logger.warning(
+                    "messaging_push_failed user_id=%s message_id=%s",
+                    participant.user_id,
+                    message.id,
+                    exc_info=True,
+                )
 
 
 def publish_event(user_id: int, event: str, payload: dict) -> None:
@@ -192,7 +264,7 @@ class ConversationListView(MessagingGateMixin, APIView):
         if blocked:
             return blocked
         from .communities import can_manage_all_communities, list_my_invites
-        from .services import has_messaging_consent, messaging_agreement_payload
+        from .services import has_messaging_consent, is_service_desk, messaging_agreement_payload
         accepted = has_messaging_consent(request.user)
         agreement = messaging_agreement_payload()
         if not accepted:
@@ -206,10 +278,53 @@ class ConversationListView(MessagingGateMixin, APIView):
         return Response({
             "viewer_role": role_of(request.user),
             "can_manage_communities": can_manage_all_communities(request.user),
+            "can_broadcast": is_service_desk(request.user),
             "invitations": list_my_invites(request.user),
             "conversations": list_conversations(request.user),
             "messaging_consent": {"accepted": True, "agreement": agreement},
         })
+
+
+class DeveloperBroadcastView(MessagingGateMixin, APIView):
+    permission_classes = [IsAuthenticated, IsMessagingParticipant]
+
+    def get(self, request):
+        blocked = self._blocked()
+        if blocked:
+            return blocked
+        from .services import MessagingError, broadcast_audience
+        try:
+            return Response(broadcast_audience(request.user))
+        except MessagingError as exc:
+            return _rejected_response(exc, status=403)
+
+    def post(self, request):
+        blocked = self._blocked()
+        if blocked:
+            return blocked
+        if not _allow_action(request.user.id, "broadcast", 5, 3600):
+            return rate_limit_drf_response()
+        from .library_cards import parse_library_payload
+        from .services import MessagingError, broadcast_developer_message
+        raw_groups = request.data.get("group_ids") or []
+        if isinstance(raw_groups, str):
+            try:
+                raw_groups = json.loads(raw_groups) if raw_groups.strip() else []
+            except (TypeError, ValueError):
+                return Response({"detail": "Некорректный список групп", "code": "bad_groups"}, status=400)
+        try:
+            result = broadcast_developer_message(
+                request.user,
+                text=request.data.get("text") or "",
+                audience=(request.data.get("audience") or "").strip(),
+                group_ids=raw_groups,
+                uploads=request.FILES.getlist("files"),
+                library=parse_library_payload(request.data.get("library")),
+            )
+        except (MessagingError, MessageBlocked, UploadValidationError, PurposeRejected) as exc:
+            status = 403 if getattr(exc, "code", "") == "forbidden" else 400
+            return _rejected_response(exc, status=status)
+        return Response(result)
 
 
 class UnreadCountView(MessagingGateMixin, APIView):

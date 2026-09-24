@@ -6,8 +6,13 @@ import { STUDENT_MORE_GROUPS } from "../studentNav";
 import { StudentPageShell } from "../StudentSectionUi";
 import { useSeasonalTheme } from "../../../seasonal/SeasonalThemeProvider";
 
+function formatNavCount(count) {
+  if (!count || count <= 0) return null;
+  return count > 99 ? "99+" : String(count);
+}
+
 export default function StudentMorePage() {
-  const { user, handleLogout, loggingOut, refreshUser } = useOutletContext() || {};
+  const { user, handleLogout, loggingOut, refreshUser, messageUnread } = useOutletContext() || {};
   const { openAppearancePanel, hasSeasonalAppearance } = useSeasonalTheme();
   const name = user ? displayName(user) : "";
 
@@ -23,28 +28,39 @@ export default function StudentMorePage() {
           <section key={group.id} className="st-more-section">
             <h2 className="st-more-section__title">{group.label}</h2>
             <div className="st-more-grid">
-              {items.map((item) =>
-                item.action === "appearance" ? (
-                  <button
+              {items.map((item) => {
+                const countLabel = item.id === "messages" ? formatNavCount(messageUnread) : null;
+                const icon = (
+                  <span className="st-more-card__icon" aria-hidden="true">
+                    <CabinetIcon name={item.icon} />
+                    {countLabel ? <span className="st-more-card__badge">{countLabel}</span> : null}
+                  </span>
+                );
+                if (item.action === "appearance") {
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="st-more-card"
+                      onClick={openAppearancePanel}
+                    >
+                      {icon}
+                      <span className="st-more-card__label">{item.label}</span>
+                    </button>
+                  );
+                }
+                return (
+                  <Link
                     key={item.id}
-                    type="button"
+                    to={item.path}
                     className="st-more-card"
-                    onClick={openAppearancePanel}
+                    aria-label={countLabel ? `${item.label}, ${countLabel}` : item.label}
                   >
-                    <span className="st-more-card__icon" aria-hidden="true">
-                      <CabinetIcon name={item.icon} />
-                    </span>
-                    <span className="st-more-card__label">{item.label}</span>
-                  </button>
-                ) : (
-                  <Link key={item.id} to={item.path} className="st-more-card">
-                    <span className="st-more-card__icon" aria-hidden="true">
-                      <CabinetIcon name={item.icon} />
-                    </span>
+                    {icon}
                     <span className="st-more-card__label">{item.label}</span>
                   </Link>
-                ),
-              )}
+                );
+              })}
             </div>
           </section>
           );

@@ -6,6 +6,7 @@ import CatalogEngagementBar from "../components/CatalogEngagementBar";
 import LessonPreviewModal from "../components/LessonPreviewModal";
 import TryNowLessons from "../components/TryNowLessons";
 import StateView from "../components/StateView";
+import CollectionCard from "../components/collections/CollectionCard";
 import { isCatalogLocked } from "../accessGate/accessGate";
 import { useAccessGate, useCabinetAuthed } from "../hooks/useAccessGate";
 import {
@@ -25,6 +26,7 @@ import { pickTryNowLessons, readRecentLessons } from "../utils/recentLessons";
 import { mapApiStudent } from "../cabinet/cabinetMappers";
 import { trackValueGoal } from "../utils/valuePath";
 import "../styles/material-access.css";
+import "./lesson-collections.css";
 
 const patternInf = new URL("../assets/subject-patterns/inf.svg", import.meta.url).href;
 const patternMath = new URL("../assets/subject-patterns/math.svg", import.meta.url).href;
@@ -274,6 +276,8 @@ export default function ReadyLessonsPage() {
   const paymentStatus = searchParams.get("status") || "";
   const forEvent = searchParams.get("for_event") || searchParams.get("event") || "";
   const [lessons, setLessons] = useState([]);
+  const [collections, setCollections] = useState([]);
+  const catalogKind = searchParams.get("kind") || "all";
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
@@ -389,19 +393,26 @@ export default function ReadyLessonsPage() {
     if (ordering && ordering !== "newest") qs.set("ordering", ordering);
     const url = qs.toString() ? `/api/lessons/?${qs}` : "/api/lessons/";
 
-    fetch(url, { credentials: "same-origin" })
-      .then((res) => {
+    Promise.all([
+      fetch(url, { credentials: "same-origin" }).then((res) => {
         if (!res.ok) throw new Error("Не удалось загрузить каталог уроков");
         return res.json();
-      })
-      .then((data) => {
+      }),
+      fetch("/api/lesson-collections/", { credentials: "same-origin" }).then((res) => {
+        if (!res.ok) throw new Error("Не удалось загрузить наборы");
+        return res.json();
+      }),
+    ])
+      .then(([lessonData, collectionData]) => {
         if (cancelled) return;
-        setLessons(Array.isArray(data?.lessons) ? data.lessons : []);
+        setLessons(Array.isArray(lessonData?.lessons) ? lessonData.lessons : []);
+        setCollections(Array.isArray(collectionData?.collections) ? collectionData.collections : []);
       })
       .catch((err) => {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : "Ошибка загрузки");
         setLessons([]);
+        setCollections([]);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -485,6 +496,23 @@ export default function ReadyLessonsPage() {
       return haystack.includes(q);
     });
   }, [lessons, search, subject, level, topic, grade, taskNumber, durationFilter, difficulty]);
+
+  const filteredCollections = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return collections.filter((item) => {
+      if (subject && item.subject !== subject) return false;
+      if (grade && String(item.grade || "") !== grade) return false;
+      if (!q) return true;
+      return [item.title, item.short_description, item.subject].filter(Boolean).join(" ").toLowerCase().includes(q);
+    });
+  }, [collections, search, subject, grade]);
+
+  const setCatalogKind = (kind) => {
+    const next = new URLSearchParams(searchParams);
+    if (kind === "all") next.delete("kind");
+    else next.set("kind", kind);
+    setSearchParams(next, { replace: true });
+  };
 
   const resetFilters = () => {
     setSearch("");
@@ -750,11 +778,39 @@ export default function ReadyLessonsPage() {
 
           <section className="lessons-library-v3">
             <header className="lessons-library-v3__head">
-              <h2 className="lessons-library-v3__title">Каталог уроков</h2>
+              <h2 className="lessons-library-v3__title">Каталог</h2>
               <p className="lessons-library-v3__meta">
-                Найдено: <strong>{filteredLessons.length}</strong>
+                Найдено: <strong>{(catalogKind === "collections" ? 0 : filteredLessons.length) + (catalogKind === "lessons" ? 0 : filteredCollections.length)}</strong>
               </p>
             </header>
+            <div className="lcol-kind" role="tablist" aria-label="Тип материалов">
+              {[
+                ["all", "Все"],
+                ["lessons", "Уроки"],
+                ["collections", "Наборы"],
+              ].map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`lcol-kind__btn${catalogKind === id ? " lcol-kind__btn--active" : ""}`}
+                  aria-pressed={catalogKind === id}
+                  onClick={() => setCatalogKind(id)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {catalogKind !== "lessons" && filteredCollections.length ? (
+              <div className="lessons-library-v3__grid lcol-catalog-grid">
+                {filteredCollections.map((item) => {
+                  const theme = getSubjectTheme(item.subject);
+                  const coverStyle = item.cover_url
+                    ? { backgroundImage: `url("${item.cover_url}")` }
+                    : { backgroundColor: theme.color, backgroundImage: `url("${theme.pattern}")` };
+                  return <CollectionCard key={item.slug} item={item} coverStyle={coverStyle} />;
+                })}
+              </div>
+            ) : null}
 
             {loading ? (
               <StateView variant="loading" title="Загружаем каталог" description="Это займёт пару секунд." />
@@ -769,6 +825,10 @@ export default function ReadyLessonsPage() {
                   </button>
                 }
               />
+            ) : catalogKind === "collections" ? (
+              filteredCollections.length === 0 ? (
+                <StateView variant="empty" title="Пока нет наборов" description="Опубликованные наборы появятся здесь." />
+              ) : null
             ) : filteredLessons.length === 0 ? (
               lessons.length === 0 ? (
                 <StateView

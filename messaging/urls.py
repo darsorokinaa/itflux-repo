@@ -21,6 +21,7 @@ from .api import (
     AttachmentDownloadView,
     ContactSearchView,
     ConversationListView,
+    DeveloperBroadcastView,
     MessageSearchView,
     DirectConversationView,
     LibraryFileView,
@@ -37,6 +38,7 @@ from .api import (
 
 urlpatterns = [
     path("conversations/", ConversationListView.as_view(), name="messaging_conversations"),
+    path("broadcast/", DeveloperBroadcastView.as_view(), name="messaging_broadcast"),
     path("agreement/", MessagingAgreementView.as_view(), name="messaging_agreement"),
     path("consent/", MessagingConsentView.as_view(), name="messaging_consent"),
     path("search/", MessageSearchView.as_view(), name="messaging_search"),

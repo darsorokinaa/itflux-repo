@@ -1340,6 +1340,7 @@ button.st-ld-item {
 }
 
 .st-more-card__icon {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1348,6 +1349,24 @@ button.st-ld-item {
   border-radius: 12px;
   background: #EFF6FF;
   color: #2563EB;
+}
+
+.st-more-card__badge {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #EF4444;
+  color: #fff;
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .st-more-card__icon svg {

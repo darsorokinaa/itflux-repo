@@ -57,6 +57,7 @@ from .models import (
     LessonPlanItem,
     MatchingPair,
     Material,
+    CollectionPurchase,
     LessonDemoAccess,
     LessonPurchase,
     Notification,
@@ -257,6 +258,16 @@ class LessonPurchaseAdmin(admin.ModelAdmin):
     list_display = ("user", "lesson", "status", "amount", "currency", "purchased_at")
     list_filter = ("status",)
     search_fields = ("user__username", "lesson__title", "lesson__slug")
+    ordering = ("-purchased_at", "-created_at")
+    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(CollectionPurchase)
+class CollectionPurchaseAdmin(admin.ModelAdmin):
+    list_display = ("user", "collection", "source", "status", "amount", "valid_until", "purchased_at")
+    list_filter = ("status", "source")
+    search_fields = ("user__username", "collection__title", "collection__slug")
+    autocomplete_fields = ("collection",)
     ordering = ("-purchased_at", "-created_at")
     readonly_fields = ("created_at", "updated_at")
 
