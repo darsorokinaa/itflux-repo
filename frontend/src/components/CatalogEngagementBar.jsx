@@ -4,6 +4,7 @@ import { Eye, Heart } from "lucide-react";
 import {
   asCount,
   formatCompactCount,
+  formatExactCount,
   registerCatalogView,
   toggleCatalogLike,
 } from "../utils/catalogEngagement";
@@ -89,7 +90,7 @@ export default function CatalogEngagementBar({
     <div className={`catalog-engagement ${className}`.trim()}>
       <span className="catalog-engagement__stat" title={viewsTitle}>
         <Eye size={16} strokeWidth={2.1} aria-hidden="true" />
-        <span aria-label={viewsTitle}>{formatCompactCount(views)}</span>
+        <span aria-label={viewsTitle}>{formatExactCount(views)}</span>
       </span>
       <button
         type="button"

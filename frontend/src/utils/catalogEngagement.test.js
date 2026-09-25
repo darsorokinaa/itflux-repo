@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { asCount, formatCompactCount } from "./catalogEngagement";
+import { asCount, formatCompactCount, formatExactCount } from "./catalogEngagement";
 
 describe("asCount", () => {
   it("coerces missing and invalid values to 0", () => {
@@ -16,6 +16,15 @@ describe("asCount", () => {
     expect(asCount(7)).toBe(7);
     expect(asCount("12")).toBe(12);
     expect(asCount(4.9)).toBe(4);
+  });
+});
+
+describe("formatExactCount", () => {
+  it("shows the stored integer with grouping", () => {
+    expect(formatExactCount(0)).toBe("0");
+    expect(formatExactCount(125)).toBe("125");
+    expect(formatExactCount(1200)).toBe("1\u00a0200");
+    expect(formatExactCount(1_100_000)).toBe("1\u00a0100\u00a0000");
   });
 });
 

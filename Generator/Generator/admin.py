@@ -5,6 +5,7 @@ import re
 from django.contrib import admin
 from django.contrib.admin.utils import unquote
 from django.contrib.admin.widgets import AdminFileWidget
+from django.contrib.contenttypes.prefetch import GenericPrefetch
 from django.db.models import Count, Q
 from django import forms
 from django.http import FileResponse, Http404
@@ -12,6 +13,8 @@ from django.urls import path, reverse
 from django.utils.html import format_html, format_html_join, strip_tags
 from django_ckeditor_5.widgets import CKEditor5Widget
 
+from Cabinet.models import Material
+from .engagement import catalog_view_kind, catalog_view_title
 from .models import (
     Announcement,
     CatalogContentLike,
@@ -856,9 +859,44 @@ class CatalogContentLikeAdmin(admin.ModelAdmin):
 
 @admin.register(CatalogContentViewDedup)
 class CatalogContentViewDedupAdmin(admin.ModelAdmin):
-    list_display = ("id", "content_type", "object_id", "user", "viewed_at")
+    list_display = ("id", "kind_display", "target_display", "user", "viewed_at")
     list_filter = ("content_type",)
-    readonly_fields = ("content_type", "object_id", "user", "visitor_key", "viewed_at")
+    search_fields = ("user__username", "user__email")
+    readonly_fields = (
+        "kind_display",
+        "target_display",
+        "content_type",
+        "object_id",
+        "user",
+        "visitor_key",
+        "viewed_at",
+    )
+
+    def get_queryset(self, request):
+        return (
+            super()
+            .get_queryset(request)
+            .select_related("content_type", "user")
+            .prefetch_related(
+                GenericPrefetch(
+                    "content_object",
+                    [
+                        Lesson.objects.only("id", "title"),
+                        InterestingItem.objects.only("id", "title", "tag"),
+                        Material.objects.only("id", "title"),
+                        Variant.objects.only("id", "local_number"),
+                    ],
+                )
+            )
+        )
+
+    @admin.display(description="Раздел")
+    def kind_display(self, obj):
+        return catalog_view_kind(obj.content_type, obj.content_object)
+
+    @admin.display(description="Название")
+    def target_display(self, obj):
+        return catalog_view_title(obj.content_type, obj.content_object, obj.object_id)
 
 
 @admin.register(Update)

@@ -191,6 +191,34 @@ def toggle_like(obj, user) -> dict[str, Any]:
     return {"is_liked": is_liked, "likes_count": likes_count}
 
 
+def catalog_view_kind(content_type, target) -> str:
+    """Единая подпись раздела для строки просмотра в админке."""
+    model = getattr(content_type, "model", "") or ""
+    if model == "lesson":
+        return "Урок"
+    if model == "material":
+        return "Материал"
+    if model == "variant":
+        return "Вариант"
+    if model == "interestingitem":
+        tag = (getattr(target, "tag", "") or "").casefold()
+        if "тренаж" in tag or "интерактив" in tag:
+            return "Тренажёр"
+        return "Интересное"
+    return str(getattr(content_type, "name", "") or model or "—")
+
+
+def catalog_view_title(content_type, target, object_id) -> str:
+    if target is None:
+        return f"#{object_id}"
+    model = getattr(content_type, "model", "") or ""
+    if model == "variant":
+        number = getattr(target, "local_number", None) or target.pk
+        return f"Вариант №{number}"
+    title = (getattr(target, "title", "") or "").strip()
+    return title or f"#{object_id}"
+
+
 def set_visitor_cookie(response, raw: str | None):
     if not raw:
         return response

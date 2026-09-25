@@ -9,7 +9,7 @@ from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from Generator.engagement import VIEW_DEDUP_MINUTES, register_view
+from Generator.engagement import VIEW_DEDUP_MINUTES, catalog_view_kind, catalog_view_title, register_view
 from Generator.models import CatalogContentLike, InterestingItem, Lesson
 
 
@@ -206,6 +206,26 @@ class CatalogEngagementTests(TestCase):
         self.assertEqual(VIEW_DEDUP_MINUTES, 30)
         self.lesson.refresh_from_db()
         self.assertEqual(self.lesson.views_count, 1)
+
+    def test_view_kind_labels(self):
+        from django.contrib.contenttypes.models import ContentType
+
+        from Cabinet.models import Material
+
+        lesson_ct = ContentType.objects.get_for_model(Lesson)
+        item_ct = ContentType.objects.get_for_model(InterestingItem)
+        material_ct = ContentType.objects.get_for_model(Material)
+        trainer = _interesting(slug="trainer-eng-1", title="Логика", tag="Тренажёр")
+        fact = _interesting(slug="fact-eng-1", title="Факт о бите", tag="Факт")
+        material = Material.objects.create(title="Конспект")
+
+        self.assertEqual(catalog_view_kind(lesson_ct, self.lesson), "Урок")
+        self.assertEqual(catalog_view_title(lesson_ct, self.lesson, self.lesson.pk), "Урок тест")
+        self.assertEqual(catalog_view_kind(item_ct, trainer), "Тренажёр")
+        self.assertEqual(catalog_view_kind(item_ct, fact), "Интересное")
+        self.assertEqual(catalog_view_kind(material_ct, material), "Материал")
+        self.assertEqual(catalog_view_title(material_ct, material, material.pk), "Конспект")
+        self.assertEqual(catalog_view_title(lesson_ct, None, 9), "#9")
 
     def test_guest_is_liked_false(self):
         res = self.client.get(reverse("api_interesting"))

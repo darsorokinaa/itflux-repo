@@ -56,6 +56,11 @@ export function asCount(value) {
   return Math.floor(n);
 }
 
+/** Точное число из базы: 1200 → «1 200». */
+export function formatExactCount(value) {
+  return asCount(value).toLocaleString("ru-RU");
+}
+
 /** 125 → «125», 1200 → «1,2 тыс.», 1_100_000 → «1,1 млн» */
 export function formatCompactCount(value) {
   const n = asCount(value);

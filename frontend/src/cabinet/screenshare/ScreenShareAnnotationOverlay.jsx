@@ -7,7 +7,6 @@ import { useElementClientRect } from "../annotations/useElementClientRect";
 import CabinetIcon from "../CabinetIcons";
 import {
   collapsedAnnotationUi,
-  openedAnnotationUi,
   shouldResetAnnotationUi,
   shouldShowAnnotationTrigger,
 } from "../annotations/v2/zoomSession";
@@ -625,24 +624,6 @@ export default function ScreenShareAnnotationOverlay({
           </button>
         )}
       />
-    </div>
-  ) : showToolbar && showTrigger ? (
-    <div className={`ann-toolbar-slot${compact ? " is-compact" : ""}`}>
-      <button
-        type="button"
-        className="ss-ann-v2-reopen"
-        onClick={() => {
-          const next = openedAnnotationUi();
-          setTool(next.tool);
-          setToolbarOpen(next.toolbarOpen);
-        }}
-        title="Аннотации"
-        aria-expanded="false"
-        aria-label="Аннотации"
-      >
-        <CabinetIcon name="pencil" />
-        <span>Аннотации</span>
-      </button>
     </div>
   ) : null;
 

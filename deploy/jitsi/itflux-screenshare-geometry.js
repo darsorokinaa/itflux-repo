@@ -790,6 +790,29 @@
     postPipResult({ ok: true, action: "left" });
   });
 
+  // Chrome calls this when the user switches away from the call tab.
+  // getUserMedia lives in this frame, so the handler must be registered here.
+  try {
+    if (navigator.mediaSession && typeof navigator.mediaSession.setActionHandler === "function") {
+      navigator.mediaSession.setActionHandler("enterpictureinpicture", function () {
+        var video = findRemoteCameraVideoEl("");
+        if (!video || typeof video.requestPictureInPicture !== "function") {
+          postPipResult({ ok: false, reason: "no-video", action: "auto" });
+          return;
+        }
+        if (document.pictureInPictureElement === video) {
+          postPipResult({ ok: true, already: true, action: "entered" });
+          return;
+        }
+        Promise.resolve(video.requestPictureInPicture()).then(function () {
+          postPipResult({ ok: true, action: "entered" });
+        }).catch(function () {
+          postPipResult({ ok: false, reason: "blocked", action: "auto" });
+        });
+      });
+    }
+  } catch (err) { /* enterpictureinpicture action unsupported */ }
+
   var ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(function () {
     schedule("resize");
   }) : null;

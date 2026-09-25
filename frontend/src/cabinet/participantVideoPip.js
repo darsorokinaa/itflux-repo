@@ -53,6 +53,27 @@ function iframeOrigin(iframe) {
   }
 }
 
+export function registerAutoTabPip(onEnter) {
+  const session = typeof navigator !== "undefined" ? navigator.mediaSession : null;
+  if (!session || typeof session.setActionHandler !== "function" || typeof onEnter !== "function") {
+    return () => {};
+  }
+  try {
+    session.setActionHandler("enterpictureinpicture", (details) => {
+      onEnter(details || {});
+    });
+  } catch {
+    return () => {};
+  }
+  return () => {
+    try {
+      session.setActionHandler("enterpictureinpicture", null);
+    } catch {
+      /* ignore */
+    }
+  };
+}
+
 export function requestIframeParticipantPip(iframe, payload = {}) {
   if (!iframe?.contentWindow) return false;
   const origin = iframeOrigin(iframe) || "*";
@@ -358,6 +379,13 @@ export function createParticipantPipController({ onState } = {}) {
     addListener(window, "message", onWindowMessage);
   }
 
+  const unregisterAutoTabPip = registerAutoTabPip(() => {
+    if (disposed || isPipActive()) return;
+    const video = presentationVideo;
+    if (video) void requestLocalPip(video);
+    requestCrossOriginPip(lastIframe, lastParticipantId);
+  });
+
   const requestPip = async ({
     iframe = null,
     participant = null,
@@ -477,6 +505,7 @@ export function createParticipantPipController({ onState } = {}) {
     dispose() {
       if (disposed) return;
       disposed = true;
+      unregisterAutoTabPip();
       stopAvatarLoop();
       try {
         if (typeof document !== "undefined" && presentationVideo && document.pictureInPictureElement === presentationVideo) {

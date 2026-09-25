@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createParticipantPipController,
+  registerAutoTabPip,
   requestIframeParticipantPip,
   videoPipAvailable,
 } from "./participantVideoPip";
@@ -186,6 +187,18 @@ describe("participantVideoPip", () => {
     await controller.onScreenShareChanged(false, context);
     expect(exitPictureInPicture).not.toHaveBeenCalled();
     controller.dispose();
+  });
+
+  it("registers automatic picture-in-picture for a tab switch", () => {
+    const setActionHandler = vi.fn();
+    vi.stubGlobal("navigator", { mediaSession: { setActionHandler } });
+    const onEnter = vi.fn();
+    const unregister = registerAutoTabPip(onEnter);
+    expect(setActionHandler).toHaveBeenCalledWith("enterpictureinpicture", expect.any(Function));
+    setActionHandler.mock.calls[0][1]({ enterPictureInPictureReason: "contentoccluded" });
+    expect(onEnter).toHaveBeenCalledWith({ enterPictureInPictureReason: "contentoccluded" });
+    unregister();
+    expect(setActionHandler).toHaveBeenLastCalledWith("enterpictureinpicture", null);
   });
 
   it("posts a PiP request into the Jitsi iframe without creating a new conference", () => {

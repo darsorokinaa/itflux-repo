@@ -443,6 +443,8 @@ class Variant(models.Model):
     )
 
     class Meta:
+        verbose_name = "Вариант"
+        verbose_name_plural = "Варианты"
         indexes = [
             models.Index(fields=["owner_teacher", "local_number"], name="variant_owner_local_idx"),
         ]
@@ -932,6 +934,8 @@ class Lesson(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        verbose_name = "Урок"
+        verbose_name_plural = "Уроки"
         ordering = ("-created_at", "id")
         indexes = [
             models.Index(fields=["status", "access_level"], name="lesson_status_access_idx"),

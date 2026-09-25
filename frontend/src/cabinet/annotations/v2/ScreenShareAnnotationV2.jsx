@@ -10,7 +10,6 @@ import {
   participantColor,
 } from "../../screenshare/constants";
 import { computeScreenShareContentRect } from "../../screenshare/contentRect";
-import CabinetIcon from "../../CabinetIcons";
 import { createAnnotationEngine } from "./engine";
 import { annDebug, isAnnDebugEnabled } from "./debug";
 import PresenterToolbar from "./PresenterToolbar";
@@ -18,13 +17,7 @@ import GeometryDebugOverlay from "./GeometryDebugOverlay";
 import { useJitsiShareGeometry } from "./useJitsiShareGeometry";
 import { GEOMETRY_STATUS } from "./jitsiGeometry";
 import { resolvePresenterOverlayPlan } from "./overlays/presenterAdapter";
-import {
-  ANNOTATION_PIP_SIZE,
-  bindPipWindowClose,
-  closeDocumentPipWindow,
-  documentPipAvailable,
-  openDocumentPipWindow,
-} from "./overlays/documentPip";
+import { closeDocumentPipWindow } from "./overlays/documentPip";
 import {
   collapsedAnnotationUi,
   openedAnnotationUi,
@@ -420,36 +413,6 @@ export default function ScreenShareAnnotationV2({
 
   const content = drawableContent ? layout.content : null;
   const dockRect = content || hostBox;
-  const attachPipWindow = (win) => {
-    if (!win) return;
-    pipWindowRef.current = win;
-    setPipWindow(win);
-    bindPipWindowClose(win, () => {
-      if (pipWindowRef.current !== win) return;
-      pipWindowRef.current = null;
-      setPipWindow(null);
-    });
-  };
-  const openToolbar = () => {
-    const next = openedAnnotationUi();
-    setTool(next.tool);
-    setToolbarOpen(next.toolbarOpen);
-    toolbarOpenRef.current = true;
-    if (pipWindowRef.current && !pipWindowRef.current.closed) return;
-    if (!documentPipAvailable()) return;
-    void openDocumentPipWindow(ANNOTATION_PIP_SIZE).then((win) => {
-      if (!win) return;
-      if (!toolbarOpenRef.current) {
-        closeDocumentPipWindow(win);
-        return;
-      }
-      if (pipWindowRef.current && pipWindowRef.current !== win) {
-        closeDocumentPipWindow(win);
-        return;
-      }
-      attachPipWindow(win);
-    });
-  };
   const collapseToolbar = () => {
     const next = collapsedAnnotationUi();
     setTool(next.tool);
@@ -510,15 +473,7 @@ export default function ScreenShareAnnotationV2({
     transform: "none",
   } : undefined;
 
-  const triggerStyle = dockRect ? {
-    left: Math.max(8, dockRect.left + 12),
-    top: Math.max(8, Math.min(dockRect.top + dockRect.height - 48, viewH - 56)),
-    right: "auto",
-    bottom: "auto",
-    transform: "none",
-  } : undefined;
-
-  const toolbarPortal = !toolbar && !showTrigger
+  const toolbarPortal = !toolbar
     ? null
     : pipWindow?.document?.body
       ? createPortal(toolbar, pipWindow.document.body)
@@ -527,23 +482,11 @@ export default function ScreenShareAnnotationV2({
           ref={drag.nodeRef}
           className={`ss-ann-v2-toolbar-slot${compact ? " is-compact" : ""}`}
           style={{
-            ...(drag.positioned ? drag.style : (toolbar ? defaultToolbarStyle : triggerStyle)),
-            transform: drag.positioned ? "none" : (toolbar ? defaultToolbarStyle?.transform : triggerStyle?.transform),
+            ...(drag.positioned ? drag.style : defaultToolbarStyle),
+            transform: drag.positioned ? "none" : defaultToolbarStyle?.transform,
           }}
         >
-          {toolbar || (showTrigger ? (
-            <button
-              type="button"
-              className="ss-ann-v2-reopen"
-              onClick={openToolbar}
-              title="Аннотации"
-              aria-expanded="false"
-              aria-label="Аннотации"
-            >
-              <CabinetIcon name="pencil" />
-              <span>Аннотации</span>
-            </button>
-          ) : null)}
+          {toolbar}
         </div>,
         host,
       );
