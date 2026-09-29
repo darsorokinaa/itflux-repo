@@ -844,7 +844,8 @@ class LessonLearningPlanSyncService:
                 )
 
             enrollments = []
-            for sid in chosen:
+            # Блокировка учеников в _auto_create_enrollment идёт по pk.
+            for sid in sorted(set(chosen)):
                 enrollment = LessonPlanEnrollment.objects.filter(
                     teacher=teacher,
                     student_id=sid,
@@ -895,6 +896,7 @@ class LessonLearningPlanSyncService:
         return [enrollment]
 
     @classmethod
+    @transaction.atomic
     def _auto_create_enrollment(
         cls, event: ScheduleEvent, *, teacher, student_id: int,
     ) -> Optional[LessonPlanEnrollment]:
@@ -903,9 +905,12 @@ class LessonLearningPlanSyncService:
         Не создаёт второй активный план по тому же ученику+предмету.
         Завершённый план при явном добавлении темы из карточки урока
         открывается снова — это не «начать сначала», а продолжить тот же план.
+        Повторный вызов идемпотентен: строка ученика блокируется до проверки.
         """
+        from .plan_schedule import lock_enrollment_scope
         from .plan_subjects import get_plan_subject_label
 
+        lock_enrollment_scope(student_id=student_id)
         student = Student.objects.filter(pk=student_id, teacher=teacher).first()
         if student is None:
             return None

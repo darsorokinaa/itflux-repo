@@ -142,6 +142,28 @@ else:
         )
     ALLOWED_HOSTS = _hosts_list
 
+# Публичные хосты платформы. Запросы с Host: itflux.ru доходят до Django
+# (редирект itflux-academy.ru → itflux.ru), даже если в DJANGO_ALLOWED_HOSTS
+# перечислен только стенд. Уже заданные хосты и маска .itflux.ru не дублируются.
+_CANONICAL_PUBLIC_HOSTS = ("itflux.ru", "www.itflux.ru")
+
+
+def _with_canonical_public_hosts(hosts):
+    merged = list(hosts)
+    for host in _CANONICAL_PUBLIC_HOSTS:
+        covered = any(
+            item == host
+            or item == f".{host}"
+            or (item.startswith(".") and (host == item[1:] or host.endswith(item)))
+            for item in merged
+        )
+        if not covered:
+            merged.append(host)
+    return merged
+
+
+ALLOWED_HOSTS = _with_canonical_public_hosts(ALLOWED_HOSTS)
+
 # Application definition
 INSTALLED_APPS = [
     "daphne",
@@ -356,6 +378,10 @@ CSRF_TRUSTED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ] + _csrf_extra
+for _canonical_host in _CANONICAL_PUBLIC_HOSTS:
+    _canonical_origin = f"https://{_canonical_host}"
+    if _canonical_origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(_canonical_origin)
 CORS_ALLOW_CREDENTIALS = True
 
 CSRF_COOKIE_SAMESITE = "Lax"
@@ -505,6 +531,9 @@ TIMEWEB_AI_AGENT_BASE = (
     os.environ.get("TIMEWEB_AI_AGENT_BASE")
     or "https://agent.timeweb.cloud/api/v1/cloud-ai/agents"
 ).strip().rstrip("/")
+# Отдельный агент генератора рабочих листов. Пустые значения не подменяются агентом помощника.
+TIMEWEB_AI_WORKSHEET_AGENT_ID = (os.environ.get("TIMEWEB_AI_WORKSHEET_AGENT_ID") or "").strip()
+TIMEWEB_AI_WORKSHEET_AGENT_TOKEN = (os.environ.get("TIMEWEB_AI_WORKSHEET_AGENT_TOKEN") or "").strip()
 TIMEWEB_AI_GATEWAY_KEY = (os.environ.get("TIMEWEB_AI_GATEWAY_KEY") or "").strip()
 TIMEWEB_AI_GATEWAY_BASE = (os.environ.get("TIMEWEB_AI_GATEWAY_BASE") or "https://api.timeweb.ai/v1").strip().rstrip("/")
 TIMEWEB_AI_TEXT_MODEL = (os.environ.get("TIMEWEB_AI_TEXT_MODEL") or "").strip()

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { User } from "lucide-react";
 import { getActiveNavTab, NAV_TABS } from "../config/navTabs";
+import SoonModal from "./SoonModal";
 import TaskSearchPanel from "./TaskSearchPanel";
 import { displayName } from "../pages/CabinetAuthPage";
 import { fetchCabinetSession, getCabinetHomePath } from "../utils/cabinetAuth";
@@ -86,10 +87,32 @@ type SessionUser = {
   avatar?: string | null;
 };
 
+function tokenWord(count: number) {
+  const abs = Math.abs(count) % 100;
+  const last = abs % 10;
+  if (abs > 10 && abs < 20) return "токенов";
+  if (last === 1) return "токен";
+  if (last >= 2 && last <= 4) return "токена";
+  return "токенов";
+}
+
+type SpendLine = { key: string; label: string; amount: number };
+
+const FALLBACK_SPEND: SpendLine[] = [
+  { key: "ai_new_task", label: "Новое задание", amount: 3 },
+  { key: "task_rewrite", label: "Переформулировка", amount: 1 },
+  { key: "task_theme_adaptation", label: "Адаптация под тему", amount: 1 },
+  { key: "ai_design", label: "Оформление", amount: 5 },
+  { key: "theory_block", label: "Теория", amount: 2 },
+  { key: "image_generation", label: "Картинка к заданию", amount: 8 },
+];
+
 function CabinetNavButton({ onNavigate }: { onNavigate?: () => void }) {
   const [cabinetAuthed, setCabinetAuthed] = useState(false);
   const [user, setUser] = useState<SessionUser | null>(null);
   const [avatarUrl, setAvatarUrl] = useState("");
+  const [tokens, setTokens] = useState<number | null>(null);
+  const [spend, setSpend] = useState<SpendLine[]>(FALLBACK_SPEND);
 
   useEffect(() => {
     let cancelled = false;
@@ -103,12 +126,29 @@ function CabinetNavButton({ onNavigate }: { onNavigate?: () => void }) {
           setCabinetAuthed(authed);
           setUser(nextUser);
           setAvatarUrl(authed ? resolveUserAvatarUrl(nextUser) : "");
+          if (!authed || nextUser?.role !== "teacher") {
+            setTokens(null);
+            return;
+          }
+          fetch("/api/cabinet/ai/worksheets/balance/", { credentials: "same-origin" })
+            .then((response) => (response.ok ? response.json() : null))
+            .then((payload) => {
+              if (cancelled || !payload || typeof payload.balance !== "number") return;
+              setTokens(payload.balance);
+              if (Array.isArray(payload.costs) && payload.costs.length) {
+                setSpend(payload.costs.filter((item: SpendLine) => item && typeof item.amount === "number" && item.label));
+              }
+            })
+            .catch(() => {
+              if (!cancelled) setTokens(null);
+            });
         })
         .catch(() => {
           if (cancelled) return;
           setCabinetAuthed(false);
           setUser(null);
           setAvatarUrl("");
+          setTokens(null);
         });
     };
 
@@ -117,11 +157,14 @@ function CabinetNavButton({ onNavigate }: { onNavigate?: () => void }) {
     const onVisibility = () => {
       if (document.visibilityState === "visible") load();
     };
+    const onTokens = () => load();
     window.addEventListener("focus", onFocus);
+    window.addEventListener("itflux:ai-tokens", onTokens);
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       cancelled = true;
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener("itflux:ai-tokens", onTokens);
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
@@ -135,7 +178,34 @@ function CabinetNavButton({ onNavigate }: { onNavigate?: () => void }) {
     ? (isTeacher ? `Кабинет учителя — ${name}` : `Личный кабинет — ${name}`)
     : "Личный кабинет";
 
+  const tokenLabel = tokens == null ? "" : `Осталось ${tokens} ${tokenWord(tokens)}`;
+  const aiSpend = spend.filter((item) => item.amount > 0 && item.key !== "base_worksheet_generation" && item.key !== "task_from_bank");
+  const spendOf = (key: string) => spend.find((item) => item.key === key)?.amount;
+  const typicalHelp = 10 * (spendOf("ai_new_task") ?? 3) + (spendOf("ai_design") ?? 5);
+
   return (
+    <div className="cabinet-nav-account">
+    {isTeacher && tokens != null ? (
+      <span className="cabinet-nav-tokens" tabIndex={0} aria-label={tokenLabel}>
+        <strong>{tokens}</strong>
+        <span>{tokenWord(tokens)}</span>
+        <span className="cabinet-nav-tokens__tip" role="tooltip">
+          <strong>Токены — только на помощь ИИ</strong>
+          <p>Рабочий лист можно собрать и править бесплатно. Сколько листов доступно, зависит от тарифа.</p>
+          <p>Токены списываются, когда ИИ помогает:</p>
+          <ul>
+            {aiSpend.map((item) => (
+              <li key={item.key}>
+                <span>{item.label}</span>
+                <b>{item.amount}</b>
+              </li>
+            ))}
+          </ul>
+          <p>Например, 10 новых заданий и оформление — {typicalHelp} токенов. Пока конструктор закрыт, баланс сохраняется.</p>
+          <Link className="cabinet-nav-tokens__link" to="/pricing">Тарифы</Link>
+        </span>
+      </span>
+    ) : null}
     <Link
       to={href}
       className={`cabinet-nav-button${showAvatarMode ? " cabinet-nav-button--avatar" : ""}`}
@@ -172,6 +242,7 @@ function CabinetNavButton({ onNavigate }: { onNavigate?: () => void }) {
         <span className="cabinet-nav-button__text">Личный кабинет</span>
       )}
     </Link>
+    </div>
   );
 }
 
@@ -180,6 +251,7 @@ export default function Nav() {
   const active = getActiveNavTab(pathname);
   const [menuOpen, setMenuOpen] = useState(false);
   const [isTeacher, setIsTeacher] = useState(false);
+  const [soonTitle, setSoonTitle] = useState("");
 
   useEffect(() => {
     setMenuOpen(false);
@@ -264,6 +336,25 @@ export default function Nav() {
                   );
                 }
 
+                if (tab.soon) {
+                  return (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      className={className}
+                      role="tab"
+                      aria-selected={false}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        setSoonTitle(tab.label);
+                      }}
+                    >
+                      <span className="site-nav__tab-label">{tab.label}</span>
+                      <span className="site-nav__tab-badge">скоро</span>
+                    </button>
+                  );
+                }
+
                 return (
                   <Link
                     key={tab.key}
@@ -300,6 +391,7 @@ export default function Nav() {
           </div>
         </div>
       </nav>
+      {soonTitle ? <SoonModal title={soonTitle} onClose={() => setSoonTitle("")} /> : null}
     </header>
   );
 }

@@ -120,9 +120,10 @@ def _audience(event) -> tuple[str, list[str]]:
     if not getattr(event, "pk", None):
         return "", []
     student_names = []
-    group_names = []
     try:
-        participants = event.participants.select_related("student", "group").all()[:6]
+        # У ScheduleEventParticipant есть student/user/teacher, поля group нет.
+        # Группа занятия живёт на самом ScheduleEvent и читается ниже.
+        participants = list(event.participants.select_related("student")[:6])
     except Exception:
         participants = []
     for participant in participants:
@@ -131,16 +132,8 @@ def _audience(event) -> tuple[str, list[str]]:
             name = str(getattr(student, "full_name", "") or "").strip()
             if name:
                 student_names.append(name)
-            continue
-        group = getattr(participant, "group", None)
-        if getattr(participant, "group_id", None) and group is not None:
-            name = str(getattr(group, "title", "") or "").strip()
-            if name:
-                group_names.append(name)
     if student_names:
         return "student", student_names
-    if group_names:
-        return "group", group_names
     student = None
     group = None
     try:

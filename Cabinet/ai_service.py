@@ -880,7 +880,11 @@ def _run_text_then_images(
         if isinstance(user_content, str) and cap_note:
             messages[-1]["content"] = prompt + cap_note
 
-        result = complete_chat(messages, max_tokens=plan.ai_max_output_tokens)
+        result = complete_chat(
+            messages,
+            max_tokens=plan.ai_max_output_tokens,
+            provider_context="default",
+        )
         billed = True
         assistant_text = _visible_assistant_text(result.content)
         image_specs = []

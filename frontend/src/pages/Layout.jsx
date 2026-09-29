@@ -28,6 +28,7 @@ function Layout() {
     /^\/cabinet\/boards\/[^/]+$/.test(pathNorm)
     || /^\/teacher\/boards\/[^/]+$/.test(pathNorm);
   const isBookingPage = pathname.startsWith("/book/");
+  const isWorksheetPage = pathNorm === "/worksheets" || pathNorm === "/worksheets/ai";
   const isChromelessPage =
     isLessonViewerPage || isInterestingViewerPage || isInteractivePlayPage || isBoardEditorPage;
   /** Экзамен/вариант: своя залипающая панель действий снизу — нижнюю навигацию там не показываем. */
@@ -124,12 +125,13 @@ function Layout() {
   }, [pathname]);
 
   const showMobileTabBar =
-    !isLessonOrHomeworkContext && !isChromelessPage && !isExamVariantPage && !isCabinetArea && !isBookingPage;
+    !isLessonOrHomeworkContext && !isChromelessPage && !isExamVariantPage && !isCabinetArea && !isBookingPage && !isWorksheetPage;
 
   const showSiteFooter =
     !isChromelessPage &&
     !isLessonOrHomeworkContext &&
     !isBookingPage &&
+    !isWorksheetPage &&
     (!isCabinetArea || pathname === "/cabinet/login");
 
   /** Скрываем на полноэкранных сценариях, где кнопка мешает работе. */
@@ -139,7 +141,9 @@ function Layout() {
     !isHomeworkEmbedContext &&
     !isVideoMeetingPage &&
     !isBoardEditorPage &&
-    !isBookingPage;
+    !isBookingPage &&
+    !isWorksheetPage &&
+    !pathNorm.startsWith("/cabinet/worksheets");
 
   return (
     <div
@@ -158,7 +162,7 @@ function Layout() {
         {/* боковое меню */}
       </aside>
 
-      <main className={isMarketingHome || isChromelessPage || isBookingPage ? "w-full" : "container mt-4"}>
+      <main className={isMarketingHome || isChromelessPage || isBookingPage || isWorksheetPage ? "w-full" : "container mt-4"}>
         <Outlet />
       </main>
 

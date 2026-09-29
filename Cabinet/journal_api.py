@@ -6,6 +6,7 @@ import csv
 import io
 from decimal import Decimal, InvalidOperation
 
+from django.db import OperationalError, transaction
 from django.db.models import Avg, Count, Prefetch, Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
@@ -51,6 +52,7 @@ from .journal_service import (
     fill_status_for_journal,
     format_overall_score_display,
     get_or_create_journal,
+    lock_schedule_events_for_plan_sync,
     get_or_create_journal_settings,
     publish_record,
     resolve_homework_for_journal_record,
@@ -66,6 +68,14 @@ from .homework_from_review import HomeworkFromReviewError
 from .models import ScheduleEvent, Student, StudentGroup
 from .permissions import IsCabinetStudent, IsCabinetTeacher
 from .student_errors import collect_student_errors, create_homework_from_student_errors
+
+
+def _is_deadlock(exc: OperationalError) -> bool:
+    message = str(exc).lower()
+    if "deadlock detected" in message:
+        return True
+    cause = getattr(exc, "__cause__", None)
+    return cause is not None and cause.__class__.__name__ == "DeadlockDetected"
 
 
 def _err(exc: Exception) -> Response:
@@ -331,15 +341,26 @@ class JournalLessonCompleteView(APIView):
 
     def post(self, request, lesson_id: int):
         event = get_object_or_404(ScheduleEvent, pk=lesson_id, owner=request.user)
-        try:
-            journal = get_or_create_journal(event, request.user)
-            if request.data:
-                journal = update_journal(journal, request.user, request.data)
-            journal = complete_journal(
-                journal, request.user, force=bool(request.data.get("force"))
-            )
-        except JournalError as e:
-            return _err(e)
+        journal = None
+        for attempt in range(3):
+            try:
+                with transaction.atomic():
+                    # Все занятия плана — до журнала и в порядке pk.
+                    lock_schedule_events_for_plan_sync(event)
+                    journal = get_or_create_journal(event, request.user)
+                    if request.data:
+                        journal = update_journal(journal, request.user, request.data)
+                    journal = complete_journal(
+                        journal, request.user, force=bool(request.data.get("force"))
+                    )
+                break
+            except JournalError as e:
+                return _err(e)
+            except OperationalError as exc:
+                if not _is_deadlock(exc) or attempt == 2:
+                    raise
+        if journal is None:
+            raise OperationalError("deadlock detected")
         journal = LessonJournal.objects.prefetch_related(
             "student_records__criterion_scores__criterion",
             "student_records__tags",

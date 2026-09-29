@@ -385,7 +385,9 @@ def get_or_create_journal(event: ScheduleEvent, teacher: User) -> LessonJournal:
     ensure_default_tags(teacher)
     ensure_default_templates(teacher)
 
-    journal = LessonJournal.objects.filter(schedule_event=event).select_for_update().first()
+    # Событие раньше журнала: complete и правки расписания держат тот же порядок.
+    ScheduleEvent.objects.select_for_update(of=("self",)).filter(pk=event.pk).order_by("pk").first()
+    journal = LessonJournal.objects.filter(schedule_event=event).select_for_update(of=("self",)).order_by("pk").first()
     if journal:
         _ensure_student_records(journal, event, teacher)
         return journal
@@ -416,7 +418,12 @@ def get_or_create_journal(event: ScheduleEvent, teacher: User) -> LessonJournal:
             edit_token=secrets.token_hex(16),
         )
     except IntegrityError:
-        journal = LessonJournal.objects.filter(schedule_event=event).select_for_update().first()
+        journal = (
+            LessonJournal.objects.filter(schedule_event=event)
+            .select_for_update(of=("self",))
+            .order_by("pk")
+            .first()
+        )
         if journal is None:
             raise
         _ensure_student_records(journal, event, teacher)
@@ -1377,7 +1384,14 @@ def update_journal(
             journal.actual_topic = journal.planned_topic
             changed.append("actual_topic")
 
-    records_payload = payload.get("student_records") or []
+    records_payload = list(payload.get("student_records") or [])
+    records_payload.sort(
+        key=lambda rp: (
+            rp.get("id") is None,
+            rp.get("id") or 0,
+            rp.get("student_id") or 0,
+        )
+    )
     for rp in records_payload:
         _update_student_record(journal, teacher, rp)
         changed.append("student_records")
@@ -1564,9 +1578,43 @@ def _acquire_edit_lock(journal: LessonJournal, teacher: User, tab_token: str) ->
     )
 
 
+def lock_schedule_events_for_plan_sync(event) -> None:
+    """Блокирует занятия плана по возрастанию pk до журнала и realign.
+
+    Два завершения уроков одного плана иначе берут события в разном порядке
+    и ловят deadlock.
+    """
+    from .models import ScheduleEvent
+    from .plan_schedule import events_for_enrollment, get_active_enrollment
+
+    ids = {event.pk}
+    enrollment = get_active_enrollment(event)
+    if enrollment is not None:
+        owner = getattr(event, "owner", None) or enrollment.teacher
+        rows = events_for_enrollment(enrollment, owner)
+        if hasattr(rows, "values_list"):
+            ids.update(rows.values_list("pk", flat=True))
+        else:
+            ids.update(row.pk for row in rows)
+    ordered = sorted(pk for pk in ids if pk)
+    if not ordered:
+        return
+    list(
+        ScheduleEvent.objects.select_for_update(of=("self",))
+        .filter(pk__in=ordered)
+        .order_by("pk")
+    )
+
+
 @transaction.atomic
 def complete_journal(journal: LessonJournal, teacher: User, *, force: bool = False) -> LessonJournal:
-    journal = LessonJournal.objects.select_for_update().select_related("schedule_event").get(pk=journal.pk)
+    event_id = journal.schedule_event_id
+    ScheduleEvent.objects.select_for_update(of=("self",)).filter(pk=event_id).order_by("pk").first()
+    journal = (
+        LessonJournal.objects.select_for_update(of=("self",))
+        .select_related("schedule_event")
+        .get(pk=journal.pk)
+    )
     already_completed = journal.status == JournalStatus.COMPLETED
 
     settings = get_or_create_journal_settings(teacher)

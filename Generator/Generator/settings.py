@@ -178,6 +178,27 @@ if DEBUG or _TESTING_NESTED:
 else:
     ALLOWED_HOSTS = _hosts_n or []
 
+# Публичные хосты платформы. Запросы с Host: itflux.ru доходят до Django,
+# даже если DJANGO_ALLOWED_HOSTS задаёт только стенд.
+_CANONICAL_PUBLIC_HOSTS = ("itflux.ru", "www.itflux.ru")
+
+
+def _with_canonical_public_hosts(hosts):
+    merged = list(hosts)
+    for host in _CANONICAL_PUBLIC_HOSTS:
+        covered = any(
+            item == host
+            or item == f".{host}"
+            or (item.startswith(".") and (host == item[1:] or host.endswith(item)))
+            for item in merged
+        )
+        if not covered:
+            merged.append(host)
+    return merged
+
+
+ALLOWED_HOSTS = _with_canonical_public_hosts(ALLOWED_HOSTS)
+
 
 # Application definition
 
@@ -333,6 +354,10 @@ CSRF_TRUSTED_ORIGINS = [
     "https://*.replit.dev",
     "https://*.repl.co",
 ] + _extra_origins
+for _canonical_host in _CANONICAL_PUBLIC_HOSTS:
+    _canonical_origin = f"https://{_canonical_host}"
+    if _canonical_origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(_canonical_origin)
 
 CSRF_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_HTTPONLY = False  # React должен читать cookie
@@ -553,6 +578,15 @@ TBANK_FFD_VERSION = (os.environ.get("TBANK_FFD_VERSION") or "1.05").strip()
 TBANK_RECEIPT_EMAIL = (os.environ.get("TBANK_RECEIPT_EMAIL") or "").strip()
 ANON_VARIANTS_MONTHLY_LIMIT = int(os.environ.get("ANON_VARIANTS_MONTHLY_LIMIT", "5"))
 ANON_WORKBOOKS_MONTHLY_LIMIT = int(os.environ.get("ANON_WORKBOOKS_MONTHLY_LIMIT", "3"))
+
+# Общий адрес агентов Timeweb. ID и ключ помощника здесь не задаём.
+TIMEWEB_AI_AGENT_BASE = (
+    os.environ.get("TIMEWEB_AI_AGENT_BASE")
+    or "https://agent.timeweb.cloud/api/v1/cloud-ai/agents"
+).strip().rstrip("/")
+# Отдельный агент генератора рабочих листов.
+TIMEWEB_AI_WORKSHEET_AGENT_ID = (os.environ.get("TIMEWEB_AI_WORKSHEET_AGENT_ID") or "").strip()
+TIMEWEB_AI_WORKSHEET_AGENT_TOKEN = (os.environ.get("TIMEWEB_AI_WORKSHEET_AGENT_TOKEN") or "").strip()
 
 # Web Push (VAPID). Generate with: python -c "from py_vapid import Vapid01; ..."
 # or leave empty — push UI will show that the channel is not configured yet.

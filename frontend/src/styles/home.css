@@ -423,6 +423,7 @@ a.home-updates__card {
 .site-nav__tab {
   display: inline-flex;
   align-items: center;
+  cursor: pointer;
   gap: 6px;
   padding: 8px 14px;
   border-radius: var(--r-pill);

@@ -198,6 +198,8 @@
 .cabinet-nav-item {
   width: 44px;
   height: 44px;
+  font: inherit;
+  text-align: left;
   border-radius: 14px;
   color: var(--cb-text-3);
   display: flex;

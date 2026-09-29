@@ -1,0 +1,60 @@
+.soon-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.soon-modal__card {
+  width: min(100%, 420px);
+  padding: 28px 28px 24px;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.2);
+  color: #0f172a;
+  text-align: left;
+}
+
+.soon-modal__kicker {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #2563eb;
+}
+
+.soon-modal__card h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.soon-modal__card p {
+  margin: 10px 0 0;
+  font-size: 15px;
+  line-height: 1.45;
+  color: #475569;
+}
+
+.soon-modal__card button {
+  margin-top: 20px;
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 16px;
+  background: #2563eb;
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.soon-modal__card button:hover {
+  background: #1d4ed8;
+}

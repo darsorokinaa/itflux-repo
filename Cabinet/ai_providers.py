@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import logging
 from dataclasses import dataclass, field
+from io import BytesIO
 from typing import Any, Callable
 
 import requests
@@ -66,16 +67,51 @@ def reset_provider_overrides():
     set_provider_overrides(complete_chat=None, generate_image=None)
 
 
-def _agent_url() -> str:
-    agent_id = (getattr(settings, "TIMEWEB_AI_AGENT_ID", "") or "").strip()
+PROVIDER_DEFAULT = "default"
+PROVIDER_WORKSHEET = "worksheet"
+WORKSHEET_AGENT_MISSING = (
+    "Генератор рабочих листов не подключён: задайте TIMEWEB_AI_WORKSHEET_AGENT_ID "
+    "и TIMEWEB_AI_WORKSHEET_AGENT_TOKEN."
+)
+
+
+def _proxy_source() -> str:
+    return (getattr(settings, "TIMEWEB_AI_PROXY_SOURCE", "") or "itflux").strip() or "itflux"
+
+
+def _agent_headers(token: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "x-proxy-source": _proxy_source(),
+    }
+
+
+def _agent_root(agent_id: str = "") -> str:
+    chosen = (agent_id or getattr(settings, "TIMEWEB_AI_AGENT_ID", "") or "").strip()
     base = (getattr(settings, "TIMEWEB_AI_AGENT_BASE", "") or "").rstrip("/")
-    if not agent_id or not base:
+    if not chosen or not base:
         return ""
-    return f"{base}/{agent_id}/v1/chat/completions"
+    return f"{base}/{chosen}"
+
+
+def _agent_url(agent_id: str = "") -> str:
+    root = _agent_root(agent_id)
+    if not root:
+        return ""
+    return f"{root}/v1/chat/completions"
 
 
 def _agent_token() -> str:
     return (getattr(settings, "TIMEWEB_AI_AGENT_TOKEN", "") or "").strip()
+
+
+def _worksheet_agent_id() -> str:
+    return (getattr(settings, "TIMEWEB_AI_WORKSHEET_AGENT_ID", "") or "").strip()
+
+
+def _worksheet_agent_token() -> str:
+    return (getattr(settings, "TIMEWEB_AI_WORKSHEET_AGENT_TOKEN", "") or "").strip()
 
 
 def _gateway_key() -> str:
@@ -92,6 +128,14 @@ def text_provider_configured() -> bool:
     return bool(_agent_token() and _agent_url()) or bool(_gateway_key())
 
 
+def worksheet_text_provider_configured() -> bool:
+    """Агент листов задан отдельно. Агент помощника и шлюз сюда не подходят."""
+    if _complete_chat_impl is not None:
+        return True
+    agent_id = _worksheet_agent_id()
+    return bool(agent_id and _worksheet_agent_token() and _agent_url(agent_id))
+
+
 def image_provider_configured() -> bool:
     if _generate_image_impl is not None:
         return True
@@ -104,14 +148,133 @@ def complete_chat(
     max_tokens: int = 2500,
     timeout: int = 90,
     model: str = "",
+    provider_context: str = PROVIDER_DEFAULT,
 ) -> TextResult:
+    context = (provider_context or PROVIDER_DEFAULT).strip()
     if _complete_chat_impl is not None:
-        return _complete_chat_impl(messages, max_tokens=max_tokens, timeout=timeout, model=model)
+        return _complete_chat_impl(
+            messages,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            model=model,
+            provider_context=context,
+        )
+    if context == PROVIDER_WORKSHEET:
+        agent_id = _worksheet_agent_id()
+        token = _worksheet_agent_token()
+        url = _agent_url(agent_id) if agent_id else ""
+        if not token or not url:
+            raise ProviderError(WORKSHEET_AGENT_MISSING, billed=False, retryable=False)
+        return _timeweb_agent_chat(
+            messages,
+            url=url,
+            token=token,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            model=model,
+            provider="timeweb_worksheet_agent",
+        )
+    if context != PROVIDER_DEFAULT:
+        raise ProviderError("Неизвестный контекст AI-провайдера.", billed=False, retryable=False)
     if _agent_token() and _agent_url():
-        return _timeweb_agent_chat(messages, max_tokens=max_tokens, timeout=timeout, model=model)
+        return _timeweb_agent_chat(
+            messages,
+            url=_agent_url(),
+            token=_agent_token(),
+            max_tokens=max_tokens,
+            timeout=timeout,
+            model=model,
+        )
     if _gateway_key():
         return _timeweb_gateway_chat(messages, max_tokens=max_tokens, timeout=timeout, model=model)
     raise ProviderError(USER_UNAVAILABLE, billed=False, retryable=True)
+
+
+def generate_worksheet_background(prompt: str, *, timeout: int = 180) -> str:
+    """Картинка фона листа через Responses API агента.
+
+    Документация агента: POST /v1/responses с инструментом image_generation.
+    Байты лежат в output[].result, а не в ссылке на хранилище.
+    В тестах, где подменён чат, сетевой вызов не делается.
+    """
+    return _agent_image(prompt, size="1024x1536", thumb=(1200, 1800), timeout=timeout)
+
+
+def generate_content_image(prompt: str, *, timeout: int = 180) -> str:
+    """Иллюстрация внутри задания: квадратный кадр, объект по центру."""
+    return _agent_image(prompt, size="1024x1024", thumb=(960, 960), timeout=timeout)
+
+
+def _agent_image(prompt: str, *, size: str, thumb: tuple[int, int], timeout: int) -> str:
+    if _complete_chat_impl is not None or _generate_image_impl is not None:
+        return ""
+    agent_id = _worksheet_agent_id()
+    token = _worksheet_agent_token()
+    root = _agent_root(agent_id)
+    if not agent_id or not token or not root:
+        return ""
+    try:
+        data = _post_json(
+            f"{root}/v1/responses",
+            {
+                "input": (prompt or "")[:4000],
+                "tools": [{
+                    "type": "image_generation",
+                    "size": size,
+                    "quality": "medium",
+                    "output_format": "jpeg",
+                    "output_compression": 70,
+                    "background": "opaque",
+                }],
+                "tool_choice": "required",
+            },
+            _agent_headers(token),
+            timeout,
+        )
+    except ProviderError:
+        logger.warning("worksheet image request failed")
+        return ""
+    return _background_from_agent_payload(data, thumb=thumb)
+
+
+def _background_from_agent_payload(data: dict, thumb: tuple[int, int] = (1200, 1800)) -> str:
+    encoded = ""
+    for item in data.get("output") or []:
+        if not isinstance(item, dict) or item.get("type") != "image_generation_call":
+            continue
+        result = item.get("result") or ""
+        if isinstance(result, str) and len(result) > 1000:
+            encoded = result
+            break
+    if not encoded:
+        return ""
+    try:
+        raw = base64.b64decode(encoded, validate=False)
+    except (ValueError, TypeError):
+        logger.warning("worksheet background image is not base64")
+        return ""
+    if len(raw) < 1000:
+        return ""
+    return _jpeg_data_url(raw, thumb=thumb)
+
+
+def _jpeg_data_url(raw: bytes, thumb: tuple[int, int] = (1200, 1800)) -> str:
+    try:
+        from PIL import Image
+    except ImportError:
+        logger.warning("Pillow is not installed, worksheet background skipped")
+        return ""
+    try:
+        image = Image.open(BytesIO(raw))
+        image = image.convert("RGB")
+        image.thumbnail(thumb, Image.Resampling.LANCZOS)
+        out = BytesIO()
+        image.save(out, format="JPEG", quality=74, optimize=True)
+    except Exception:
+        logger.warning("worksheet background image could not be encoded")
+        return ""
+    payload = base64.b64encode(out.getvalue()).decode("ascii")
+    return "data:image/jpeg;base64," + payload
 
 
 def generate_image(prompt: str, *, size: str = "1024x1024", timeout: int = 120) -> ImageResult:
@@ -170,8 +333,16 @@ def _parse_chat_payload(data: dict, provider: str, fallback_model: str) -> TextR
     )
 
 
-def _timeweb_agent_chat(messages, *, max_tokens: int, timeout: int, model: str) -> TextResult:
-    url = _agent_url()
+def _timeweb_agent_chat(
+    messages,
+    *,
+    url: str,
+    token: str,
+    max_tokens: int,
+    timeout: int,
+    model: str,
+    provider: str = "timeweb_agent",
+) -> TextResult:
     payload: dict[str, Any] = {
         "messages": messages,
         "max_tokens": max(64, int(max_tokens or 2500)),
@@ -179,16 +350,8 @@ def _timeweb_agent_chat(messages, *, max_tokens: int, timeout: int, model: str) 
     }
     if model:
         payload["model"] = model
-    data = _post_json(
-        url,
-        payload,
-        {
-            "Authorization": f"Bearer {_agent_token()}",
-            "Content-Type": "application/json",
-        },
-        timeout,
-    )
-    result = _parse_chat_payload(data, "timeweb_agent", model)
+    data = _post_json(url, payload, _agent_headers(token), timeout)
+    result = _parse_chat_payload(data, provider, model)
     if not result.content:
         raise ProviderError(USER_UNAVAILABLE, billed=True, retryable=False)
     return result

@@ -279,23 +279,27 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
                     {"detail": "Предмет плана не совпадает с предметом ученика."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            already = LessonPlanEnrollment.objects.filter(
-                teacher=self.get_teacher(),
-                student=student,
-                student_subject=subject,
-            ).exclude(status__in=[EnrollmentStatus.COMPLETED, EnrollmentStatus.CANCELLED]).first()
-            if already is None:
-                already = LessonPlanEnrollment.objects.create(
+            with transaction.atomic():
+                from .plan_schedule import lock_enrollment_scope
+
+                lock_enrollment_scope(student_id=student.pk)
+                already = LessonPlanEnrollment.objects.filter(
                     teacher=self.get_teacher(),
-                    plan=plan,
                     student=student,
                     student_subject=subject,
-                    format="individual",
-                    status=EnrollmentStatus.ACTIVE,
-                )
-            elif already.plan_id != plan.pk:
-                already.plan = plan
-                already.save(update_fields=["plan", "updated_at"])
+                ).exclude(status__in=[EnrollmentStatus.COMPLETED, EnrollmentStatus.CANCELLED]).first()
+                if already is None:
+                    already = LessonPlanEnrollment.objects.create(
+                        teacher=self.get_teacher(),
+                        plan=plan,
+                        student=student,
+                        student_subject=subject,
+                        format="individual",
+                        status=EnrollmentStatus.ACTIVE,
+                    )
+                elif already.plan_id != plan.pk:
+                    already.plan = plan
+                    already.save(update_fields=["plan", "updated_at"])
             if start_date or date_interval:
                 from .plan_dates import apply_enrollment_start_dates
                 apply_enrollment_start_dates(
@@ -375,22 +379,26 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
                         {"detail": "Предмет плана не совпадает с предметом ученика."},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
-                enrollment = LessonPlanEnrollment.objects.filter(
-                    student_subject=subject,
-                    status__in=[EnrollmentStatus.ACTIVE, EnrollmentStatus.PAUSED],
-                ).first()
-                if enrollment:
-                    enrollment.plan = plan
-                    enrollment.save(update_fields=["plan", "updated_at"])
-                else:
-                    enrollment = LessonPlanEnrollment.objects.create(
-                        teacher=self.get_teacher(),
-                        plan=plan,
-                        student=student,
+                with transaction.atomic():
+                    from .plan_schedule import lock_enrollment_scope
+
+                    lock_enrollment_scope(student_id=student.pk)
+                    enrollment = LessonPlanEnrollment.objects.filter(
                         student_subject=subject,
-                        format="individual",
-                        status=EnrollmentStatus.ACTIVE,
-                    )
+                        status__in=[EnrollmentStatus.ACTIVE, EnrollmentStatus.PAUSED],
+                    ).first()
+                    if enrollment:
+                        enrollment.plan = plan
+                        enrollment.save(update_fields=["plan", "updated_at"])
+                    else:
+                        enrollment = LessonPlanEnrollment.objects.create(
+                            teacher=self.get_teacher(),
+                            plan=plan,
+                            student=student,
+                            student_subject=subject,
+                            format="individual",
+                            status=EnrollmentStatus.ACTIVE,
+                        )
         if dates_provided:
             if enrollment is None:
                 enrollment = LessonPlanEnrollment.objects.filter(
@@ -1643,13 +1651,13 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
             context={"teacher": self.get_teacher()},
         )
         serializer.is_valid(raise_exception=True)
-        item = serializer.save(plan=plan)
-        plan.lessons_count = plan.items.count()
-        plan.save(update_fields=["lessons_count", "updated_at"])
-        LessonPlanEnrollment.objects.filter(
-            plan=plan,
-            status=EnrollmentStatus.COMPLETED,
-        ).update(status=EnrollmentStatus.ACTIVE, updated_at=timezone.now())
+        with transaction.atomic():
+            item = serializer.save(plan=plan)
+            plan.lessons_count = plan.items.count()
+            plan.save(update_fields=["lessons_count", "updated_at"])
+            from .plan_schedule import reopen_completed_enrollments
+
+            reopen_completed_enrollments(plan)
         return Response(LessonPlanItemSerializer(item).data, status=status.HTTP_201_CREATED)
 
 
@@ -1897,6 +1905,16 @@ class LessonPlanEnrollmentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
                 student=student,
                 student__teacher=self.get_teacher(),
             )
+        with transaction.atomic():
+            from .plan_schedule import lock_enrollment_scope
+
+            lock_enrollment_scope(
+                student_id=getattr(student, "pk", None),
+                group_id=getattr(group, "pk", None),
+            )
+            return self._create_enrollment_locked(serializer, student, group, student_subject, plan)
+
+    def _create_enrollment_locked(self, serializer, student, group, student_subject, plan):
         existing_qs = LessonPlanEnrollment.objects.filter(
             teacher=self.get_teacher(),
         ).exclude(status__in=[EnrollmentStatus.COMPLETED, EnrollmentStatus.CANCELLED])

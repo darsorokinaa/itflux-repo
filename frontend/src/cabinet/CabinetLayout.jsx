@@ -27,6 +27,7 @@ import PwaEnableNotificationsPrompt from "./pwa/PwaEnableNotificationsPrompt";
 import PwaInstallPrompt from "./pwa/PwaInstallPrompt";
 import { useSeasonalTheme } from "../seasonal/SeasonalThemeProvider";
 import { openSupport } from "./support";
+import SoonModal from "../components/SoonModal";
 import { rememberReturnPath } from "../accessGate/accessGate";
 import TimewebAiEmbed, { planHasTimewebAi } from "./TimewebAiEmbed";
 import "../styles/cabinet-dashboard.css";
@@ -45,7 +46,7 @@ function SoonBadge() {
   return <span className="cabinet-soon-badge">скоро</span>;
 }
 
-function NavSidebarItem({ item, active, badgeCount = 0 }) {
+function NavSidebarItem({ item, active, badgeCount = 0, onSoon }) {
   const className = [
     "cabinet-nav-item",
     item.accent ? "cabinet-nav-item--accent" : "",
@@ -97,6 +98,14 @@ function NavSidebarItem({ item, active, badgeCount = 0 }) {
     );
   }
 
+  if (item.soon) {
+    return (
+      <button type="button" className={className} aria-label={ariaLabel} onClick={() => onSoon?.(item)}>
+        {content}
+      </button>
+    );
+  }
+
   return (
     <Link
       to={item.path}
@@ -118,6 +127,7 @@ export default function CabinetLayout() {
   const [user, setUser] = useState(null);
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutConfirm, setLogoutConfirm] = useState(false);
+  const [soonTitle, setSoonTitle] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
@@ -406,6 +416,10 @@ export default function CabinetLayout() {
                     item={item}
                     active={isCabinetNavActive(location.pathname, item)}
                     badgeCount={navBadgeForItem(item.id)}
+                    onSoon={(entry) => {
+                      setNavOpen(false);
+                      setSoonTitle(entry.label);
+                    }}
                   />
                 ))}
               </div>
@@ -608,6 +622,7 @@ export default function CabinetLayout() {
           ) : null}
         </header>
 
+        {soonTitle ? <SoonModal title={soonTitle} onClose={() => setSoonTitle("")} /> : null}
         <div className={contentClass}>
           {isDashboard ? (
             <>

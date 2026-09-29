@@ -694,6 +694,83 @@ def mark_plan_item_skipped(plan_item, event=None):
     plan_item.save(update_fields=update_fields)
 
 
+def lock_enrollment_scope(*, student_id=None, group_id=None):
+    """Сериализует запись активного назначения для одного ученика или группы.
+
+    Вызывать внутри transaction.atomic(). SELECT FOR UPDATE по пустому
+    Enrollment ничего не блокирует, поэтому берём строку ученика или группы.
+    """
+    from django.db import transaction
+
+    from .models import Student, StudentGroup
+
+    if not transaction.get_connection().in_atomic_block:
+        raise RuntimeError("lock_enrollment_scope требует transaction.atomic()")
+    if student_id:
+        Student.objects.select_for_update().filter(pk=student_id).order_by("pk").first()
+    if group_id:
+        StudentGroup.objects.select_for_update().filter(pk=group_id).order_by("pk").first()
+
+
+def active_enrollment_conflicts(enrollment) -> bool:
+    """Есть ли уже active/paused назначение с тем же ключом unique-ограничения."""
+    qs = LessonPlanEnrollment.objects.filter(
+        teacher_id=enrollment.teacher_id,
+        status__in=[EnrollmentStatus.ACTIVE, EnrollmentStatus.PAUSED],
+    ).exclude(pk=enrollment.pk)
+    if enrollment.student_id and enrollment.student_subject_id:
+        return qs.filter(
+            student_id=enrollment.student_id,
+            student_subject_id=enrollment.student_subject_id,
+        ).exists()
+    if enrollment.student_id and not enrollment.student_subject_id:
+        return qs.filter(
+            student_id=enrollment.student_id,
+            student_subject__isnull=True,
+        ).exists()
+    if enrollment.group_id:
+        return qs.filter(group_id=enrollment.group_id).exists()
+    return False
+
+
+def reopen_completed_enrollments(plan):
+    """Вернуть завершённые назначения плана в active, не нарушая partial unique.
+
+    Несколько completed по одному ученику и предмету допустимы. Массовый
+    UPDATE всех сразу в active нарушает cabinet_uniq_active_enrollment_student_subject.
+    """
+    from django.db import transaction
+
+    from .models import Student, StudentGroup
+
+    plan_id = getattr(plan, "pk", plan)
+    with transaction.atomic():
+        # Сначала ученики и группы по pk, затем сами назначения.
+        # Создание enrollment блокирует ученика раньше строки назначения.
+        pending = list(
+            LessonPlanEnrollment.objects.filter(
+                plan_id=plan_id,
+                status=EnrollmentStatus.COMPLETED,
+            ).order_by("pk").values_list("pk", "student_id", "group_id")
+        )
+        student_ids = sorted({student_id for _, student_id, _ in pending if student_id})
+        group_ids = sorted({group_id for _, _, group_id in pending if group_id})
+        if student_ids:
+            list(Student.objects.select_for_update().filter(pk__in=student_ids).order_by("pk"))
+        if group_ids:
+            list(StudentGroup.objects.select_for_update().filter(pk__in=group_ids).order_by("pk"))
+        completed = list(
+            LessonPlanEnrollment.objects.select_for_update()
+            .filter(pk__in=[pk for pk, _, _ in pending])
+            .order_by("pk")
+        )
+        for enrollment in completed:
+            if active_enrollment_conflicts(enrollment):
+                continue
+            enrollment.status = EnrollmentStatus.ACTIVE
+            enrollment.save(update_fields=["status", "updated_at"])
+
+
 def apply_plan_cancel_action(event, plan_cancel_action):
     """Apply plan topic shift/skip when a lesson is cancelled."""
     action = (plan_cancel_action or PLAN_CANCEL_SHIFT).strip().lower()

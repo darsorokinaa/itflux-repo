@@ -4,6 +4,9 @@ from rest_framework.routers import DefaultRouter
 from . import (
     activation_api,
     ai_api,
+)
+from .worksheet_ai import api as worksheet_ai_api
+from . import (
     api_views,
     availability_api,
     billing_api,
@@ -591,5 +594,26 @@ urlpatterns = [
         name="ai_conversation_detail",
     ),
     path("ai/request/", ai_api.AIRequestView.as_view(), name="ai_request"),
+    path("ai/worksheets/options/", worksheet_ai_api.WorksheetAIOptionsView.as_view(), name="worksheet_ai_options"),
+    path("ai/worksheets/topics/", worksheet_ai_api.WorksheetAITopicsView.as_view(), name="worksheet_ai_topics"),
+    path("ai/worksheets/balance/", worksheet_ai_api.WorksheetAIBalanceView.as_view(), name="worksheet_ai_balance"),
+    path("ai/worksheets/quote/", worksheet_ai_api.WorksheetAIQuoteView.as_view(), name="worksheet_ai_quote"),
+    path("ai/worksheets/generate/", worksheet_ai_api.WorksheetAIGenerateView.as_view(), name="worksheet_ai_generate"),
+    path("ai/worksheets/images/", worksheet_ai_api.WorksheetAIImageView.as_view(), name="worksheet_ai_image"),
+    path(
+        "ai/worksheets/documents/",
+        worksheet_ai_api.WorksheetAIDocumentListView.as_view(),
+        name="worksheet_ai_documents",
+    ),
+    path(
+        "ai/worksheets/documents/<uuid:document_id>/duplicate/",
+        worksheet_ai_api.WorksheetAIDocumentDuplicateView.as_view(),
+        name="worksheet_ai_document_duplicate",
+    ),
+    path(
+        "ai/worksheets/documents/<uuid:document_id>/",
+        worksheet_ai_api.WorksheetAIDocumentView.as_view(),
+        name="worksheet_ai_document",
+    ),
     path("", include(router.urls)),
 ]

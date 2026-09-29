@@ -298,6 +298,13 @@ class Task(models.Model):
         db_index=True,
         help_text="1 — первая часть, 2 — вторая. Пусто, если не экзамен или не указано.",
     )
+    ai_candidate_id = models.PositiveIntegerField(
+        "ID исходного AI-задания",
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Заполняется, когда проверенное AI-задание становится обычной задачей банка.",
+    )
     updated_at = models.DateTimeField("Изменено", auto_now=True)
 
     objects = models.Manager()
@@ -322,6 +329,11 @@ class Task(models.Model):
                 fields=["owner_teacher", "local_number"],
                 condition=Q(scope="teacher"),
                 name="task_owner_local_number_uniq",
+            ),
+            models.UniqueConstraint(
+                fields=["ai_candidate_id"],
+                condition=Q(ai_candidate_id__isnull=False),
+                name="task_ai_candidate_uniq",
             ),
         ]
 

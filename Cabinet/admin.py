@@ -1672,3 +1672,5 @@ def _admin_urls_with_activation():
 
 
 admin.site.get_urls = _admin_urls_with_activation
+
+from .worksheet_ai import admin as worksheet_ai_admin  # noqa: E402, F401

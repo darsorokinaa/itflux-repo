@@ -5358,3 +5358,14 @@ from .availability_models import (  # noqa: E402
     TeacherBooking,
     TeacherBookingLink,
 )
+
+from .worksheet_ai.models import (  # noqa: E402, F401
+    AITaskCandidate,
+    AITokenAccount,
+    AITransaction,
+    KnowledgeInstruction,
+    WorksheetAIGeneration,
+    WorksheetAIPricing,
+    WorksheetAIQuote,
+    WorksheetDocument,
+)

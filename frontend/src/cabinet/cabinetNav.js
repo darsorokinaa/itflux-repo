@@ -21,6 +21,7 @@ export const CABINET_NAV_GROUPS = [
     items: [
       { id: "plans", label: "Планы уроков", path: "/cabinet/plans", icon: "plan" },
       { id: "interactives", label: "Интерактивы", path: "/cabinet/interactives", icon: "interactives" },
+      { id: "worksheets", label: "Конструктор материалов", path: "/cabinet/worksheets", icon: "worksheet", soon: true },
       { id: "boards", label: "Интерактивные доски", path: "/cabinet/boards", icon: "board" },
       { id: "files", label: "Мои файлы", path: "/cabinet/files", icon: "folder" },
     ],
@@ -73,6 +74,7 @@ export const CABINET_MORE_GROUPS = [
       { id: "library", label: "Библиотека", path: "/cabinet/library", icon: "lessons" },
       { id: "my-task-bank", label: "Мой банк задач", path: "/tasks/my", icon: "cards" },
       { id: "interactives", label: "Интерактивы", path: "/cabinet/interactives", icon: "interactives" },
+      { id: "worksheets", label: "Конструктор материалов", path: "/cabinet/worksheets", icon: "worksheet", soon: true },
       { id: "boards", label: "Интерактивные доски", path: "/cabinet/boards", icon: "board" },
       { id: "files", label: "Мои файлы", path: "/cabinet/files", icon: "folder" },
     ],
@@ -135,6 +137,7 @@ export function getCabinetSectionTitle(pathname) {
   if (pathname.startsWith("/cabinet/plans/") && pathname.includes("/edit")) return "Редактирование плана";
   if (pathname.startsWith("/cabinet/plans/new")) return "Новый план";
   if (/\/cabinet\/plans\/[^/]+$/.test(pathname)) return "План занятий";
+  if (pathname.startsWith("/cabinet/worksheets")) return "Конструктор материалов";
   if (pathname.startsWith("/cabinet/interactives/new")) return "Создать интерактив";
   if (pathname.startsWith("/cabinet/interactives/")) return "Интерактив";
   if (pathname.startsWith("/cabinet/variant-themes")) return "Темы вариантов";

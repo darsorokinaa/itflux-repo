@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { Link, useNavigate, useOutletContext } from "react-router-dom";
+import SoonModal from "../../components/SoonModal";
 import { displayName } from "../../pages/CabinetAuthPage";
 import CabinetIcon from "../CabinetIcons";
 import { CABINET_MORE_GROUPS } from "../cabinetNav";
@@ -12,7 +14,7 @@ function formatNavCount(count) {
   return count > 99 ? "99+" : String(count);
 }
 
-function MoreCard({ item, onSettings, onGuide, onSupport, onNotifications, onAppearance, badgeCount = 0 }) {
+function MoreCard({ item, onSettings, onGuide, onSupport, onNotifications, onAppearance, onSoon, badgeCount = 0 }) {
   const countLabel = formatNavCount(badgeCount);
 
   if (item.action === "settings") {
@@ -104,6 +106,14 @@ function MoreCard({ item, onSettings, onGuide, onSupport, onNotifications, onApp
     );
   }
 
+  if (item.soon) {
+    return (
+      <button type="button" className={className} onClick={() => onSoon?.(item)}>
+        {content}
+      </button>
+    );
+  }
+
   return (
     <Link
       to={item.path}
@@ -117,6 +127,7 @@ function MoreCard({ item, onSettings, onGuide, onSupport, onNotifications, onApp
 
 export default function CabinetMorePage() {
   const navigate = useNavigate();
+  const [soonTitle, setSoonTitle] = useState("");
   const {
     user,
     handleLogout,
@@ -192,6 +203,7 @@ export default function CabinetMorePage() {
                   onGuide={openGuide}
                   onSupport={openSupport || openSupportEvent}
                   onNotifications={openNotifications}
+                  onSoon={(entry) => setSoonTitle(entry.label)}
                 />
               ))}
             </div>
@@ -228,6 +240,7 @@ export default function CabinetMorePage() {
           </button>
         </div>
       ) : null}
+      {soonTitle ? <SoonModal title={soonTitle} onClose={() => setSoonTitle("")} /> : null}
     </CabinetPageShell>
   );
 }

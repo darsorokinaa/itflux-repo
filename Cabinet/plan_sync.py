@@ -341,22 +341,40 @@ class PlanSyncService:
 
         if item is None:
             return event
-        item = LessonPlanItem.objects.select_for_update().filter(pk=item.pk).first()
-        if item is None:
-            return event
         terminal = {
             ScheduleEvent.Status.CANCELLED,
             ScheduleEvent.Status.COMPLETED,
             ScheduleEvent.Status.DONE,
         }
-        if not force:
-            taken_by_other = (
-                ScheduleEvent.objects.select_for_update()
-                .filter(lesson_plan_item_id=item.pk)
-                .exclude(pk=event.pk)
-                .exclude(status__in=terminal)
-                .exists()
+        # Сначала события по возрастанию pk, затем пункт плана.
+        # Иначе complete и привязка темы берут одни и те же строки в разном порядке.
+        other_event_ids = list(
+            ScheduleEvent.objects.filter(lesson_plan_item_id=item.pk)
+            .exclude(pk=event.pk)
+            .exclude(status__in=terminal)
+            .order_by("pk")
+            .values_list("pk", flat=True)
+        )
+        event_ids = sorted({event.pk, *other_event_ids})
+        if event_ids:
+            list(
+                ScheduleEvent.objects.select_for_update(of=("self",))
+                .filter(pk__in=event_ids)
+                .order_by("pk")
             )
+        sibling_item_ids = LessonPlanItem.objects.filter(
+            scheduled_event_id=event.pk,
+        ).order_by("pk").values_list("pk", flat=True)
+        item_ids = sorted({item.pk, *sibling_item_ids})
+        locked_items = {
+            row.pk: row
+            for row in LessonPlanItem.objects.select_for_update().filter(pk__in=item_ids).order_by("pk")
+        }
+        item = locked_items.get(item.pk)
+        if item is None:
+            return event
+        if not force:
+            taken_by_other = bool(other_event_ids)
             other_scheduled = item.scheduled_event
             if (
                 other_scheduled is not None
@@ -601,8 +619,34 @@ class PlanSyncService:
             student_id=enrollment.student_id,
         )
 
-        from .models import ScheduleEvent
+        from .models import LessonPlanItem, ScheduleEvent
         from .journal_models import LessonJournal
+
+        event_ids = {ev.pk for ev in sequence_events if getattr(ev, "pk", None)}
+        item_ids = sorted({item.pk for item in items if getattr(item, "pk", None)})
+        if item_ids:
+            event_ids.update(
+                LessonPlanItem.objects.filter(
+                    pk__in=item_ids,
+                    scheduled_event_id__isnull=False,
+                ).values_list("scheduled_event_id", flat=True)
+            )
+            event_ids.update(
+                ScheduleEvent.objects.filter(lesson_plan_item_id__in=item_ids).values_list("pk", flat=True)
+            )
+        ordered_event_ids = sorted(pk for pk in event_ids if pk)
+        if ordered_event_ids:
+            list(
+                ScheduleEvent.objects.select_for_update(of=("self",))
+                .filter(pk__in=ordered_event_ids)
+                .order_by("pk")
+            )
+        if item_ids:
+            list(
+                LessonPlanItem.objects.select_for_update()
+                .filter(pk__in=item_ids)
+                .order_by("pk")
+            )
 
         journals = {
             journal.schedule_event_id: journal
@@ -793,8 +837,11 @@ class PlanSyncService:
             if item.status not in (PlanItemStatus.COMPLETED, PlanItemStatus.SKIPPED)
         ]
         if enrollment.status == EnrollmentStatus.COMPLETED and remaining_open:
-            enrollment.status = EnrollmentStatus.ACTIVE
-            enrollment.save(update_fields=["status", "updated_at"])
+            from .plan_schedule import active_enrollment_conflicts
+
+            if not active_enrollment_conflicts(enrollment):
+                enrollment.status = EnrollmentStatus.ACTIVE
+                enrollment.save(update_fields=["status", "updated_at"])
 
         logger.info(
             "plan realigned enrollment=%s conducted=%s upcoming=%s updated=%s",

@@ -383,7 +383,8 @@ def _add_material_homework_task(homework, material, order, *, sync_existing=Fals
                 task.order = order
                 updates.append("order")
         if updates:
-            task.save(update_fields=updates + ["updated_at"])
+            # HomeworkTask не хранит timestamp: updated_at у модели нет.
+            task.save(update_fields=updates)
     else:
         HomeworkTask.objects.create(
             homework=homework,

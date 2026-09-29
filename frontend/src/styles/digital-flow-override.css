@@ -161,6 +161,13 @@ button,
   margin-left: 0;
 }
 
+.site-nav__panel .cabinet-nav-account {
+  grid-column: 4 !important;
+  grid-row: 1 !important;
+  justify-self: end !important;
+  margin-left: 0 !important;
+}
+
 .site-nav__panel .cabinet-nav-button {
   grid-column: 4 !important;
   grid-row: 1 !important;
@@ -231,6 +238,13 @@ button,
     margin-left: 0 !important;
   }
 
+.site-nav__panel.is-open .cabinet-nav-account {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
 .site-nav__panel.is-open .cabinet-nav-button {
     width: 100%;
     margin-left: 0 !important;
@@ -240,6 +254,11 @@ button,
     padding-bottom: 8px;
     justify-content: flex-start;
   }
+
+.site-nav__panel.is-open .cabinet-nav-account .cabinet-nav-button--avatar {
+  width: auto !important;
+  flex: 1;
+}
 
 .site-nav__panel.is-open .cabinet-nav-button--avatar {
     width: 100% !important;
