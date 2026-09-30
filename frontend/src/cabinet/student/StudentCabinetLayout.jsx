@@ -23,6 +23,7 @@ import {
   isStudentNavActive,
 } from "./studentNav";
 import { fetchMessageUnread } from "../messages/api";
+import EducationalLoading, { LOADING_MESSAGES } from "../../components/EducationalLoading";
 import { connectMessagingSocket } from "../messages/live";
 import "../styles/messages.css";
 import { PageTitleProvider } from "../hooks/usePageTitle";
@@ -214,7 +215,11 @@ export default function StudentCabinetLayout() {
   }, []);
 
   if (loading) {
-    return <div className="st-loading-screen">Загрузка…</div>;
+    return (
+      <div className="st-loading-screen">
+        <EducationalLoading message={LOADING_MESSAGES.page} />
+      </div>
+    );
   }
 
   if (!user) {

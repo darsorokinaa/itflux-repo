@@ -15,7 +15,8 @@ import {
 } from "../lessonCardContent";
 import { fetchStudentScheduleEvent } from "../../utils/cabinetAuth";
 import { studentTimezoneNote } from "../timezones";
-import { formatLessonTimeRange, useLessonConnectAvailable } from "./StudentSectionUi";
+import { formatLessonTimeRange, StudentLoadingState, useLessonConnectAvailable } from "./StudentSectionUi";
+import { LOADING_MESSAGES } from "../../components/EducationalLoading";
 import { resolveAuthenticatedMeetingNavigation } from "../meetingNavigation";
 
 const EVENT_TYPES = {
@@ -139,7 +140,7 @@ export default function StudentEventDetailPopover({ eventId, onClose }) {
     return createPortal(
       <div className="cb-sch-overlay cb-sch-overlay--lesson" onClick={onClose} role="presentation">
         <div className="cb-sch-popover cb-lesson-card" onClick={(e) => e.stopPropagation()} role="dialog">
-          <div className="st-loading" style={{ minHeight: 200 }}>Загрузка…</div>
+          <StudentLoadingState compact message={LOADING_MESSAGES.lesson} style={{ minHeight: 200 }} />
         </div>
       </div>,
       document.body

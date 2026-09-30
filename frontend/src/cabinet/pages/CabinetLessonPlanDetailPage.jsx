@@ -4,6 +4,7 @@ import CabinetIcon from "../CabinetIcons";
 import ConfirmActionModal from "../components/ConfirmActionModal";
 import PlanItemDetailModal from "../components/PlanItemDetailModal";
 import { CabinetPageShell } from "../CabinetSectionUi";
+import EducationalLoading, { LOADING_MESSAGES } from "../../components/EducationalLoading";
 import {
   PLAN_STATUS_LABELS,
   mapApiPlan,
@@ -237,7 +238,7 @@ export default function CabinetLessonPlanDetailPage() {
     }
   };
 
-  if (loading) return <CabinetPageShell><p className="cb-loading">Загрузка…</p></CabinetPageShell>;
+  if (loading) return <CabinetPageShell><EducationalLoading message={LOADING_MESSAGES.data} /></CabinetPageShell>;
   if (notFound) return <Navigate to="/cabinet/plans" replace />;
 
   const tone = planStatusTone(plan.status);

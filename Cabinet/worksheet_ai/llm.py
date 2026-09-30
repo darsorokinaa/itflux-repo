@@ -9,6 +9,7 @@ import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 
+from Cabinet.worksheet_ai.method_prompt import CONTENT_ACTIONS, METHOD_PROMPT
 from Cabinet.ai_providers import (
     PROVIDER_WORKSHEET,
     WORKSHEET_AGENT_MISSING,
@@ -65,6 +66,26 @@ def note_retry() -> None:
         ledger.retries += 1
 
 
+_JSON_BACKSLASH = re.compile(
+    r'\\(?:u[0-9a-fA-F]{4}|[A-Za-z]{2,}|["\\/bfnrt]|.)'
+)
+
+
+def repair_json_backslashes(text: str) -> str:
+    """LaTeX в ответе модели ломает JSON: \\( и \\frac не являются экранированием."""
+
+    def repl(match):
+        token = match.group(0)
+        body = token[1:]
+        if len(body) == 5 and body[0] == "u":
+            return token
+        if body in {'"', "\\", "/"} or (len(body) == 1 and body in "bfnrt"):
+            return token
+        return "\\" + token
+
+    return _JSON_BACKSLASH.sub(repl, text)
+
+
 def parse_json_object(content: str) -> dict:
     text = (content or "").strip()
     if text.startswith("```"):
@@ -74,20 +95,31 @@ def parse_json_object(content: str) -> dict:
     end = text.rfind("}")
     if start < 0 or end <= start:
         raise LLMError("Модель вернула не JSON.")
+    blob = text[start : end + 1]
     try:
-        data = json.loads(text[start : end + 1])
-    except json.JSONDecodeError as exc:
-        raise LLMError("Модель вернула невалидный JSON.") from exc
+        data = json.loads(blob)
+    except json.JSONDecodeError:
+        try:
+            data = json.loads(repair_json_backslashes(blob))
+        except json.JSONDecodeError as exc:
+            raise LLMError("Модель вернула невалидный JSON.") from exc
     if not isinstance(data, dict):
         raise LLMError("Модель вернула не объект JSON.")
     return data
+
+
+def system_prompt_for(user_payload: dict) -> str:
+    """Методические правила только для содержания. Оформление и учитель их не видят."""
+    if user_payload.get("action") in CONTENT_ACTIONS:
+        return f"{SYSTEM_GUARD}\n\n{METHOD_PROMPT}"
+    return SYSTEM_GUARD
 
 
 def call_json(user_payload: dict, *, max_tokens: int = 2200, attempts: int = 2) -> tuple[dict, str]:
     if not worksheet_text_provider_configured():
         raise LLMError(WORKSHEET_AGENT_MISSING, configuration=True)
     messages = [
-        {"role": "system", "content": SYSTEM_GUARD},
+        {"role": "system", "content": system_prompt_for(user_payload)},
         {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
     ]
     last = ""

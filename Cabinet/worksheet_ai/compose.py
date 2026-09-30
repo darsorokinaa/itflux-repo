@@ -189,7 +189,8 @@ def compose_worksheet(params: dict, tasks: list[dict], *, theory: str = "", desi
     })
     seq += 1
     mixed = params.get("difficulty") == "mixed"
-    if not mixed:
+    exact_variant = bool(params.get("variant_id"))
+    if not mixed and not exact_variant:
         for title in design.get("sections") or []:
             blocks.append({
                 "id": _block_id("h", seq),
@@ -202,7 +203,7 @@ def compose_worksheet(params: dict, tasks: list[dict], *, theory: str = "", desi
     number = 0
     for index, item in enumerate(tasks, start=1):
         band = item.get("difficulty") or "standard"
-        if mixed and band != last_band:
+        if mixed and not exact_variant and band != last_band:
             blocks.append({
                 "id": _block_id("h", seq),
                 "type": "heading",
@@ -266,6 +267,7 @@ def compose_worksheet(params: dict, tasks: list[dict], *, theory: str = "", desi
         "studentLine": True,
         "criteria": params.get("format") in {"control", "quiz"},
         "variants": 1,
+        "variantNumber": str(params.get("variant_id") or ""),
     }
     return {"blocks": blocks, "form": form, "design": design}
 

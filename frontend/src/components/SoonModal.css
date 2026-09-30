@@ -58,3 +58,16 @@
 .soon-modal__card button:hover {
   background: #1d4ed8;
 }
+
+.soon-page {
+  display: flex;
+  justify-content: center;
+  padding: 48px 20px 80px;
+}
+
+.soon-page .soon-modal__card h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import CabinetIcon from "../CabinetIcons";
 import { CabinetPageShell, CabinetPageHeader } from "../CabinetSectionUi";
+import EducationalLoading, { LOADING_MESSAGES } from "../../components/EducationalLoading";
 import ConfirmActionModal from "../components/ConfirmActionModal";
 import HomeworkAttachmentsField from "../components/HomeworkAttachmentsField";
 import PlanItemResourcesPicker from "../components/PlanItemResourcesPicker";
@@ -393,7 +394,7 @@ export default function CabinetHomeworkEditPage() {
   if (loading) {
     return (
       <CabinetPageShell className="cb-section--review">
-        <p className="cb-loading">Загрузка…</p>
+        <EducationalLoading message={LOADING_MESSAGES.material} />
       </CabinetPageShell>
     );
   }

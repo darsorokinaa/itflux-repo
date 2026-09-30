@@ -1,5 +1,4 @@
 import { useEffect, useRef } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
 import "./SoonModal.css";
 
 export default function SoonModal({ title, onClose }) {
@@ -34,17 +33,5 @@ export default function SoonModal({ title, onClose }) {
         <button type="button" onClick={onClose}>Понятно</button>
       </div>
     </div>
-  );
-}
-
-export function WorksheetSoonPage() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const home = location.pathname.startsWith("/cabinet") ? "/cabinet" : "/";
-  return (
-    <SoonModal
-      title="Конструктор материалов"
-      onClose={() => navigate(home, { replace: true })}
-    />
   );
 }

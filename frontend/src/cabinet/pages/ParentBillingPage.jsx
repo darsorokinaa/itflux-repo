@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { claimParentPayment, fetchParentBilling, fetchParentChildren } from "../../utils/cabinetAuth";
 import ParentChildSwitcher from "../parent/ParentChildSwitcher";
-import { StudentErrorState, StudentPageShell } from "../student/StudentSectionUi";
+import { StudentErrorState, StudentLoadingState, StudentPageShell } from "../student/StudentSectionUi";
 
 export default function ParentBillingPage() {
   const [params, setParams] = useSearchParams();
@@ -88,7 +88,7 @@ export default function ParentBillingPage() {
         }}
       />
 
-      {loading ? <div className="st-loading">Загрузка…</div> : null}
+      {loading ? <StudentLoadingState /> : null}
       {error ? <StudentErrorState message={error} onRetry={load} /> : null}
 
       {!loading && billing && billing.allowed === false ? (

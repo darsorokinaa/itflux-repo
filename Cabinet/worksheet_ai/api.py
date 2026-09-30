@@ -5,6 +5,8 @@ GET  /api/cabinet/ai/worksheets/topics/?subject_id=&q=
 GET  /api/cabinet/ai/worksheets/balance/
 POST /api/cabinet/ai/worksheets/quote/
 POST /api/cabinet/ai/worksheets/generate/
+POST /api/cabinet/ai/worksheets/background/
+POST /api/cabinet/ai/worksheets/theory/
 GET  /api/cabinet/ai/worksheets/documents/
 POST /api/cabinet/ai/worksheets/documents/
 GET  /api/cabinet/ai/worksheets/documents/<uuid>/
@@ -23,14 +25,15 @@ from rest_framework.views import APIView
 
 from Generator.models import Level, Subject, TaskList
 
-from Cabinet.ai_providers import generate_content_image
-from Cabinet.worksheet_ai.artwork import content_image_prompt
+from Cabinet.ai_providers import generate_content_image, generate_worksheet_background
+from Cabinet.worksheet_ai.artwork import content_image_prompt, illustration_prompt
 
-from .billing import InsufficientTokens, balance_of, debit, ensure_period_grant, refund
+from .billing import InsufficientTokens, balance_of, debit, ensure_period_grant, refund, worksheet_watermark_required
 from .models import WorksheetDocument
 from .pricing import get_pricing, spend_catalog
 from .params import BLOCKED
-from .pipeline import PipelineError, confirm_generation, create_quote, document_payload
+from .llm import LLMError
+from .pipeline import PipelineError, _theory, confirm_generation, create_quote, document_payload
 from .quality import record_teacher_edits
 from .retrieval import suggest_topics
 from Cabinet.permissions import IsCabinetTeacher
@@ -68,6 +71,8 @@ class WorksheetAIOptionsView(APIView):
             "grades": list(range(1, 12)),
             "subject_levels": subject_levels,
             "subject_task_lists": {str(row["subject_id"]): row["total"] for row in pairs},
+            "costs": spend_catalog(),
+            "watermark": worksheet_watermark_required(request.user),
         })
 
 
@@ -183,6 +188,134 @@ class WorksheetAIImageView(APIView):
             )
         return Response({
             "image": image,
+            "charged": price,
+            "balance": balance_of(request.user),
+        })
+
+
+class WorksheetAIBackgroundView(APIView):
+    """Только фон листа. Задания не меняются. Списывает оформление."""
+
+    permission_classes = [IsCabinetTeacher]
+    parser_classes = [JSONParser]
+
+    def post(self, request):
+        prompt = str((request.data or {}).get("prompt") or "").strip()
+        if len(prompt) < 3:
+            return Response({"code": "BAD_REQUEST", "message": "Опишите оформление."}, status=400)
+        if len(prompt) > 800:
+            prompt = prompt[:800]
+        idem = str(
+            request.headers.get("Idempotency-Key")
+            or request.headers.get("X-Idempotency-Key")
+            or ""
+        ).strip()
+        if not idem:
+            return Response({"code": "BAD_REQUEST", "message": "Нет ключа запроса."}, status=400)
+        ensure_period_grant(request.user)
+        price = int(get_pricing()["costs"].get("ai_design") or 0)
+        try:
+            debit(
+                request.user,
+                price,
+                idempotency_key=idem[:80],
+                description="Оформление: только фон листа",
+                metadata={"kind": "background"},
+            )
+        except InsufficientTokens as exc:
+            return Response(exc.to_dict(), status=exc.status)
+        image = generate_worksheet_background(illustration_prompt(prompt))
+        if not image:
+            refund(
+                request.user,
+                price,
+                idempotency_key=f"{idem[:70]}:refund",
+                description="Возврат: фон не создан",
+            )
+            return Response(
+                {
+                    "code": "AI_UNAVAILABLE",
+                    "message": "Не удалось нарисовать фон. Токены возвращены.",
+                    "balance": balance_of(request.user),
+                },
+                status=502,
+            )
+        return Response({
+            "background": image,
+            "charged": price,
+            "balance": balance_of(request.user),
+        })
+
+
+class WorksheetAITheoryView(APIView):
+    """Только текст теории в начале листа. Фон и задания не меняются."""
+
+    permission_classes = [IsCabinetTeacher]
+    parser_classes = [JSONParser]
+
+    def post(self, request):
+        data = request.data or {}
+        topic = str(data.get("topic") or "").strip()
+        if len(topic) < 2:
+            return Response({"code": "BAD_REQUEST", "message": "Укажите тему."}, status=400)
+        topic = topic[:200]
+        subject = str(data.get("subject") or "").strip()[:80] or "Учебный предмет"
+        raw_grade = str(data.get("grade") or "").strip()
+        try:
+            grade = int(raw_grade) if raw_grade else ""
+        except ValueError:
+            grade = ""
+        wishes = str(data.get("wishes") or "").strip()[:4000]
+        idem = str(
+            request.headers.get("Idempotency-Key")
+            or request.headers.get("X-Idempotency-Key")
+            or ""
+        ).strip()
+        if not idem:
+            return Response({"code": "BAD_REQUEST", "message": "Нет ключа запроса."}, status=400)
+        ensure_period_grant(request.user)
+        price = int(get_pricing()["costs"].get("theory_block") or 0)
+        try:
+            debit(
+                request.user,
+                price,
+                idempotency_key=idem[:80],
+                description="Теория: текст в начале листа",
+                metadata={"kind": "theory_block"},
+            )
+        except InsufficientTokens as exc:
+            return Response(exc.to_dict(), status=exc.status)
+        text = ""
+        try:
+            text, _model = _theory(
+                {
+                    "subject_name": subject,
+                    "grade": grade,
+                    "topic": topic,
+                    "format": "lesson",
+                    "wishes": wishes,
+                },
+                [],
+            )
+        except LLMError:
+            text = ""
+        if len(str(text or "").strip()) < 20:
+            refund(
+                request.user,
+                price,
+                idempotency_key=f"{idem[:70]}:refund",
+                description="Возврат: теория не создана",
+            )
+            return Response(
+                {
+                    "code": "AI_UNAVAILABLE",
+                    "message": "Не удалось написать теорию. Токены возвращены.",
+                    "balance": balance_of(request.user),
+                },
+                status=502,
+            )
+        return Response({
+            "text": text,
             "charged": price,
             "balance": balance_of(request.user),
         })

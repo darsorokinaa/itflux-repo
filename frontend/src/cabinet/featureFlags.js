@@ -5,6 +5,12 @@
 export const PAYMENTS_ENABLED = true;
 
 /**
+ * Конструктор материалов временно закрыт.
+ * В меню показывается «скоро», прямые ссылки открывают заглушку.
+ */
+export const WORKSHEETS_CONSTRUCTOR_ENABLED = false;
+
+/**
  * Screen-share annotation overlay in the video lesson.
  * Рисование поверх картинки демонстрации: перо, маркер, фигуры.
  */

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import EducationalLoading, { LOADING_MESSAGES } from "../../components/EducationalLoading";
 import { useOutletContext } from "react-router-dom";
 import CabinetIcon from "../CabinetIcons";
 import {
@@ -112,8 +113,16 @@ export function StudentEmptyState({ title, text, actionLabel, onAction, icon = "
   );
 }
 
-export function StudentLoadingState() {
-  return <div className="st-loading" role="status">Загрузка…</div>;
+export function StudentLoadingState({
+  message = LOADING_MESSAGES.data,
+  compact = false,
+  style,
+}) {
+  return (
+    <div className="st-loading" style={style}>
+      <EducationalLoading message={message} compact={compact} />
+    </div>
+  );
 }
 
 export function StudentErrorState({ message, onRetry }) {

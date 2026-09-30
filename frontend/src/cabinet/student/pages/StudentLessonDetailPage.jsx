@@ -5,9 +5,11 @@ import {
   fetchStudentLesson,
 } from "../../../utils/cabinetAuth";
 import {
+  StudentLoadingState,
   StudentPageShell,
   StudentStatusBadge,
 } from "../StudentSectionUi";
+import { LOADING_MESSAGES } from "../../../components/EducationalLoading";
 import CabinetIcon from "../../CabinetIcons";
 import { usePageTitle } from "../../hooks/usePageTitle";
 import { getMaterialTypeConfig, materialTypeLabel } from "../../materialTypeConfig";
@@ -80,7 +82,7 @@ export default function StudentLessonDetailPage() {
     finally { setCompleting(false); }
   };
 
-  if (loading) return <StudentPageShell><div className="st-loading">Загрузка…</div></StudentPageShell>;
+  if (loading) return <StudentPageShell><StudentLoadingState message={LOADING_MESSAGES.lesson} /></StudentPageShell>;
   if (!lesson) return <StudentPageShell><p className="st-panel__empty">Урок не найден</p></StudentPageShell>;
 
   return (

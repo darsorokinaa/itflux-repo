@@ -234,7 +234,7 @@ export default function InterestingPage() {
           </section>
 
           {loading ? (
-            <StateView variant="loading" title="Загружаем материалы…" description="Это займёт пару секунд." />
+            <StateView variant="loading" title="Подготавливаем материал…" />
           ) : error ? (
             <StateView
               variant="error"

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ensureCsrfCookie, getCsrfToken } from "../../utils/cabinetAuth";
 import { usePageTitle } from "../hooks/usePageTitle";
+import EducationalLoading, { LOADING_MESSAGES } from "../../components/EducationalLoading";
 import "../styles/worksheet-ai.css";
 
 const COUNTS = [5, 10, 15, 20];
@@ -291,6 +292,11 @@ export default function WorksheetAIWizard() {
 
       {bootError ? <div className="wai-error">{bootError}</div> : null}
       {error ? <div className="wai-error">{error}</div> : null}
+      {loading ? (
+        <EducationalLoading
+          message={step === "review" ? LOADING_MESSAGES.worksheet : LOADING_MESSAGES.fetch}
+        />
+      ) : null}
 
       {step === "form" ? (
         <div className="wai-layout">

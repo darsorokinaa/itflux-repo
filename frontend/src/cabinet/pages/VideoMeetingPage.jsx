@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import EducationalLoading, { LOADING_MESSAGES } from "../../components/EducationalLoading";
 
 import {
   planItemHomeworkPopoverRows,
@@ -3311,8 +3312,7 @@ export default function VideoMeetingPage() {
         >
           {pageState === "loading" ? (
             <div className="video-lesson-state">
-              <div className="video-lesson-state__spinner" aria-hidden="true" />
-              <p className="video-lesson-state__title">Загрузка…</p>
+              <EducationalLoading message={LOADING_MESSAGES.lesson} />
             </div>
           ) : null}
 

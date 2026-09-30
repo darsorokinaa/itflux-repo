@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { CircleHelp, Maximize, Minus, Plus, X } from "lucide-react";
 import { openMaterialPdf } from "../materials/collab/pdfjsLoader";
+import EducationalLoading, { LOADING_MESSAGES } from "../../components/EducationalLoading";
 import NotebookCanvas from "./NotebookCanvas";
 import NotebookPagesDrawer from "./NotebookPagesDrawer";
 import NotebookToolbar from "./NotebookToolbar";
@@ -503,7 +504,7 @@ export default function HomeworkNotebookEditor({
   const backgroundUrl = background.url;
   const isPdf = background.isPdf;
   const isImage = background.isImage;
-  const saveStatus = saveState === "saving" ? "Сохраняем…" : saveState === "error" ? "Ошибка сохранения" : "Сохранено";
+  const saveStatus = saveState === "saving" ? LOADING_MESSAGES.save : saveState === "error" ? "Ошибка сохранения" : "Сохранено";
 
   const onAddPage = async (kind, file) => {
     if (readOnly) return;
@@ -548,7 +549,11 @@ export default function HomeworkNotebookEditor({
   if (!doc) {
     return createPortal(
       <div className="hw-notebook">
-        <p className="hw-notebook__status">{error || "Загрузка…"}</p>
+        {error ? (
+          <p className="hw-notebook__status">{error}</p>
+        ) : (
+          <EducationalLoading message={LOADING_MESSAGES.material} />
+        )}
       </div>,
       document.body,
     );
@@ -822,6 +827,6 @@ export function HomeworkPublishedNotebookPage() {
       .catch((err) => setError(err.message));
   }, [submissionId, taskId]);
   if (error) return <p className="hw-notebook__error">{error}</p>;
-  if (!payload) return <p className="hw-notebook__status">Загрузка…</p>;
+  if (!payload) return <EducationalLoading message={LOADING_MESSAGES.material} />;
   return <HomeworkNotebookEditor publishedPayload={payload} />;
 }

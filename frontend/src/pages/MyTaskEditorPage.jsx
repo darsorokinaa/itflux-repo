@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import MathContent from "../components/MathContent";
+import EducationalLoading, { LOADING_MESSAGES } from "../components/EducationalLoading";
 import TaskFileAttachment from "../components/TaskFileAttachment";
 import {
   TeacherTaskAnswerEditor,
@@ -590,7 +591,7 @@ export default function MyTaskEditorPage() {
   const pillClass = form.status === "ready" ? "saas-status is-ready" : "saas-status";
 
   if (allowed == null) {
-    return <MyTaskBankShell>Загрузка…</MyTaskBankShell>;
+    return <MyTaskBankShell><EducationalLoading message={LOADING_MESSAGES.data} /></MyTaskBankShell>;
   }
 
   if (allowed === false) {
@@ -607,7 +608,7 @@ export default function MyTaskEditorPage() {
   }
 
   if (!loaded || (isNew && allowed === true && bankMeta === null)) {
-    return <MyTaskBankShell>Загрузка…</MyTaskBankShell>;
+    return <MyTaskBankShell><EducationalLoading message={LOADING_MESSAGES.data} /></MyTaskBankShell>;
   }
 
   if (createBlocked) {

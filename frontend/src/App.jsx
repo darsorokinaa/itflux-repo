@@ -50,7 +50,10 @@ import CabinetInteractiveEditorPage from "./cabinet/pages/CabinetInteractiveEdit
 import CabinetInteractiveDetailPage from "./cabinet/pages/CabinetInteractiveDetailPage";
 import CabinetInteractivePlayPage from "./cabinet/pages/CabinetInteractivePlayPage";
 import CabinetBoardsPage from "./cabinet/pages/CabinetBoardsPage";
-import { WorksheetSoonPage } from "./components/SoonModal";
+import CabinetWorksheetEditorPage from "./cabinet/pages/CabinetWorksheetEditorPage";
+import WorksheetAIWizard from "./cabinet/worksheet/WorksheetAIWizard";
+import WorksheetSoonPage from "./pages/WorksheetSoonPage";
+import { WORKSHEETS_CONSTRUCTOR_ENABLED } from "./cabinet/featureFlags";
 import CabinetBoardEditorPage from "./cabinet/pages/CabinetBoardEditorPage";
 import HomeworkNotebookEditor, { HomeworkPublishedNotebookPage } from "./cabinet/notebook/HomeworkNotebookEditor";
 import CabinetFilesPage from "./cabinet/pages/CabinetFilesPage";
@@ -314,8 +317,8 @@ function App() {
           <Route path="/lessons" element={<ReadyLessonsPage />} />
           <Route path="/lessons/collections/:slug" element={<LessonCollectionPage />} />
           <Route path="/lessons/:slug/view" element={<LessonViewerPage />} />
-          <Route path="/worksheets/ai" element={<WorksheetSoonPage />} />
-          <Route path="/worksheets" element={<WorksheetSoonPage />} />
+          <Route path="/worksheets/ai" element={WORKSHEETS_CONSTRUCTOR_ENABLED ? <WorksheetAIWizard /> : <WorksheetSoonPage />} />
+          <Route path="/worksheets" element={WORKSHEETS_CONSTRUCTOR_ENABLED ? <CabinetWorksheetEditorPage /> : <WorksheetSoonPage />} />
           <Route path="/interesting" element={<InterestingPage />} />
           <Route path="/interesting/:slug/view" element={<InterestingViewerPage />} />
           <Route path="/teachers" element={<ForTeachersPage />} />
@@ -463,8 +466,8 @@ function App() {
               )}
             />
             <Route path="boards" element={<CabinetBoardsPage />} />
-            <Route path="worksheets/ai" element={<WorksheetSoonPage />} />
-            <Route path="worksheets" element={<WorksheetSoonPage />} />
+            <Route path="worksheets/ai" element={WORKSHEETS_CONSTRUCTOR_ENABLED ? <WorksheetAIWizard /> : <WorksheetSoonPage />} />
+            <Route path="worksheets" element={WORKSHEETS_CONSTRUCTOR_ENABLED ? <CabinetWorksheetEditorPage /> : <WorksheetSoonPage />} />
             <Route path="files" element={<CabinetFilesPage />} />
             <Route
               path="review/:reviewId"

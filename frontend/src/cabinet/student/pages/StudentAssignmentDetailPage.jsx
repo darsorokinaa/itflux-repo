@@ -17,6 +17,7 @@ import {
   visibleHomeworkResourceTasks,
 } from "../../homeworkTaskDisplay";
 import {
+  StudentLoadingState,
   StudentPageShell,
   formatDueDate,
 } from "../StudentSectionUi";
@@ -395,7 +396,7 @@ export default function StudentAssignmentDetailPage() {
   if (loading) {
     return (
       <StudentPageShell>
-        <div className="st-loading">Загрузка…</div>
+        <StudentLoadingState />
       </StudentPageShell>
     );
   }

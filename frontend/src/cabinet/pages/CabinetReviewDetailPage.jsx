@@ -6,6 +6,7 @@ import {
   CabinetPageShell,
   CabinetPageHeader,
 } from "../CabinetSectionUi";
+import EducationalLoading, { LOADING_MESSAGES } from "../../components/EducationalLoading";
 import CabinetFloatingMenu from "../components/CabinetFloatingMenu";
 import {
   buildTeacherVariantUrl,
@@ -777,7 +778,7 @@ export default function CabinetReviewDetailPage() {
   if (loading) {
     return (
       <CabinetPageShell className="cb-section--review">
-        <p className="cb-loading">Загрузка работы…</p>
+        <EducationalLoading message={LOADING_MESSAGES.fetch} />
       </CabinetPageShell>
     );
   }

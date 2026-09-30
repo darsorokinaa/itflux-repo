@@ -4,6 +4,7 @@ import { fetchParentChildren, fetchParentHomework } from "../../utils/cabinetAut
 import ParentChildSwitcher from "../parent/ParentChildSwitcher";
 import {
   StudentErrorState,
+  StudentLoadingState,
   StudentPageShell,
   StudentStatusBadge,
 } from "../student/StudentSectionUi";
@@ -66,7 +67,7 @@ export default function ParentHomeworkPage() {
           setParams(p);
         }}
       />
-      {loading ? <div className="st-loading">Загрузка…</div> : null}
+      {loading ? <StudentLoadingState /> : null}
       {error ? <StudentErrorState message={error} onRetry={load} /> : null}
       {!loading && !error && items.length === 0 ? (
         <div className="st-empty">

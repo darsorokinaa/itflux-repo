@@ -1,3 +1,5 @@
+import { WORKSHEETS_CONSTRUCTOR_ENABLED } from "../cabinet/featureFlags";
+
 export type NavTabKey = "tasks" | "my-tasks" | "generator" | "lessons" | "worksheets" | "interesting" | "teachers";
 
 export type NavTabDef = {
@@ -15,7 +17,12 @@ export const NAV_TABS: ReadonlyArray<NavTabDef> = [
   { key: "my-tasks", label: "Мой банк задач", to: "/tasks/my" },
   { key: "generator", label: "Генератор вариантов", to: "/generator" },
   { key: "lessons", label: "Готовые уроки", to: "/lessons" },
-  { key: "worksheets", label: "Конструктор материалов", to: "/worksheets", soon: true },
+  {
+    key: "worksheets",
+    label: "Конструктор материалов",
+    to: "/worksheets",
+    soon: !WORKSHEETS_CONSTRUCTOR_ENABLED,
+  },
   { key: "interesting", label: "Тренажёры и интерактивы", to: "/interesting" },
   { key: "teachers", label: "Сообщество учителей", to: "/teachers" },
 ];

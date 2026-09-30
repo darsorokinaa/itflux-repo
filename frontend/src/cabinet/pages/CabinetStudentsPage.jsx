@@ -10,6 +10,7 @@ import {
   CabinetEmptyState,
   useSoonToast,
 } from "../CabinetSectionUi";
+import EducationalLoading, { LOADING_MESSAGES } from "../../components/EducationalLoading";
 import { mapApiGroup, mapApiStudent } from "../cabinetMappers";
 import {
   latestInviteForStudent,
@@ -736,7 +737,7 @@ function ArchiveTab({
       </div>
 
       {loading ? (
-        <p className="cb-loading">Загрузка архива…</p>
+        <EducationalLoading message={LOADING_MESSAGES.data} />
       ) : isEmpty ? (
         <div className="cb-archive-empty">
           <h3 className="cb-archive-empty__title">В архиве пока ничего нет</h3>
@@ -1512,7 +1513,7 @@ export default function CabinetStudentsPage() {
   if (loading) {
     return (
       <CabinetPageShell className="cb-section--students">
-        <p className="cb-loading">Загрузка учеников…</p>
+        <EducationalLoading message={LOADING_MESSAGES.data} />
       </CabinetPageShell>
     );
   }

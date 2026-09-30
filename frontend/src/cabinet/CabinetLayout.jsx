@@ -28,6 +28,7 @@ import PwaInstallPrompt from "./pwa/PwaInstallPrompt";
 import { useSeasonalTheme } from "../seasonal/SeasonalThemeProvider";
 import { openSupport } from "./support";
 import SoonModal from "../components/SoonModal";
+import EducationalLoading, { LOADING_MESSAGES } from "../components/EducationalLoading";
 import { rememberReturnPath } from "../accessGate/accessGate";
 import TimewebAiEmbed, { planHasTimewebAi } from "./TimewebAiEmbed";
 import "../styles/cabinet-dashboard.css";
@@ -320,7 +321,11 @@ export default function CabinetLayout() {
   };
 
   if (loading) {
-    return <div className="cb-loading-screen">Загрузка…</div>;
+    return (
+      <div className="cb-loading-screen">
+        <EducationalLoading message={LOADING_MESSAGES.page} />
+      </div>
+    );
   }
 
   if (!user) {

@@ -5,7 +5,7 @@ import { billingTypeLabel, formatMoney, formatUnits } from "../../billing/billin
 import CabinetIcon from "../../CabinetIcons";
 import ProfileAvatarEditor from "../../components/ProfileAvatarEditor";
 import { loadStudentData } from "../studentData";
-import { StudentPageShell } from "../StudentSectionUi";
+import { StudentLoadingState, StudentPageShell } from "../StudentSectionUi";
 import {
   browserTimeZone,
   ensureTimezoneOption,
@@ -62,7 +62,7 @@ export default function StudentProfilePage() {
   };
 
   if (loading || !profile) {
-    return <StudentPageShell><div className="st-loading">Загрузка…</div></StudentPageShell>;
+    return <StudentPageShell><StudentLoadingState /></StudentPageShell>;
   }
 
   const display = [profile.name, profile.surname].filter(Boolean).join(" ") || "Ученик";

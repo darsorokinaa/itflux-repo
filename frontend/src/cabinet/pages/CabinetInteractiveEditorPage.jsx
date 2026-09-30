@@ -12,6 +12,7 @@ import InteractiveImageField from "../components/InteractiveImageField";
 import QuizEditor from "../components/QuizEditor";
 import WheelEditor from "../components/WheelEditor";
 import { CabinetPageShell } from "../CabinetSectionUi";
+import EducationalLoading, { LOADING_MESSAGES } from "../../components/EducationalLoading";
 import CabinetFloatingMenu from "../components/CabinetFloatingMenu";
 import { useInteractiveAppearanceCatalog } from "../interactiveAppearance";
 import {
@@ -715,7 +716,7 @@ export default function CabinetInteractiveEditorPage() {
   if (loading) {
     return (
       <CabinetPageShell className="cb-section--interactive-editor ix-ed-page">
-        <p className="cb-loading">Загрузка…</p>
+        <EducationalLoading message={LOADING_MESSAGES.material} />
       </CabinetPageShell>
     );
   }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import CabinetIcon from "../CabinetIcons";
 import CabinetModal from "./CabinetModal";
+import EducationalLoading, { LOADING_MESSAGES } from "../../components/EducationalLoading";
 import CabinetFloatingMenu from "./CabinetFloatingMenu";
 import {
   mapApiPlanItem,
@@ -371,7 +372,7 @@ export default function PlanItemDetailModal({
   if (!item && loading) {
     return (
       <CabinetModal lesson hideHead onClose={onClose}>
-        <p className="cb-loading cb-lesson-card__loading">Загрузка занятия…</p>
+        <EducationalLoading message={LOADING_MESSAGES.lesson} />
       </CabinetModal>
     );
   }

@@ -201,7 +201,7 @@ function CabinetNavButton({ onNavigate }: { onNavigate?: () => void }) {
               </li>
             ))}
           </ul>
-          <p>Например, 10 новых заданий и оформление — {typicalHelp} токенов. Пока конструктор закрыт, баланс сохраняется.</p>
+          <p>Например, 10 новых заданий и оформление — {typicalHelp} токенов.</p>
           <Link className="cabinet-nav-tokens__link" to="/pricing">Тарифы</Link>
         </span>
       </span>

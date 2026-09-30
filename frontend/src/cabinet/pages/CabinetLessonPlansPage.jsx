@@ -8,6 +8,7 @@ import {
   CabinetFilterBar,
   CabinetEmptyState,
 } from "../CabinetSectionUi";
+import EducationalLoading, { LOADING_MESSAGES } from "../../components/EducationalLoading";
 import {
   PLAN_CATALOG_FILTERS,
   PLAN_FILTERS,
@@ -125,7 +126,7 @@ export default function CabinetLessonPlansPage() {
       {error ? <p className="cb-inline-error" role="alert">{error}</p> : null}
 
       {loading ? (
-        <p className="cb-loading">Загрузка планов…</p>
+        <EducationalLoading message={LOADING_MESSAGES.data} />
       ) : visible.length === 0 ? (
         <CabinetEmptyState
           icon="plan"

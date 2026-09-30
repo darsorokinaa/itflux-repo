@@ -15,7 +15,7 @@ from Cabinet.ai_providers import (
     reset_provider_overrides,
     set_provider_overrides,
 )
-from Cabinet.worksheet_ai.llm import LLMError, call_json
+from Cabinet.worksheet_ai.llm import LLMError, call_json, parse_json_object, system_prompt_for
 from Cabinet.models import AITransaction, Profile
 from Cabinet.worksheet_ai.artwork import clean_svg, content_image_prompt, illustration_prompt, svg_data_url
 from Cabinet.worksheet_ai.integrity import compare_wording, numeric_answer_holds, topic_mentioned
@@ -25,7 +25,7 @@ from Cabinet.worksheet_ai.models import (
     WorksheetAIPricing,
 )
 from Cabinet.worksheet_ai.pricing import DEFAULT_CONFIG
-from Generator.models import Level, Part, Subject, Task, TaskList
+from Generator.models import Level, Part, Subject, Task, TaskList, Variant, VariantContent
 
 
 def _teacher(username="ws_ai_teacher"):
@@ -94,6 +94,13 @@ class IntegrityTests(SimpleTestCase):
             "Найдите площадь прямоугольника.",
             "Логарифмы: вычисления и свойства",
         ))
+
+    def test_method_prompt_stays_inside_content_generation(self):
+        content = system_prompt_for({"action": "create_missing_tasks"})
+        design = system_prompt_for({"action": "design_background"})
+        self.assertIn("Нельзя менять числа", content)
+        self.assertIn("Цифровой поток", content)
+        self.assertNotIn("Нельзя менять числа", design)
 
     def test_illustration_prompt_describes_mood_without_character_names(self):
         prompt = illustration_prompt("оформление волшебства гарри поттер хогвартсв, свечи")
@@ -277,6 +284,49 @@ class WorksheetAIFlowTests(TestCase):
         self.assertEqual(body["balance"], 72)
         self.assertEqual(balance_of(self.teacher), 72)
 
+    def test_background_only_charges_design_and_does_not_touch_tasks(self):
+        from Cabinet.worksheet_ai.billing import balance_of
+
+        with mock.patch(
+            "Cabinet.worksheet_ai.api.generate_worksheet_background",
+            return_value="data:image/jpeg;base64,bg",
+        ) as painted:
+            response = self.client.post(
+                "/api/cabinet/ai/worksheets/background/",
+                {"prompt": "пергамент, свечи и золотая рамка"},
+                format="json",
+                HTTP_IDEMPOTENCY_KEY="bg-ok",
+            )
+        self.assertEqual(response.status_code, 200, response.content)
+        body = response.json()
+        self.assertEqual(body["charged"], 5)
+        self.assertTrue(body["background"].startswith("data:image/jpeg"))
+        self.assertEqual(body["balance"], 75)
+        self.assertEqual(balance_of(self.teacher), 75)
+        self.assertEqual(painted.call_count, 1)
+        self.assertIn("пергамент", painted.call_args.args[0].lower())
+
+    def test_theory_only_charges_theory_and_returns_text(self):
+        from Cabinet.worksheet_ai.billing import balance_of
+
+        with mock.patch(
+            "Cabinet.worksheet_ai.api._theory",
+            return_value=("Логарифм — это показатель степени, в которую возводят основание.", "test"),
+        ) as written:
+            response = self.client.post(
+                "/api/cabinet/ai/worksheets/theory/",
+                {"subject": "Математика", "grade": 10, "topic": "Логарифмы"},
+                format="json",
+                HTTP_IDEMPOTENCY_KEY="theory-ok",
+            )
+        self.assertEqual(response.status_code, 200, response.content)
+        body = response.json()
+        self.assertEqual(body["charged"], 2)
+        self.assertIn("Логарифм", body["text"])
+        self.assertEqual(body["balance"], 78)
+        self.assertEqual(balance_of(self.teacher), 78)
+        self.assertEqual(written.call_args.args[0]["topic"], "Логарифмы")
+
     def test_content_image_refunds_when_the_picture_is_empty(self):
         from Cabinet.worksheet_ai.billing import balance_of
 
@@ -344,6 +394,48 @@ class WorksheetAIFlowTests(TestCase):
         self.assertEqual(sum(1 for block in tasks if block["origin"] == "ai_generated"), 3)
         self.assertEqual(AITaskCandidate.objects.filter(review_status="pending_review").count(), 3)
         self.assertFalse(Task.objects.filter(task_template__icontains="Новое задание").exists())
+
+    def test_variant_number_takes_every_task_exactly(self):
+        later = self._task("Сначала вычислите 17+4. Дроби.")
+        earlier = self._task("Потом вычислите 23-6. Дроби.")
+        variant = Variant.objects.create(var_subject=self.subject, level=self.level, created_by="TEST")
+        VariantContent.objects.create(variant=variant, task=earlier, order=1)
+        VariantContent.objects.create(variant=variant, task=later, order=2)
+        quote = self._quote(
+            task_count=3,
+            variant_id=variant.id,
+            wording="theme",
+            theme="Космос",
+            difficulty="mixed",
+        )
+        self.assertTrue(quote["exact_variant"])
+        self.assertEqual(quote["variant_id"], variant.id)
+        self.assertEqual(quote["requested_tasks"], 2)
+        self.assertEqual(quote["bank_tasks_selected"], 2)
+        self.assertEqual(quote["ai_tasks_required"], 0)
+        self.assertEqual(quote["tasks_to_adapt"], 0)
+        self.assertEqual(quote["estimated_cost"], 0)
+        generated = self._generate(quote, key="variant-exact")
+        self.assertEqual(generated.status_code, 200, generated.content)
+        document = self._document(generated.json()["worksheet_id"])
+        tasks = [block for block in document["blocks"] if block["type"] == "task"]
+        self.assertEqual(len(tasks), 2)
+        self.assertIn("23-6", tasks[0]["task"]["question"])
+        self.assertIn("17+4", tasks[1]["task"]["question"])
+        self.assertEqual(tasks[0]["bankTaskId"], earlier.id)
+        self.assertNotIn("Космос", tasks[0]["task"]["question"])
+        self.assertEqual(document["form"]["variantNumber"], str(variant.id))
+        headings = [block.get("text") for block in document["blocks"] if block["type"] == "heading"]
+        self.assertNotIn("Базовый уровень", headings)
+
+    def test_unknown_variant_is_rejected(self):
+        response = self.client.post(
+            "/api/cabinet/ai/worksheets/quote/",
+            self._payload(variant_id=999999),
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("не найден", response.json()["message"])
 
     def test_original_wording_is_not_sent_to_ai(self):
         task = self._task("Дроби. На складе 20 кг яблок.")
@@ -658,11 +750,26 @@ class WorksheetAIFlowTests(TestCase):
         self.assertEqual(hidden_list.json()["documents"], [])
         self.assertNotEqual(secret.id, None)
 
+    def test_paid_plan_has_no_worksheet_watermark(self):
+        from Cabinet.models import TariffPlan, TeacherSubscription
+
+        plan = TariffPlan.objects.create(name="Учитель", slug="ws-paid-teacher", is_free=False, price_month=1990)
+        TeacherSubscription.objects.create(
+            teacher=self.teacher,
+            plan=plan,
+            status=TeacherSubscription.Status.ACTIVE,
+            source=TeacherSubscription.Source.ADMIN,
+        )
+        response = self.client.get("/api/cabinet/ai/worksheets/options/")
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["watermark"])
+
     def test_options_do_not_dump_tasks(self):
         self._task("Дроби. Скрытое условие 9+1.")
         response = self.client.get("/api/cabinet/ai/worksheets/options/")
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("Скрытое условие", response.content.decode())
+        self.assertTrue(response.json()["watermark"])
         topics = self.client.get(f"/api/cabinet/ai/worksheets/topics/?subject_id={self.subject.id}&q=Дроб")
         self.assertEqual(topics.status_code, 200)
         self.assertIn("Дроби", topics.json()["topics"])
@@ -1080,3 +1187,40 @@ class WorksheetAgentRoutingTests(SimpleTestCase):
         self.assertEqual(data, {"ok": True})
         self.assertEqual(model, "worksheet-model")
         self.assertEqual(seen.get("provider_context"), "worksheet")
+
+    def test_latex_backslashes_still_parse_as_json(self):
+        raw = (
+            '{"theory":"Линейное уравнение — это уравнение первой степени. '
+            r'Пример: \(3x+5=17\), значит \(x=4\). Дробь \(\frac{1}{2}\)."}'
+        )
+        data = parse_json_object(raw)
+        self.assertIn(r"\(3x+5=17\)", data["theory"])
+        self.assertIn(r"\frac{1}{2}", data["theory"])
+
+    def test_json_newline_before_cyrillic_stays_a_newline(self):
+        data = parse_json_object('{"text":"Первая строка\\nВторая строка теории."}')
+        self.assertEqual(data["text"], "Первая строка\nВторая строка теории.")
+
+    def test_theory_reads_theory_field_with_latex(self):
+        raw = (
+            '{"theory":"Линейное уравнение — это уравнение первой степени. '
+            r'Пример: \(3x+5=17\), \(x=4\)."}'
+        )
+        set_provider_overrides(
+            complete_chat=lambda messages, **kwargs: TextResult(content=raw, model="worksheet-model")
+        )
+        from Cabinet.worksheet_ai.pipeline import _theory
+
+        text, model = _theory(
+            {
+                "subject_name": "Математика",
+                "grade": 7,
+                "topic": "Линейные уравнения",
+                "format": "lesson",
+                "wishes": "",
+            },
+            [],
+        )
+        self.assertIn("Линейное уравнение", text)
+        self.assertIn(r"\(3x+5=17\)", text)
+        self.assertEqual(model, "worksheet-model")

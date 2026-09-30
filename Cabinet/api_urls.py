@@ -600,6 +600,8 @@ urlpatterns = [
     path("ai/worksheets/quote/", worksheet_ai_api.WorksheetAIQuoteView.as_view(), name="worksheet_ai_quote"),
     path("ai/worksheets/generate/", worksheet_ai_api.WorksheetAIGenerateView.as_view(), name="worksheet_ai_generate"),
     path("ai/worksheets/images/", worksheet_ai_api.WorksheetAIImageView.as_view(), name="worksheet_ai_image"),
+    path("ai/worksheets/background/", worksheet_ai_api.WorksheetAIBackgroundView.as_view(), name="worksheet_ai_background"),
+    path("ai/worksheets/theory/", worksheet_ai_api.WorksheetAITheoryView.as_view(), name="worksheet_ai_theory"),
     path(
         "ai/worksheets/documents/",
         worksheet_ai_api.WorksheetAIDocumentListView.as_view(),

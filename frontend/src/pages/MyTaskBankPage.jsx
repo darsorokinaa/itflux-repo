@@ -13,6 +13,7 @@ import {
 } from "../utils/teacherTaskBankApi";
 import { fetchExamCatalog } from "../utils/examCatalog";
 import MathContent from "../components/MathContent";
+import EducationalLoading, { LOADING_MESSAGES } from "../components/EducationalLoading";
 import TaskFileAttachment from "../components/TaskFileAttachment";
 import TaskNoAnswerBadge from "../components/TaskNoAnswerBadge";
 import "../styles/my-task-bank.css";
@@ -437,7 +438,7 @@ export default function MyTaskBankPage() {
       {accessModal}
       {error ? <p className="all-tasks-meta__error">{error}</p> : null}
 
-      {loading && !data ? <p className="all-tasks-meta">Загрузка…</p> : null}
+      {loading && !data ? <EducationalLoading message={LOADING_MESSAGES.data} /> : null}
 
       {bankIsEmpty ? (
         <div className="mtb-empty">

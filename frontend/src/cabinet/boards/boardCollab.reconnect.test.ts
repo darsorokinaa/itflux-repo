@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { reportClientEvent } from "../../utils/clientTelemetry";
 import {
   BOARD_RECONNECT,
   boardReconnectDelayMs,
@@ -746,5 +747,273 @@ describe("createBoardCollabSession reconnect", () => {
       }),
     } as MessageEvent);
     expect(onRemoteScene).not.toHaveBeenCalled();
+  });
+});
+
+describe("board heartbeat", () => {
+  let originalWebSocket: typeof WebSocket;
+  let session: ReturnType<typeof createBoardCollabSession> | null;
+
+  beforeEach(() => {
+    originalWebSocket = globalThis.WebSocket;
+    FakeWebSocket.instances = [];
+    session = null;
+    vi.mocked(reportClientEvent).mockClear();
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    vi.useFakeTimers();
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+  });
+
+  afterEach(() => {
+    session?.close();
+    session = null;
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    if (originalWebSocket) globalThis.WebSocket = originalWebSocket;
+    FakeWebSocket.instances = [];
+  });
+
+  function lastSocket() {
+    return FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
+  }
+
+  function parsed(ws = lastSocket()) {
+    return ws.sent.map((row) => JSON.parse(row) as { type?: string; t?: number });
+  }
+
+  function pings(ws = lastSocket()) {
+    return parsed(ws).filter((row) => row.type === "ping");
+  }
+
+  function reconnectReasons() {
+    return vi.mocked(reportClientEvent).mock.calls
+      .filter((call) => call[0] === "board_ws_reconnect")
+      .map((call) => (call[1] as { reason?: string } | undefined)?.reason);
+  }
+
+  function setVisibility(state: "hidden" | "visible") {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: state,
+    });
+  }
+
+  function hideTab() {
+    setVisibility("hidden");
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("pagehide"));
+  }
+
+  function showTab() {
+    setVisibility("visible");
+    document.dispatchEvent(new Event("visibilitychange"));
+  }
+
+  function ackLastPing(ws = lastSocket()) {
+    const ping = pings(ws).at(-1);
+    ws.onmessage?.({
+      data: JSON.stringify({ type: "pong", t: ping?.t }),
+    } as MessageEvent);
+  }
+
+  function emitSceneOps(ws = lastSocket()) {
+    ws.onmessage?.({
+      data: JSON.stringify({
+        type: "scene_ops",
+        client_id: "peer-1",
+        ops: { ops: [{ op: "upsert", element: { id: "stroke", version: 1, isDeleted: false } }] },
+      }),
+    } as MessageEvent);
+  }
+
+  it("foreground ping then pong does not reconnect", () => {
+    session = createBoardCollabSession("board-1", "A");
+    lastSocket().open();
+    vi.advanceTimersByTime(BOARD_RECONNECT.HEARTBEAT_MS);
+    expect(pings()).toHaveLength(1);
+    ackLastPing();
+    vi.advanceTimersByTime(BOARD_RECONNECT.PING_ACK_MS + 1);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(lastSocket().readyState).toBe(FakeWebSocket.OPEN);
+    expect(reconnectReasons()).not.toContain("pong-timeout");
+    expect(reconnectReasons()).not.toContain("ping-ack-timeout");
+  });
+
+  it("reconnects once when a foreground ping gets no pong", () => {
+    session = createBoardCollabSession("board-1", "A");
+    lastSocket().open();
+    vi.advanceTimersByTime(BOARD_RECONNECT.HEARTBEAT_MS);
+    expect(pings()).toHaveLength(1);
+    vi.advanceTimersByTime(BOARD_RECONNECT.PING_ACK_MS + 1);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(FakeWebSocket.instances[0].readyState).toBe(FakeWebSocket.CLOSED);
+    vi.advanceTimersByTime(500);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(reconnectReasons()).toEqual(["ping-ack-timeout"]);
+  });
+
+  it.each([60_000, 5 * 60_000, 15 * 60_000])(
+    "keeps an open socket after %dms in background when the wake ping is acked",
+    (awayMs) => {
+      session = createBoardCollabSession("board-1", "A");
+      lastSocket().open();
+      hideTab();
+      vi.advanceTimersByTime(awayMs);
+      expect(FakeWebSocket.instances).toHaveLength(1);
+      expect(lastSocket().readyState).toBe(FakeWebSocket.OPEN);
+      showTab();
+      expect(FakeWebSocket.instances).toHaveLength(1);
+      expect(lastSocket().readyState).toBe(FakeWebSocket.OPEN);
+      const ping = pings().at(-1);
+      expect(ping?.type).toBe("ping");
+      expect(typeof ping?.t).toBe("number");
+      ackLastPing();
+      vi.advanceTimersByTime(BOARD_RECONNECT.PING_ACK_MS + 1);
+      expect(FakeWebSocket.instances).toHaveLength(1);
+      expect(lastSocket().readyState).toBe(FakeWebSocket.OPEN);
+      expect(reconnectReasons()).not.toContain("pong-timeout");
+      expect(reconnectReasons()).not.toContain("resume-healthcheck-failed");
+    },
+  );
+
+  it("reconnects after background only if the fresh ping is not acked", () => {
+    session = createBoardCollabSession("board-1", "A");
+    lastSocket().open();
+    hideTab();
+    vi.advanceTimersByTime(60_000);
+    showTab();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(pings().length).toBeGreaterThanOrEqual(1);
+    vi.advanceTimersByTime(BOARD_RECONNECT.PING_ACK_MS - 1);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    vi.advanceTimersByTime(2);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(FakeWebSocket.instances[0].readyState).toBe(FakeWebSocket.CLOSED);
+    const payload = vi.mocked(reportClientEvent).mock.calls.find(
+      (call) => call[0] === "board_ws_reconnect",
+    )?.[1] as {
+      reason?: string;
+      visibilityState?: string;
+      readyState?: number;
+      backgroundDurationMs?: number;
+      lastInboundAgeMs?: number;
+      pingAckTimeout?: number;
+    };
+    expect(payload?.reason).toBe("resume-healthcheck-failed");
+    expect(payload?.visibilityState).toBe("visible");
+    expect(payload?.readyState).toBe(FakeWebSocket.OPEN);
+    expect(payload?.backgroundDurationMs).toBeGreaterThanOrEqual(60_000);
+    expect(payload?.lastInboundAgeMs).toBeGreaterThanOrEqual(60_000);
+    expect(payload?.pingAckTimeout).toBe(1);
+    expect(reconnectReasons()).not.toContain("pong-timeout");
+  });
+
+  it("does not reconnect when scene_ops arrives before pong after background", () => {
+    const onRemoteOps = vi.fn();
+    session = createBoardCollabSession("board-1", "A", { onRemoteOps });
+    lastSocket().open();
+    hideTab();
+    vi.advanceTimersByTime(60_000);
+    showTab();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    emitSceneOps();
+    expect(onRemoteOps).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(BOARD_RECONNECT.PING_ACK_MS + 1);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(lastSocket().readyState).toBe(FakeWebSocket.OPEN);
+    expect(reconnectReasons()).toEqual([]);
+  });
+
+  it("runs one healthcheck when visibility, pageshow and focus fire together", () => {
+    session = createBoardCollabSession("board-1", "A");
+    lastSocket().open();
+    hideTab();
+    vi.advanceTimersByTime(60_000);
+    setVisibility("visible");
+    const before = pings().length;
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("pageshow"));
+    window.dispatchEvent(new Event("focus"));
+    expect(pings().length).toBe(before + 1);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    vi.advanceTimersByTime(BOARD_RECONNECT.PING_ACK_MS + 1);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    vi.advanceTimersByTime(500);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it("ignores a delayed onclose from the socket replaced by reconnect", () => {
+    session = createBoardCollabSession("board-1", "A");
+    const first = lastSocket();
+    first.open();
+    const oldClose = first.onclose;
+    session.reconnectNow();
+    const second = lastSocket();
+    expect(second).not.toBe(first);
+    second.open();
+    oldClose?.({ code: 1006, reason: "late" } as CloseEvent);
+    expect(second.readyState).toBe(FakeWebSocket.OPEN);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    vi.advanceTimersByTime(5_000);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(second.readyState).toBe(FakeWebSocket.OPEN);
+    expect(first.readyState).toBe(FakeWebSocket.CLOSED);
+  });
+
+  it("does not cycle reconnects while the tab stays hidden", () => {
+    session = createBoardCollabSession("board-1", "A");
+    lastSocket().open();
+    hideTab();
+    vi.advanceTimersByTime(30_000);
+    vi.advanceTimersByTime(30_000);
+    vi.advanceTimersByTime(60_000);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(lastSocket().readyState).toBe(FakeWebSocket.OPEN);
+    expect(reconnectReasons()).toEqual([]);
+  });
+
+  it("does not open a second socket when resume sees CONNECTING", () => {
+    session = createBoardCollabSession("board-1", "A");
+    expect(lastSocket().readyState).toBe(FakeWebSocket.CONNECTING);
+    hideTab();
+    vi.advanceTimersByTime(1_000);
+    showTab();
+    window.dispatchEvent(new Event("pageshow"));
+    window.dispatchEvent(new Event("focus"));
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(lastSocket().readyState).toBe(FakeWebSocket.CONNECTING);
+  });
+
+  it("does not reconnect when a pong t does not match but the frame still arrived", () => {
+    session = createBoardCollabSession("board-1", "A");
+    lastSocket().open();
+    hideTab();
+    vi.advanceTimersByTime(60_000);
+    showTab();
+    const ping = pings().at(-1);
+    expect(typeof ping?.t).toBe("number");
+    lastSocket().onmessage?.({
+      data: JSON.stringify({ type: "pong", t: (ping?.t || 0) - 1 }),
+    } as MessageEvent);
+    vi.advanceTimersByTime(BOARD_RECONNECT.PING_ACK_MS + 1);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(lastSocket().readyState).toBe(FakeWebSocket.OPEN);
+    expect(reconnectReasons()).toEqual([]);
+  });
+
+  it("treats foreground scene_ops as liveness when pong has not arrived", () => {
+    session = createBoardCollabSession("board-1", "A");
+    lastSocket().open();
+    vi.advanceTimersByTime(BOARD_RECONNECT.HEARTBEAT_MS);
+    emitSceneOps();
+    vi.advanceTimersByTime(BOARD_RECONNECT.PING_ACK_MS + 1);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(lastSocket().readyState).toBe(FakeWebSocket.OPEN);
+    expect(reconnectReasons()).toEqual([]);
   });
 });

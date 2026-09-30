@@ -176,6 +176,8 @@ def retrieve_knowledge(params: dict) -> list[KnowledgeInstruction]:
 
 def build_plan(user, params: dict) -> dict:
     config = get_pricing()
+    if params.get("variant_id"):
+        return _plan_from_variant(user, params, config)
     try:
         pool = retrieve_tasks(user, params, limit=int(config["search_pool_limit"]))
     except Exception as exc:
@@ -214,6 +216,42 @@ def build_plan(user, params: dict) -> dict:
         "theory_block": bool(params["wants_theory"]),
         "charge_base": False,
         "wording": wording,
+    }
+    total, breakdown = price_lines(lines_for_plan(plan), config["costs"])
+    plan["estimated_cost"] = total
+    plan["breakdown"] = breakdown
+    return {"plan": plan, "selected": selected, "config": config}
+
+
+def _plan_from_variant(user, params: dict, config: dict) -> dict:
+    from .variant_source import VariantSourceError, load_variant_tasks
+
+    try:
+        variant, selected = load_variant_tasks(user, int(params["variant_id"]))
+    except VariantSourceError as exc:
+        raise PipelineError("VARIANT_NOT_FOUND", exc.message, 400) from exc
+    params["task_count"] = len(selected)
+    params["wording"] = "original"
+    params["variant_id"] = variant.id
+    plan = {
+        "requested_tasks": len(selected),
+        "bank_tasks_available": len(selected),
+        "bank_tasks_selected": len(selected),
+        "ai_tasks_required": 0,
+        "ai_task_difficulties": [],
+        "tasks_to_adapt": 0,
+        "tasks_to_rewrite": 0,
+        "tasks_left_unchanged": len(selected),
+        "tasks_not_themable": 0,
+        "adapt_keys": [],
+        "rewrite_keys": [],
+        "ai_design": bool(params.get("ai_design")),
+        "style_intensity": params.get("style_intensity") or "light",
+        "theory_block": bool(params["wants_theory"]),
+        "charge_base": False,
+        "wording": "original",
+        "exact_variant": True,
+        "variant_id": variant.id,
     }
     total, breakdown = price_lines(lines_for_plan(plan), config["costs"])
     plan["estimated_cost"] = total
@@ -348,9 +386,24 @@ def _execute(user, generation: WorksheetAIGeneration) -> dict:
     plan = quote.plan
     warnings = []
     stages = [{"name": "retrieve_tasks", "selected": len(quote.selected_tasks or [])}]
-    selected = reload_snapshot(user, quote.selected_tasks or [])
+    if params.get("variant_id"):
+        from .variant_source import VariantSourceError, load_variant_tasks
+
+        try:
+            _variant, selected = load_variant_tasks(user, int(params["variant_id"]))
+        except VariantSourceError as exc:
+            _fail_and_refund(generation, exc.message)
+            raise PipelineError(
+                "VARIANT_NOT_FOUND",
+                exc.message,
+                400,
+                refunded=generation.quoted_cost,
+                balance=get_account(user).balance,
+            ) from exc
+    else:
+        selected = reload_snapshot(user, quote.selected_tasks or [])
     if len(selected) < len(quote.selected_tasks or []):
-        warnings.append("Часть заданий банка стала недоступна и не вошла в лист.")
+        warnings.append("Часть заданий варианта стала недоступна и не вошла в лист." if params.get("variant_id") else "Часть заданий банка стала недоступна и не вошла в лист.")
     stages.append({"name": "select_tasks", "kept": len(selected)})
     model_name = ""
     adapted = 0
@@ -462,7 +515,7 @@ def _execute(user, generation: WorksheetAIGeneration) -> dict:
             warnings.append("Короткий теоретический блок не добавлен.")
         stages.append({"name": "theory", "added": bool(theory)})
 
-    if params.get("difficulty") == "mixed":
+    if params.get("difficulty") == "mixed" and not params.get("variant_id"):
         tasks.sort(key=lambda item: {"basic": 0, "standard": 1, "advanced": 2}.get(item.get("difficulty"), 1))
     design = design_for(params)
     ai_design_done = False
@@ -637,12 +690,23 @@ def _create_missing(user, generation, params, plan, instructions, *, existing):
             "level": params.get("level_label"),
             "topic": params.get("topic"),
             "subtopics": params.get("subtopics") or [],
+            "goal": params.get("goal") or "",
+            "format": params.get("format") or "",
             "theme": params.get("theme") if params.get("wording") == "theme" else "",
-            "theme_rule": "Сюжет можно добавить только если числа, единицы и способ решения остаются теми же. Иначе оставь нейтральное условие.",
+            "theme_rule": (
+                "Сюжет меняет только оболочку. Числа, единицы, формулы, ответ и ход решения не меняй. "
+                "Если сюжет искажает смысл, оставь нейтральное условие."
+            ),
+            "count_rule": "Верни ровно задания из tasks_to_create, без лишних.",
             "untrusted_teacher_notes": params.get("wishes") or "",
             "knowledge": [{"id": row.id, "title": row.title, "body": row.body[:2000]} for row in instructions],
             "tasks_to_create": [
-                {"slot": index, "difficulty": difficulty, "topic": params.get("topic")}
+                {
+                    "slot": index,
+                    "difficulty": difficulty,
+                    "difficulty_label": {"basic": "базовый", "standard": "стандартный", "advanced": "повышенный"}.get(difficulty, difficulty),
+                    "topic": params.get("topic"),
+                }
                 for index, difficulty in batch
             ],
             "output": {
@@ -809,13 +873,24 @@ def _theory(params, knowledge_ids) -> tuple[str, str]:
                 "что это такое, главное правило или формула и один короткий пример. "
                 "Не длиннее 500 символов. Без новых заданий и без приветствия."
             ),
+            "output": {"text": "готовый текст теории для ученика"},
         },
         max_tokens=600,
     )
-    text = str(data.get("text") or "").strip()
+    text = _theory_text(data)
     if len(text) < 20:
         raise LLMError("Пустая теория.")
     return text[:700], model
+
+
+def _theory_text(data: dict) -> str:
+    if not isinstance(data, dict):
+        return ""
+    for key in ("text", "theory", "content", "body"):
+        value = str(data.get(key) or "").strip()
+        if value:
+            return value
+    return ""
 
 
 def _public_task(item, text: str, *, changed: bool) -> dict:
@@ -1030,6 +1105,8 @@ def _quote_payload(quote: WorksheetAIQuote, balance: int) -> dict:
         "ai_design": bool(plan.get("ai_design")),
         "layout_included": True,
         "theory_block": bool(plan.get("theory_block")),
+        "exact_variant": bool(plan.get("exact_variant")),
+        "variant_id": plan.get("variant_id"),
         "estimated_cost": price,
         "balance": balance,
         "balance_after": balance - price if balance >= price else None,

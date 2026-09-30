@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { columnSlices, fitSheet, paginateBlocks, paginateColumns } from "./worksheetLayout";
+import { columnSlices, fitSheet, paginateBlocks, paginateColumns, paginateGrid, placeGrid } from "./worksheetLayout";
 
 describe("paginateBlocks", () => {
   it("moves the next block onto a new page when it does not fit", () => {
@@ -84,6 +84,36 @@ describe("paginateBlocks", () => {
       gap: 10,
     });
     expect(cols.map((col) => col.map((block) => block.id))).toEqual([["a", "b"], ["c"]]);
+  });
+
+  it("wraps blocks into rows and keeps the gutter", () => {
+    const blocks = ["a", "b", "c"].map((id) => ({ id, type: "task" }));
+    const pages = paginateGrid(blocks, { a: 40, b: 70, c: 40 }, {
+      contentHeight: 200,
+      columns: 2,
+      gap: 16,
+      firstUsed: 0,
+    });
+    expect(pages.map((page) => page.map((block) => block.id))).toEqual([["a", "b", "c"]]);
+    expect(placeGrid(pages[0], 2).map((cell) => [cell.block.id, cell.row, cell.col, cell.span])).toEqual([
+      ["a", 1, 1, 1],
+      ["b", 1, 2, 1],
+      ["c", 2, 1, 1],
+    ]);
+  });
+
+  it("moves a block to the right column and lets another span the row", () => {
+    const blocks = [
+      { id: "wide", type: "text", fullWidth: true },
+      { id: "left", type: "task", column: 0 },
+      { id: "right", type: "task", column: 1 },
+    ];
+    const cells = placeGrid(blocks, 2);
+    expect(cells.map((cell) => [cell.block.id, cell.row, cell.col, cell.span])).toEqual([
+      ["wide", 1, 1, 2],
+      ["left", 2, 1, 1],
+      ["right", 2, 2, 1],
+    ]);
   });
 
   it("does not drop a block that is taller than the page", () => {

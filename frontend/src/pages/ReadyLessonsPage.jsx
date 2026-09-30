@@ -813,7 +813,7 @@ export default function ReadyLessonsPage() {
             ) : null}
 
             {loading ? (
-              <StateView variant="loading" title="Загружаем каталог" description="Это займёт пару секунд." />
+              <StateView variant="loading" title="Загружаем данные…" />
             ) : error ? (
               <StateView
                 variant="error"

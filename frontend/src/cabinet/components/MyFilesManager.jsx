@@ -22,6 +22,7 @@ import {
 import { mapApiStudent } from "../cabinetMappers";
 import { formatStorageBytes, isQuotaExceededError, quotaExceededMessage, quotaPayloadFromError } from "../storageFormat";
 import QuotaExceededNotice from "./QuotaExceededNotice";
+import EducationalLoading, { LOADING_MESSAGES } from "../../components/EducationalLoading";
 import CabinetModal from "./CabinetModal";
 import CabinetFloatingMenu from "./CabinetFloatingMenu";
 import ConfirmActionModal from "./ConfirmActionModal";
@@ -966,7 +967,16 @@ export default function MyFilesManager({
 
               {uploads.length ? (
                 <div className="cb-files__uploads">
-                  <p>Загружается {uploads.length} {uploads.length === 1 ? "файл" : "файла"}</p>
+                  <EducationalLoading
+                    compact
+                    align="start"
+                    message={
+                      uploads.some((job) => !job.error)
+                      && uploads.filter((job) => !job.error && !job.done).every((job) => job.progress >= 90)
+                        ? LOADING_MESSAGES.almost
+                        : LOADING_MESSAGES.file
+                    }
+                  />
                   {uploads.map((job) => (
                     <div key={job.name} className={`cb-files__upload-row${job.error ? " is-error" : ""}`}>
                       <span>{job.name}</span>

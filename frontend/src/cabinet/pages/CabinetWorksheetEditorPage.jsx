@@ -5,13 +5,13 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import { FormulaTextField, TaskInspector, TaskSheetFace, TaskTypePicker } from "../worksheet/TaskTypeEditors";
 import { canonicalType, createTask, getTaskSpec } from "../worksheet/taskTypeRegistry";
 import {
-  BLOCK_GAP_PX,
   collectContentWarnings,
   collectMetricWarnings,
-  columnSlices,
   contentBox,
   fitSheet,
-  stackHeight,
+  paginateBlocks,
+  paginateGrid,
+  placeGrid,
 } from "../worksheet/worksheetLayout";
 import "../styles/worksheet-editor.css";
 
@@ -74,10 +74,10 @@ function themeLook(form) {
   if (palette) return palette;
   const hue = [...text].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 360;
   return {
-    accent: `hsl(${hue} 42% 32%)`,
-    paper: "#fffefa",
-    ink: "#1c2430",
-    frame: `hsl(${hue} 32% 62%)`,
+    accent: `hsl(${hue} 72% 38%)`,
+    paper: `hsl(${hue} 78% 96%)`,
+    ink: `hsl(${hue} 40% 16%)`,
+    frame: `hsl(${hue} 78% 46%)`,
   };
 }
 
@@ -150,9 +150,33 @@ function splitCounts(count) {
   return { warm, apply: apply + (n - used), check, final, total: n };
 }
 
-function recommendation(count) {
-  const parts = splitCounts(count);
-  return `${parts.warm} простых → ${parts.apply} на применение → ${parts.check} на поиск ошибки → ${parts.final} итоговое повышенного уровня.`;
+function tokenWord(count) {
+  const value = Math.abs(Number(count) || 0);
+  const mod10 = value % 10;
+  const mod100 = value % 100;
+  if (mod10 === 1 && mod100 !== 11) return "токен";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "токена";
+  return "токенов";
+}
+
+function withTheoryText(blocks, text) {
+  const theory = String(text || "").trim();
+  const list = Array.isArray(blocks) ? blocks.map((block) => ({ ...block })) : [];
+  const heading = { id: newId(), type: "heading", text: "Теория", align: "left", fullWidth: true, placed: false };
+  const body = { id: newId(), type: "text", text: theory, align: "left", fullWidth: true, placed: false };
+  if (list[0]?.type === "heading" && String(list[0].text || "").trim() === "Теория" && list[1]?.type === "text") {
+    return [
+      { ...list[0], fullWidth: true },
+      { ...list[1], text: theory, fullWidth: true },
+      ...list.slice(2),
+    ];
+  }
+  return [heading, body, ...list];
+}
+
+function wantsTheoryOf(form) {
+  if (form.theoryTouched) return Boolean(form.theory);
+  return form.purpose === "intro";
 }
 
 function levelFor(groupId) {
@@ -539,7 +563,7 @@ export default function CabinetWorksheetEditorPage() {
     fipi: "",
     extra: "",
     style: "whiteboard",
-    themePrompt: "Светлый фон, тонкие формулы и небольшие акценты по краям. Центральная область чистая.",
+    themePrompt: "Ярко и необычно: насыщенные цвета, крупный характерный шрифт заголовка, цветные плашки и иллюстрации по краям листа. Середина светлая, чтобы задания читались.",
     mono: false,
     toner: false,
     density: "обычная",
@@ -550,6 +574,7 @@ export default function CabinetWorksheetEditorPage() {
     studentCopy: true,
     teacherCopy: true,
     studentLine: true,
+    designOnly: false,
   });
   const formRef = useRef(form);
   const assembledRef = useRef(assembled);
@@ -631,6 +656,7 @@ export default function CabinetWorksheetEditorPage() {
   const selected = previewTasks.find((block) => block.id === selectedId) || null;
   const purpose = purposeById(form.purpose);
   const minutes = form.minutes || minutesFor(form.count);
+  const wantsTheory = wantsTheoryOf(form);
 
   const setField = (key) => (event) => {
     const value = event.target.type === "number" ? Number(event.target.value) : event.target.type === "checkbox" ? event.target.checked : event.target.value;
@@ -658,7 +684,12 @@ export default function CabinetWorksheetEditorPage() {
   documentIdRef.current = documentId;
   const skipInitialLoad = useRef(false);
   const [aiSubjects, setAiSubjects] = useState(null);
+  const [aiBalance, setAiBalance] = useState(null);
+  const [designCost, setDesignCost] = useState(5);
+  const [theoryCost, setTheoryCost] = useState(2);
+  const [showWatermark, setShowWatermark] = useState(true);
   const [aiQuote, setAiQuote] = useState(null);
+  const [aiQuoteMessage, setAiQuoteMessage] = useState("");
   const [aiQuoteStatus, setAiQuoteStatus] = useState("loading");
   const [aiBusy, setAiBusy] = useState(false);
   const [quoteNonce, setQuoteNonce] = useState(0);
@@ -671,7 +702,14 @@ export default function CabinetWorksheetEditorPage() {
         const response = await fetch("/api/cabinet/ai/worksheets/options/", { credentials: "same-origin" });
         if (!response.ok) return;
         const data = await response.json();
-        if (!cancelled) setAiSubjects(data.subjects || []);
+        if (cancelled) return;
+        setAiSubjects(data.subjects || []);
+        if (typeof data.balance === "number") setAiBalance(data.balance);
+        const design = (data.costs || []).find((item) => item.key === "ai_design");
+        if (design && typeof design.amount === "number") setDesignCost(design.amount);
+        const theory = (data.costs || []).find((item) => item.key === "theory_block");
+        if (theory && typeof theory.amount === "number") setTheoryCost(theory.amount);
+        setShowWatermark(data.watermark !== false);
       } catch {
         if (!cancelled) setAiSubjects([]);
       }
@@ -680,14 +718,22 @@ export default function CabinetWorksheetEditorPage() {
   }, []);
 
   useEffect(() => {
+    if (form.designOnly) {
+      setAiQuote(null);
+      setAiQuoteMessage("");
+      setAiQuoteStatus("idle");
+      return undefined;
+    }
     if (!aiSubjects) return undefined;
     const subject = aiSubjects.find((item) => item.name === form.subject)
       || aiSubjects.find((item) => (item.name || "").toLowerCase().includes(String(form.subject || "").toLowerCase()));
     if (!subject || String(form.topic || "").trim().length < 2) {
       setAiQuote(null);
+      setAiQuoteMessage("");
       setAiQuoteStatus("idle");
       return undefined;
     }
+    const variantId = String(form.variantNumber || "").replace(/\D/g, "");
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       setAiQuoteStatus("loading");
@@ -709,22 +755,26 @@ export default function CabinetWorksheetEditorPage() {
             goal: form.purpose === "homework" ? "practice" : (form.purpose || "practice"),
             format: form.purpose === "homework" ? "homework" : form.purpose === "check" ? "quiz" : form.purpose === "intro" ? "lesson" : "training",
             wording: "original",
-            wants_theory: form.purpose === "intro",
+            wants_theory: wantsTheoryOf(form),
             ai_design: wantsAiDesign(form),
             style: "school",
             custom_style: designPromptOf(form),
             wishes: String(form.extra || "").trim(),
+            ...(variantId ? { variant_id: Number(variantId) } : {}),
           }),
         });
         const data = await response.json().catch(() => ({}));
         if (cancelled) return;
         if (!response.ok) {
           setAiQuote(null);
+          setAiQuoteMessage(data.message || "Не удалось посчитать стоимость");
           setAiQuoteStatus("error");
           return;
         }
+        setAiQuoteMessage("");
         setAiQuote(data);
         setAiQuoteStatus("ready");
+        if (typeof data.balance === "number") setAiBalance(data.balance);
       } catch {
         if (!cancelled) {
           setAiQuote(null);
@@ -736,7 +786,7 @@ export default function CabinetWorksheetEditorPage() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [aiSubjects, form.subject, form.grade, form.topic, form.count, form.difficulty, form.purpose, form.themePrompt, form.extra, quoteNonce]);
+  }, [aiSubjects, form.designOnly, form.subject, form.grade, form.topic, form.count, form.difficulty, form.purpose, form.theory, form.theoryTouched, form.themePrompt, form.extra, form.variantNumber, quoteNonce]);
 
   const createWithAi = async () => {
     if (!aiQuote?.can_generate || aiBusy) return;
@@ -785,7 +835,99 @@ export default function CabinetWorksheetEditorPage() {
     }
   };
 
-  const tokenLine = aiBusy
+  const requestAi = async (path, body) => {
+    await ensureCsrfCookie();
+    const headers = {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "Idempotency-Key": crypto.randomUUID(),
+    };
+    const csrf = getCsrfToken();
+    if (csrf) headers["X-CSRFToken"] = csrf;
+    const response = await fetch(path, {
+      method: "POST",
+      credentials: "same-origin",
+      headers,
+      body: JSON.stringify(body),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (typeof data.balance === "number") setAiBalance(data.balance);
+    return { response, data };
+  };
+
+  const applyKeptTasks = async () => {
+    const updateBackground = !form.keepBackground;
+    const addTheory = Boolean(form.addTheory);
+    if (aiBusy || (!updateBackground && !addTheory)) return;
+    setAiBusy(true);
+    let charged = 0;
+    let backgroundDone = false;
+    try {
+      if (updateBackground) {
+        const prompt = designPromptOf(form).trim();
+        if (prompt.length < 3) throw new Error("Опишите оформление.");
+        const { response, data } = await requestAi("/api/cabinet/ai/worksheets/background/", { prompt });
+        if (!response.ok || !data.background) throw new Error(data.message || "Не удалось обновить оформление.");
+        setForm((current) => ({ ...current, background: data.background, designOnly: true }));
+        charged += Number(data.charged) || 0;
+        backgroundDone = true;
+      }
+      if (addTheory) {
+        const topic = String(form.topic || "").trim();
+        if (topic.length < 2) throw new Error("Укажите тему.");
+        const { response, data } = await requestAi("/api/cabinet/ai/worksheets/theory/", {
+          subject: form.subject,
+          grade: Number(form.grade) || "",
+          topic,
+          wishes: String(form.extra || "").trim(),
+        });
+        if (!response.ok || !String(data.text || "").trim()) {
+          throw new Error(backgroundDone
+            ? "Фон обновлён. Теорию добавить не удалось."
+            : (data.message || "Не удалось добавить теорию."));
+        }
+        setAssembled(true);
+        commit(withTheoryText(sourceBlocks(), data.text));
+        charged += Number(data.charged) || 0;
+      }
+      window.dispatchEvent(new Event("itflux:ai-tokens"));
+      const done = [
+        updateBackground ? "Фон обновлён" : "",
+        addTheory ? "теория добавлена" : "",
+      ].filter(Boolean).join(", ");
+      showToast(`${done}. Задания без изменений. Списано ${charged} токенов.`);
+    } catch (error) {
+      showToast(error.message || "Не удалось обновить лист.");
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const keepBackground = Boolean(form.designOnly && form.keepBackground);
+  const addTheory = Boolean(form.designOnly && form.addTheory);
+  const keptSpend = (keepBackground ? 0 : designCost) + (addTheory ? theoryCost : 0);
+  const theoryReady = String(form.topic || "").trim().length >= 2;
+  const designPromptReady = designPromptOf(form).trim().length >= 3;
+  const keptShort = aiBalance != null && aiBalance < keptSpend ? keptSpend - aiBalance : 0;
+  const keptBlocked = form.designOnly && (
+    (!keepBackground && !designPromptReady)
+    || (addTheory && !theoryReady)
+    || (keepBackground && !addTheory)
+    || keptShort > 0
+  );
+  const tokenLine = form.designOnly
+    ? (aiBusy
+      ? (addTheory && !keepBackground ? "Обновляем лист…" : addTheory ? "Пишем теорию…" : "Рисуем фон…")
+      : keepBackground && !addTheory
+        ? "Фон останется"
+        : !keepBackground && !designPromptReady
+          ? "Опишите оформление"
+          : addTheory && !theoryReady
+            ? "Укажите тему"
+            : keptShort
+              ? `Не хватает ${keptShort} токенов`
+              : `${keptSpend} ${tokenWord(keptSpend)}`)
+    : aiBusy
     ? "Создаём лист…"
     : aiQuoteStatus === "error"
       ? "Не удалось посчитать стоимость"
@@ -1059,26 +1201,28 @@ export default function CabinetWorksheetEditorPage() {
     window.addEventListener("pointerup", up);
   };
 
-  const toggleType = (id) => {
-    setForm((current) => {
-      const has = current.types.includes(id);
-      const types = has ? current.types.filter((item) => item !== id) : [...current.types, id];
-      return { ...current, types: types.length ? types : [id] };
-    });
-  };
-
   const toggleSection = (id) => setOpenSection((current) => (current === id ? "" : id));
   const geometry = useMemo(() => contentBox("a4", orientation, marginMm), [orientation, marginMm]);
   contentWidthRef.current = geometry.contentWidth;
   const scale = zoomPreset === "fit-width" ? fitWidth : zoomPreset === "fit-page" ? fitPage : Number(zoomPreset) || 1;
   scaleRef.current = scale;
+  const gutter = form.blockGap === 12 || form.blockGap === 24 ? form.blockGap : 16;
   const fitted = useMemo(
-    () => fitSheet(sheetBlocks, blockHeights, {
-      contentHeight: geometry.contentHeight,
-      firstUsed: headerHeight + BLOCK_GAP_PX,
-      gap: BLOCK_GAP_PX,
-    }),
-    [sheetBlocks, blockHeights, geometry.contentHeight, headerHeight],
+    () => {
+      const options = {
+        contentHeight: geometry.contentHeight,
+        firstUsed: headerHeight + gutter,
+        gap: gutter,
+      };
+      if (form.columns === 1) {
+        return { columns: 1, pages: paginateBlocks(sheetBlocks, blockHeights, options) };
+      }
+      if (form.columns === 2) {
+        return { columns: 2, pages: paginateGrid(sheetBlocks, blockHeights, { ...options, columns: 2 }) };
+      }
+      return fitSheet(sheetBlocks, blockHeights, options);
+    },
+    [sheetBlocks, blockHeights, geometry.contentHeight, headerHeight, form.columns, gutter],
   );
   const pages = fitted.pages;
   const columnCount = fitted.columns;
@@ -1091,6 +1235,7 @@ export default function CabinetWorksheetEditorPage() {
   const sheetClass = [
     "ws-sheet",
     `is-${form.style || "whiteboard"}`,
+    sheetLook ? "is-vivid" : "",
     sheetLook && !bgData ? "is-themed" : "",
     bgData ? "has-art" : "",
     form.mono ? "is-bw" : "",
@@ -1106,12 +1251,13 @@ export default function CabinetWorksheetEditorPage() {
       backgroundPosition: "center",
       "--sheet-art": `url("${bgData}")`,
     } : {}),
-    ...(sheetLook && !bgData ? {
-      "--page-background": sheetLook.paper,
+    ...(sheetLook ? {
       "--ws-accent": sheetLook.accent,
       "--ws-ink": sheetLook.ink,
       "--ws-frame": sheetLook.frame,
+      ...(bgData ? {} : { "--page-background": sheetLook.paper }),
     } : {}),
+    "--ws-gutter": `${gutter}px`,
   };
 
   const moveBlock = (id, direction) => {
@@ -1124,6 +1270,18 @@ export default function CabinetWorksheetEditorPage() {
     let number = 0;
     setAssembled(true);
     commit(list.map((block) => (block.type === "task" ? { ...block, number: ++number, placed: false } : block)));
+  };
+
+  const placeInColumn = (id, column) => {
+    setForm((current) => (current.columns === 2 ? current : { ...current, columns: 2 }));
+    patchBlock(id, { column, fullWidth: false });
+  };
+
+  const toggleBlockWidth = (id) => {
+    const block = sourceBlocks().find((item) => item.id === id);
+    const fullWidth = !block?.fullWidth;
+    if (fullWidth) setForm((current) => ({ ...current, columns: 2 }));
+    patchBlock(id, fullWidth ? { fullWidth: true, column: undefined } : { fullWidth: false });
   };
 
   const replaceFromBank = (block, direction) => {
@@ -1647,82 +1805,158 @@ export default function CabinetWorksheetEditorPage() {
                 <span className="ws-label">Тема</span>
                 <input type="text" value={form.topic} onChange={setField("topic")} />
               </label>
-              <label className="ws-field ws-field--key">
-                <span className="ws-label">Что ученик должен уметь <em>после выполнения</em></span>
-                <textarea value={form.goal} onChange={setField("goal")} />
-              </label>
-              <h3>Для чего этот лист?</h3>
-              <div className="ws-goals">
-                {PURPOSES.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={`ws-goal${form.purpose === item.id ? " is-active" : ""}`}
-                    onClick={() => setForm((current) => ({ ...current, purpose: item.id }))}
-                  >
-                    <strong>{item.title}</strong>
-                    <span>{item.text}</span>
-                  </button>
-                ))}
-              </div>
-              <div className="ws-recommend">
-                <div className="ws-recommend__top">
-                  <em>ИИ предлагает структуру</em>
-                  <span>{form.count} заданий · ≈{minutes} мин</span>
-                </div>
-                <p>{recommendation(form.count)}</p>
-              </div>
-            </section>
-
-            <Accordion
-              title="Структура и сложность"
-              hint={`${form.count} заданий · от простого к сложному`}
-              open={openSection === "structure"}
-              onToggle={() => toggleSection("structure")}
-            >
-              <div className="ws-grid2">
-                <label className="ws-field"><span className="ws-label">Заданий</span><input type="number" min="3" max="12" value={form.count} onChange={setField("count")} /></label>
-                <label className="ws-field">
-                  <span className="ws-label">Время</span>
-                  <select value={String(minutes)} onChange={(event) => setForm((current) => ({ ...current, minutes: Number(event.target.value) }))}>
-                    <option value="25">25 минут</option>
-                    <option value="40">40 минут</option>
-                    <option value="60">60 минут</option>
-                  </select>
-                </label>
-              </div>
               <label className="ws-field">
-                <span className="ws-label">Логика сложности</span>
+                <span className="ws-label">Тип листа</span>
+                <select value={form.purpose} onChange={setField("purpose")}>
+                  {PURPOSES.map((item) => (
+                    <option key={item.id} value={item.id}>{item.title}</option>
+                  ))}
+                </select>
+              </label>
+              <p className="ws-hint">{purposeById(form.purpose).text}</p>
+              <label className="ws-field">
+                <span className="ws-label">Сложность</span>
                 <select value={form.difficulty} onChange={setField("difficulty")}>
                   <option>От простого к сложному</option>
                   <option>Равномерная</option>
                   <option>Диагностическая смесь</option>
                 </select>
               </label>
-              <span className="ws-label">Типы заданий</span>
-              <div className="ws-types">
-                {TASK_TYPES.filter((type) => ["short", "lines", "error", "choice", "match"].includes(type.id)).map((type) => (
-                  <button key={type.id} type="button" className={form.types.includes(type.id) ? "is-on" : ""} onClick={() => toggleType(type.id)}>{type.label}</button>
-                ))}
-              </div>
-            </Accordion>
+              <fieldset className="ws-source">
+                <legend className="ws-label">Задания</legend>
+                <label>
+                  <input
+                    type="radio"
+                    name="ws-task-source"
+                    checked={!form.designOnly}
+                    onChange={() => setForm((current) => ({ ...current, designOnly: false }))}
+                  />
+                  <span>Создать задания с нуля</span>
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="ws-task-source"
+                    checked={Boolean(form.designOnly)}
+                    onChange={() => setForm((current) => ({ ...current, designOnly: true }))}
+                  />
+                  <span>Оставить задания без изменений</span>
+                </label>
+              </fieldset>
+              {form.designOnly ? (
+                <>
+                  <label className="ws-check">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(form.keepBackground)}
+                      onChange={(event) => setForm((current) => ({ ...current, keepBackground: event.target.checked }))}
+                    />
+                    <span>Оставить фон без изменений</span>
+                  </label>
+                  <label className="ws-check ws-theory">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(form.addTheory)}
+                      onChange={(event) => setForm((current) => ({ ...current, addTheory: event.target.checked }))}
+                    />
+                    <span>
+                      Добавить теорию
+                      <small>короткий текст в начале листа · {theoryCost} {tokenWord(theoryCost)}</small>
+                    </span>
+                  </label>
+                  <p className="ws-hint">
+                    {form.keepBackground && form.addTheory
+                      ? "Фон и задания останутся как есть. В начало листа добавится короткий текст с теорией."
+                      : form.keepBackground
+                        ? "Фон и задания останутся как есть."
+                        : form.addTheory
+                          ? "Задания останутся. Фон обновится, и в начало листа добавится теория."
+                          : "Тексты и структура листа останутся как есть. Поменяется только фоновая картинка."}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <label className="ws-field">
+                    <span className="ws-label">Номер варианта</span>
+                    <input
+                      inputMode="numeric"
+                      value={form.variantNumber || ""}
+                      placeholder="С платформы, если задания брать оттуда"
+                      onChange={(event) => setForm((current) => ({
+                        ...current,
+                        variantNumber: event.target.value.replace(/\D/g, "").slice(0, 12),
+                      }))}
+                    />
+                  </label>
+                  {form.variantNumber ? (
+                    <p className="ws-hint">
+                      {aiQuote?.exact_variant
+                        ? `Все ${aiQuote.requested_tasks} заданий варианта №${aiQuote.variant_id} войдут в лист без изменений.`
+                        : aiQuoteStatus === "error"
+                          ? aiQuoteMessage
+                          : "Задания этого варианта попадут в лист без изменений."}
+                    </p>
+                  ) : null}
+                  <div className="ws-grid2">
+                    {form.variantNumber ? null : (
+                      <label className="ws-field">
+                        <span className="ws-label">Заданий</span>
+                        <input type="number" min="3" max="12" value={form.count} onChange={setField("count")} />
+                      </label>
+                    )}
+                    <label className="ws-field">
+                      <span className="ws-label">Время</span>
+                      <select value={String(minutes)} onChange={(event) => setForm((current) => ({ ...current, minutes: Number(event.target.value) }))}>
+                        {[25, 40, 60].includes(Number(minutes)) ? null : <option value={String(minutes)}>{minutes} минут</option>}
+                        <option value="25">25 минут</option>
+                        <option value="40">40 минут</option>
+                        <option value="60">60 минут</option>
+                      </select>
+                    </label>
+                  </div>
+                  <label className="ws-check ws-theory">
+                    <input
+                      type="checkbox"
+                      checked={wantsTheory}
+                      onChange={(event) => setForm((current) => ({
+                        ...current,
+                        theory: event.target.checked,
+                        theoryTouched: true,
+                      }))}
+                    />
+                    <span>
+                      Теория
+                      <small>короткий текст в начале листа · {theoryCost} {tokenWord(theoryCost)}</small>
+                    </span>
+                  </label>
+                </>
+              )}
+            </section>
 
             <Accordion
-              title="Оформление"
-              hint={String(form.themePrompt || "").trim() ? "свой промпт" : "промпт и поля"}
-              open={openSection === "look"}
-              onToggle={() => toggleSection("look")}
+              title="Дополнительно"
+              hint="оформление и пожелания"
+              open={openSection === "extra"}
+              onToggle={() => toggleSection("extra")}
             >
               <label className="ws-field ws-field--prompt">
-                <span className="ws-label">Промпт оформления</span>
+                <span className="ws-label">Оформление</span>
                 <textarea
                   rows={4}
                   value={form.themePrompt}
                   onChange={setField("themePrompt")}
-                  placeholder="Опишите, как оформить лист: фон, рамка, акценты, плотность, настроение"
+                  placeholder="Например: осенние листья, школа, теория и практика"
                 />
               </label>
-              <p className="ws-hint">Текст из блока «Дополнительно» добавляется к этому промпту. По нему на фоне листа рисуются орнамент и иллюстрации, центр остаётся свободным для заданий.</p>
+              <label className="ws-field">
+                <span className="ws-label">Отдельные пожелания</span>
+                <textarea
+                  rows={3}
+                  value={form.extra}
+                  onChange={setField("extra")}
+                  placeholder="Что ещё учесть в листе"
+                />
+              </label>
               <label className="ws-check">
                 <input type="checkbox" checked={form.studentLine !== false} onChange={(event) => setForm((current) => ({ ...current, studentLine: event.target.checked }))} />
                 <span>Строка ученика — ФИО, класс и дата</span>
@@ -1736,24 +1970,6 @@ export default function CabinetWorksheetEditorPage() {
                   <option value="16">16 мм</option>
                 </select>
               </label>
-            </Accordion>
-
-            <Accordion
-              title="Дополнительно"
-              hint={form.extra ? "пожелания преподавателя" : "ответы, варианты, критерии проверки"}
-              open={openSection === "extra"}
-              onToggle={() => toggleSection("extra")}
-            >
-              <label className="ws-field">
-                <span className="ws-label">Что хочет видеть преподаватель</span>
-                <textarea
-                  rows={3}
-                  value={form.extra}
-                  onChange={setField("extra")}
-                  placeholder="Например: герб в рамке, тёплая бумага, короткое вступление"
-                />
-              </label>
-              <p className="ws-hint">Это пожелание дописывается к промпту оформления и попадает на лист.</p>
               <div className="ws-types">
                 <button type="button" className={form.answers ? "is-on" : ""} onClick={() => setForm((current) => ({ ...current, answers: !current.answers }))}>Ключ ответов</button>
                 <button type="button" className={form.solutions ? "is-on" : ""} onClick={() => setForm((current) => ({ ...current, solutions: !current.solutions }))}>Краткие решения</button>
@@ -1762,8 +1978,14 @@ export default function CabinetWorksheetEditorPage() {
               </div>
             </Accordion>
             <div className="ws-cta">
-              <button type="button" disabled={aiBusy || !aiQuote?.can_generate} onClick={createWithAi}>
-                Создать рабочий лист
+              <button
+                type="button"
+                disabled={aiBusy || (form.designOnly ? keptBlocked : !aiQuote?.can_generate)}
+                onClick={form.designOnly ? applyKeptTasks : createWithAi}
+              >
+                {form.designOnly
+                  ? (addTheory && !keepBackground ? "Обновить оформление и теорию" : addTheory ? "Добавить теорию" : "Обновить оформление")
+                  : "Создать рабочий лист"}
                 <span>{tokenLine}</span>
               </button>
             </div>
@@ -1789,6 +2011,16 @@ export default function CabinetWorksheetEditorPage() {
               <button type="button" className="ws-icon-btn" onClick={undo} disabled={historyIndexRef.current <= 0} aria-label="Отменить" title="Отменить"><CabinetIcon name="undo" /></button>
               <button type="button" className="ws-icon-btn" onClick={redo} disabled={historyIndexRef.current >= historyRef.current.length - 1} aria-label="Повторить" title="Повторить"><CabinetIcon name="redo" /></button>
               <button type="button" onClick={() => setOrientation((value) => (value === "portrait" ? "landscape" : "portrait"))}>{orientation === "portrait" ? "Альбом" : "Книга"}</button>
+              <button type="button" onClick={() => setForm((current) => ({ ...current, columns: columnCount > 1 ? 1 : 2 }))}>{columnCount > 1 ? "1 колонка" : "2 колонки"}</button>
+              <select
+                aria-label="Отступ между блоками"
+                value={String(gutter)}
+                onChange={(event) => setForm((current) => ({ ...current, blockGap: Number(event.target.value) }))}
+              >
+                <option value="12">Отступ 12</option>
+                <option value="16">Отступ 16</option>
+                <option value="24">Отступ 24</option>
+              </select>
               <button type="button" onClick={() => setGridOn((value) => !value)}>{gridOn ? "Скрыть сетку" : "Сетка"}</button>
               <button type="button" onClick={() => { if (warnings.length) setExportGate(true); else window.print(); }}>Скачать PDF</button>
               <select aria-label="Масштаб" value={String(zoomPreset)} onChange={(event) => {
@@ -1953,24 +2185,7 @@ export default function CabinetWorksheetEditorPage() {
                             </div>
                           ) : null}
                           {pageBlocks.length ? (() => {
-                            const lead = [];
-                            const rest = [];
-                            if (columnCount > 1) {
-                              pageBlocks.forEach((block) => {
-                                if (block?.fullWidth && !rest.length) lead.push(block);
-                                else rest.push(block);
-                              });
-                            }
-                            const columnGap = 10;
-                            const leadUsed = stackHeight(lead, blockHeights, columnGap);
-                            const reserved = (pageIndex === 0 ? headerHeight + BLOCK_GAP_PX : 0) + (lead.length ? leadUsed + columnGap : 0);
-                            const groups = columnCount > 1
-                              ? columnSlices(rest, blockHeights, {
-                                columns: columnCount,
-                                columnHeight: Math.max(120, geometry.contentHeight - reserved),
-                                gap: columnGap,
-                              })
-                              : [pageBlocks];
+                            const cells = columnCount > 1 ? placeGrid(pageBlocks, columnCount) : [];
                             const renderBlock = (block) => {
                             const selected = editMode && (block.id === selectedId || selectedIds.includes(block.id));
                             const note = NOTE_BLOCKS[block.type];
@@ -2019,6 +2234,14 @@ export default function CabinetWorksheetEditorPage() {
                                   }}
                                 >
                                   <span className="ws-grip" title="Перетащите, чтобы изменить порядок" aria-hidden="true" onPointerDown={(event) => onGripDown(event, block.id)} />
+                                  {editMode ? (
+                                    <div className="ws-block-tools" onClick={(event) => event.stopPropagation()}>
+                                      <button type="button" aria-pressed={block.column !== 1 && !block.fullWidth} onClick={() => placeInColumn(block.id, 0)}>Слева</button>
+                                      <button type="button" aria-pressed={block.column === 1 && !block.fullWidth} onClick={() => placeInColumn(block.id, 1)}>Справа</button>
+                                      <button type="button" aria-pressed={!!block.fullWidth} onClick={() => toggleBlockWidth(block.id)}>Ширина</button>
+                                      <button type="button" className="is-danger" onClick={() => removeTask(block.id)}>Удалить</button>
+                                    </div>
+                                  ) : null}
                                   <div className="ws-flow-block__body">{body}</div>
                                   <div className="ws-resize-h" title="Добавить место снизу" onPointerDown={(event) => onResizeDown(event, block.id)} />
                                   <div className="ws-resize-c" data-axis="x" title="Изменить ширину" onPointerDown={(event) => onResizeDown(event, block.id)} />
@@ -2044,21 +2267,26 @@ export default function CabinetWorksheetEditorPage() {
                               </div>
                             );
                             };
-                            return (
-                              <>
-                                {lead.length ? <div className="ws-preface">{lead.map(renderBlock)}</div> : null}
-                                <div className={columnCount > 1 ? "ws-columns" : undefined}>
-                                  {groups.map((group, colIndex) => (
-                                    <div className={columnCount > 1 ? "ws-column" : undefined} key={`col-${pageIndex}-${colIndex}`}>
-                                      {group.map(renderBlock)}
+                            if (columnCount > 1) {
+                              return (
+                                <div className="ws-grid-flow">
+                                  {cells.map((cell) => (
+                                    <div
+                                      key={cell.block.id}
+                                      className="ws-grid-cell"
+                                      style={{ gridRow: cell.row, gridColumn: `${cell.col} / span ${cell.span}` }}
+                                    >
+                                      {renderBlock(cell.block)}
                                     </div>
                                   ))}
                                 </div>
-                              </>
-                            );
+                              );
+                            }
+                            return <div className="ws-stack">{pageBlocks.map(renderBlock)}</div>;
                           })() : <p className="ws-empty-page">Пустая страница. Добавьте задание.</p>}
                         </div>
                         <div className="ws-page-no">{pageIndex + 1}</div>
+                        {showWatermark ? <p className="ws-watermark">Сделано на Цифровом потоке</p> : null}
                       </div>
                       {editMode ? (
                         <div className="ws-page-tools">

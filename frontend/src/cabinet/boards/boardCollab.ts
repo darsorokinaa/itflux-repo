@@ -281,7 +281,11 @@ export const BOARD_RECONNECT = {
   MAX_MS: 8000,
   JITTER: 0.2,
   MAX_ATTEMPT: 8,
-  PONG_STALE_MS: 40000,
+  /** Foreground-only silence safety net. Never a reason to drop a socket on wake. */
+  PONG_STALE_MS: 120_000,
+  HEARTBEAT_MS: 25_000,
+  /** After returning from background, ignore wall-clock silence until a fresh probe. */
+  RESUME_GRACE_MS: 20_000,
   HIDDEN_RESUME_MS: RESUME_TIMING.MIN_BACKGROUND_MS,
   /** After iOS/tab wake the first pong is often slower than the PWA UI probe. */
   PING_ACK_MS: 8000,
@@ -353,6 +357,11 @@ export function createBoardCollabSession(
   let reconnectAttempt = 0;
   let lastPingAt = 0;
   let lastPongAt = 0;
+  let lastInboundAt = 0;
+  let outstandingPingT = 0;
+  let lastHeartbeatTickAt = 0;
+  let backgroundDurationMs = 0;
+  let resumedVisibleAt = 0;
   let reconnectGaveUp = false;
   let lastHiddenAt = 0;
   let pingAckTimer: number | null = null;
@@ -533,41 +542,82 @@ export function createBoardCollabSession(
     ws.onclose = null;
   };
 
-  const isPongStale = () => {
-    if (!lastPongAt) return false;
-    return Date.now() - lastPongAt > BOARD_RECONNECT.PONG_STALE_MS;
+  const isForeground = () => {
+    if (typeof document === "undefined") return true;
+    return document.visibilityState !== "hidden";
   };
 
-  const startHeartbeat = () => {
+  const resumeGraceActive = () =>
+    resumedVisibleAt > 0 && Date.now() - resumedVisibleAt < BOARD_RECONNECT.RESUME_GRACE_MS;
+
+  /**
+   * Wall-clock silence is not proof the socket died. iOS/PWA timers freeze in
+   * background, so an old lastPong must not reconnect by itself.
+   * PONG_STALE_MS only describes a long foreground gap with zero inbound.
+   */
+  const foregroundSilenceExceedsSafetyNet = (now = Date.now()) => {
+    if (!isForeground() || resumeGraceActive() || !lastInboundAt) return false;
+    return now - lastInboundAt > BOARD_RECONNECT.PONG_STALE_MS;
+  };
+
+  const heartbeatDiag = (reason: string) => {
+    const now = Date.now();
+    return {
+      reason: String(reason).slice(0, 32),
+      visibilityState: typeof document !== "undefined" ? document.visibilityState : "",
+      readyState: socket ? socket.readyState : -1,
+      lastInboundAgeMs: lastInboundAt ? now - lastInboundAt : -1,
+      lastPongAgeMs: lastPongAt ? now - lastPongAt : -1,
+      lastPingAgeMs: lastPingAt ? now - lastPingAt : -1,
+      backgroundDurationMs: Math.max(0, Math.round(backgroundDurationMs || 0)),
+      reconnectAttempt,
+      pingAckTimeout: awaitingPingAck ? 1 : 0,
+      inboundQuiet: foregroundSilenceExceedsSafetyNet(now) ? 1 : 0,
+    };
+  };
+
+  const classifyReconnectReason = (reason: string) => {
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return "network-offline";
+    return reason;
+  };
+
+  const noteBackground = () => {
+    if (!lastHiddenAt) lastHiddenAt = Date.now();
+    clearPingAckTimer();
+    awaitingPingAck = false;
+    outstandingPingT = 0;
+    unlockResume();
     stopHeartbeat();
-    lastHealthSampleAt = Date.now();
-    heartbeatTimer = window.setInterval(() => {
-      const now = Date.now();
-      if (lastPongAt && now - lastPongAt > BOARD_RECONNECT.PONG_STALE_MS) {
-        forceReconnect("pong-timeout");
-        return;
-      }
-      lastPingAt = now;
-      sendRaw({ type: "ping", t: now });
-      if (boardSyncDebugEnabled() && now - lastHealthSampleAt >= 45_000) {
-        lastHealthSampleAt = now;
-        const mem = (
-          performance as Performance & { memory?: { usedJSHeapSize?: number } }
-        ).memory;
-        reportClientEvent("board_health_sample", {
-          boardId: String(boardId).slice(0, 64),
-          ws: socket?.readyState === WebSocket.OPEN ? 1 : 0,
-          reconnects: reconnectsTotal,
-          out: outboundTotal,
-          inbound: inboundTotal,
-          inB: inboundBytesTotal,
-          peers: peers.size,
-          pending: pendingLive ? 1 : 0,
-          heap: typeof mem?.usedJSHeapSize === "number" ? mem.usedJSHeapSize : 0,
-          nodes: typeof document !== "undefined" ? document.querySelectorAll("*").length : 0,
-        });
-      }
-    }, 25000);
+  };
+
+  const noteSocketAlive = () => {
+    awaitingPingAck = false;
+    outstandingPingT = 0;
+    clearPingAckTimer();
+    unlockResume();
+    if (
+      !closed
+      && isForeground()
+      && socket
+      && socket.readyState === WebSocket.OPEN
+      && heartbeatTimer == null
+    ) {
+      startHeartbeat();
+    }
+  };
+
+  const healthcheckFailReason = (reason: string) => {
+    if (
+      reason === "visibility"
+      || reason === "pageshow"
+      || reason === "pagehide"
+      || reason === "resume"
+      || reason === "focus"
+      || reason === "online"
+    ) {
+      return "resume-healthcheck-failed";
+    }
+    return "ping-ack-timeout";
   };
 
   const scheduleReconnect = () => {
@@ -596,14 +646,21 @@ export function createBoardCollabSession(
 
   const forceReconnect = (reason = "manual") => {
     if (closed) return;
+    const normalized = classifyReconnectReason(reason);
+    const diag = heartbeatDiag(normalized);
     if (
-      reason === "visibility"
-      || reason === "pageshow"
-      || reason === "pagehide"
-      || reason === "online"
-      || reason === "resume"
-      || reason === "manual"
-      || reason === "ping-ack-timeout"
+      normalized === "visibility"
+      || normalized === "pageshow"
+      || normalized === "pagehide"
+      || normalized === "online"
+      || normalized === "resume"
+      || normalized === "focus"
+      || normalized === "manual"
+      || normalized === "ping-ack-timeout"
+      || normalized === "resume-healthcheck-failed"
+      || normalized === "socket-closed"
+      || normalized === "network-offline"
+      || normalized === "connecting-timeout"
     ) {
       reconnectAttempt = 0;
     }
@@ -612,6 +669,7 @@ export function createBoardCollabSession(
     clearPingAckTimer();
     clearConnectingTimer();
     awaitingPingAck = false;
+    outstandingPingT = 0;
     const ws = socket;
     socket = null;
     untrackSocket();
@@ -623,34 +681,76 @@ export function createBoardCollabSession(
       /* ignore */
     }
     handlers.onStatus?.("connecting");
-    reportClientEvent("board_ws_reconnect", { reason: String(reason).slice(0, 32) });
+    boardWsLifecycle(
+      currentSocketId || clientId.slice(0, 8),
+      "RECONNECT",
+      `reason=${diag.reason} visibility=${diag.visibilityState} readyState=${diag.readyState} inAge=${diag.lastInboundAgeMs} pongAge=${diag.lastPongAgeMs} pingAge=${diag.lastPingAgeMs} bgMs=${diag.backgroundDurationMs} attempt=${diag.reconnectAttempt} pingAck=${diag.pingAckTimeout}`,
+    );
+    reportClientEvent("board_ws_reconnect", diag);
     connect();
   };
 
+  const armPingAck = (failReason: string, armedAt: number) => {
+    clearPingAckTimer();
+    awaitingPingAck = true;
+    outstandingPingT = armedAt;
+    pingAckTimer = window.setTimeout(() => {
+      pingAckTimer = null;
+      if (!awaitingPingAck || outstandingPingT !== armedAt) return;
+      const elapsed = Date.now() - armedAt;
+      const timerWasFrozen = elapsed > BOARD_RECONNECT.PING_ACK_MS + 2_000;
+      if (!isForeground() || timerWasFrozen) {
+        awaitingPingAck = false;
+        outstandingPingT = 0;
+        if (
+          isForeground()
+          && !closed
+          && socket
+          && socket.readyState === WebSocket.OPEN
+          && !resumeInProgress
+        ) {
+          verifyOpenSocket("resume");
+        }
+        return;
+      }
+      if (lastInboundAt >= armedAt) {
+        noteSocketAlive();
+        return;
+      }
+      forceReconnect(failReason);
+    }, BOARD_RECONNECT.PING_ACK_MS);
+  };
+
   const verifyOpenSocket = (reason: string) => {
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-      forceReconnect(reason);
+    if (closed) return;
+    const state = socket?.readyState;
+    if (!socket || state === WebSocket.CLOSING || state === WebSocket.CLOSED) {
+      forceReconnect(classifyReconnectReason("socket-closed"));
+      return;
+    }
+    if (state === WebSocket.CONNECTING) {
+      unlockResume();
       return;
     }
     const pingAt = Date.now();
     lastPingAt = pingAt;
-    awaitingPingAck = true;
+    const failReason = classifyReconnectReason(healthcheckFailReason(reason));
     const sent = sendRaw({ type: "ping", t: pingAt });
     if (!sent) {
       awaitingPingAck = false;
-      forceReconnect(`${reason}-ping-fail`);
+      outstandingPingT = 0;
+      forceReconnect(classifyReconnectReason(`${reason}-ping-fail`));
       return;
     }
-    clearPingAckTimer();
-    pingAckTimer = window.setTimeout(() => {
-      pingAckTimer = null;
-      if (awaitingPingAck) {
-        awaitingPingAck = false;
-        forceReconnect("ping-ack-timeout");
-        return;
-      }
-      unlockResume();
-    }, BOARD_RECONNECT.PING_ACK_MS);
+    armPingAck(failReason, pingAt);
+    if (reason !== "ping-ack-timeout") {
+      const diag = heartbeatDiag(reason);
+      boardWsLifecycle(
+        currentSocketId || clientId.slice(0, 8),
+        "HEALTHCHECK",
+        `reason=${reason} visibility=${diag.visibilityState} readyState=${diag.readyState} inAge=${diag.lastInboundAgeMs} pongAge=${diag.lastPongAgeMs} bgMs=${diag.backgroundDurationMs}`,
+      );
+    }
   };
 
   const softPing = () => {
@@ -659,42 +759,97 @@ export function createBoardCollabSession(
     sendRaw({ type: "ping", t: lastPingAt });
   };
 
+  const ensureHeartbeat = () => {
+    if (!closed && isForeground() && socket?.readyState === WebSocket.OPEN && heartbeatTimer == null) {
+      startHeartbeat();
+    }
+  };
+
   const resumeIfNeeded = (reason: string) => {
     if (closed) return;
     if (reason === "visibility" && document.visibilityState === "hidden") {
-      lastHiddenAt = Date.now();
+      noteBackground();
       return;
     }
     if (reason === "pagehide" || reason === "freeze") {
-      lastHiddenAt = Date.now();
+      noteBackground();
       return;
     }
     if (reason === "manual") {
       unlockResume();
     }
     if (!lockResume()) return;
-    const hiddenMs = lastHiddenAt ? Date.now() - lastHiddenAt : null;
+    const hiddenMs = lastHiddenAt ? Date.now() - lastHiddenAt : 0;
+    const wasBackground = lastHiddenAt > 0;
+    if (wasBackground) backgroundDurationMs = hiddenMs;
     lastHiddenAt = 0;
-    const knownShort = hiddenMs != null && hiddenMs < BOARD_RECONNECT.HIDDEN_RESUME_MS;
-    const open = Boolean(socket && socket.readyState === WebSocket.OPEN);
-    const frozenOpen = open && hiddenMs != null && hiddenMs >= BOARD_RECONNECT.HIDDEN_RESUME_MS;
-    // Live socket: never tear it down just because the parent tab resumed.
-    // Ack-kill only after a long freeze (zombie OPEN) or a stale pong.
-    if (open && !isPongStale() && !frozenOpen && reason !== "online") {
+    resumedVisibleAt = Date.now();
+    const knownShort = wasBackground && hiddenMs < BOARD_RECONNECT.HIDDEN_RESUME_MS;
+    const state = socket?.readyState;
+    const open = state === WebSocket.OPEN;
+    // pageshow/focus without a real hide, or a very short hide: probe without killing.
+    // A throttled wake (reason "resume") and a long hide must ack a fresh ping first.
+    const softWake = reason !== "online" && reason !== "resume" && (knownShort || !wasBackground);
+    if (open && softWake && reason !== "manual") {
       unlockResume();
       softPing();
+      ensureHeartbeat();
       return;
     }
-    if (knownShort && reason !== "online") {
+    if (reason === "manual" && open && !wasBackground && !foregroundSilenceExceedsSafetyNet()) {
       unlockResume();
       softPing();
+      ensureHeartbeat();
       return;
     }
-    if (!open || isPongStale()) {
-      forceReconnect(reason);
+    if (!socket || state === WebSocket.CLOSING || state === WebSocket.CLOSED) {
+      forceReconnect(classifyReconnectReason("socket-closed"));
       return;
     }
+    if (state === WebSocket.CONNECTING) {
+      unlockResume();
+      return;
+    }
+    // OPEN after a long background, freeze, or online: health-check. Do not
+    // reconnect just because lastPong aged out while timers were frozen.
     verifyOpenSocket(reason);
+  };
+
+  const startHeartbeat = () => {
+    stopHeartbeat();
+    lastHeartbeatTickAt = Date.now();
+    lastHealthSampleAt = Date.now();
+    heartbeatTimer = window.setInterval(() => {
+      const now = Date.now();
+      const gap = now - lastHeartbeatTickAt;
+      lastHeartbeatTickAt = now;
+      if (!isForeground()) return;
+      // setInterval slept through background. Age of the last pong is not a failure.
+      if (gap > BOARD_RECONNECT.HEARTBEAT_MS + 5_000) {
+        resumeIfNeeded("resume");
+        return;
+      }
+      if (awaitingPingAck || resumeInProgress) return;
+      verifyOpenSocket("ping-ack-timeout");
+      if (boardSyncDebugEnabled() && now - lastHealthSampleAt >= 45_000) {
+        lastHealthSampleAt = now;
+        const mem = (
+          performance as Performance & { memory?: { usedJSHeapSize?: number } }
+        ).memory;
+        reportClientEvent("board_health_sample", {
+          boardId: String(boardId).slice(0, 64),
+          ws: socket?.readyState === WebSocket.OPEN ? 1 : 0,
+          reconnects: reconnectsTotal,
+          out: outboundTotal,
+          inbound: inboundTotal,
+          inB: inboundBytesTotal,
+          peers: peers.size,
+          pending: pendingLive ? 1 : 0,
+          heap: typeof mem?.usedJSHeapSize === "number" ? mem.usedJSHeapSize : 0,
+          nodes: typeof document !== "undefined" ? document.querySelectorAll("*").length : 0,
+        });
+      }
+    }, BOARD_RECONNECT.HEARTBEAT_MS);
   };
 
   let flushLive = () => {};
@@ -757,6 +912,7 @@ export function createBoardCollabSession(
         clearPeers("reconnect");
       }
       lastPongAt = Date.now();
+      lastInboundAt = lastPongAt;
       lastHiddenAt = 0;
       sendJoin();
       boardWsLifecycle(currentSocketId, "JOIN ROOM", `boardId=${boardId}`);
@@ -786,7 +942,6 @@ export function createBoardCollabSession(
       if (closed || socket !== ws) return;
       inboundTotal += 1;
       inboundBytesTotal += String(event.data || "").length;
-      lastPongAt = Date.now();
       let data: CollabMessage;
       try {
         data = JSON.parse(String(event.data));
@@ -794,6 +949,7 @@ export function createBoardCollabSession(
         return;
       }
       if (!data || typeof data !== "object") return;
+      lastInboundAt = Date.now();
       if (
         data.type !== "pong"
         && data.type !== "cursor_move"
@@ -804,9 +960,15 @@ export function createBoardCollabSession(
       }
 
       if (data.type === "pong") {
-        awaitingPingAck = false;
+        lastPongAt = lastInboundAt;
+        const echoed = typeof data.t === "number" ? data.t : null;
+        // No t: older servers. Matching t: this ping. Any other t still updated
+        // lastInboundAt, so the ack timer will not tear the socket down.
+        const matchesOutstanding = echoed == null || !outstandingPingT || echoed === outstandingPingT;
+        if (awaitingPingAck && matchesOutstanding) noteSocketAlive();
         return;
       }
+      if (awaitingPingAck) noteSocketAlive();
 
       if (data.type === "ready" || data.type === "room_joined") {
         boardWsLifecycle(currentSocketId, "ROOM JOINED");
@@ -1164,7 +1326,11 @@ export function createBoardCollabSession(
     };
 
     ws.onclose = (event) => {
+      if (socket !== ws) return;
       lastCloseCode = typeof event?.code === "number" ? event.code : null;
+      clearPingAckTimer();
+      awaitingPingAck = false;
+      outstandingPingT = 0;
       clearConnectingTimer();
       const reason = String(event?.reason || "");
       const wasClean = Boolean(event?.wasClean);
@@ -1174,10 +1340,8 @@ export function createBoardCollabSession(
         `code=${lastCloseCode ?? ""} reason=${reason.slice(0, 64)} wasClean=${wasClean}`,
       );
       boardWsLog("closed", { boardId, clientId, willReconnect: !closed, code: lastCloseCode });
-      if (socket === ws) {
-        stopHeartbeat();
-        socket = null;
-      }
+      stopHeartbeat();
+      socket = null;
       if (closed) return;
       reconnectsTotal += 1;
       if (isSocketLive(socket)) return;
@@ -1201,12 +1365,18 @@ export function createBoardCollabSession(
   const onOnline = () => resumeIfNeeded("online");
   const onResume = () => resumeIfNeeded("resume");
   const onFreeze = () => resumeIfNeeded("freeze");
+  const onFocus = () => {
+    if (document.visibilityState === "hidden") return;
+    if (!lastHiddenAt) return;
+    resumeIfNeeded("focus");
+  };
   document.addEventListener("visibilitychange", onVisibility);
   window.addEventListener("pageshow", onPageShow);
   window.addEventListener("pagehide", onPageHide);
   window.addEventListener("online", onOnline);
   window.addEventListener("resume", onResume);
   window.addEventListener("freeze", onFreeze);
+  window.addEventListener("focus", onFocus);
 
   flushLive = () => {
     liveTimer = null;
@@ -1616,6 +1786,7 @@ export function createBoardCollabSession(
       window.removeEventListener("online", onOnline);
       window.removeEventListener("resume", onResume);
       window.removeEventListener("freeze", onFreeze);
+      window.removeEventListener("focus", onFocus);
       const ws = socket;
       socket = null;
       untrackSocket();
@@ -1642,6 +1813,7 @@ export function createBoardCollabSession(
         lastCloseCode,
         lastPingAt,
         lastPongAt,
+        lastInboundAt,
         ...payloadStats(),
         peerCount: peers.size,
         awaitingSnapshot,

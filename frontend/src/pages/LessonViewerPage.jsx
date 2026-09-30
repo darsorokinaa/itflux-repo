@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import CatalogMaterialViewer from "../components/CatalogMaterialViewer";
+import { LOADING_MESSAGES } from "../components/EducationalLoading";
 import LessonCollectionNavigation from "../components/collections/LessonCollectionNavigation";
 import RelatedCollectionLessons from "../components/collections/RelatedCollectionLessons";
 import { getLessonContentUrl, lessonPreviewUrl } from "../cabinet/lessonCardUtils";
@@ -74,6 +75,7 @@ export default function LessonViewerPage() {
       backLabel="← К описанию"
       frameSrc={lesson && slug ? getLessonContentUrl(slug) : ""}
       loading={loading}
+      loadingMessage={LOADING_MESSAGES.lesson}
       error={error}
       engagement={lesson?.slug ? { kind: "lessons", slug: lesson.slug } : null}
       banner={<LessonCollectionNavigation lesson={lesson} />}

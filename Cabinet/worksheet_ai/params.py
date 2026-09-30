@@ -136,4 +136,17 @@ def parse_request(raw: dict, *, max_tasks: int) -> dict:
         "exam": exam_code(level_label),
         "wishes": clean_text(data.get("wishes"), 4000),
         "wants_theory": bool(wants_theory),
+        "variant_id": _variant_id(data.get("variant_id")),
     }
+
+
+def _variant_id(value):
+    if value in (None, "", 0, "0"):
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ParseError("Номер варианта должен быть числом.") from exc
+    if number < 1:
+        raise ParseError("Укажите номер варианта.")
+    return number

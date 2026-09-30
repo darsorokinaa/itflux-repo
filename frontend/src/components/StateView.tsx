@@ -1,4 +1,5 @@
 import { type ReactNode } from "react";
+import { ScienceFactNote } from "./EducationalLoading";
 
 export type StateVariant =
   | "loading"
@@ -114,6 +115,7 @@ export default function StateView({
       </div>
       <p className="state-view__title">{title}</p>
       {description ? <p className="state-view__desc">{description}</p> : null}
+      {isLoading ? <ScienceFactNote /> : null}
       {action ? <div className="state-view__action">{action}</div> : null}
     </div>
   );

@@ -12,6 +12,7 @@ import ConfirmActionModal from "../components/ConfirmActionModal";
 import { UserAvatarMark } from "../components/ProfileAvatarEditor";
 import PwaEnableNotificationsPrompt from "../pwa/PwaEnableNotificationsPrompt";
 import PwaInstallPrompt from "../pwa/PwaInstallPrompt";
+import EducationalLoading, { LOADING_MESSAGES } from "../../components/EducationalLoading";
 import {
   PARENT_MOBILE_NAV,
   PARENT_NAV,
@@ -134,7 +135,11 @@ export default function ParentCabinetPage() {
   }, []);
 
   if (loading) {
-    return <div className="st-loading-screen">Загрузка…</div>;
+    return (
+      <div className="st-loading-screen">
+        <EducationalLoading message={LOADING_MESSAGES.page} />
+      </div>
+    );
   }
 
   if (!user) {

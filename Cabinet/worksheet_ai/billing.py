@@ -139,6 +139,16 @@ def refund(user, amount: int, **kwargs) -> AITransaction:
     )
 
 
+def worksheet_watermark_required(user) -> bool:
+    """Бесплатный тариф и отсутствие подписки оставляют знак на листе. Платные тарифы — нет."""
+    from Cabinet.models import TeacherSubscription
+
+    sub = TeacherSubscription.objects.filter(teacher=user).select_related("plan").first()
+    if sub and sub.is_valid() and sub.plan_id and not sub.plan.is_free:
+        return False
+    return True
+
+
 def ensure_period_grant(user) -> AITokenAccount:
     """Один раз за календарный месяц начисляет AI-токены по тарифу. Повтор безопасен."""
     from Cabinet.models import TeacherSubscription

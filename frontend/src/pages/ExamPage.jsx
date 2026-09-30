@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useLocation, Link, useNavigate } from "react-router-dom";
 import MathContent from "../components/MathContent";
+import EducationalLoading, { LOADING_MESSAGES } from "../components/EducationalLoading";
 import { devApiBase } from "../utils/devApiBase";
 import { isEgeInfTruthTableTask, isEgeInfParallelProcessesTask, isEgeInfRoadGraphTask, isOgeRusTask13 } from "../utils/isOgeInformaticsTask";
 
@@ -1980,8 +1981,7 @@ function ExamPage() {
   if (!variant) {
     return (
       <div className="exam-variant-status exam-variant-status--loading">
-        <h2 className="exam-variant-status__title">Загружаем вариант…</h2>
-        <p className="exam-variant-status__text">Подождите, идёт загрузка заданий.</p>
+        <EducationalLoading message={LOADING_MESSAGES.material} />
         {variantLoadingUrl ? (
           <p className="exam-variant-status__meta">{variantLoadingUrl}</p>
         ) : null}

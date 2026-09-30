@@ -12,6 +12,7 @@ import {
   uploadInteractiveImage,
 } from "../../utils/cabinetAuth";
 import ConfirmActionModal from "../components/ConfirmActionModal";
+import EducationalLoading, { LOADING_MESSAGES } from "../../components/EducationalLoading";
 import InteractiveAssignModal from "../components/InteractiveAssignModal";
 import InteractiveLaunchScreen, { TemplateSwitcher } from "../components/InteractiveLaunchScreen";
 import {
@@ -133,7 +134,7 @@ export default function CabinetInteractiveDetailPage() {
   if (loading) {
     return (
       <CabinetPageShell className="cb-section--interactive-detail ix-page ix-launch-page">
-        <p className="cb-loading">Загрузка…</p>
+        <EducationalLoading message={LOADING_MESSAGES.material} />
       </CabinetPageShell>
     );
   }

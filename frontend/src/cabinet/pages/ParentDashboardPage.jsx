@@ -4,6 +4,7 @@ import { fetchParentDashboard } from "../../utils/cabinetAuth";
 import ParentChildSwitcher from "../parent/ParentChildSwitcher";
 import {
   StudentErrorState,
+  StudentLoadingState,
   StudentPageShell,
   StudentStatusBadge,
 } from "../student/StudentSectionUi";
@@ -72,7 +73,7 @@ export default function ParentDashboardPage() {
   if (loading) {
     return (
       <StudentPageShell className="st-dashboard parent-home">
-        <div className="st-loading">Загрузка…</div>
+        <StudentLoadingState />
       </StudentPageShell>
     );
   }

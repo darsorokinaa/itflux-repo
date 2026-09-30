@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import EducationalLoading, { LOADING_MESSAGES } from "./EducationalLoading";
 import { useRegisterCatalogView } from "./CatalogEngagementBar";
 
 /**
@@ -10,6 +11,7 @@ export default function CatalogMaterialViewer({
   backLabel = "← Назад",
   frameSrc = "",
   loading = false,
+  loadingMessage = LOADING_MESSAGES.material,
   error = "",
   engagement = null,
   banner = null,
@@ -23,7 +25,7 @@ export default function CatalogMaterialViewer({
   if (loading) {
     return (
       <div className="lesson-viewer-page lesson-viewer-page--loading">
-        <p className="lesson-viewer-page__status">Загрузка…</p>
+        <EducationalLoading message={loadingMessage} />
       </div>
     );
   }

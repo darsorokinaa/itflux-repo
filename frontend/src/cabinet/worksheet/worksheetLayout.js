@@ -219,6 +219,103 @@ export function columnSlices(blocks, heights = {}, options = {}) {
 }
 
 /**
+ * Place blocks on a wrapping grid.
+ * column 0 stays left, column 1 sits on the right, fullWidth spans the row.
+ */
+export function placeGrid(blocks, columns = 2) {
+  const cols = Math.max(1, columns || 1);
+  const cells = [];
+  let row = 1;
+  let col = 1;
+  (blocks || []).forEach((block) => {
+    if (!block || block.type === "page-break") return;
+    if (cols === 1 || block.fullWidth) {
+      if (col !== 1) {
+        row += 1;
+        col = 1;
+      }
+      cells.push({ block, row, col: 1, span: cols });
+      row += 1;
+      col = 1;
+      return;
+    }
+    let target = col;
+    if (block.column === 1) target = Math.min(cols, 2);
+    else if (block.column === 0) target = 1;
+    if (target < col) {
+      row += 1;
+      col = 1;
+      target = block.column === 1 ? Math.min(cols, 2) : 1;
+    }
+    if (target > col) col = target;
+    cells.push({ block, row, col, span: 1 });
+    col += 1;
+    if (col > cols) {
+      row += 1;
+      col = 1;
+    }
+  });
+  return cells;
+}
+
+function commitGridRow(pages, usedRef, row, heights, contentHeight, gap) {
+  if (!row.length) return;
+  const height = Math.max(...row.map((block) => blockHeight(block, heights)));
+  let page = pages[pages.length - 1];
+  const occupied = page.length > 0 || usedRef.used > 0;
+  const lead = page.length ? gap : 0;
+  if (occupied && page.length && lead + height > contentHeight - usedRef.used) {
+    pages.push([]);
+    usedRef.used = 0;
+    page = pages[pages.length - 1];
+  }
+  if (page.length) usedRef.used += gap;
+  row.forEach((block) => page.push(block));
+  usedRef.used += height;
+}
+
+/**
+ * Flow blocks across columns, one row at a time, then onto the next page.
+ * Two blocks in a row share the height of the taller one.
+ */
+export function paginateGrid(blocks, heights = {}, options = {}) {
+  const contentHeight = options.contentHeight || 900;
+  const columns = Math.max(1, options.columns || 1);
+  const gap = options.gap ?? BLOCK_GAP_PX;
+  if (columns === 1) return paginateBlocks(blocks, heights, options);
+
+  const pages = [[]];
+  const usedRef = { used: options.firstUsed || 0 };
+  let chunk = [];
+
+  const flush = (pageBreak) => {
+    const rows = new Map();
+    placeGrid(chunk, columns).forEach((cell) => {
+      if (!rows.has(cell.row)) rows.set(cell.row, []);
+      rows.get(cell.row).push(cell.block);
+    });
+    [...rows.keys()].sort((a, b) => a - b).forEach((key) => {
+      commitGridRow(pages, usedRef, rows.get(key), heights, contentHeight, gap);
+    });
+    chunk = [];
+    if (pageBreak) {
+      if (pages[pages.length - 1].length) pages.push([]);
+      usedRef.used = 0;
+    }
+  };
+
+  (blocks || []).forEach((block) => {
+    if (!block || block.type === "page-break") {
+      flush(true);
+      return;
+    }
+    chunk.push(block);
+  });
+  flush(false);
+  return pages.length ? pages : [[]];
+}
+
+/**
  * Keep the sheet on one or two A4 pages. A second column is used
  * when a single column would run past the second page.
  */
@@ -226,8 +323,8 @@ export function fitSheet(blocks, heights = {}, options = {}) {
   const single = paginateBlocks(blocks, heights, options);
   const filled = single.filter((page) => page.length);
   if (filled.length <= 2) return { columns: 1, pages: single.length ? single : [[]] };
-  const gap = Math.min(options.gap ?? BLOCK_GAP_PX, 10);
-  const pages = paginateColumns(blocks, heights, { ...options, columns: 2, gap });
+  const gap = options.gap ?? BLOCK_GAP_PX;
+  const pages = paginateGrid(blocks, heights, { ...options, columns: 2, gap });
   return { columns: 2, pages };
 }
 
