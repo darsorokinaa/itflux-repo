@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { fetchParentChildren, fetchParentJournal } from "../../utils/cabinetAuth";
 import ParentChildSwitcher from "../parent/ParentChildSwitcher";
 import { StudentErrorState, StudentLoadingState, StudentPageShell } from "../student/StudentSectionUi";
+import { isHomeworkOverdue } from "../homeworkDueAt";
 
 export default function ParentResultsPage() {
   const [params, setParams] = useSearchParams();
@@ -115,7 +116,7 @@ export default function ParentResultsPage() {
               {item.date || "—"}
               {item.score_percent != null ? ` · ${item.score_percent}%` : ""}
               {item.status_label || item.status ? ` · ${item.status_label || item.status}` : ""}
-              {item.is_overdue ? " · просрочено" : ""}
+              {isHomeworkOverdue(item) ? " · просрочено" : ""}
             </p>
             {item.comment ? <p className="st-muted">{item.comment}</p> : null}
           </li>

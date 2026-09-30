@@ -39,11 +39,28 @@ function resolveDueAt(item) {
   );
 }
 
+function formatDueBadge(iso) {
+  if (!iso) return "";
+  const due = new Date(iso);
+  if (Number.isNaN(due.getTime())) return "";
+  return due.toLocaleString("ru-RU", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function isSameLocalDay(iso) {
+  const due = new Date(iso);
+  if (Number.isNaN(due.getTime())) return false;
+  return due.toDateString() === new Date().toDateString();
+}
+
 function isReviewOverdue(item) {
-  if (item.is_overdue === true) return true;
   if (item.status !== "pending") return false;
   const dueAt = resolveDueAt(item);
-  if (!dueAt) return false;
+  if (!dueAt) return item.is_overdue === true;
   const due = new Date(dueAt);
   if (Number.isNaN(due.getTime())) return false;
   return due.getTime() < Date.now();
@@ -140,9 +157,15 @@ function mapReviewItem(item) {
     }
   }
 
-  if (overdue && item.status === "pending") {
-    deadlineLabel = "Просрочено";
-    deadlineTone = "overdue";
+  const dueBadge = formatDueBadge(resolveDueAt(item));
+  if (awaitingSubmission && dueBadge) {
+    deadlineLabel = `До ${dueBadge}`;
+    if (overdue) {
+      deadlineTone = "overdue";
+      metaLine = "Просрочено";
+    } else {
+      deadlineTone = isSameLocalDay(resolveDueAt(item)) ? "today" : "default";
+    }
   }
 
   return {

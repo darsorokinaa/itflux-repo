@@ -22,6 +22,7 @@ import {
   formatDueDate,
 } from "../StudentSectionUi";
 import { usePageTitle } from "../../hooks/usePageTitle";
+import { studentHomeworkStatus } from "../studentAssignmentCards";
 import AttachmentPreviewModal, {
   isAttachmentPreviewable,
   openAttachmentPreferPreview,
@@ -274,7 +275,7 @@ export default function StudentAssignmentDetailPage() {
   const variantSubmitted = Boolean(item?.variant_submitted);
 
   const badge = useMemo(
-    () => (item ? getBadgeProps(item.status, item.status_label, variantSubmitted) : null),
+    () => (item ? getBadgeProps(studentHomeworkStatus(item), item.status_label, variantSubmitted) : null),
     [item, variantSubmitted],
   );
 

@@ -1032,17 +1032,21 @@ def release_for_student(event, student, plan_item, lesson):
             homework.title = f"ДЗ: {plan_item.title}"
             homework.description = plan_item.homework_description or homework.description
             homework.lesson = lesson
-            homework.due_at = due_at
             if homework.status == HomeworkStatus.DRAFT:
                 homework.status = HomeworkStatus.ASSIGNED
             update_fields = [
                 "title",
                 "description",
                 "lesson",
-                "due_at",
                 "status",
                 "updated_at",
             ]
+            # Повторная выдача после урока не затирает срок, который уже стоит:
+            # учитель мог указать другую дату, а автосрок (следующий урок) часто уже в прошлом
+            # и тогда ДЗ сразу помечается просроченным.
+            if homework.due_at is None and due_at is not None:
+                homework.due_at = due_at
+                update_fields.append("due_at")
             if event.student_subject_id and homework.student_subject_id != event.student_subject_id:
                 homework.student_subject_id = event.student_subject_id
                 update_fields.append("student_subject")

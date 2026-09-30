@@ -9,6 +9,7 @@ import {
   formatResultCounts,
   formatResultPercent,
 } from "../homeworkResultSummary";
+import { isDueAtPast } from "../homeworkDueAt";
 
 const TYPE_LABELS = {
   homework: "Домашнее задание",
@@ -36,6 +37,15 @@ function isDueToday(iso) {
   return new Date(iso).toDateString() === new Date().toDateString();
 }
 
+/** «Просрочено» только если срок сдачи уже прошёл. Будущая дата не перебивается статусом. */
+export function studentHomeworkStatus(item) {
+  const status = item?.status || "";
+  if (status === "overdue" && item?.due_at && !isDueAtPast(item.due_at)) {
+    return "new";
+  }
+  return status;
+}
+
 export function getStudentAssignmentPath(item) {
   if (item.kind === "interactive") {
     return `/cabinet/student/interactives/${item.interactive_assignment_id || item.id}/play`;
@@ -61,35 +71,38 @@ export function studentResultBlock(item) {
 export function mapStudentAssignmentToHwCard(item) {
   const typeLabel = item.student_subject_label || item.type_label || TYPE_LABELS[item.type] || "Задание";
   const isInteractive = item.kind === "interactive";
+  const status = studentHomeworkStatus(item);
 
-  let deadlineLabel = item.status_label || "Задание";
-  let deadlineTone = STATUS_TONE[item.status] || "default";
+  let deadlineLabel = (status === item.status ? item.status_label : "") || "Задание";
+  let deadlineTone = STATUS_TONE[status] || "default";
   let metaLine = "";
   let comment = "";
 
-  if (item.status === "needs_fix") {
+  if (status === "needs_fix") {
     deadlineLabel = "Нужна доработка";
     deadlineTone = "overdue";
     metaLine = "Учитель оставил замечания";
     comment = commentPreview(item.result_summary?.teacher_comment_preview || item.teacher_comment);
-  } else if (item.due_at && !["checked", "completed", "submitted", "reviewing"].includes(item.status)) {
+  } else if (item.due_at && !["checked", "completed", "submitted", "reviewing"].includes(status)) {
     const dueTime = formatStudentTime(item.due_at);
     deadlineLabel = isDueToday(item.due_at)
       ? (dueTime ? `Сегодня, ${dueTime}` : "Сегодня")
       : `До ${formatStudentDate(item.due_at)}${dueTime ? `, ${dueTime}` : ""}`;
-    if (item.status === "overdue") {
+    if (status === "overdue" && isDueAtPast(item.due_at)) {
       deadlineTone = "overdue";
     } else if (isDueToday(item.due_at)) {
       deadlineTone = "today";
+    } else {
+      deadlineTone = "default";
     }
-    if (item.status === "new" || item.status === "in_progress") {
+    if (status === "new" || status === "in_progress") {
       metaLine = item.due_at ? `Сдать до ${formatStudentDate(item.due_at)}` : "";
     }
-  } else if (item.status === "submitted" || item.status === "reviewing") {
+  } else if (status === "submitted" || status === "reviewing") {
     deadlineLabel = "Сдано";
     deadlineTone = "review";
     metaLine = "Ожидает проверки преподавателем";
-  } else if (item.status === "checked" || item.status === "completed") {
+  } else if (status === "checked" || status === "completed") {
     deadlineLabel = item.status_label || "Проверено";
     deadlineTone = "completed";
     comment = commentPreview(item.result_summary?.teacher_comment_preview || item.teacher_comment);
@@ -112,10 +125,10 @@ export function mapStudentAssignmentToHwCard(item) {
   let hideProgressBar = true;
 
   if (!result) {
-    if (item.status === "in_progress") {
+    if (status === "in_progress") {
       progressLabel = "В работе";
       progressTone = "review";
-    } else if (item.status === "new") {
+    } else if (status === "new") {
       progressLabel = null;
     }
   }
@@ -135,7 +148,7 @@ export function mapStudentAssignmentToHwCard(item) {
     hideProgressBar,
     actionLabel: isInteractive
       ? interactiveActionLabel(item.action)
-      : assignmentActionLabel(item.status),
+      : assignmentActionLabel(status),
     actionPrimary: true,
   };
 }

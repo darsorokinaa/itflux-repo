@@ -36,6 +36,20 @@ export function datetimeLocalToIso(localValue) {
   return parsed.toISOString();
 }
 
+export function isDueAtPast(iso, now = Date.now()) {
+  if (!iso) return false;
+  const due = new Date(iso).getTime();
+  if (Number.isNaN(due)) return false;
+  return due < now;
+}
+
+/** Будущий срок сдачи не считается просрочкой, даже если статус пришёл как overdue. */
+export function isHomeworkOverdue(item, now = Date.now()) {
+  if (!item) return false;
+  if (item.due_at && !isDueAtPast(item.due_at, now)) return false;
+  return Boolean(item.is_overdue) || item.status === "overdue";
+}
+
 export function readDatetimeLocalInput(form, name = "due_at") {
   if (!form || typeof form.querySelector !== "function") return null;
   const input = form.querySelector(`input[name="${name}"]`);

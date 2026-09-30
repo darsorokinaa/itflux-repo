@@ -37,6 +37,27 @@ describe("homeworkJournalStatus", () => {
     expect(wasHomeworkSubmittedLate(entry)).toBe(true);
   });
 
+  it("does not mark a future due date as overdue", () => {
+    const entry = {
+      status: "overdue",
+      status_label: "Просрочено",
+      is_overdue: true,
+      due_at: "2099-01-01T12:00:00Z",
+    };
+    expect(isUnsubmittedOverdue(entry)).toBe(false);
+    expect(homeworkJournalStatusLabel(entry)).not.toBe("Просрочено");
+  });
+
+  it("still shows overdue when the due date has passed", () => {
+    const entry = {
+      status: "not_submitted",
+      due_at: "2000-01-01T12:00:00Z",
+      is_overdue: false,
+    };
+    expect(isUnsubmittedOverdue(entry)).toBe(true);
+    expect(homeworkJournalStatusLabel(entry)).toBe("Просрочено");
+  });
+
   it("still shows overdue when the work was not turned in", () => {
     const entry = {
       status: "overdue",

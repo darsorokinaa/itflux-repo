@@ -8,6 +8,7 @@ import HomeworkAttachmentsField, {
 import PlanItemResourcesPicker from "./PlanItemResourcesPicker";
 import { getInteractiveDisplayTitle } from "../interactivesData";
 import { assignStudentHomework, checkVariantTasksOverlap, fetchStudentHomeworkOptions } from "../../utils/cabinetAuth";
+import { datetimeLocalToIso, toDateTimeLocalValue } from "../homeworkDueAt";
 
 function HomeworkPickItem({ item, selected, onSelect, disabled }) {
   return (
@@ -85,7 +86,6 @@ export default function HomeworkAssignModal({
   const [selectedId, setSelectedId] = useState("");
   const [deadline, setDeadline] = useState("");
   const [suggestedDueAt, setSuggestedDueAt] = useState("");
-  const [deadlineTouched, setDeadlineTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [customTitle, setCustomTitle] = useState("");
   const [customDescription, setCustomDescription] = useState("");
@@ -94,29 +94,6 @@ export default function HomeworkAssignModal({
   const [resourcePickerOpen, setResourcePickerOpen] = useState(false);
   const [duplicateTaskIds, setDuplicateTaskIds] = useState([]);
   const [pendingAttachmentFiles, setPendingAttachmentFiles] = useState([]);
-
-  const toDateTimeLocalValue = (iso) => {
-    if (!iso) return "";
-    try {
-      const d = new Date(iso);
-      if (Number.isNaN(d.getTime())) return "";
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, "0");
-      const day = String(d.getDate()).padStart(2, "0");
-      const h = String(d.getHours()).padStart(2, "0");
-      const min = String(d.getMinutes()).padStart(2, "0");
-      return `${y}-${m}-${day}T${h}:${min}`;
-    } catch {
-      return "";
-    }
-  };
-
-  const datetimeLocalToIso = (localValue) => {
-    if (!localValue) return undefined;
-    const d = new Date(localValue);
-    if (Number.isNaN(d.getTime())) return localValue;
-    return d.toISOString();
-  };
 
   const formatSuggestedHint = (iso) => {
     if (!iso) return "";
@@ -134,11 +111,7 @@ export default function HomeworkAssignModal({
 
   const resolveDueAtPayload = () => {
     if (!deadline) return undefined;
-    const suggestedLocal = toDateTimeLocalValue(suggestedDueAt);
-    if (suggestedDueAt && (!deadlineTouched || deadline === suggestedLocal)) {
-      return suggestedDueAt;
-    }
-    return datetimeLocalToIso(deadline);
+    return datetimeLocalToIso(deadline) || undefined;
   };
 
   const loadOptions = useCallback(async () => {
@@ -167,7 +140,6 @@ export default function HomeworkAssignModal({
       setSelectedId(first ? String(first.id) : "");
       const suggested = data?.suggested_due_at || "";
       setSuggestedDueAt(suggested);
-      setDeadlineTouched(false);
       setDeadline(toDateTimeLocalValue(suggested));
     } catch (err) {
       setError(err.message || "Не удалось загрузить занятия");
@@ -448,10 +420,7 @@ export default function HomeworkAssignModal({
                         <input
                           type="datetime-local"
                           value={deadline}
-                          onChange={(e) => {
-                            setDeadlineTouched(true);
-                            setDeadline(e.target.value);
-                          }}
+                          onChange={(e) => setDeadline(e.target.value)}
                           disabled={submitting}
                         />
                         {suggestedDueAt ? (
@@ -572,10 +541,7 @@ export default function HomeworkAssignModal({
                 <input
                   type="datetime-local"
                   value={deadline}
-                  onChange={(e) => {
-                    setDeadlineTouched(true);
-                    setDeadline(e.target.value);
-                  }}
+                  onChange={(e) => setDeadline(e.target.value)}
                   disabled={submitting}
                 />
                 {suggestedDueAt ? (

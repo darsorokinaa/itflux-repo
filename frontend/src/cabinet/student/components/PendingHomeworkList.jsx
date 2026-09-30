@@ -3,7 +3,7 @@ import {
   StudentStatusBadge,
   formatDueDate,
 } from "../StudentSectionUi";
-import { getStudentAssignmentPath, studentResultBlock } from "../studentAssignmentCards";
+import { getStudentAssignmentPath, studentHomeworkStatus, studentResultBlock } from "../studentAssignmentCards";
 import {
   studentHwActionLabel,
   studentHwStatusLabel,
@@ -13,9 +13,10 @@ import { commentPreview } from "../../homeworkResultSummary";
 export function PendingHomeworkCard({ item, showTeacher = false }) {
   const subject = item.student_subject_label || item.type_label || "Задание";
   const title = item.topic || item.title;
-  const statusLabel = studentHwStatusLabel(item.status, item.status_label);
-  const actionLabel = studentHwActionLabel(item.status);
-  const isOverdue = item.status === "overdue";
+  const status = studentHomeworkStatus(item);
+  const statusLabel = studentHwStatusLabel(status, status === item.status ? item.status_label : "");
+  const actionLabel = studentHwActionLabel(status);
+  const isOverdue = status === "overdue";
   const result = studentResultBlock(item);
   const comment = commentPreview(item.result_summary?.teacher_comment_preview || item.teacher_comment);
 
@@ -23,13 +24,13 @@ export function PendingHomeworkCard({ item, showTeacher = false }) {
   if (result) {
     const parts = [result.countsLabel, result.percentage != null ? `${result.percentage}%` : ""].filter(Boolean);
     progressText = parts.length ? `Результат ${parts.join(" · ")}` : "";
-  } else if (item.status === "submitted" || item.status === "reviewing") {
+  } else if (status === "submitted" || status === "reviewing") {
     progressText = "Ожидает проверки преподавателем";
-  } else if (item.status === "needs_fix") {
+  } else if (status === "needs_fix") {
     progressText = "Учитель оставил замечания";
   } else if (item.items_count > 0 && item.result_percent == null) {
     progressText = `Выполнено ${item.items_done ?? 0} из ${item.items_count} заданий`;
-  } else if (item.progress_percent > 0 && item.status === "in_progress") {
+  } else if (item.progress_percent > 0 && status === "in_progress") {
     progressText = "В процессе";
   }
 
@@ -38,7 +39,7 @@ export function PendingHomeworkCard({ item, showTeacher = false }) {
       <div className="st-pending-hw__body">
         <div className="st-pending-hw__top">
           <span className="st-pending-hw__subject">{subject}</span>
-          <StudentStatusBadge status={item.status} label={statusLabel} />
+          <StudentStatusBadge status={status} label={statusLabel} />
         </div>
         <h3 className="st-pending-hw__title">{title}</h3>
         {item.topic && item.title && item.topic !== item.title ? (
@@ -69,7 +70,7 @@ export function PendingHomeworkCard({ item, showTeacher = false }) {
             <span>{progressText}</span>
           </div>
         ) : null}
-        {comment && (item.status === "checked" || item.status === "needs_fix") ? (
+        {comment && (status === "checked" || status === "needs_fix") ? (
           <p className="st-hw-card__comment">{comment}</p>
         ) : null}
       </div>

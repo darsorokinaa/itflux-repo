@@ -9,6 +9,7 @@ import {
   StudentStatusBadge,
 } from "../student/StudentSectionUi";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { isHomeworkOverdue } from "../homeworkDueAt";
 
 function formatWhen(iso) {
   if (!iso) return "—";
@@ -173,7 +174,7 @@ export default function ParentDashboardPage() {
               <li key={hw.homework_id} className="st-list-card">
                 <div className="st-list-card__row">
                   <strong>{hw.title}</strong>
-                  {hw.is_overdue ? <StudentStatusBadge status="overdue" label="Просрочено" /> : null}
+                  {isHomeworkOverdue(hw) ? <StudentStatusBadge status="overdue" label="Просрочено" /> : null}
                 </div>
                 <p className="st-muted">
                   {hw.status_label || hw.status}

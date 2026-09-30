@@ -1296,6 +1296,43 @@ class StudentReleaseTests(TestCase):
         self.assertIsNotNone(homework)
         self.assertEqual(homework.due_at, next_starts)
 
+    def test_rerelease_keeps_teacher_due_date(self):
+        """Указанный срок не затирается следующим уроком и не становится просрочкой."""
+        from Cabinet.models import Homework
+        from Cabinet.student_api import _homework_student_status
+        from Cabinet.student_release import StudentReleaseService
+
+        next_starts = timezone.now() - timedelta(hours=1)
+        create_single_event(
+            teacher=self.teacher,
+            data={
+                "title": self.student.full_name,
+                "starts_at": next_starts,
+                "ends_at": next_starts + timedelta(minutes=45),
+                "event_type": "individual_lesson",
+                "notify_participants": False,
+            },
+            student_ids=[self.student.pk],
+            notify=False,
+        )
+        custom_due = timezone.now() + timedelta(days=4)
+        homework = Homework.objects.create(
+            teacher=self.teacher,
+            student=self.student,
+            lesson_plan_item=self.plan_item,
+            title="ДЗ: Логика",
+            description="Решить задачи 1–3",
+            status="assigned",
+            due_at=custom_due,
+        )
+
+        StudentReleaseService.release_for_event(self.event)
+        homework.refresh_from_db()
+        self.assertEqual(homework.due_at, custom_due)
+        status, label, _submission = _homework_student_status(homework, self.student)
+        self.assertNotEqual(status, "overdue")
+        self.assertNotEqual(label, "Просрочено")
+
     def test_homework_due_at_prefers_same_subject_next_lesson(self):
         from Cabinet.models import Homework, LessonPlan, LessonPlanItem
         from Cabinet.student_release import StudentReleaseService

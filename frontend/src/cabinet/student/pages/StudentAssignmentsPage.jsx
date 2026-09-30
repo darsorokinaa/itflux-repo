@@ -8,6 +8,7 @@ import { fetchStudentAssignments, fetchStudentInteractives } from "../../../util
 import {
   getStudentAssignmentPath,
   mapStudentAssignmentToHwCard,
+  studentHomeworkStatus,
 } from "../studentAssignmentCards";
 import {
   StudentEmptyState,
@@ -27,17 +28,18 @@ const FILTERS = [
 ];
 
 function matchesFilter(item, filter) {
+  const status = studentHomeworkStatus(item);
   if (filter === "all") return true;
   if (filter === "todo") {
-    return ["new", "in_progress", "overdue", "needs_fix"].includes(item.status);
+    return ["new", "in_progress", "overdue", "needs_fix"].includes(status);
   }
   if (filter === "reviewing") {
-    return item.status === "submitted" || item.status === "reviewing";
+    return status === "submitted" || status === "reviewing";
   }
   if (filter === "in_progress") {
-    return item.status === "in_progress" || item.status === "needs_fix";
+    return status === "in_progress" || status === "needs_fix";
   }
-  return item.status === filter;
+  return status === filter;
 }
 
 function HomeworkListCard({ item }) {

@@ -8,9 +8,10 @@ import {
   StudentPageShell,
   StudentStatusBadge,
 } from "../student/StudentSectionUi";
+import { isHomeworkOverdue } from "../homeworkDueAt";
 
 const BUCKETS = [
-  { id: "todo", label: "Нужно выполнить", match: (h) => ["not_submitted", "new", "in_progress", "overdue"].includes(h.status) || h.is_overdue },
+  { id: "todo", label: "Нужно выполнить", match: (h) => ["not_submitted", "new", "in_progress", "overdue"].includes(h.status) || isHomeworkOverdue(h) },
   { id: "review", label: "На проверке", match: (h) => h.status === "submitted" },
   { id: "done", label: "Проверено", match: (h) => h.status === "checked" },
   { id: "fix", label: "На доработке", match: (h) => ["returned", "needs_revision"].includes(h.status) },
@@ -92,7 +93,7 @@ export default function ParentHomeworkPage() {
                     {hw.score_percent != null ? ` · ${hw.score_percent}%` : ""}
                     {hw.attempt_count ? ` · попыток: ${hw.attempt_count}` : ""}
                   </p>
-                  {hw.is_overdue ? <StudentStatusBadge status="overdue" label="Просрочено" /> : null}
+                  {isHomeworkOverdue(hw) ? <StudentStatusBadge status="overdue" label="Просрочено" /> : null}
                   {hw.teacher_comment ? <p className="st-muted">{hw.teacher_comment}</p> : null}
                   {(hw.attempts || []).length > 1 ? (
                     <details>

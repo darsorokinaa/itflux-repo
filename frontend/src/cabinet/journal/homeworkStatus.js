@@ -34,6 +34,10 @@ export function wasHomeworkSubmittedLate(entry) {
 
 export function isUnsubmittedOverdue(entry) {
   if (isHomeworkTurnedIn(entry)) return false;
+  if (entry?.due_at) {
+    const due = new Date(entry.due_at).getTime();
+    if (!Number.isNaN(due)) return due < Date.now();
+  }
   const status = String(entry?.status || "").toLowerCase();
   return Boolean(entry?.is_overdue) || status === "overdue";
 }
@@ -45,7 +49,9 @@ export function homeworkJournalStatusKey(entry) {
     return "submitted";
   }
   if (isUnsubmittedOverdue(entry)) return "overdue";
-  return String(entry?.status || "").toLowerCase();
+  const status = String(entry?.status || "").toLowerCase();
+  if (status === "overdue") return "not_submitted";
+  return status;
 }
 
 export function homeworkJournalStatusLabel(entry) {
@@ -57,7 +63,7 @@ export function homeworkJournalStatusLabel(entry) {
   }
   if (key === "overdue") return "Просрочено";
   const raw = String(entry?.status_label || "").trim();
-  if (raw) return raw;
+  if (raw && !/просроч/i.test(raw)) return raw;
   return HOMEWORK_STATUS_LABELS[key] || "Не сдано";
 }
 

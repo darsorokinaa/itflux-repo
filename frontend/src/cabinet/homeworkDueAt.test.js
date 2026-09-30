@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { datetimeLocalToIso, toDateTimeLocalValue } from "./homeworkDueAt";
+import { datetimeLocalToIso, isDueAtPast, toDateTimeLocalValue } from "./homeworkDueAt";
 
 describe("homeworkDueAt", () => {
   it("converts datetime-local values as local calendar time, not UTC midnight", () => {
@@ -20,5 +20,12 @@ describe("homeworkDueAt", () => {
   it("returns null for an empty deadline instead of reusing the previous ISO", () => {
     expect(datetimeLocalToIso("")).toBeNull();
     expect(datetimeLocalToIso("not-a-date")).toBeNull();
+  });
+
+  it("treats a future due date as not overdue", () => {
+    const now = new Date("2026-09-30T12:00:00").getTime();
+    expect(isDueAtPast("2026-10-05T18:00:00", now)).toBe(false);
+    expect(isDueAtPast("2026-09-29T18:00:00", now)).toBe(true);
+    expect(isDueAtPast("", now)).toBe(false);
   });
 });
