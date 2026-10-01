@@ -5,10 +5,10 @@
 export const PAYMENTS_ENABLED = true;
 
 /**
- * Конструктор материалов временно закрыт.
- * В меню показывается «скоро», прямые ссылки открывают заглушку.
+ * Конструктор материалов.
+ * false — в меню «скоро», прямые ссылки открывают заглушку.
  */
-export const WORKSHEETS_CONSTRUCTOR_ENABLED = false;
+export const WORKSHEETS_CONSTRUCTOR_ENABLED = true;
 
 /**
  * Screen-share annotation overlay in the video lesson.

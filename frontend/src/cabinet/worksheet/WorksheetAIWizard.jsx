@@ -51,6 +51,12 @@ const WORDING = [
   },
 ];
 
+const READY_STYLES = [
+  { id: "whiteboard", title: "Доска", text: "Светлый лист и тонкие акценты по краям." },
+  { id: "school", title: "Учебник", text: "Тёплая полоса и спокойные поля." },
+  { id: "strict", title: "Бланк", text: "Строгий лист без декора." },
+  { id: "minimal", title: "Минимум", text: "Почти пустой лист и тонкая рамка." },
+];
 const INTENSITY = [
   { id: "light", title: "Лёгкая", text: "Небольшая тематическая подводка." },
   { id: "medium", title: "Средняя", text: "Сюжет встроен в условие." },
@@ -86,6 +92,7 @@ const EMPTY = {
   wishes: "",
   wants_theory: false,
   theoryTouched: false,
+  theory_detail: "brief",
 };
 
 async function api(path, options = {}) {
@@ -207,7 +214,7 @@ export default function WorksheetAIWizard() {
     goal: form.goal,
     goal_text: form.goal_text,
     format: form.format,
-    style: "school",
+    style: form.style || "school",
     custom_style: form.custom_style,
     theme: form.theme,
     wording: form.wording,
@@ -215,6 +222,7 @@ export default function WorksheetAIWizard() {
     ai_design: form.ai_design,
     wishes: form.wishes,
     wants_theory: form.theoryTouched ? form.wants_theory : theoryDefault,
+    theory_detail: form.theory_detail === "detailed" ? "detailed" : "brief",
   });
 
   const calculate = async () => {
@@ -437,12 +445,34 @@ export default function WorksheetAIWizard() {
                   checked={form.theoryTouched ? form.wants_theory : theoryDefault}
                   onChange={(event) => set({ wants_theory: event.target.checked, theoryTouched: true })}
                 />
-                Короткий теоретический блок
+                Теоретический блок
               </label>
+              {(form.theoryTouched ? form.wants_theory : theoryDefault) ? (
+                <div className="wai-wording" role="radiogroup" aria-label="Объём теории">
+                  <button type="button" className={form.theory_detail !== "detailed" ? "is-on" : ""} onClick={() => set({ theory_detail: "brief" })}>
+                    <strong>Краткая</strong>
+                    <span>Определение, правило и один пример.</span>
+                  </button>
+                  <button type="button" className={form.theory_detail === "detailed" ? "is-on" : ""} onClick={() => set({ theory_detail: "detailed" })}>
+                    <strong>Подробная</strong>
+                    <span>Правила, несколько примеров и типичная ошибка.</span>
+                  </button>
+                </div>
+              ) : null}
             </section>
 
             <section>
               <h2>Как оформить</h2>
+              <span className="wai-label">Готовый стиль</span>
+              <div className="wai-choice" role="radiogroup" aria-label="Готовый стиль">
+                {READY_STYLES.map((item) => (
+                  <button key={item.id} type="button" className={form.style === item.id ? "is-on" : ""} onClick={() => set({ style: item.id })}>
+                    <strong>{item.title}</strong>
+                    <span>{item.text}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="wai-note">Эти стили не рисуют фон через AI и входят в сборку листа. Свой сюжет ниже может добавить иллюстрацию.</p>
               <label className="wai-check">
                 <input type="checkbox" checked={form.ai_design} onChange={(event) => set({ ai_design: event.target.checked })} />
                 AI-оформление: модель подберёт заголовки, акценты, плотность и структуру
@@ -490,8 +520,14 @@ export default function WorksheetAIWizard() {
                 {quote.tasks_not_themable} {plural(quote.tasks_not_themable, "останется без изменений, потому что его нежелательно тематизировать", "останутся без изменений, потому что их нежелательно тематизировать", "останутся без изменений, потому что их нежелательно тематизировать")}
               </li>
             ) : null}
-            <li>{quote?.ai_design ? "AI-оформление: включено" : "Оформление: готовый стиль редактора, входит в стоимость листа"}</li>
-            {quote?.theory_block ? <li>Будет добавлен короткий теоретический блок</li> : null}
+            <li>{quote?.ai_design ? "AI-оформление: включено" : `Оформление: ${labelOf(READY_STYLES, form.style) || "Учебник"}, без AI-фона`}</li>
+            {quote?.theory_block ? (
+              <li>
+                {form.theory_detail === "detailed"
+                  ? "Будет добавлен подробный теоретический блок"
+                  : "Будет добавлен короткий теоретический блок"}
+              </li>
+            ) : null}
           </ul>
           {(quote?.breakdown || []).filter((row) => row.amount > 0).length ? (
             <ul className="wai-breakdown">

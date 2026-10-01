@@ -23,7 +23,7 @@ export const TASK_TYPE_GROUPS = [
   {
     id: "quick",
     label: "Быстрый ответ",
-    types: ["short_answer", "single_choice", "fill_blank"],
+    types: ["short_answer", "image_question", "single_choice", "fill_blank"],
   },
   {
     id: "work",
@@ -38,7 +38,7 @@ export const TASK_TYPE_GROUPS = [
   {
     id: "visual",
     label: "Математика и визуализация",
-    types: ["function_graph", "coordinate_plane", "expression", "image_question", "plane", "solid"],
+    types: ["function_graph", "coordinate_plane", "unit_circle", "expression", "plane", "solid"],
   },
 ];
 
@@ -275,6 +275,35 @@ export const TASK_TYPE_REGISTRY = {
     validate(task) {
       return sampleFunction(task.content?.expression, 0) == null ? ["Функция должна быть вычислимой, например x^2 - 4*x + 3."] : [];
     },
+  },
+  unit_circle: {
+    id: "unit_circle",
+    label: "Тригонометрическая окружность",
+    hint: "Угол на единичной окружности: синус, косинус, тангенс и котангенс",
+    subjects: ["Математика"],
+    create: () => base("unit_circle", {
+      question: "Найдите синус и косинус отмеченного угла.",
+      content: {
+        angle: 30,
+        unit: "rad",
+        showAxes: true,
+        showAngles: true,
+        showSin: false,
+        showCos: false,
+        showTan: false,
+        showCot: false,
+        showValues: false,
+      },
+      answer: { value: "cos = √3/2, sin = 1/2" },
+    }),
+    migrate(task) {
+      const created = this.create();
+      if (task?.type === "unit_circle" && task?.content) return { ...created, ...task, type: "unit_circle", q: questionOf(task) || created.question };
+      created.question = questionOf(task) || created.question;
+      created.q = created.question;
+      return created;
+    },
+    validate() { return []; },
   },
   coordinate_plane: {
     id: "coordinate_plane",

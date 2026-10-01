@@ -123,7 +123,19 @@ function Preview({ view, children }) {
   );
 }
 
-export function TaskTypePicker({ type, onChange, label }) {
+function groupsFor(subject, type) {
+  const current = type ? canonicalType(type) : "";
+  return TASK_TYPE_GROUPS.map((group) => ({
+    ...group,
+    types: group.types.filter((id) => {
+      const only = TASK_TYPE_REGISTRY[id]?.subjects;
+      if (!only) return true;
+      return only.includes(subject) || current === id;
+    }),
+  })).filter((group) => group.types.length);
+}
+
+export function TaskTypePicker({ type, onChange, label, subject = "Математика" }) {
   const [open, setOpen] = useState(false);
   const [box, setBox] = useState(null);
   const rootRef = useRef(null);
@@ -178,7 +190,7 @@ export function TaskTypePicker({ type, onChange, label }) {
           onMouseDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}
         >
-          {TASK_TYPE_GROUPS.map((group) => (
+          {groupsFor(subject, type).map((group) => (
             <section key={group.id}>
               <strong>{group.label}</strong>
               {group.types.map((id) => {
@@ -2349,6 +2361,240 @@ function PlaneEditor({ task, onChange }) {
   );
 }
 
+const UNIT_ANGLES = [0, 30, 45, 60, 90, 120, 135, 150, 180, 210, 225, 240, 270, 300, 315, 330];
+const UNIT_RAD = {
+  0: "0", 30: "π/6", 45: "π/4", 60: "π/3", 90: "π/2", 120: "2π/3", 135: "3π/4", 150: "5π/6",
+  180: "π", 210: "7π/6", 225: "5π/4", 240: "4π/3", 270: "3π/2", 300: "5π/3", 315: "7π/4", 330: "11π/6",
+};
+const UNIT_VALUE = {
+  0: { cos: "1", sin: "0", tg: "0", ctg: null },
+  30: { cos: "√3/2", sin: "1/2", tg: "√3/3", ctg: "√3" },
+  45: { cos: "√2/2", sin: "√2/2", tg: "1", ctg: "1" },
+  60: { cos: "1/2", sin: "√3/2", tg: "√3", ctg: "√3/3" },
+  90: { cos: "0", sin: "1", tg: null, ctg: "0" },
+  120: { cos: "−1/2", sin: "√3/2", tg: "−√3", ctg: "−√3/3" },
+  135: { cos: "−√2/2", sin: "√2/2", tg: "−1", ctg: "−1" },
+  150: { cos: "−√3/2", sin: "1/2", tg: "−√3/3", ctg: "−√3" },
+  180: { cos: "−1", sin: "0", tg: "0", ctg: null },
+  210: { cos: "−√3/2", sin: "−1/2", tg: "√3/3", ctg: "√3" },
+  225: { cos: "−√2/2", sin: "−√2/2", tg: "1", ctg: "1" },
+  240: { cos: "−1/2", sin: "−√3/2", tg: "√3", ctg: "√3/3" },
+  270: { cos: "0", sin: "−1", tg: null, ctg: "0" },
+  300: { cos: "1/2", sin: "−√3/2", tg: "−√3", ctg: "−√3/3" },
+  315: { cos: "√2/2", sin: "−√2/2", tg: "−1", ctg: "−1" },
+  330: { cos: "√3/2", sin: "−1/2", tg: "−√3/3", ctg: "−√3" },
+};
+
+const UNIT_TOGGLES = [
+  ["showAxes", "Оси"],
+  ["showAngles", "Углы"],
+  ["showSin", "Синус"],
+  ["showCos", "Косинус"],
+  ["showTan", "Тангенс"],
+  ["showCot", "Котангенс"],
+  ["showValues", "Значения"],
+];
+
+function unitAngle(value) {
+  const angle = Number(value);
+  return UNIT_ANGLES.includes(angle) ? angle : 30;
+}
+
+function unitFlags(content = {}) {
+  return {
+    axes: content.showAxes !== false,
+    angles: content.showAngles !== false,
+    sin: Boolean(content.showSin),
+    cos: Boolean(content.showCos),
+    tan: Boolean(content.showTan),
+    cot: Boolean(content.showCot),
+    values: Boolean(content.showValues),
+  };
+}
+
+function unitAnswer(angle, content = {}) {
+  const flags = unitFlags(content);
+  const row = UNIT_VALUE[unitAngle(angle)];
+  const chosen = [];
+  const push = (on, key, name) => {
+    if (!on) return;
+    const value = row[key];
+    chosen.push(value == null ? `${name} не определён` : `${name} = ${value}`);
+  };
+  if (!flags.sin && !flags.cos && !flags.tan && !flags.cot) {
+    return `cos = ${row.cos}, sin = ${row.sin}`;
+  }
+  push(flags.sin, "sin", "sin");
+  push(flags.cos, "cos", "cos");
+  push(flags.tan, "tg", "tg");
+  push(flags.cot, "ctg", "ctg");
+  return chosen.join(", ");
+}
+
+function unitPoint(angle, radius, center) {
+  const rad = (Number(angle) * Math.PI) / 180;
+  return [center + radius * Math.cos(rad), center - radius * Math.sin(rad)];
+}
+
+function unitRatio(angle, kind) {
+  const rad = (unitAngle(angle) * Math.PI) / 180;
+  if (kind === "tan") {
+    if (Math.abs(Math.cos(rad)) < 1e-10) return null;
+    return Math.tan(rad);
+  }
+  if (Math.abs(Math.sin(rad)) < 1e-10) return null;
+  return Math.cos(rad) / Math.sin(rad);
+}
+
+function UnitCircleSvg({ content = {} }) {
+  const flags = unitFlags(content);
+  const marked = unitAngle(content.angle);
+  const center = 200;
+  const radius = 92;
+  const [px, py] = unitPoint(marked, radius, center);
+  const labelOf = (deg) => (content.unit === "deg" ? `${deg}°` : UNIT_RAD[deg]);
+  const row = UNIT_VALUE[marked];
+  const tan = flags.tan ? unitRatio(marked, "tan") : null;
+  const cot = flags.cot ? unitRatio(marked, "cot") : null;
+  const tanY = tan == null ? null : center - radius * tan;
+  const cotX = cot == null ? null : center + radius * cot;
+  const caption = flags.values ? unitAnswer(marked, content) : "";
+  const arcLarge = marked > 180 ? 1 : 0;
+  const arcEnd = unitPoint(marked, 28, center);
+  return (
+    <svg className="ws-unit" viewBox="0 0 400 430" role="img" aria-label="Тригонометрическая окружность">
+      {flags.cot ? (
+        <g>
+          <line className="is-cot" x1="48" y1={center - radius} x2="364" y2={center - radius} />
+          <text className="is-cot-label" x="8" y={center - radius} dominantBaseline="middle">ctg</text>
+        </g>
+      ) : null}
+      {flags.tan ? (
+        <g>
+          <line className="is-tan" x1={center + radius} y1="36" x2={center + radius} y2="364" />
+          <text className="is-tan-label" x={center + radius + 6} y="348">tg</text>
+        </g>
+      ) : null}
+      {flags.axes ? (
+        <g>
+          <line className="is-axis" x1="28" y1={center} x2="372" y2={center} />
+          <line className="is-axis" x1={center} y1="372" x2={center} y2="28" />
+          <polygon className="is-arrow" points="372,200 362,195 362,205" />
+          <polygon className="is-arrow" points="200,28 195,38 205,38" />
+          <line x1={center + radius} y1={center - 4} x2={center + radius} y2={center + 4} />
+          <line x1={center - radius} y1={center - 4} x2={center - radius} y2={center + 4} />
+          <line x1={center - 4} y1={center - radius} x2={center + 4} y2={center - radius} />
+          <line x1={center - 4} y1={center + radius} x2={center + 4} y2={center + radius} />
+          <text x={center + radius - 8} y={center + 15} textAnchor="end">1</text>
+          <text x={center - radius + 14} y={center + 16} textAnchor="start">−1</text>
+          <text x={center + 12} y={center - radius + 16} textAnchor="start">1</text>
+          <text x={center + 12} y={center + radius - 2} textAnchor="start">−1</text>
+          <text className="is-axis-name" x="358" y={center + 16}>x</text>
+          <text className="is-axis-name" x={center + 8} y="24">y</text>
+        </g>
+      ) : null}
+      <circle cx={center} cy={center} r={radius} />
+      {flags.axes || flags.angles ? (
+        <text className="is-angle" x={center + radius + 6} y={center - 2} textAnchor="start" dominantBaseline="middle">{labelOf(0)}</text>
+      ) : null}
+      {flags.angles ? UNIT_ANGLES.filter((deg) => deg !== 0).map((deg) => {
+        const [x, y] = unitPoint(deg, radius, center);
+        const cardinal = deg % 90 === 0;
+        const [lx, ly] = unitPoint(deg, radius + (cardinal ? 28 : 18), center);
+        const cos = Math.cos((deg * Math.PI) / 180);
+        return (
+          <g key={deg}>
+            <line className="is-muted" x1={center} y1={center} x2={x} y2={y} />
+            <text className="is-angle" x={lx} y={deg === 180 ? ly - 12 : ly} textAnchor={Math.abs(cos) < 0.25 ? "middle" : cos > 0 ? "start" : "end"} dominantBaseline="middle">{labelOf(deg)}</text>
+          </g>
+        );
+      }) : null}
+      {flags.cos ? (
+        <g>
+          <line className="is-cos" x1={center} y1={center} x2={px} y2={center} />
+          <text x={center + (px - center) * 0.42} y={center + (py < center ? 18 : -14)} textAnchor="middle">{flags.values ? row.cos : "cos"}</text>
+        </g>
+      ) : null}
+      {flags.sin ? (
+        <g>
+          <line className="is-sin" x1={px} y1={py} x2={px} y2={center} />
+          <line className="is-guide" x1={px} y1={py} x2={center} y2={py} />
+          <text x={center - 12} y={py} textAnchor="end" dominantBaseline="middle">{flags.values ? row.sin : "sin"}</text>
+        </g>
+      ) : null}
+      {flags.tan && tanY != null ? (
+        <g>
+          <line className="is-guide" x1={Math.cos((marked * Math.PI) / 180) > 0 ? px : center} y1={Math.cos((marked * Math.PI) / 180) > 0 ? py : center} x2={center + radius} y2={tanY} />
+          <line className="is-tan-seg" x1={center + radius} y1={center} x2={center + radius} y2={tanY} />
+          <circle className="is-tan-dot" cx={center + radius} cy={tanY} r="3.2" />
+          {flags.values && row.tg ? <text className="is-tan-label" x={center + radius + 8} y={tanY} dominantBaseline="middle">{row.tg}</text> : null}
+        </g>
+      ) : null}
+      {flags.cot && cotX != null ? (
+        <g>
+          <line className="is-guide" x1={Math.sin((marked * Math.PI) / 180) > 0 ? px : center} y1={Math.sin((marked * Math.PI) / 180) > 0 ? py : center} x2={cotX} y2={center - radius} />
+          <line className="is-cot-seg" x1={center} y1={center - radius} x2={cotX} y2={center - radius} />
+          <circle className="is-cot-dot" cx={cotX} cy={center - radius} r="3.2" />
+          {flags.values && row.ctg ? <text className="is-cot-label" x={cotX} y={center - radius - 8} textAnchor="middle">{row.ctg}</text> : null}
+        </g>
+      ) : null}
+      {marked ? <path className="is-arc" d={`M ${center + 28} ${center} A 28 28 0 ${arcLarge} 0 ${arcEnd[0]} ${arcEnd[1]}`} /> : null}
+      <line className="is-ray" x1={center} y1={center} x2={px} y2={py} />
+      <circle className="is-dot" cx={px} cy={py} r="3.4" />
+      {caption ? <text className="is-value" x="200" y="412" textAnchor="middle">{caption}</text> : null}
+    </svg>
+  );
+}
+
+function UnitCircleEditor({ task, onChange }) {
+  const angle = unitAngle(task.content?.angle);
+  const setAngle = (next) => onChange(sync(task, { content: { angle: next }, answer: { value: unitAnswer(next, task.content) } }));
+  const setFlag = (key, checked) => {
+    const content = { [key]: checked };
+    const affectsAnswer = key === "showSin" || key === "showCos" || key === "showTan" || key === "showCot";
+    onChange(sync(task, affectsAnswer
+      ? { content, answer: { value: unitAnswer(angle, { ...task.content, ...content }) } }
+      : { content }));
+  };
+  return (
+    <>
+      <QuestionField task={task} onChange={onChange} />
+      <Field label="Отмеченный угол">
+        <select value={String(angle)} onChange={(event) => setAngle(Number(event.target.value))}>
+          {UNIT_ANGLES.map((deg) => (
+            <option key={deg} value={deg}>{task.content?.unit === "deg" ? `${deg}°` : UNIT_RAD[deg]}</option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Подписи углов">
+        <div className="ws-type-choice">
+          {[["rad", "Радианы"], ["deg", "Градусы"]].map(([id, label]) => (
+            <label key={id}>
+              <input type="radio" checked={(task.content?.unit || "rad") === id} onChange={() => onChange(sync(task, { content: { unit: id } }))} /> {label}
+            </label>
+          ))}
+        </div>
+      </Field>
+      <Field label="На окружности">
+        <div className="ws-type-choice ws-opt-grid">
+          {UNIT_TOGGLES.map(([key, label]) => {
+            const checked = key === "showAxes" || key === "showAngles" ? task.content?.[key] !== false : Boolean(task.content?.[key]);
+            return (
+              <label key={key}>
+                <input type="checkbox" checked={checked} onChange={(event) => setFlag(key, event.target.checked)} />
+                {label}
+              </label>
+            );
+          })}
+        </div>
+      </Field>
+      <Field label="Правильный ответ">
+        <input value={task.answer?.value || ""} onChange={(event) => onChange(sync(task, { answer: { value: event.target.value } }))} />
+      </Field>
+    </>
+  );
+}
+
 const EDITORS = {
   short_answer: ShortAnswerEditor,
   solution: SolutionEditor,
@@ -2359,6 +2605,7 @@ const EDITORS = {
   table: TableEditor,
   function_graph: FunctionGraphEditor,
   coordinate_plane: CoordinateEditor,
+  unit_circle: UnitCircleEditor,
   expression: ExpressionEditor,
   sorting: SortingEditor,
   classification: ClassificationEditor,
@@ -2675,6 +2922,14 @@ function StudentView({ task, mode = "print", compose = false, onChange, focus, o
     const figures = (task.answer.objects || []).filter((item) => compose || item.visibleToStudent !== false);
     return <GraphSvg expression="" viewport={task.content.viewport} figures={figures} showGraph={false} showPoints={false} showGrid />;
   }
+  if (type === "unit_circle") {
+    return (
+      <>
+        <UnitCircleSvg content={task.content} />
+        {interactive ? <p className="ws-answer-line"><span className="ws-answer-line__label">Ответ</span><input className="ws-sheet-input" aria-label="Синус и косинус" /></p> : <AnswerRule label="Ответ" />}
+      </>
+    );
+  }
   if (type === "expression") {
     return <p className="ws-math ws-math--display">{task.content.latex ? `\\(${task.content.latex}\\)` : <span className="ws-placeholder">Введите формулу</span>}</p>;
   }
@@ -2812,7 +3067,7 @@ function TeacherView({ task, mode = "print", compose = false, onChange, focus, o
       {type === "single_choice" ? <p className="ws-key">Верные: {(task.answer.options || []).filter((item) => item.correct).map((item) => item.label).join(", ")}</p> : null}
       {type === "matching" ? <p className="ws-key">{(task.answer.pairs || []).map((pair) => `${String(pair.left || "").trim() || (pair.leftImage ? "рисунок" : "…")} → ${String(pair.right || "").trim() || (pair.rightImage ? "рисунок" : "…")}`).join("; ")}</p> : null}
       {type === "find_error" ? <p className="ws-key">{task.answer.explanation}<br />{task.answer.correction}</p> : null}
-      {type === "expression" || type === "image_question" || type === "solid" || type === "plane" ? <p className="ws-key">Ответ: {task.answer.value}</p> : null}
+      {type === "expression" || type === "image_question" || type === "solid" || type === "plane" || type === "unit_circle" ? <p className="ws-key">Ответ: {task.answer.value}</p> : null}
       {type === "sorting" ? <p className="ws-key">Порядок: {(task.answer.items || []).map((item) => item.text).join(" → ")}</p> : null}
     </div>
   );

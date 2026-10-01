@@ -17,6 +17,7 @@ STYLES = {"minimal", "school", "whiteboard", "edtech", "strict", "game", "themat
 DIFFICULTIES = {"basic", "standard", "advanced", "mixed"}
 WORDING = {"original", "rephrase", "theme"}
 INTENSITIES = {"light", "medium", "vivid"}
+THEORY_DETAILS = {"brief", "detailed"}
 
 GOAL_DEFAULT_THEORY = {"intro"}
 FORMAT_DEFAULT_THEORY = {"lesson"}
@@ -136,8 +137,15 @@ def parse_request(raw: dict, *, max_tasks: int) -> dict:
         "exam": exam_code(level_label),
         "wishes": clean_text(data.get("wishes"), 4000),
         "wants_theory": bool(wants_theory),
+        "keep_background": bool(data.get("keep_background")),
+        "theory_detail": _theory_detail(data.get("theory_detail")),
         "variant_id": _variant_id(data.get("variant_id")),
     }
+
+
+def _theory_detail(value) -> str:
+    detail = str(value or "").strip()
+    return detail if detail in THEORY_DETAILS else "brief"
 
 
 def _variant_id(value):

@@ -201,6 +201,13 @@ class WorksheetDocument(models.Model):
         indexes = [
             models.Index(fields=["teacher", "created_at"], name="ws_doc_teacher_created_idx"),
         ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["teacher"],
+                condition=models.Q(status="draft"),
+                name="ws_doc_one_draft_per_teacher",
+            ),
+        ]
 
     def __str__(self):
         return self.title or str(self.id)

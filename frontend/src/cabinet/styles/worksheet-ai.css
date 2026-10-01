@@ -61,6 +61,8 @@
 }
 .wai-label { display: block; margin-top: 8px; font-size: 14px; }
 .wai-choice, .wai-hints, .wai-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.wai-choice button { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; max-width: 220px; text-align: left; }
+.wai-choice button span { color: var(--wai-muted); font-size: 12px; }
 .wai-choice button.is-on, .wai-wording button.is-on { border-color: var(--wai-accent); color: var(--wai-accent); }
 .wai-choice input { width: 96px; }
 .wai-wording { display: grid; gap: 8px; }

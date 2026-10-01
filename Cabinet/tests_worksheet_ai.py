@@ -102,13 +102,60 @@ class IntegrityTests(SimpleTestCase):
         self.assertIn("Цифровой поток", content)
         self.assertNotIn("Нельзя менять числа", design)
 
+    def test_ready_styles_stay_plain_and_do_not_order_artwork(self):
+        from Cabinet.worksheet_ai.artwork import artwork_requested
+        from Cabinet.worksheet_ai.compose import design_for
+
+        blank = design_for({"style": "strict", "wishes": "первые задания простые, побольше места для решения"})
+        self.assertEqual(blank["style"], "exam")
+        self.assertTrue(blank["toner"])
+        self.assertEqual(blank["themePrompt"], "Строгий экзаменационный бланк без декора.")
+        self.assertFalse(artwork_requested({
+            "style": "strict",
+            "custom_style": blank["themePrompt"],
+            "wishes": "первые задания простые, побольше места для решения",
+        }))
+        book = design_for({"style": "school"})
+        self.assertEqual(book["style"], "textbook")
+        self.assertEqual(book["themePrompt"], "Аккуратная учебная полоса, спокойные поля.")
+        self.assertTrue(artwork_requested({"style": "school", "theme": "осенний лес и листья по краям"}))
+
+    def test_variant_pictures_stay_and_formula_fragments_do_not(self):
+        from Cabinet.worksheet_ai.compose import editor_task
+        from Cabinet.worksheet_ai.textutil import illustration_urls
+
+        html = (
+            "<p>На рисунке схема. Вычислите 8+1.</p>"
+            '<figure class="image"><img src="/media/tasks/scheme.png"></figure>'
+            '<p><img src="/media/ege/xs3qstsrc-tree.png"></p>'
+            '<p>Найдите <img src="/media/ege/xs3qstsrc-frac.png"> значение.</p>'
+            '<p><img src="/media/ege/innerimg-letter.png"></p>'
+            '<p><img src="javascript:alert(1)"></p>'
+        )
+        self.assertEqual(
+            illustration_urls(html),
+            ["/media/tasks/scheme.png", "/media/ege/xs3qstsrc-tree.png"],
+        )
+        question = editor_task({
+            "text": "На рисунке схема. Вычислите 8+1.",
+            "answer": "9",
+            "images": illustration_urls(html),
+        })["question"]
+        self.assertIn("На рисунке схема", question)
+        self.assertIn('src="/media/tasks/scheme.png"', question)
+        self.assertIn('src="/media/ege/xs3qstsrc-tree.png"', question)
+        self.assertNotIn("innerimg", question)
+        self.assertNotIn("javascript", question)
+
     def test_illustration_prompt_describes_mood_without_character_names(self):
         prompt = illustration_prompt("оформление волшебства гарри поттер хогвартсв, свечи")
         lowered = prompt.lower()
         self.assertNotIn("гарри", lowered)
         self.assertNotIn("хогварт", lowered)
         self.assertIn("свечи", lowered)
-        self.assertIn("пустая", lowered)
+        self.assertIn("свободной", lowered)
+        self.assertIn("белые карточки", lowered)
+        self.assertIn("контейнеры", lowered)
 
     def test_agent_image_result_becomes_jpeg_background(self):
         import base64
@@ -326,6 +373,26 @@ class WorksheetAIFlowTests(TestCase):
         self.assertEqual(body["balance"], 78)
         self.assertEqual(balance_of(self.teacher), 78)
         self.assertEqual(written.call_args.args[0]["topic"], "Логарифмы")
+        self.assertEqual(written.call_args.args[0]["theory_detail"], "brief")
+
+    def test_theory_only_passes_detailed_length(self):
+        with mock.patch(
+            "Cabinet.worksheet_ai.api._theory",
+            return_value=("Подробная теория про логарифмы, правила и примеры.", "test"),
+        ) as written:
+            response = self.client.post(
+                "/api/cabinet/ai/worksheets/theory/",
+                {
+                    "subject": "Математика",
+                    "grade": 10,
+                    "topic": "Логарифмы",
+                    "theory_detail": "detailed",
+                },
+                format="json",
+                HTTP_IDEMPOTENCY_KEY="theory-detailed",
+            )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(written.call_args.args[0]["theory_detail"], "detailed")
 
     def test_content_image_refunds_when_the_picture_is_empty(self):
         from Cabinet.worksheet_ai.billing import balance_of
@@ -427,6 +494,25 @@ class WorksheetAIFlowTests(TestCase):
         self.assertEqual(document["form"]["variantNumber"], str(variant.id))
         headings = [block.get("text") for block in document["blocks"] if block["type"] == "heading"]
         self.assertNotIn("Базовый уровень", headings)
+
+    def test_variant_task_picture_is_added_to_the_sheet(self):
+        task = self._task("По схеме вычислите 8+1. Дроби.")
+        task.task_template = (
+            "<p>По схеме вычислите 8+1. Дроби.</p>"
+            '<figure class="image"><img src="/media/tasks/scheme.png" alt="схема"></figure>'
+            '<p>Дробь <img src="https://cdn.example/xs3qstsrc-frac.png"> в строке.</p>'
+        )
+        task.save(update_fields=["task_template"])
+        variant = Variant.objects.create(var_subject=self.subject, level=self.level, created_by="TEST")
+        VariantContent.objects.create(variant=variant, task=task, order=1)
+        quote = self._quote(task_count=1, variant_id=variant.id)
+        generated = self._generate(quote, key="variant-picture")
+        self.assertEqual(generated.status_code, 200, generated.content)
+        document = self._document(generated.json()["worksheet_id"])
+        question = [block for block in document["blocks"] if block["type"] == "task"][0]["task"]["question"]
+        self.assertIn("По схеме вычислите 8+1", question)
+        self.assertIn('src="/media/tasks/scheme.png"', question)
+        self.assertNotIn("xs3qstsrc-frac", question)
 
     def test_unknown_variant_is_rejected(self):
         response = self.client.post(
@@ -1032,6 +1118,76 @@ class WorksheetAIFlowTests(TestCase):
         self.assertEqual(rows[created.json()["id"]]["preview"], ["черновик"])
         self.assertGreaterEqual(rows[generated.json()["worksheet_id"]]["task_count"], 1)
 
+    def test_autosave_reuses_the_only_draft(self):
+        from Cabinet.worksheet_ai.models import WorksheetDocument
+
+        first = self.client.post(
+            "/api/cabinet/ai/worksheets/documents/",
+            {
+                "title": "Черновик",
+                "blocks": [{"id": "1", "type": "text", "text": "первый"}],
+                "form": {"topic": "Черновик"},
+            },
+            format="json",
+        )
+        self.assertEqual(first.status_code, 201, first.content)
+        second = self.client.post(
+            "/api/cabinet/ai/worksheets/documents/",
+            {
+                "title": "Черновик",
+                "blocks": [{"id": "1", "type": "text", "text": "второй"}],
+                "form": {"topic": "Черновик"},
+            },
+            format="json",
+        )
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertEqual(second.json()["id"], first.json()["id"])
+        self.assertEqual(second.json()["blocks"][0]["text"], "второй")
+        WorksheetDocument.objects.create(
+            teacher=self.teacher,
+            title="готовый лист",
+            blocks=[{"id": "2", "type": "text", "text": "сохранён"}],
+            form={},
+            status=WorksheetDocument.Status.SAVED,
+        )
+        listed = self.client.get("/api/cabinet/ai/worksheets/documents/")
+        self.assertEqual(listed.status_code, 200, listed.content)
+        drafts = [row for row in listed.json()["documents"] if row["status"] == "draft"]
+        saved = [row for row in listed.json()["documents"] if row["status"] == "saved"]
+        self.assertEqual([row["id"] for row in drafts], [first.json()["id"]])
+        self.assertEqual([row["title"] for row in saved], ["готовый лист"])
+
+    def test_same_title_sheets_collapse_to_the_newest(self):
+        from Cabinet.worksheet_ai.models import WorksheetDocument
+
+        older = WorksheetDocument.objects.create(
+            teacher=self.teacher,
+            title="Дроби",
+            blocks=[{"id": "1", "type": "text", "text": "старый"}],
+            form={},
+            status=WorksheetDocument.Status.SAVED,
+        )
+        newer = WorksheetDocument.objects.create(
+            teacher=self.teacher,
+            title="дроби",
+            blocks=[{"id": "1", "type": "text", "text": "новый"}],
+            form={},
+            status=WorksheetDocument.Status.SAVED,
+        )
+        other = WorksheetDocument.objects.create(
+            teacher=self.teacher,
+            title="Проценты",
+            blocks=[{"id": "1", "type": "text", "text": "другая тема"}],
+            form={},
+            status=WorksheetDocument.Status.SAVED,
+        )
+        listed = self.client.get("/api/cabinet/ai/worksheets/documents/")
+        self.assertEqual(listed.status_code, 200, listed.content)
+        rows = {row["id"]: row for row in listed.json()["documents"]}
+        self.assertEqual(set(rows), {str(newer.id), str(other.id)})
+        self.assertNotIn(str(older.id), rows)
+        self.assertEqual(rows[str(newer.id)]["preview"], ["новый"])
+
     def test_teacher_can_duplicate_and_delete_a_sheet(self):
         created = self.client.post(
             "/api/cabinet/ai/worksheets/documents/",
@@ -1053,6 +1209,7 @@ class WorksheetAIFlowTests(TestCase):
         self.assertEqual(copied.status_code, 201, copied.content)
         self.assertNotEqual(copied.json()["id"], document_id)
         self.assertEqual(copied.json()["title"], "Лист про дроби (копия)")
+        self.assertEqual(copied.json()["status"], "saved")
         self.assertEqual(copied.json()["preview"], ["исходный"])
         opened = self.client.get(f"/api/cabinet/ai/worksheets/documents/{copied.json()['id']}/")
         self.assertEqual(opened.status_code, 200)
@@ -1224,3 +1381,47 @@ class WorksheetAgentRoutingTests(SimpleTestCase):
         self.assertIn("Линейное уравнение", text)
         self.assertIn(r"\(3x+5=17\)", text)
         self.assertEqual(model, "worksheet-model")
+
+    def test_brief_theory_is_capped_and_detailed_keeps_the_long_text(self):
+        from Cabinet.worksheet_ai.pipeline import _theory
+
+        long_text = "Логарифм — это показатель степени. " * 50
+        raw = json.dumps({"text": long_text}, ensure_ascii=False)
+        seen = {}
+
+        def spy(messages, **kwargs):
+            seen["user"] = messages[1]["content"]
+            seen["max_tokens"] = kwargs.get("max_tokens")
+            return TextResult(content=raw, model="worksheet-model")
+
+        set_provider_overrides(complete_chat=spy)
+        brief, _model = _theory(
+            {
+                "subject_name": "Математика",
+                "grade": 10,
+                "topic": "Логарифмы",
+                "format": "lesson",
+                "wishes": "",
+            },
+            [],
+        )
+        self.assertEqual(len(brief), 700)
+        self.assertEqual(seen["max_tokens"], 600)
+        self.assertIn("краткую теорию", seen["user"])
+
+        set_provider_overrides(complete_chat=spy)
+        detailed, _model = _theory(
+            {
+                "subject_name": "Математика",
+                "grade": 10,
+                "topic": "Логарифмы",
+                "format": "lesson",
+                "wishes": "",
+                "theory_detail": "detailed",
+            },
+            [],
+        )
+        self.assertGreater(len(detailed), 700)
+        self.assertEqual(detailed, long_text.strip())
+        self.assertEqual(seen["max_tokens"], 1600)
+        self.assertIn("подробную теорию", seen["user"])

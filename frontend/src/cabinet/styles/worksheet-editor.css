@@ -112,6 +112,101 @@
   margin: 0;
   padding: 16px 16px 8px;
 }
+.ws-help-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ws-accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.ws-help-btn svg {
+  width: 16px;
+  height: 16px;
+}
+.ws-help-btn:hover,
+.ws-help-btn:focus-visible {
+  text-decoration: underline;
+  outline: none;
+}
+.ws-help-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 8000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.45);
+}
+.ws-help {
+  --ws-ink: #202a3a;
+  --ws-muted: #727b88;
+  width: min(560px, 100%);
+  max-height: min(720px, calc(100vh - 40px));
+  overflow: auto;
+  padding: 20px 22px 22px;
+  border-radius: 16px;
+  background: #fff;
+  color: var(--ws-ink);
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.18);
+}
+.ws-help__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.ws-help__head h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+}
+.ws-help__head button {
+  border: 0;
+  background: transparent;
+  color: var(--ws-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.ws-help__steps {
+  margin: 0 0 16px;
+  padding-left: 20px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.ws-help__topics {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ws-help__topics li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ws-help__topics strong {
+  font-size: 14px;
+}
+.ws-help__topics span {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ws-muted);
+}
 .ws-hero-head h2 { font-size: 20px; font-weight: 750; letter-spacing: -0.03em; }
 .ws-hero-head span { font-size: 11px; color: var(--ws-muted); }
 
@@ -303,6 +398,26 @@
   font-size: 11px;
   font-weight: 500;
   color: var(--ws-muted);
+}
+.ws-theory-detail {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 8px 22px;
+}
+.ws-theory-detail button {
+  border: 1px solid var(--ws-line);
+  background: #fff;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--ws-ink);
+}
+.ws-theory-detail button.is-on {
+  border-color: #b9cdfc;
+  background: var(--ws-accent-soft);
+  color: #2559c7;
 }
 
 .ws-types {
@@ -1188,6 +1303,12 @@ body:has(.cabinet-layout):has(.ws-editor) .support-fab {
   overflow-wrap: anywhere;
   min-height: 1.45em;
 }
+.ws-task__q img {
+  display: block;
+  max-width: min(100%, 420px);
+  height: auto;
+  margin: 8px 0 4px;
+}
 .ws-task__q mjx-container,
 .ws-math mjx-container {
   max-width: 100%;
@@ -1671,6 +1792,29 @@ body:has(.cabinet-layout):has(.ws-editor) .support-fab {
 .ws-solid-slot.is-over,
 .ws-obj.is-over { outline: 2px solid #2d66e8; outline-offset: 3px; }
 .ws-solid { width: min(100%, 280px); height: auto; display: block; }
+.ws-unit { width: min(100%, 380px); height: auto; display: block; margin: 4px 0 8px; }
+.ws-unit line, .ws-unit circle, .ws-unit path { fill: none; stroke: #1c2430; stroke-width: 1; }
+.ws-unit .is-axis { stroke-width: 1.45; }
+.ws-unit .is-arrow { fill: #1c2430; stroke: none; }
+.ws-unit .is-muted { stroke: #8b95a5; stroke-width: 0.7; }
+.ws-unit .is-ray { stroke: #2d66e8; stroke-width: 1.8; }
+.ws-unit .is-arc { stroke: #2d66e8; stroke-width: 1.6; }
+.ws-unit .is-sin { stroke: #2d66e8; stroke-width: 1.8; }
+.ws-unit .is-cos { stroke: #7c3aed; stroke-width: 1.8; }
+.ws-unit .is-tan, .ws-unit .is-tan-seg { stroke: #c2410c; }
+.ws-unit .is-tan-seg { stroke-width: 2.2; }
+.ws-unit .is-cot, .ws-unit .is-cot-seg { stroke: #0f766e; }
+.ws-unit .is-cot-seg { stroke-width: 2.2; }
+.ws-unit .is-guide { stroke-dasharray: 3 3; }
+.ws-unit .is-dot { fill: #2d66e8; stroke: none; }
+.ws-unit .is-tan-dot { fill: #c2410c; stroke: none; }
+.ws-unit .is-cot-dot { fill: #0f766e; stroke: none; }
+.ws-unit text { fill: #1c2430; font-size: 11px; font-family: inherit; paint-order: stroke; stroke: #fff; stroke-width: 3px; }
+.ws-unit .is-angle { font-size: 10px; }
+.ws-unit .is-axis-name { font-size: 13px; font-weight: 700; }
+.ws-unit .is-tan-label { fill: #c2410c; font-size: 12px; font-weight: 700; }
+.ws-unit .is-cot-label { fill: #0f766e; font-size: 12px; font-weight: 700; }
+.ws-unit .is-value { font-size: 12px; }
 .ws-solid-palette {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));

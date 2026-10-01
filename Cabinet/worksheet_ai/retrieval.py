@@ -9,7 +9,7 @@ from django.db.models import Q
 from Generator.models import SubTopic, Task, TaskList
 
 from .integrity import is_themable
-from .textutil import plain_text, text_hash, tokens
+from .textutil import pictures_of, plain_text, text_hash, tokens
 
 
 DIFFICULTY_RANK = {"basic": 0, "standard": 1, "advanced": 2}
@@ -33,6 +33,7 @@ class RetrievedTask:
     score: int
     themable: bool
     exam_part: int | None = None
+    images: tuple[str, ...] = ()
 
     def snapshot(self) -> dict:
         data = asdict(self)
@@ -354,6 +355,7 @@ def reload_snapshot(user, snapshot: list[dict]) -> list[RetrievedTask]:
                     score=0,
                     themable=is_themable(plain_text(task.task_template), exam_part=task.exam_part),
                     exam_part=task.exam_part,
+                    images=pictures_of(task),
                 )
             )
         elif item.get("candidate_id"):

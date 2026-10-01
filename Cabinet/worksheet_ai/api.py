@@ -18,6 +18,7 @@ POST /api/cabinet/ai/worksheets/documents/<uuid>/duplicate/
 import copy
 import re
 
+from django.db import IntegrityError, transaction
 from django.db.models import Count
 from rest_framework.parsers import JSONParser
 from rest_framework.response import Response
@@ -33,7 +34,14 @@ from .models import WorksheetDocument
 from .pricing import get_pricing, spend_catalog
 from .params import BLOCKED
 from .llm import LLMError
-from .pipeline import PipelineError, _theory, confirm_generation, create_quote, document_payload
+from .pipeline import (
+    PipelineError,
+    _theory,
+    collapse_same_title_sheets,
+    confirm_generation,
+    create_quote,
+    document_payload,
+)
 from .quality import record_teacher_edits
 from .retrieval import suggest_topics
 from Cabinet.permissions import IsCabinetTeacher
@@ -266,6 +274,9 @@ class WorksheetAITheoryView(APIView):
         except ValueError:
             grade = ""
         wishes = str(data.get("wishes") or "").strip()[:4000]
+        theory_detail = str(data.get("theory_detail") or "").strip()
+        if theory_detail not in {"brief", "detailed"}:
+            theory_detail = "brief"
         idem = str(
             request.headers.get("Idempotency-Key")
             or request.headers.get("X-Idempotency-Key")
@@ -294,6 +305,7 @@ class WorksheetAITheoryView(APIView):
                     "topic": topic,
                     "format": "lesson",
                     "wishes": wishes,
+                    "theory_detail": theory_detail,
                 },
                 [],
             )
@@ -382,11 +394,29 @@ def _margin(value) -> int:
     return max(0, min(margin, 40))
 
 
+def _collapse_drafts(user, keep_id=None) -> None:
+    """У преподавателя один черновик: автосохранение больше не плодит копии."""
+    drafts = WorksheetDocument.objects.filter(
+        teacher=user,
+        status=WorksheetDocument.Status.DRAFT,
+    ).order_by("-updated_at")
+    if keep_id:
+        extra = drafts.exclude(pk=keep_id)
+    else:
+        latest = drafts.values_list("pk", flat=True).first()
+        if not latest:
+            return
+        extra = drafts.exclude(pk=latest)
+    extra.delete()
+
+
 class WorksheetAIDocumentListView(APIView):
     permission_classes = [IsCabinetTeacher]
     parser_classes = [JSONParser]
 
     def get(self, request):
+        collapse_same_title_sheets(request.user)
+        _collapse_drafts(request.user)
         documents = WorksheetDocument.objects.filter(teacher=request.user).order_by("-updated_at")
         return Response({"documents": [_document_summary(row) for row in documents]})
 
@@ -396,16 +426,43 @@ class WorksheetAIDocumentListView(APIView):
             blocks = []
         form = request.data.get("form") if isinstance(request.data.get("form"), dict) else {}
         title = str(request.data.get("title") or form.get("topic") or "Черновик").strip()[:255] or "Черновик"
-        document = WorksheetDocument.objects.create(
-            teacher=request.user,
-            title=title,
-            blocks=blocks,
-            form=form,
-            orientation=_orientation(request.data.get("orientation")),
-            margin_mm=_margin(request.data.get("margin_mm")),
-            status=WorksheetDocument.Status.DRAFT,
-        )
-        return Response(document_payload(document), status=201)
+        orientation = _orientation(request.data.get("orientation"))
+        margin_mm = _margin(request.data.get("margin_mm"))
+        created = False
+        document = None
+        for attempt in range(2):
+            try:
+                with transaction.atomic():
+                    document = (
+                        WorksheetDocument.objects.select_for_update()
+                        .filter(teacher=request.user, status=WorksheetDocument.Status.DRAFT)
+                        .order_by("-updated_at")
+                        .first()
+                    )
+                    created = document is None
+                    if created:
+                        document = WorksheetDocument.objects.create(
+                            teacher=request.user,
+                            title=title,
+                            blocks=blocks,
+                            form=form,
+                            orientation=orientation,
+                            margin_mm=margin_mm,
+                            status=WorksheetDocument.Status.DRAFT,
+                        )
+                    else:
+                        document.title = title
+                        document.blocks = blocks
+                        document.form = form
+                        document.orientation = orientation
+                        document.margin_mm = margin_mm
+                        document.save(update_fields=["title", "blocks", "form", "orientation", "margin_mm", "updated_at"])
+                    _collapse_drafts(request.user, keep_id=document.pk)
+                break
+            except IntegrityError:
+                if attempt:
+                    raise
+        return Response(document_payload(document), status=201 if created else 200)
 
 
 class WorksheetAIDocumentView(APIView):
@@ -467,6 +524,6 @@ class WorksheetAIDocumentDuplicateView(APIView):
             design=copy.deepcopy(source.design) if isinstance(source.design, dict) else {},
             orientation=_orientation(source.orientation),
             margin_mm=_margin(source.margin_mm),
-            status=source.status if source.status in WorksheetDocument.Status.values else WorksheetDocument.Status.DRAFT,
+            status=WorksheetDocument.Status.SAVED,
         )
         return Response(_document_summary(copy_row), status=201)

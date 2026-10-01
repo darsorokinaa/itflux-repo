@@ -36,7 +36,7 @@ export function estimateBlockHeight(block) {
   if (block.type === "text") return 52;
   if (block.type === "page-break") return 0;
   const type = block.task?.type || block.task?.content?.type;
-  if (type === "function_graph" || type === "graph" || type === "coordinate_plane" || type === "solid" || type === "plane") return 300;
+  if (type === "function_graph" || type === "graph" || type === "coordinate_plane" || type === "unit_circle" || type === "solid" || type === "plane") return 300;
   if (block.type === "reference" || block.type === "fact") return 96;
   if (type === "table") return 180;
   if (type === "solution" || type === "lines") return 168;

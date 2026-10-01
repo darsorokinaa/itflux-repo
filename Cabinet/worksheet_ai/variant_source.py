@@ -6,7 +6,7 @@ from Generator.models import Task, Variant, VariantContent
 
 from .integrity import is_themable
 from .retrieval import RetrievedTask, difficulty_of_task
-from .textutil import plain_text
+from .textutil import pictures_of, plain_text
 
 MAX_VARIANT_TASKS = 60
 
@@ -39,7 +39,8 @@ def load_variant_tasks(user, variant_id: int) -> tuple[Variant, list[RetrievedTa
         if task.scope == Task.Scope.TEACHER and task.owner_teacher_id != teacher_id:
             continue
         text = plain_text(task.task_template)
-        if not text:
+        images = pictures_of(task)
+        if not text and not images:
             continue
         title = ""
         if task.task_id and task.task:
@@ -61,6 +62,7 @@ def load_variant_tasks(user, variant_id: int) -> tuple[Variant, list[RetrievedTa
                 score=0,
                 themable=is_themable(text, exam_part=task.exam_part),
                 exam_part=task.exam_part,
+                images=images,
             )
         )
     if not selected:

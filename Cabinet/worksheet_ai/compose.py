@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from .textutil import sheet_html
+import html
+
+from .textutil import safe_image_src, sheet_html
 
 STYLE_TO_EDITOR = {
     "minimal": ("minimal", False, False),
@@ -14,6 +16,20 @@ STYLE_TO_EDITOR = {
     "thematic": ("whiteboard", False, False),
     "print": ("minimal", True, False),
     "custom": ("minimal", False, False),
+}
+STYLE_PROMPT = {
+    "minimal": "Почти пустой лист, только тонкая рамка.",
+    "textbook": "Аккуратная учебная полоса, спокойные поля.",
+    "whiteboard": "Светлый фон, тонкие формулы и небольшие акценты по краям. Центральная область чистая.",
+    "exam": "Строгий экзаменационный бланк без декора.",
+}
+_STOCK_PROMPTS = {
+    " ".join(text.lower().replace("ё", "е").split()).strip(" .")
+    for text in (
+        *STYLE_PROMPT.values(),
+        "Спокойное оформление листа, без лишнего декора.",
+        "Строгий бланк без декора.",
+    )
 }
 
 LEVEL_LABEL = {"basic": "база", "standard": "стандарт", "advanced": "повышенный"}
@@ -48,9 +64,22 @@ def _block_id(prefix: str, number: int) -> str:
     return f"ai{prefix}{number}"
 
 
+def question_with_images(item: dict) -> str:
+    question = sheet_html(item.get("text") or "")
+    tags = []
+    seen = set()
+    for src in item.get("images") or []:
+        safe = safe_image_src(src)
+        if not safe or safe in seen:
+            continue
+        seen.add(safe)
+        tags.append(f'<p><img src="{html.escape(safe, quote=True)}" alt=""></p>')
+    return f"{question}{''.join(tags)}" if question else "".join(tags)
+
+
 def editor_task(item: dict) -> dict:
     task_type = item.get("task_type") or "short_answer"
-    question = sheet_html(item.get("text") or "")
+    question = question_with_images(item)
     answer = item.get("answer") or ""
     solution = item.get("solution") or ""
     if task_type == "single_choice" and item.get("options"):
@@ -95,13 +124,22 @@ def editor_task(item: dict) -> dict:
     }
 
 
+def _plain_prompt(text: str) -> bool:
+    cleaned = " ".join(str(text or "").lower().replace("ё", "е").split()).strip(" .")
+    return not cleaned or cleaned in _STOCK_PROMPTS
+
+
 def design_for(params: dict) -> dict:
     style_id, mono, toner = STYLE_TO_EDITOR.get(params.get("style") or "school", STYLE_TO_EDITOR["school"])
-    theme = params.get("theme") or ""
-    custom = params.get("custom_style") or ""
-    prompt = theme or custom or "Спокойное оформление листа, без лишнего декора."
-    if style_id == "exam" and "Строгий бланк" not in prompt:
-        prompt = "Строгий бланк без декора. " + prompt
+    theme = str(params.get("theme") or "").strip()
+    custom = str(params.get("custom_style") or "").strip()
+    requested = theme or custom
+    if _plain_prompt(requested):
+        prompt = STYLE_PROMPT.get(style_id, "Спокойное оформление листа, без лишнего декора.")
+    else:
+        prompt = requested
+        if style_id == "exam" and "Строгий бланк" not in prompt:
+            prompt = "Строгий бланк без декора. " + prompt
     density = "плотная" if "компакт" in (params.get("wishes") or "").lower() else "обычная"
     wishes = (params.get("wishes") or "").lower()
     lines = 3

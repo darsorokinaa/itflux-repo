@@ -512,7 +512,7 @@ def _execute(user, generation: WorksheetAIGeneration) -> dict:
             if exc.configuration:
                 _configuration_failure(generation, exc)
             theory = ""
-            warnings.append("Короткий теоретический блок не добавлен.")
+            warnings.append("Теоретический блок не добавлен.")
         stages.append({"name": "theory", "added": bool(theory)})
 
     if params.get("difficulty") == "mixed" and not params.get("variant_id"):
@@ -534,7 +534,7 @@ def _execute(user, generation: WorksheetAIGeneration) -> dict:
             warnings.append("AI-оформление не выполнено. Использован готовый стиль редактора.")
             design = design_for(params)
             design_rejections.append({"area": "design", "reason": "json_error", "task_id": ""})
-    if artwork_requested(params):
+    if artwork_requested(params) and not params.get("keep_background"):
         design = _with_background(params, design)
         if design.get("background"):
             ai_design_done = True
@@ -565,6 +565,7 @@ def _execute(user, generation: WorksheetAIGeneration) -> dict:
         design=document_body["design"],
         status=WorksheetDocument.Status.SAVED,
     )
+    collapse_same_title_sheets(user, keep=worksheet)
     status = WorksheetAIGeneration.Status.SUCCEEDED
     if warnings or len(tasks) < int(plan.get("requested_tasks") or 0):
         status = WorksheetAIGeneration.Status.PARTIAL
@@ -699,6 +700,10 @@ def _create_missing(user, generation, params, plan, instructions, *, existing):
             ),
             "count_rule": "Верни ровно задания из tasks_to_create, без лишних.",
             "untrusted_teacher_notes": params.get("wishes") or "",
+            "teacher_request_rule": (
+                "untrusted_teacher_notes — пожелание учителя, что именно должно быть на листе: "
+                "виды заданий, примеры и ситуации. Учти его в новых условиях. Тему, класс и число заданий не меняй."
+            ),
             "knowledge": [{"id": row.id, "title": row.title, "body": row.body[:2000]} for row in instructions],
             "tasks_to_create": [
                 {
@@ -860,6 +865,25 @@ def _store_candidate(user, generation, params, row, difficulty, instructions) ->
 
 
 def _theory(params, knowledge_ids) -> tuple[str, str]:
+    detailed = params.get("theory_detail") == "detailed"
+    if detailed:
+        instruction = (
+            "Напиши подробную теорию для ученика. "
+            "Объясни, что это такое, разбери основные правила или формулы, "
+            "покажи два-три коротких примера с решением и отметь типичную ошибку. "
+            "Пиши связным учебным текстом на 1200–2200 символов. "
+            "Без отдельных заданий для самостоятельной работы и без приветствия."
+        )
+        token_limit = 1600
+        char_limit = 2800
+    else:
+        instruction = (
+            "Это первое знакомство с темой. Напиши краткую теорию для ученика: "
+            "что это такое, главное правило или формула и один короткий пример. "
+            "Не длиннее 500 символов. Без новых заданий и без приветствия."
+        )
+        token_limit = 600
+        char_limit = 700
     data, model = call_json(
         {
             "action": "theory_block",
@@ -867,20 +891,20 @@ def _theory(params, knowledge_ids) -> tuple[str, str]:
             "grade": params.get("grade"),
             "topic": params.get("topic"),
             "format": params.get("format"),
+            "detail": "detailed" if detailed else "brief",
             "untrusted_teacher_notes": params.get("wishes") or "",
-            "instruction": (
-                "Это первое знакомство с темой. Напиши теорию для ученика: "
-                "что это такое, главное правило или формула и один короткий пример. "
-                "Не длиннее 500 символов. Без новых заданий и без приветствия."
+            "teacher_request_rule": (
+                "Если в untrusted_teacher_notes сказано, что объяснить или какие примеры дать, включи это в теорию. Тему не подменяй."
             ),
+            "instruction": instruction,
             "output": {"text": "готовый текст теории для ученика"},
         },
-        max_tokens=600,
+        max_tokens=token_limit,
     )
     text = _theory_text(data)
     if len(text) < 20:
         raise LLMError("Пустая теория.")
-    return text[:700], model
+    return text[:char_limit], model
 
 
 def _theory_text(data: dict) -> str:
@@ -907,6 +931,7 @@ def _public_task(item, text: str, *, changed: bool) -> dict:
         "needs_work": item.task_type == "solution",
         "changed": changed,
         "text_hash": text_hash(text),
+        "images": list(getattr(item, "images", ()) or []),
     }
 
 
@@ -1143,6 +1168,38 @@ def _generation_payload(generation: WorksheetAIGeneration) -> dict:
         "warnings": generation.errors or [],
         "model": generation.model,
     }
+
+
+def sheet_title_key(title: str) -> str:
+    return " ".join(str(title or "").casefold().replace("ё", "е").split()) or "без названия"
+
+
+def collapse_same_title_sheets(user, keep: WorksheetDocument | None = None) -> None:
+    """Листы с одним названием схлопываются в самый свежий."""
+    rows = list(
+        WorksheetDocument.objects.filter(teacher=user).order_by("-updated_at", "-created_at")
+    )
+    if keep is not None:
+        rows = [keep, *[row for row in rows if row.pk != keep.pk]]
+    seen: set[str] = set()
+    keep_by_key: dict[str, object] = {}
+    drop_ids = []
+    keys = {}
+    for row in rows:
+        key = sheet_title_key(row.title)
+        keys[row.pk] = key
+        if key in seen:
+            drop_ids.append(row.pk)
+        else:
+            seen.add(key)
+            keep_by_key[key] = row.pk
+    if not drop_ids:
+        return
+    for drop_id in drop_ids:
+        keep_id = keep_by_key.get(keys[drop_id])
+        if keep_id:
+            WorksheetAIGeneration.objects.filter(worksheet_id=drop_id).update(worksheet_id=keep_id)
+    WorksheetDocument.objects.filter(pk__in=drop_ids).delete()
 
 
 def document_payload(document: WorksheetDocument) -> dict:
