@@ -3,6 +3,7 @@
  */
 
 import { reportClientEvent } from "../../utils/clientTelemetry";
+import { requestHardReload } from "../../utils/liveSessionGuard";
 
 const INSTALL_DISMISS_KEY = "itflux-pwa-install-dismissed";
 const PUSH_PROMPT_DISMISS_KEY = "itflux-push-prompt-dismissed";
@@ -306,7 +307,12 @@ export function bindPushNavigation() {
     if (!event.data || event.data.type !== "ITFLUX_NOTIFICATION_CLICK") return;
     const url = event.data.url;
     if (typeof url === "string" && url.startsWith("/")) {
-      window.location.assign(url);
+      requestHardReload({
+        manual: false,
+        reason: "push-navigation",
+        source: "bindPushNavigation",
+        navigate: () => window.location.assign(url),
+      });
     }
   };
   navigator.serviceWorker.addEventListener("message", handler);

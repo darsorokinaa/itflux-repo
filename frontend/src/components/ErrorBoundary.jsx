@@ -1,5 +1,6 @@
 import { Component } from "react";
 import { reportClientEvent } from "../utils/clientTelemetry";
+import { requestHardReload } from "../utils/liveSessionGuard";
 import { cabinetHomePath } from "../utils/appBoot";
 import { isStandaloneDisplay } from "../cabinet/pwa/pwaHelpers";
 
@@ -51,13 +52,23 @@ class ErrorBoundary extends Component {
   };
 
   handleReload = () => {
-    if (typeof window !== "undefined") window.location.reload();
+    requestHardReload({
+      manual: true,
+      reason: "error-boundary",
+      source: "ErrorBoundary",
+      navigate: () => window.location.reload(),
+    });
   };
 
   handleHome = () => {
     if (typeof window === "undefined") return;
     const href = this.props.homeHref || cabinetHomePath(window.location.pathname);
-    window.location.assign(href);
+    requestHardReload({
+      manual: true,
+      reason: "error-boundary-home",
+      source: "ErrorBoundary",
+      navigate: () => window.location.assign(href),
+    });
   };
 
   render() {

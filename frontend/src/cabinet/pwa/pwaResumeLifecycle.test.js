@@ -94,6 +94,31 @@ describe("reloadSameOriginRoom", () => {
     expect(reloadSameOriginRoom({ win })).toBe("self");
     expect(selfReload).toHaveBeenCalledTimes(1);
   });
+
+  it("does not reload a live meeting unless the user asked", () => {
+    const parentReload = vi.fn();
+    const selfReload = vi.fn();
+    const win = {
+      location: { origin: "https://app.test", pathname: "/cabinet/boards/1", reload: selfReload },
+      top: {
+        location: {
+          origin: "https://app.test",
+          pathname: "/cabinet/meetings/abc",
+          reload: parentReload,
+        },
+      },
+    };
+    expect(reloadSameOriginRoom({ win, reason: "resume-recovery", source: "test" })).toBe("blocked");
+    expect(parentReload).not.toHaveBeenCalled();
+    expect(selfReload).not.toHaveBeenCalled();
+    expect(reloadSameOriginRoom({
+      win,
+      manual: true,
+      reason: "manual-reload",
+      source: "pwaResumeLifecycle.manualReload",
+    })).toBe("parent");
+    expect(parentReload).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("createPwaResumeController", () => {
@@ -308,6 +333,41 @@ describe("createPwaResumeController", () => {
     document.dispatchEvent(new Event("visibilitychange"));
     expect(onResume).toHaveBeenCalledTimes(1);
     ctl.detach();
+  });
+
+  it("automatic resume recovery does not reload a live meeting", () => {
+    const reload = vi.fn();
+    vi.stubGlobal("location", {
+      pathname: "/cabinet/meetings/abc",
+      href: "https://itflux.test/cabinet/meetings/abc",
+      origin: "https://itflux.test",
+      reload,
+    });
+    const ctl = make(() => new Promise(() => {}));
+    ctl.considerResume("visibility");
+    ctl.fail("timeout");
+    vi.advanceTimersByTime(RESUME_TIMING.FAIL_MS);
+    window.dispatchEvent(new Event("online"));
+    window.dispatchEvent(new Event("pageshow"));
+    window.dispatchEvent(new Event("focus"));
+    expect(reload).not.toHaveBeenCalled();
+    ctl.detach();
+    vi.unstubAllGlobals();
+  });
+
+  it("manualReload still reloads a live meeting", () => {
+    const reload = vi.fn();
+    vi.stubGlobal("location", {
+      pathname: "/cabinet/meetings/abc",
+      href: "https://itflux.test/cabinet/meetings/abc",
+      origin: "https://itflux.test",
+      reload,
+    });
+    const ctl = make(() => {});
+    expect(ctl.manualReload()).toBe("self");
+    expect(reload).toHaveBeenCalledTimes(1);
+    ctl.detach();
+    vi.unstubAllGlobals();
   });
 
   it("bfcache pageshow still verifies", () => {

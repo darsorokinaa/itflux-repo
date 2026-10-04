@@ -160,6 +160,7 @@ import {
   reloadSameOriginRoom,
 } from "../pwa/pwaResumeLifecycle";
 import { reportClientEvent } from "../../utils/clientTelemetry";
+import { requestHardReload } from "../../utils/liveSessionGuard";
 import { isStandaloneDisplay } from "../pwa/pwaHelpers";
 import "../styles/boards.css";
 
@@ -3472,7 +3473,11 @@ export default function CabinetBoardEditorPage() {
       stage: "board",
       pwa: isStandaloneDisplay(),
     });
-    reloadSameOriginRoom();
+    reloadSameOriginRoom({
+      manual: true,
+      reason: "manual-room-reload",
+      source: "CabinetBoardEditorPage",
+    });
   }, [boardId]);
 
   useEffect(() => {
@@ -3856,7 +3861,12 @@ export default function CabinetBoardEditorPage() {
             Доска была изменена в другом окне. Обновите страницу или сохраните свою версию как копию.
           </span>
           <div className="cb-board-editor__banner-actions">
-            <button type="button" className="cb-board-editor__btn" onClick={() => window.location.reload()}>
+            <button type="button" className="cb-board-editor__btn" onClick={() => requestHardReload({
+              manual: true,
+              reason: "board-conflict-reload",
+              source: "CabinetBoardEditorPage",
+              navigate: () => window.location.reload(),
+            })}>
               Обновить
             </button>
             <button type="button" className="cb-board-editor__btn cb-board-editor__btn--primary" onClick={handleSaveAsCopy}>

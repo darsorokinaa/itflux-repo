@@ -3,6 +3,7 @@ import { useParams, useLocation, Link, useNavigate } from "react-router-dom";
 import MathContent from "../components/MathContent";
 import EducationalLoading, { LOADING_MESSAGES } from "../components/EducationalLoading";
 import { devApiBase } from "../utils/devApiBase";
+import { requestHardReload } from "../utils/liveSessionGuard";
 import { isEgeInfTruthTableTask, isEgeInfParallelProcessesTask, isEgeInfRoadGraphTask, isOgeRusTask13 } from "../utils/isOgeInformaticsTask";
 
 // TEMP: кнопка «Код» временно скрыта
@@ -4035,7 +4036,12 @@ function ExamPage() {
             ? undefined
             : () => {
                 setResultsOpen(false);
-                window.location.reload();
+                requestHardReload({
+                  manual: true,
+                  reason: "exam-retry",
+                  source: "ExamPage",
+                  navigate: () => window.location.reload(),
+                });
               }
         }
       />

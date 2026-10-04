@@ -4,6 +4,7 @@ import {
   readAndStoreLessonTokenFromUrl,
   stripSensitiveParamsFromUrl,
 } from "../utils/sensitiveUrl";
+import { requestHardReload } from "../utils/liveSessionGuard";
 
 /**
  * Ссылка из ЛК: /lesson/join/?token=JWT
@@ -21,8 +22,13 @@ export default function LessonJoinBridge() {
     const url = new URL(window.location.href);
     if (url.pathname === "/lesson/join") {
       url.pathname = "/lesson/join/";
-      window.location.replace(url.toString());
-      return;
+      const reloaded = requestHardReload({
+        manual: false,
+        reason: "lesson-join-slash",
+        source: "LessonJoinBridge",
+        navigate: () => window.location.replace(url.toString()),
+      });
+      if (reloaded) return;
     }
     // Сохраняем JWT, но не убираем из URL до reload — Django lesson_room
     // читает ?token= при первой отдаче HTML/WS.
@@ -69,8 +75,14 @@ export default function LessonJoinBridge() {
             /* ignore */
           }
           // Token остаётся в URL на reload для Django-шаблона комнаты.
-          window.location.reload();
-          return;
+          // На живом пути /lesson/join автоматический reload запрещён.
+          const reloaded = requestHardReload({
+            manual: false,
+            reason: "lesson-join-verify",
+            source: "LessonJoinBridge",
+            navigate: () => window.location.reload(),
+          });
+          if (reloaded) return;
         }
         // Остались в SPA — убираем секрет из адресной строки.
         stripSensitiveParamsFromUrl();
@@ -165,7 +177,12 @@ export default function LessonJoinBridge() {
           onClick={() => {
             sessionStorage.removeItem("lesson_join_reload_after_verify");
             sessionStorage.removeItem("lesson_join_last_ok");
-            window.location.reload();
+            requestHardReload({
+              manual: true,
+              reason: "lesson-join-retry",
+              source: "LessonJoinBridge",
+              navigate: () => window.location.reload(),
+            });
           }}
         >
           Попробовать снова
@@ -182,7 +199,12 @@ export default function LessonJoinBridge() {
         type="button"
         className="add-button primary"
         style={{ cursor: "pointer" }}
-        onClick={() => window.location.reload()}
+        onClick={() => requestHardReload({
+          manual: true,
+          reason: "lesson-join-manual",
+          source: "LessonJoinBridge",
+          navigate: () => window.location.reload(),
+        })}
       >
         Обновить
       </button>
