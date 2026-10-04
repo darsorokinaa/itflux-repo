@@ -411,6 +411,10 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
     if (closed) return;
     if (reconnectTimer != null) return;
     if (_isSocketLive(socket)) return;
+    // A hidden tab's timers and sockets are frozen or killed by the browser.
+    // Opening another one here only burns attempts. Foreground resume reconnects
+    // a socket that is already closed.
+    if (!isForeground()) return;
     reconnectAttempt += 1;
     if (reconnectAttempt > MATERIAL_RECONNECT.MAX_ATTEMPT) {
       unlockResume();
@@ -422,6 +426,7 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       reconnectTimer = null;
       if (closed) return;
       if (_isSocketLive(socket)) return;
+      if (!isForeground()) return;
       connect();
     }, delay);
   };
@@ -516,7 +521,7 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
         version = ms?.version || data.server_revision || version;
         reportClientEvent("initial_state_received", { material: 1, version: Number(version) || 0 });
         handlers.onSyncState?.(data);
-        if (data.presented !== undefined) handlers.onPresented?.(data.presented);
+        if (data.presented !== undefined) handlers.onPresented?.(data.presented, { replay: true });
         if (data.screenshareSession !== undefined) handlers.onScreenshareSync?.(data.screenshareSession);
         return;
       }

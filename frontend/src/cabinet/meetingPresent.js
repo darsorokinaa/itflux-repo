@@ -165,6 +165,15 @@ export function shouldReplaceWorkspaceMaterial(current, incoming) {
   return a !== b;
 }
 
+/**
+ * A material-socket snapshot is a replay, not a new teacher action.
+ * It must not hide or replace a board that is already on screen.
+ * Live resource.presented / resource.cleared events are not replays.
+ */
+export function materialSyncReplayKeepsWorkspace(current, meta) {
+  return Boolean(meta?.replay && current?.kind === "board");
+}
+
 export function workspaceMaterialFromPresented(presented, meetingUuid) {
   if (!presented?.kind) return null;
   const url = String(presented.openUrl || "").trim();

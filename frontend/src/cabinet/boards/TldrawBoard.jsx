@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { computed } from "@tldraw/state";
 import { createUserId, getDefaultUserPresence, UserRecordType } from "@tldraw/tlschema";
 import { useSync } from "@tldraw/sync";
@@ -28,6 +28,7 @@ import {
 } from "./boardProvider";
 import { fetchTldrawSyncToken } from "../../utils/cabinetAuth";
 import { markPerf } from "../../utils/appBoot";
+import { reportClientEvent } from "../../utils/clientTelemetry";
 import { createLessonBoardAssetStore } from "./lessonBoardAssetStore";
 import BoardV2ErrorBoundary from "./BoardV2ErrorBoundary";
 import LessonBoardMessage from "./LessonBoardMessage";
@@ -126,10 +127,20 @@ function TldrawBoardSynced({
     markPerf("board_mount");
   }, []);
 
+  const syncStatusRef = useRef(sync.status);
   useEffect(() => {
+    const previous = syncStatusRef.current;
+    syncStatusRef.current = sync.status;
     if (sync.status && sync.status !== "loading" && sync.status !== "error") {
       markPerf("board_synced");
     }
+    const wasShowingCanvas = previous === "synced-remote" || previous === "synced-local";
+    if (!wasShowingCanvas) return;
+    if (sync.status !== "loading" && sync.status !== "error") return;
+    reportClientEvent("board_error", {
+      phase: String(sync.status || "").slice(0, 32),
+      previous: String(previous || "").slice(0, 32),
+    });
   }, [sync.status]);
 
   useEffect(() => {

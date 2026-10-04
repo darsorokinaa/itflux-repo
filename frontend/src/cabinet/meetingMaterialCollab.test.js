@@ -352,6 +352,56 @@ describe("createMeetingMaterialCollab reconnect", () => {
     expect(onJoin).toHaveBeenCalled();
   });
 
+  it("marks a sync snapshot as replay and leaves a live clear unmarked", () => {
+    const onPresented = vi.fn();
+    collab = createMeetingMaterialCollab("meet-1", { onPresented });
+    lastSocket().open();
+    lastSocket().onmessage?.({
+      data: JSON.stringify({
+        type: "material.sync_state",
+        presented: null,
+        materialSession: null,
+      }),
+    });
+    lastSocket().onmessage?.({
+      data: JSON.stringify({ type: "resource.cleared" }),
+    });
+    lastSocket().onmessage?.({
+      data: JSON.stringify({
+        type: "resource.presented",
+        presented: { kind: "board", boardId: "b1", openUrl: "/cabinet/boards/b1" },
+      }),
+    });
+    expect(onPresented).toHaveBeenNthCalledWith(1, null, { replay: true });
+    expect(onPresented).toHaveBeenNthCalledWith(2, null);
+    expect(onPresented).toHaveBeenNthCalledWith(3, {
+      kind: "board",
+      boardId: "b1",
+      openUrl: "/cabinet/boards/b1",
+    });
+  });
+
+  it("does not open a replacement socket while the tab is hidden", () => {
+    collab = createMeetingMaterialCollab("meet-1");
+    lastSocket().open();
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    lastSocket().close();
+    vi.advanceTimersByTime(30_000);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(FakeWebSocket.instances[0].readyState).toBe(FakeWebSocket.CLOSED);
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(FakeWebSocket.instances[1].readyState).toBe(FakeWebSocket.CONNECTING);
+  });
+
   it("resets presence on reconnect", () => {
     const onReset = vi.fn();
     collab = createMeetingMaterialCollab("meet-1", { onPresenceReset: onReset });

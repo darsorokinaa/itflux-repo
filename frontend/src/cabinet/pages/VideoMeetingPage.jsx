@@ -67,6 +67,7 @@ import {
   presentedIdentityKey,
   postMeetingUnpresent,
   shouldEmbedMaterialInLesson,
+  materialSyncReplayKeepsWorkspace,
   shouldReplaceWorkspaceMaterial,
   workspaceMaterialFromPresented,
   workspaceMaterialIdentityKey,
@@ -1423,6 +1424,12 @@ export default function VideoMeetingPage() {
         || workspaceMaterialRef.current?.kind === "board"
       ) {
         logVariantLifecycle("hide", { source, keepMounted: true });
+        if (workspaceMaterialRef.current?.kind === "board") {
+          reportClientEvent("board_error", {
+            phase: "workspace-hidden",
+            source: String(source || "").slice(0, 32),
+          });
+        }
         hideHeldWorkspace({ byTeacher: true });
         setMobilePane("call");
         return;
@@ -2280,9 +2287,12 @@ export default function VideoMeetingPage() {
           setPresented(payload.presented || null);
         }
       },
-      onPresented: (presentedPayload) => {
+      onPresented: (presentedPayload, meta) => {
         setPresented(presentedPayload || null);
-        applyStudentPresentedRef.current(presentedPayload, { source: "socket" });
+        if (materialSyncReplayKeepsWorkspace(workspaceMaterialRef.current, meta)) return;
+        applyStudentPresentedRef.current(presentedPayload, {
+          source: meta?.replay ? "socket-replay" : "socket",
+        });
       },
       onOpened: () => {
         if (!canManageRef.current) {

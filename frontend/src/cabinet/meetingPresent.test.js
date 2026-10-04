@@ -7,6 +7,7 @@ import {
   presentedIdentityKey,
   presentedOpenKey,
   shouldEmbedMaterialInLesson,
+  materialSyncReplayKeepsWorkspace,
   shouldReplaceWorkspaceMaterial,
   workspaceMaterialFromPresented,
   workspaceMaterialIdentityKey,
@@ -71,6 +72,17 @@ describe("live variant workspace identity", () => {
     const incoming = workspaceMaterialFromPresented(again, "meet-1");
     expect(shouldReplaceWorkspaceMaterial(held, incoming)).toBe(false);
     expect(workspaceMaterialIdentityKey(held)).toBe("variant:41");
+  });
+
+  it("keeps an open board when a material-socket snapshot is replayed", () => {
+    const board = { kind: "board", boardId: "b1", url: "/cabinet/boards/b1" };
+    expect(materialSyncReplayKeepsWorkspace(board, { replay: true })).toBe(true);
+    expect(materialSyncReplayKeepsWorkspace(board, undefined)).toBe(false);
+    expect(materialSyncReplayKeepsWorkspace(
+      { kind: "variant", homeworkId: 41 },
+      { replay: true },
+    )).toBe(false);
+    expect(materialSyncReplayKeepsWorkspace(null, { replay: true })).toBe(false);
   });
 
   it("reloads only when the variant/homework identity changes", () => {

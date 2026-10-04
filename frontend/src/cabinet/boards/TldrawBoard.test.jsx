@@ -77,6 +77,11 @@ vi.mock("tldraw", () => ({
 
 vi.mock("tldraw/tldraw.css", () => ({}));
 
+vi.mock("../../utils/clientTelemetry", () => ({
+  reportClientEvent: vi.fn(() => true),
+}));
+
+import { reportClientEvent } from "../../utils/clientTelemetry";
 import { lessonBoardComponents } from "./lessonBoardUi";
 import TldrawBoard, { shouldResumeTldrawRoom } from "./TldrawBoard";
 
@@ -176,6 +181,20 @@ describe("TldrawBoard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
     expect(syncCalls.length).toBeGreaterThan(before);
     expect(syncCalls.every((call) => call.roomId === BOARD)).toBe(true);
+  });
+
+  it("reports when a connected canvas is replaced by a loading or error state", () => {
+    syncResult = { status: "synced-remote", store: { ok: true } };
+    const view = render(boardTree());
+    expect(screen.getByTestId("tldraw-canvas")).toBeTruthy();
+    syncResult = { status: "loading", store: { ok: true } };
+    view.rerender(boardTree());
+    expect(screen.queryByTestId("tldraw-canvas")).toBeNull();
+    expect(screen.getByText("Подключаем доску…")).toBeTruthy();
+    expect(reportClientEvent).toHaveBeenCalledWith("board_error", {
+      phase: "loading",
+      previous: "synced-remote",
+    });
   });
 
   it("keeps the same sync session when the tab wakes or the network returns", () => {
