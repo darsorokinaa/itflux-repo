@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { typesetElement } from "../../utils/loadMathJax";
 
 const EQ_TABS = [
   {
@@ -154,15 +155,8 @@ function typesetNode(node, wrapped) {
     return undefined;
   }
   node.textContent = wrapped;
-  const mj = window.MathJax;
-  if (!mj?.typesetPromise) return undefined;
   let cancelled = false;
-  const run = () => {
-    if (!cancelled) mj.typesetPromise([node]).catch(() => {});
-  };
-  const startup = mj.startup?.promise;
-  if (startup?.then) startup.then(run).catch(run);
-  else run();
+  typesetElement(node, () => cancelled);
   return () => { cancelled = true; };
 }
 
@@ -180,15 +174,9 @@ export default function FormulaEditor({ value, onChange, onApply, onClose, embed
 
   useEffect(() => {
     const root = paletteRef.current;
-    const mj = window.MathJax;
-    if (!root || !mj?.typesetPromise) return undefined;
+    if (!root) return undefined;
     let cancelled = false;
-    const run = () => {
-      if (!cancelled) mj.typesetPromise([root]).catch(() => {});
-    };
-    const startup = mj.startup?.promise;
-    if (startup?.then) startup.then(run).catch(run);
-    else run();
+    typesetElement(root, () => cancelled);
     return () => { cancelled = true; };
   }, [tab]);
 

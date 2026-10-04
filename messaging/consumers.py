@@ -12,7 +12,10 @@ from .checks import messaging_is_blocked
 from .permissions import messaging_role_allowed
 from .services import typing_recipient_ids
 
+from Cabinet.loop_log import protect_logger
+
 logger = logging.getLogger("messaging")
+protect_logger("messaging")
 
 
 def connection_still_valid(user, scope) -> bool:

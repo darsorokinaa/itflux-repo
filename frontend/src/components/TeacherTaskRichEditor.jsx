@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { loadMathJax } from "../utils/loadMathJax";
 
 const IMAGE_ACCEPT = "image/png,image/jpeg,image/gif,image/webp,.png,.jpg,.jpeg,.gif,.webp";
 
@@ -84,10 +85,11 @@ function LatexModal({ open, initial = "", onClose, onInsert }) {
     }
     const wrapped = display ? `$$${raw}$$` : `$${raw}$`;
     el.textContent = wrapped;
-    const mj = window.MathJax;
-    if (!mj?.typesetPromise) return undefined;
     let cancelled = false;
-    mj.typesetPromise([el]).then(() => {
+    loadMathJax().then((mj) => {
+      if (cancelled || !mj?.typesetPromise) return undefined;
+      return mj.typesetPromise([el]);
+    }).then(() => {
       if (cancelled) return;
       const err = el.querySelector("mjx-merror, .MathJax_Error, [data-mjx-error]");
       if (err) {

@@ -182,4 +182,78 @@ class Mark(models.Model):
     def __str__(self):
         class Meta:
             verbose_name = "Баллы и оценки"
-            
+
+
+class LessonRoom(models.Model):
+    """Комната живого урока из личного кабинета. См. Generator/Generator/models.py."""
+
+    room_id = models.CharField(max_length=200, unique=True, db_index=True)
+    jwt_payload = models.JSONField(blank=True, default=dict)
+    lesson_ended_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Комната урока (ЛК)"
+        verbose_name_plural = "Комнаты уроков (ЛК)"
+
+    def __str__(self):
+        return self.room_id
+
+
+class LessonStudentsAnswer(models.Model):
+    room_id = models.CharField(max_length=200, blank=True, default="", db_index=True)
+    variant_id = models.PositiveIntegerField(default=0, db_index=True)
+    task_number = models.CharField(max_length=32, blank=True, default="")
+    teacher = models.CharField(max_length=200, blank=True, default="")
+    student = models.CharField(max_length=200, blank=True, default="")
+    answer = models.TextField(blank=True, default="")
+    is_correct = models.BooleanField(default=False)
+    is_empty = models.BooleanField(default=False)
+    payload = models.JSONField(blank=True, default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Ответ ученика на уроке"
+        verbose_name_plural = "Ответы учеников на уроке"
+        indexes = [
+            models.Index(fields=["room_id", "variant_id"], name="lesson_answer_room_variant_idx"),
+            models.Index(fields=["variant_id", "task_number"], name="lesson_answer_variant_task_idx"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=("room_id", "variant_id", "task_number", "student"),
+                name="lesson_answer_unique_per_student_task",
+            ),
+        ]
+
+
+class LessonStudentResult(models.Model):
+    room_id = models.CharField(max_length=200, blank=True, default="", db_index=True)
+    variant_id = models.PositiveIntegerField(default=0, db_index=True)
+    teacher = models.CharField(max_length=200, blank=True, default="")
+    student = models.CharField(max_length=200, blank=True, default="")
+    total_tasks = models.PositiveIntegerField(default=0)
+    correct_count = models.PositiveIntegerField(default=0)
+    wrong_count = models.PositiveIntegerField(default=0)
+    empty_count = models.PositiveIntegerField(default=0)
+    teacher_comment = models.TextField(blank=True, default="")
+    payload = models.JSONField(blank=True, default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Результат ученика в уроке"
+        verbose_name_plural = "Результаты учеников в уроке"
+        indexes = [
+            models.Index(fields=["room_id", "variant_id"], name="lesson_result_room_variant_idx"),
+            models.Index(fields=["room_id", "student"], name="lesson_result_room_student_idx"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=("room_id", "variant_id", "student"),
+                name="lesson_result_unique_per_student",
+            ),
+        ]
+ 

@@ -12,9 +12,26 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from django.conf import settings
 
 from .boards_api import board_collab_group_name
-from .board_viewport_store import get_teacher_viewport, set_teacher_viewport
+from .ws_lifecycle import (
+    WsLifecycleMixin,
+    log_ws_lifecycle,
+    mark_ws_activity,
+    mark_ws_connected,
+    note_ws_inbound,
+    request_id_from_scope,
+    ws_connection_timing,
+)
+from .board_scene_slot import drop_board_scenes, resolve_board_event, stage_board_event
+from .board_viewport_store import (
+    flush_teacher_viewport,
+    get_teacher_viewport,
+    stage_teacher_viewport,
+)
+from .loop_log import protect_logger
+from .realtime_db import critical_connect
 
 logger = logging.getLogger(__name__)
+protect_logger(logger.name)
 
 
 def _ws_log(event: str, *, user=None, board=None, **fields) -> None:
@@ -73,12 +90,13 @@ def coalesce_element_ops(ops: list) -> list:
     return [latest[eid] for eid in order if eid in latest]
 
 
-class InteractiveBoardConsumer(AsyncWebsocketConsumer):
+class InteractiveBoardConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
     """
     Комната доски: учитель-владелец и привязанный ученик (или edit-доступ)
     обмениваются live-сценой, presence и курсорами.
     """
 
+    @critical_connect
     async def connect(self):
         self.board_id = self.scope["url_route"]["kwargs"]["board_id"]
         self.group_name = board_collab_group_name(self.board_id)
@@ -86,6 +104,15 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
         self.display_name = ""
         self.role = ""
         self.user = self.scope.get("user")
+        self._ws_request_id = request_id_from_scope(self.scope)
+        mark_ws_connected(self)
+        log_ws_lifecycle(
+            self,
+            event="connect",
+            request_id=self._ws_request_id,
+            user_id=getattr(self.user, "pk", None),
+            board_id=self.board_id,
+        )
         self._last_cursor_at = 0.0
         self._last_scene_live_at = 0.0
         self._last_viewport_at = 0.0
@@ -110,8 +137,22 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
         self.permission = perm
         self.can_edit = perm in ("owner", "edit")
         self.role = "teacher" if perm == "owner" else ("student" if self.can_edit else "viewer")
+        log_ws_lifecycle(
+            self,
+            event="authenticated",
+            request_id=self._ws_request_id,
+            user_id=getattr(self.user, "pk", None),
+            board_id=self.board_id,
+        )
         _ws_log("CONNECT", user=self.user, board=self.board_id, perm=self.permission)
         await self.channel_layer.group_add(self.group_name, self.channel_name)
+        log_ws_lifecycle(
+            self,
+            event="room_joined",
+            request_id=self._ws_request_id,
+            user_id=getattr(self.user, "pk", None),
+            board_id=self.board_id,
+        )
         _ws_log("JOIN GROUP", user=self.user, board=self.board_id, group=self.group_name)
         await self.accept()
         _ws_log("ACCEPT", user=self.user, board=self.board_id)
@@ -134,6 +175,15 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
         )
 
     async def disconnect(self, close_code):
+        log_ws_lifecycle(
+            self,
+            event="disconnect",
+            request_id=getattr(self, "_ws_request_id", ""),
+            user_id=getattr(getattr(self, "user", None), "pk", None),
+            board_id=getattr(self, "board_id", ""),
+            close_code=close_code,
+            **ws_connection_timing(self),
+        )
         task = getattr(self, "_scene_flush_task", None)
         if task and not task.done():
             task.cancel()
@@ -176,6 +226,9 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                     },
                 )
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
+            members = getattr(self.channel_layer, "groups", {}).get(self.group_name) or {}
+            if not members:
+                drop_board_scenes(self.group_name)
             _ws_log(
                 "LEAVE GROUP",
                 user=getattr(self, "user", None),
@@ -209,7 +262,9 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
             if payload.get("type") == "scene_ops":
                 ops_wrap = payload.get("ops") or {}
                 ops_wrap["ops"] = coalesce_element_ops(list(ops_wrap.get("ops") or []))
-            await self.channel_layer.group_send(self.group_name, event)
+            await self.channel_layer.group_send(
+                self.group_name, stage_board_event(self.group_name, event)
+            )
 
     async def _flush_pending_scene(self, delay: float):
         try:
@@ -280,7 +335,9 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                         pass
                 await self._flush_all_pending()
             self._last_scene_live_at = time.monotonic()
-            await self.channel_layer.group_send(self.group_name, event)
+            await self.channel_layer.group_send(
+                self.group_name, stage_board_event(self.group_name, event)
+            )
             return
 
         self._merge_into_client_buffer(client_key, event)
@@ -289,7 +346,14 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
             delay = max(0.0, SCENE_LIVE_MIN_INTERVAL_SEC - elapsed)
             self._scene_flush_task = asyncio.create_task(self._flush_pending_scene(delay))
 
+    async def _remember_teacher_viewport(self, state, force=False):
+        # The latest viewport stays in memory. A database worker is used only
+        # for the throttled Redis/cache flush, not for every pan frame.
+        if stage_teacher_viewport(str(self.board_id), state, force=force):
+            await database_sync_to_async(flush_teacher_viewport)(str(self.board_id))
+
     async def receive(self, text_data=None, bytes_data=None):
+        mark_ws_activity(self)
         if bytes_data and len(bytes_data) > MAX_WS_TEXT_BYTES:
             if _board_debug_enabled():
                 logger.warning(
@@ -326,6 +390,7 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
             return
         if not isinstance(data, dict):
             return
+        note_ws_inbound(self, data)
 
         msg_type = data.get("type")
         if msg_type != "ping":
@@ -673,9 +738,7 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                 self._last_viewport_at = time.monotonic()
                 if self.role == "teacher" or self.permission == "owner":
                     state = {**payload, "type": "viewport_state"}
-                    await database_sync_to_async(set_teacher_viewport)(
-                        str(self.board_id), state, force
-                    )
+                    await self._remember_teacher_viewport(state, force=force)
                 await self.channel_layer.group_send(self.group_name, event)
                 return
 
@@ -696,9 +759,7 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                         pl = pending.get("payload") or {}
                         if self.role == "teacher" or self.permission == "owner":
                             state = {**pl, "type": "viewport_state"}
-                            await database_sync_to_async(set_teacher_viewport)(
-                                str(self.board_id), state, True
-                            )
+                            await self._remember_teacher_viewport(state, force=True)
                         await self.channel_layer.group_send(self.group_name, pending)
                     except asyncio.CancelledError:
                         raise
@@ -716,9 +777,7 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
             if pending_vp and (self.role == "teacher" or self.permission == "owner"):
                 pl = pending_vp.get("payload") or {}
                 state = {**pl, "type": "viewport_state"}
-                await database_sync_to_async(set_teacher_viewport)(
-                    str(self.board_id), state, True
-                )
+                await self._remember_teacher_viewport(state, force=True)
             cached = await database_sync_to_async(get_teacher_viewport)(str(self.board_id))
             if cached:
                 try:
@@ -894,7 +953,9 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
             # иначе снимок затирает накопленные ops отправителя и применяется всей комнатой.
             await self.channel_layer.group_send(
                 self.group_name,
-                {
+                stage_board_event(
+                    self.group_name,
+                    {
                     "type": "board.collab",
                     "payload": {
                         "type": "snapshot_response",
@@ -911,7 +972,8 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                             "files": clean_files,
                         },
                     },
-                },
+                    },
+                ),
             )
             return
 
@@ -923,6 +985,7 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
             )
 
     async def board_collab(self, event):
+        event = resolve_board_event(event)
         payload = event.get("payload") or {}
         # Не эхоить собственные live-сообщения обратно отправителю.
         if (

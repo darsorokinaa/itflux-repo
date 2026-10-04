@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ensureCsrfCookie, getCsrfToken } from "../../utils/cabinetAuth";
 import FormulaEditor from "./FormulaEditor";
+import { typesetElement } from "../../utils/loadMathJax";
 import {
   TASK_TYPE_GROUPS,
   TASK_TYPE_REGISTRY,
@@ -1090,13 +1091,8 @@ function LatexPreview({ latex }) {
       return undefined;
     }
     node.innerHTML = `\\(${source}\\)`;
-    const mj = window.MathJax;
-    if (!mj?.typesetPromise) return undefined;
     let dead = false;
-    const run = () => { if (!dead) mj.typesetPromise([node]).catch(() => {}); };
-    const startup = mj.startup?.promise;
-    if (startup?.then) startup.then(run).catch(run);
-    else run();
+    typesetElement(node, () => dead);
     return () => { dead = true; };
   }, [latex]);
   return <div className="ws-q-preview" ref={ref} />;

@@ -1,16 +1,20 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 
 import {
+  applyJitsiCallChrome,
+  applyJitsiCameraResolution,
   buildJitsiAppData,
   buildJitsiConfigOverwrite,
   buildJitsiEmbedUrl,
   buildJitsiExternalApiOptions,
   buildJitsiHostsOverwrite,
   buildJitsiInterfaceConfigOverwrite,
+  jitsiCallChromeConfig,
   getMeetingCameraEnabled,
   hasValidJitsiLocalStorageContent,
   installJitsiIframeCreateSanitizer,
   setMeetingCameraEnabled,
+  showCallTilesSideBySide,
   stripNullJitsiLocalStorageContentFromUrl,
 } from "./jitsiMeet";
 
@@ -33,6 +37,26 @@ describe("meeting camera preference", () => {
     expect(buildJitsiConfigOverwrite({ startWithVideoMuted: false }).startWithVideoMuted).toBe(false);
   });
 
+  it("starts the camera on the highest Jitsi resolution", () => {
+    const cfg = buildJitsiConfigOverwrite();
+    expect(cfg.resolution).toBe(1080);
+    expect(cfg.constraints.video.height).toEqual({ ideal: 1080, max: 1080, min: 180 });
+    expect(cfg.constraints.video.width).toEqual({ ideal: 1920, max: 1920 });
+    expect(cfg.videoQuality.maxFullResolution).toBe(1080);
+    const commands = [];
+    applyJitsiCameraResolution({
+      executeCommand: (name, value) => commands.push([name, value]),
+    });
+    expect(commands).toEqual([["setVideoQuality", 1080]]);
+    const url = buildJitsiEmbedUrl({
+      domain: "8x8.vc",
+      roomName: "digitalstreamroom",
+    });
+    expect(url).toContain("config.resolution=1080");
+    expect(url).toContain("config.constraints.video.height.ideal=1080");
+    expect(url).toContain("config.constraints.video.height.max=1080");
+  });
+
   it("keeps lobby off and forces JVB (no P2P) for school NAT", () => {
     const cfg = buildJitsiConfigOverwrite();
     expect(cfg.disableLobbyMode).toBe(true);
@@ -43,6 +67,69 @@ describe("meeting camera preference", () => {
     expect(cfg.enableNoAudioDetection).toBe(true);
     expect(cfg.enableIceRestart).toBe(true);
     expect(cfg.disableRemoteControl).toBe(false);
+    expect(cfg.disableSelfView).toBeUndefined();
+    expect(cfg.startAudioOnly).toBeUndefined();
+    expect(cfg.disableTileEnlargement).toBeUndefined();
+    expect(cfg.filmstrip?.disableStageFilmstrip).not.toBe(true);
+    expect(cfg.toolbarButtons).toEqual(["microphone", "camera", "desktop", "hangup"]);
+    expect(cfg.toolbarButtons).not.toContain("chat");
+  });
+
+  it("opens every Jitsi toolbar action only in the expanded call", () => {
+    const compact = jitsiCallChromeConfig(false);
+    const expanded = jitsiCallChromeConfig(true);
+    expect(compact.toolbarButtons).toEqual(["microphone", "camera", "desktop", "hangup"]);
+    expect(compact.toolbarConfig.alwaysVisible).toBe(false);
+    expect(expanded.toolbarConfig.alwaysVisible).toBe(true);
+    ["chat", "raisehand", "participants-pane", "tileview", "settings", "whiteboard", "recording"].forEach((name) => {
+      expect(expanded.toolbarButtons).toContain(name);
+      expect(compact.toolbarButtons).not.toContain(name);
+    });
+    const commands = [];
+    const api = { executeCommand: (name, value) => commands.push([name, value]) };
+    applyJitsiCallChrome(api, { expanded: true });
+    applyJitsiCallChrome(api, { expanded: false });
+    expect(commands.map((entry) => entry[0])).toEqual(["overwriteConfig", "overwriteConfig"]);
+    expect(commands[0][1].toolbarButtons).toContain("chat");
+    expect(commands[1][1].toolbarButtons).not.toContain("chat");
+    expect(commands[1][1].toolbarConfig.alwaysVisible).toBe(false);
+  });
+
+  it("keeps both participants visible side by side", () => {
+    const cfg = buildJitsiConfigOverwrite({ startWithVideoMuted: false, domain: "8x8.vc" });
+    expect(cfg.disableSelfView).not.toBe(true);
+    expect(cfg.filmstrip?.disabled).not.toBe(true);
+    expect(cfg.filmstrip?.disableStageFilmstrip).not.toBe(true);
+    expect(cfg.disableTileEnlargement).toBeUndefined();
+    const url = buildJitsiEmbedUrl({
+      domain: "8x8.vc",
+      roomName: "digitalstreamroom",
+      startWithVideoMuted: false,
+    });
+    expect(url).not.toContain("disableSelfView");
+    expect(url).not.toContain("disableStageFilmstrip=true");
+    expect(url).not.toContain("disableTileEnlargement");
+  });
+
+  it("keeps a solo camera on the large stage and puts two cameras side by side", () => {
+    const commands = [];
+    const api = {
+      getContentSharingParticipants: () => [],
+      getParticipantsInfo: () => [{ participantId: "me" }],
+      executeCommand: (name, value) => commands.push([name, value]),
+    };
+    showCallTilesSideBySide(api);
+    expect(commands).toEqual([["setTileView", false]]);
+
+    commands.length = 0;
+    api.getParticipantsInfo = () => [{ participantId: "me" }, { participantId: "student" }];
+    showCallTilesSideBySide(api);
+    expect(commands).toEqual([["setTileView", true]]);
+
+    commands.length = 0;
+    api.getContentSharingParticipants = () => [{ id: "share" }];
+    showCallTilesSideBySide(api);
+    expect(commands).toEqual([]);
   });
 
   it("pins MUC host to conference.<domain> so JWT sub matches the room", () => {
@@ -55,6 +142,8 @@ describe("meeting camera preference", () => {
       muc: "conference.lesson.itflux-academy.ru",
     });
     expect(buildJitsiConfigOverwrite({ domain: "meet.jit.si" }).hosts).toBeUndefined();
+    expect(buildJitsiConfigOverwrite({ domain: "8x8.vc" }).hosts).toBeUndefined();
+    expect(buildJitsiConfigOverwrite({ domain: "8x8.vc" }).preferBosh).toBe(false);
     const embed = buildJitsiEmbedUrl({
       domain: "lesson.itflux-academy.ru",
       roomName: "digitalstreamroom",

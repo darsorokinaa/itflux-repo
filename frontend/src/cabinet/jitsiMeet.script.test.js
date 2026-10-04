@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 
-import { loadJitsiExternalApi } from "./jitsiMeet";
+import { jitsiExternalApiScriptUrl, loadJitsiExternalApi, resolveJitsiApiRoomName } from "./jitsiMeet";
 
 describe("loadJitsiExternalApi", () => {
   beforeEach(() => {
@@ -25,6 +25,27 @@ describe("loadJitsiExternalApi", () => {
     document.head.appendChild(script);
     window.JitsiMeetExternalAPI = function JitsiMeetExternalAPI() {};
     await expect(loadJitsiExternalApi("meet.example.test", { timeoutMs: 200 })).resolves.toBe(window.JitsiMeetExternalAPI);
+  });
+
+  it("loads the JaaS external API from the backend script URL", () => {
+    expect(jitsiExternalApiScriptUrl(
+      "8x8.vc",
+      "https://8x8.vc/vpaas-magic-cookie-test/external_api.js",
+    )).toBe("https://8x8.vc/vpaas-magic-cookie-test/external_api.js");
+    expect(jitsiExternalApiScriptUrl("meet.example.test", "")).toBe(
+      "https://meet.example.test/libs/external_api.min.js",
+    );
+    expect(jitsiExternalApiScriptUrl("8x8.vc", "https://evil.example/external_api.js")).toBe(
+      "https://8x8.vc/libs/external_api.min.js",
+    );
+  });
+
+  it("keeps the lesson room and prefixes it for JaaS", () => {
+    expect(resolveJitsiApiRoomName({
+      roomName: "digitalstreamroom",
+      externalRoomName: "vpaas-magic-cookie-test/digitalstreamroom",
+    })).toBe("vpaas-magic-cookie-test/digitalstreamroom");
+    expect(resolveJitsiApiRoomName({ roomName: "digitalstreamroom" })).toBe("digitalstreamroom");
   });
 
   it("times out instead of waiting forever", async () => {

@@ -1,5 +1,6 @@
 # Node
 node_modules/
+services/tldraw-sync/data/
 npm-debug.log*
 
 # Python

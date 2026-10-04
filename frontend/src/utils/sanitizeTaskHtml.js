@@ -1,4 +1,23 @@
-import DOMPurify from "dompurify";
+let purify = null;
+let purifyLoading = null;
+
+/** DOMPurify is fetched only when a page actually sanitizes task HTML. */
+export function ensureSanitizer() {
+  if (!purifyLoading) {
+    purifyLoading = import("dompurify").then((mod) => {
+      purify = mod.default;
+      return purify;
+    });
+  }
+  return purifyLoading;
+}
+
+function stripUnsafeHtml(raw) {
+  return raw
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    .replace(/javascript:/gi, "");
+}
 
 /**
  * Санитизация HTML заданий перед innerHTML.
@@ -9,14 +28,11 @@ export function sanitizeTaskHtml(html) {
   if (html == null) return "";
   const raw = String(html);
   if (!raw) return "";
-  if (typeof window === "undefined") {
-    // SSR/тесты без DOM — грубый fallback
-    return raw
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-      .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
-      .replace(/javascript:/gi, "");
+  if (typeof window === "undefined" || !purify) {
+    if (typeof window !== "undefined") ensureSanitizer();
+    return stripUnsafeHtml(raw);
   }
-  return DOMPurify.sanitize(raw, {
+  return purify.sanitize(raw, {
     USE_PROFILES: { html: true },
     FORBID_TAGS: ["script", "iframe", "object", "embed", "form", "base", "link", "meta"],
     FORBID_ATTR: [

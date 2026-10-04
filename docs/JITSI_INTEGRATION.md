@@ -82,6 +82,21 @@ JITSI_SUB=<обычно тот же домен, что JITSI_DOMAIN>
 JITSI_AUD=jitsi
 ```
 
+## 5.1 JaaS (8x8)
+
+Переключение на JaaS (8x8) не меняет комнату урока: `roomName` остаётся сохранённым идентификатором `VideoMeeting`. Фронтенд получает `externalRoomName` вида `{JAAS_APP_ID}/{roomName}` и скрипт `https://8x8.vc/{JAAS_APP_ID}/external_api.js`. JWT подписывается на backend (RS256). При `VIDEO_PROVIDER=meet` остаётся прежний провайдер.
+
+```env
+VIDEO_PROVIDER=jaas
+JAAS_APP_ID=vpaas-magic-cookie-...
+JAAS_API_KEY_ID=vpaas-magic-cookie-.../key-id
+JAAS_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
+# либо JAAS_PRIVATE_KEY_PATH=/etc/itflux/jaas-private.pem
+JAAS_TOKEN_TTL_SECONDS=7200
+```
+
+Откат: `VIDEO_PROVIDER=meet` и перезапуск Daphne. Private key в репозиторий не кладётся.
+
 Claims (Prosody `token_verification`, не JaaS):
 
 - `iss` = `JITSI_APP_ID`
@@ -103,8 +118,8 @@ python manage.py migrate
 
 Проверьте заголовки для `/cabinet/meetings/`:
 
-- `script-src` / `frame-src` / `connect-src` / `img-src` / `media-src` — только свой origin и `https://<JITSI_DOMAIN>` (+ `wss://` для connect).
-- Permissions-Policy: `camera`, `microphone`, `display-capture`, `fullscreen`, `autoplay` — для платформы и домена Jitsi.
+- `script-src` / `frame-src` / `connect-src` / `img-src` / `media-src` — свой origin, `https://<JITSI_DOMAIN>` и, для JaaS, `https://8x8.vc` вместе с `wss://8x8.vc`.
+- Permissions-Policy: `camera`, `microphone`, `display-capture`, `fullscreen`, `autoplay` — для платформы, своего Jitsi и `https://8x8.vc`.
 
 Не используйте `*` и не добавляйте `unsafe-eval` без необходимости.
 

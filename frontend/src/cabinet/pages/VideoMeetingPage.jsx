@@ -23,6 +23,7 @@ import {
   updateLessonPlanItem,
 } from "../../utils/cabinetAuth";
 import {
+  applyJitsiCallChrome,
   createJitsiMeetSession,
   getMeetingCameraEnabled,
   getMeetingMicEnabled,
@@ -73,6 +74,12 @@ import {
   logVariantLifecycle,
 } from "../meetingPresent";
 import {
+  LESSON_BOARD_CHROME_SOURCE,
+  LESSON_ROOM_CHROME_SOURCE,
+  lessonBoardChromeAction,
+  withLessonBoardTitle,
+} from "../boards/lessonShell";
+import {
   createMeetingMaterialCollab,
   createRemoteApplyGuard,
 } from "../meetingMaterialCollab";
@@ -102,7 +109,7 @@ import {
 } from "../screenshare/annotationModel";
 import { LASER_TTL_MS, canDrawScreenShareAnnotations } from "../screenshare/constants";
 import { AnnotationProvider } from "../annotations/AnnotationContext";
-import { useFloatingDrag } from "../useFloatingDrag";
+import { CALL_FRAME_ASPECT, useFloatingDrag } from "../useFloatingDrag";
 import FloatingResizeHandles from "../FloatingResizeHandles";
 import MiniCallBar from "../components/MiniCallBar";
 import {
@@ -193,7 +200,7 @@ function mapJoinError(err) {
     return "Сервер отклонил доступ (конфигурация входа)";
   }
   if (code === "jitsi_auth") {
-    return "Сервер конференции отклонил токен входа. Обновите страницу урока. Локально JITSI_APP_SECRET в Generator/.env должен совпадать с Prosody на lesson.itflux-academy.ru.";
+    return "Не удалось подключить видеозвонок.";
   }
   if (
     code === "jitsi_join_timeout"
@@ -201,10 +208,10 @@ function mapJoinError(err) {
     || code === "jitsi_connection_failed"
     || code === "jitsi_conference_failed"
   ) {
-    return "Не удалось соединиться с сервером конференции. Нажмите «Повторить».";
+    return "Не удалось подключить видеозвонок.";
   }
   if (code === "jitsi_script" || code === "jitsi_script_timeout" || code === "jitsi_public_blocked") {
-    return "Не удалось открыть видеозвонок. Нажмите «Повторить». Если камера недоступна, можно войти без неё.";
+    return "Не удалось подключить видеозвонок.";
   }
   if (code === "display_name") {
     return "Не указано имя участника";
@@ -292,6 +299,83 @@ function resolveMaterialOpenUrl(row, meetingUuid, presented, { forEmbed = false 
   return forEmbed ? row.url : appendMeetingParam(row.url, meetingUuid);
 }
 
+function peerAddressName(value, { teacherSide = false } = {}) {
+  const parts = String(value || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "";
+  if (!teacherSide && parts.length >= 3) return `${parts[1]} ${parts[2]}`;
+  return parts.join(" ");
+}
+
+function callStatusLabel({ waiting, canManage, peerName }) {
+  if (waiting || !peerName) return canManage ? "Ждём ученика" : "Ждём учителя";
+  return peerAddressName(peerName, { teacherSide: canManage });
+}
+
+function LessonRoomActions({
+  workspaceOpen,
+  onCollapseWorkspace,
+  showJitsi,
+  asideOpen,
+  onToggleMaterials,
+  materialsCount,
+  roomFullscreen,
+  onToggleFullscreen,
+  canFinish,
+  finishing,
+  onFinish,
+}) {
+  return (
+    <>
+      {workspaceOpen ? (
+        <button
+          type="button"
+          className="video-lesson-icon-btn"
+          aria-label="Свернуть материал"
+          title="Свернуть материал"
+          onClick={onCollapseWorkspace}
+        >
+          <CabinetIcon name="close" />
+        </button>
+      ) : null}
+      {showJitsi ? (
+        <button
+          type="button"
+          className={`video-lesson-btn video-lesson-btn--ghost video-lesson-header__materials-btn${asideOpen ? " is-active" : ""}`}
+          onClick={onToggleMaterials}
+          aria-pressed={asideOpen}
+          title={asideOpen ? "Скрыть материалы" : "Показать материалы"}
+        >
+          Материалы{materialsCount ? ` · ${materialsCount}` : ""}
+        </button>
+      ) : null}
+      <button
+        type="button"
+        className={`video-lesson-btn video-lesson-btn--ghost${roomFullscreen ? " is-active" : ""}`}
+        onClick={onToggleFullscreen}
+        aria-pressed={roomFullscreen}
+        aria-label={roomFullscreen ? "Выйти из полноэкранного режима" : "Полноэкранный режим"}
+        title={roomFullscreen ? "Выйти из полноэкранного режима" : "Полноэкранный режим"}
+      >
+        <CabinetIcon name="expand" />
+        <span className="video-lesson-btn__label">{roomFullscreen ? "Окно" : "На весь экран"}</span>
+      </button>
+      {canFinish ? (
+        <button
+          type="button"
+          className="video-lesson-btn video-lesson-btn--danger"
+          disabled={finishing}
+          onClick={onFinish}
+          aria-label="Завершить звонок"
+        >
+          {finishing ? "…" : (
+            <>Завершить<span className="video-lesson-btn__label-tail"> урок</span></>
+          )}
+        </button>
+      ) : null}
+    </>
+  );
+}
+
 export default function VideoMeetingPage() {
   const { meetingUuid } = useParams();
   const navigate = useNavigate();
@@ -370,8 +454,12 @@ export default function VideoMeetingPage() {
   const [materialsToast, setMaterialsToast] = useState("");
   const [mobilePane, setMobilePane] = useState("call"); // call | materials
   const [roomFullscreen, setRoomFullscreen] = useState(false);
+  const [boardFrameEpoch, setBoardFrameEpoch] = useState(0);
   const pageRootRef = useRef(null);
-  const [callCollapsed, setCallCollapsed] = useState(false);
+  const boardFrameRef = useRef(null);
+  const boardSrcCacheRef = useRef({ url: "", src: "" });
+  const boardChromeActionsRef = useRef({});
+  const [callView, setCallView] = useState("normal");
   const [focusCall, setFocusCall] = useState(false);
   const [shareMiniDismissed, setShareMiniDismissed] = useState(false);
   const [localMicOn, setLocalMicOn] = useState(false);
@@ -606,7 +694,7 @@ export default function VideoMeetingPage() {
     attendanceTracker.cancelPendingLeave();
     setError("");
     setMediaWarning("");
-    setConnectionHint("Подключение к конференции…");
+    setConnectionHint("Подключаем видеозвонок…");
     setPageState("live");
     callStateRef.current?.transition(CALL_STATES.initializing, "init");
     intendedMediaRef.current = {
@@ -909,7 +997,7 @@ export default function VideoMeetingPage() {
           setScreenshareLayout(nextLayout);
           if (localSharing && !wasLocalSharing) {
             setShareMiniDismissed(false);
-            setCallCollapsed(false);
+            setCallView("normal");
             setFocusCall(false);
             reportClientEvent("screen_share_started", { surface: String(snap?.displaySurface || "").slice(0, 24) });
             void participantPipRef.current?.onScreenShareChanged(true, participantPipContext()).then((result) => {
@@ -1837,30 +1925,6 @@ export default function VideoMeetingPage() {
     }
   };
 
-  const onMiniCallHangup = useCallback(() => {
-    if (canManageRef.current) {
-      setFinishConfirm(true);
-      return;
-    }
-    try {
-      apiRef.current?.executeCommand?.("hangup");
-    } catch {
-      /* ignore */
-    }
-    leaveStudentRoomRef.current?.();
-  }, []);
-
-  const onMiniCallStayOnTop = useCallback(async () => {
-    const pip = participantPipRef.current;
-    if (!pip) return;
-    const result = await pip.toggle(participantPipContext());
-    if (result?.ok || result?.closed || result?.pending) return;
-    if (result?.reason === "unsupported") {
-      setMaterialsToast("Видео ученика можно оставить поверх комнаты");
-      window.setTimeout(() => setMaterialsToast(""), 4200);
-    }
-  }, [participantPipContext]);
-
   const onCopyLink = async () => {
     const pageUrl = detail?.videoMeeting?.pageUrl || detail?.videoMeeting?.joinUrl
       || (meetingUuid ? `/cabinet/meetings/${meetingUuid}` : "");
@@ -2172,7 +2236,7 @@ export default function VideoMeetingPage() {
     }
     setPresented(null);
     setFocusCall(false);
-    setCallCollapsed(isLessonCompactViewport());
+    setCallView(isLessonCompactViewport() ? "minimized" : "normal");
     setAsideOpen(false);
     setMobilePane("materials");
     if (workspaceMaterialRef.current?.kind === "variant" || workspaceMaterialRef.current?.kind === "board") {
@@ -2511,7 +2575,7 @@ export default function VideoMeetingPage() {
     }
     logVariantLifecycle("open new", { kind: next.kind, url: next.url });
     setMaterialSession(null);
-    setCallCollapsed(isLessonCompactViewport());
+    setCallView(isLessonCompactViewport() ? "minimized" : "normal");
     setWorkspaceMaterial(next);
     revealHeldWorkspace();
     if (next.kind === "variant") setAsideOpen(true);
@@ -2862,6 +2926,7 @@ export default function VideoMeetingPage() {
     ? subjectRaw
     : "";
   const lessonTitle = subjectLabel || subjectRaw || "Урок";
+  const boardLessonTitle = (subjectLabel || subjectRaw || "").trim();
   const headerSub = [studentLabel, whenLabel].filter(Boolean).join(" · ");
   const syncedWorkspaceOpen = false;
   const materialKind = materialSession?.material?.type || materialSession?.material?.kind || "";
@@ -2881,6 +2946,60 @@ export default function VideoMeetingPage() {
   );
   const workspaceHeld = Boolean(workspaceMaterial);
   const workspaceOpen = workspaceHeld && !workspaceMinimized && !workspaceHiddenByTeacher && !focusCall;
+  const boardChromeOpen = Boolean(workspaceOpen && workspaceMaterial?.kind === "board");
+  useEffect(() => {
+    if (!boardChromeOpen) return undefined;
+    const send = () => {
+      const frame = boardFrameRef.current;
+      try {
+        frame?.contentWindow?.postMessage({
+          source: LESSON_ROOM_CHROME_SOURCE,
+          type: "board-chrome",
+          lessonTitle: boardLessonTitle,
+          live: status === "live" && showJitsi,
+          whenLabel,
+          startsAt: event?.startsAt || event?.starts_at || "",
+          endsAt: event?.endsAt || event?.ends_at || "",
+          materialsCount,
+          materialsOpen: asideOpen,
+          fullscreen: roomFullscreen,
+          canFinish: Boolean(canManage && status === "live" && showJitsi),
+          finishing,
+        }, window.location.origin);
+      } catch {
+        /* доска ещё не готова */
+      }
+    };
+    send();
+    const onMessage = (event) => {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data;
+      if (data?.source === LESSON_BOARD_CHROME_SOURCE && data?.type === "board-chrome-ready") {
+        send();
+        return;
+      }
+      const action = lessonBoardChromeAction(data);
+      if (action) boardChromeActionsRef.current[action]?.();
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [
+    asideOpen,
+    boardChromeOpen,
+    boardFrameEpoch,
+    boardLessonTitle,
+    canManage,
+    finishing,
+    materialsCount,
+    roomFullscreen,
+    showJitsi,
+    status,
+    whenLabel,
+    event?.startsAt,
+    event?.starts_at,
+    event?.endsAt,
+    event?.ends_at,
+  ]);
   const workspaceTitle = workspaceMaterial?.title
     || materialSession?.material?.title
     || "";
@@ -2923,24 +3042,27 @@ export default function VideoMeetingPage() {
     onResizePointerDown: onCompactCallResizePointerDown,
   } = useFloatingDrag({
     enabled: compactCall,
-    resizable: compactCall && !callCollapsed && !shareMiniCall,
-    minWidth: shareMiniCall ? 240 : 160,
-    minHeight: shareMiniCall ? 140 : 120,
+    resizable: compactCall && callView !== "minimized",
+    minWidth: callView === "minimized" ? 180 : callView === "expanded" ? 640 : 280,
+    minHeight: callView === "minimized" ? 48 : callView === "expanded" ? 360 : 158,
+    aspectRatio: callView === "minimized" ? 0 : CALL_FRAME_ASPECT,
+    marginTop: boardChromeOpen ? 72 : 74,
     storageKey: meetingUuid
-      ? (shareMiniCall ? `vl-share-pip:${meetingUuid}` : `vl-compact-call:${meetingUuid}`)
+      ? (shareMiniCall ? `vl-share-pip:${meetingUuid}` : `vl-compact-call-v5:${callView}:${meetingUuid}`)
       : null,
     handleSelector: ".video-lesson-compact-drag",
   });
+  const minimizedShowsVideo = callView === "minimized" && Number(compactCallStyle?.height) > 80;
 
   const compactCallPrevRef = useRef(false);
   useEffect(() => {
     if (!compactCall) {
-      setCallCollapsed(false);
+      setCallView("normal");
       compactCallPrevRef.current = false;
       return;
     }
     if (!compactCallPrevRef.current && isLessonCompactViewport() && workspaceOpen && !shareMiniCall) {
-      setCallCollapsed(true);
+      setCallView("minimized");
     }
     compactCallPrevRef.current = true;
   }, [compactCall, shareMiniCall, workspaceOpen]);
@@ -2964,7 +3086,13 @@ export default function VideoMeetingPage() {
   useEffect(() => {
     // Сообщаем Jitsi о смене размеров контейнера без пересоздания сессии.
     window.dispatchEvent(new Event("resize"));
-  }, [asideOpen, workspaceOpen, mobilePane]);
+  }, [asideOpen, workspaceOpen, mobilePane, callView]);
+
+  useEffect(() => {
+    applyJitsiCallChrome(apiRef.current, {
+      expanded: Boolean(compactCall && callView === "expanded"),
+    });
+  }, [compactCall, callView, joinState]);
 
   const toggleRoomFullscreen = useCallback(async () => {
     const root = pageRootRef.current;
@@ -3041,6 +3169,74 @@ export default function VideoMeetingPage() {
     resumeControllerRef.current?.manualReload?.();
   }, []);
 
+  boardChromeActionsRef.current = {
+    materials: () => {
+      setFocusCall(false);
+      setAsideOpen((v) => !v);
+      setMobilePane((prev) => (prev === "materials" && asideOpen ? "call" : "materials"));
+    },
+    fullscreen: () => void toggleRoomFullscreen(),
+    finish: () => setFinishConfirm(true),
+    collapse: () => {
+      if (syncedWorkspaceOpen) {
+        if (canManage) void onClearPresented();
+        else {
+          applyMaterialSession(null);
+          setMobilePane("call");
+        }
+      } else {
+        closeWorkspaceMaterial();
+        setAsideOpen(true);
+        setMobilePane("materials");
+      }
+    },
+  };
+
+  const roomActions = (
+    <LessonRoomActions
+      workspaceOpen={workspaceOpen}
+      onCollapseWorkspace={() => {
+        if (syncedWorkspaceOpen) {
+          if (canManage) void onClearPresented();
+          else {
+            applyMaterialSession(null);
+            setMobilePane("call");
+          }
+        } else {
+          closeWorkspaceMaterial();
+          setAsideOpen(true);
+          setMobilePane("materials");
+        }
+      }}
+      showJitsi={showJitsi}
+      asideOpen={asideOpen}
+      onToggleMaterials={() => {
+        setFocusCall(false);
+        setAsideOpen((v) => !v);
+        setMobilePane((prev) => (prev === "materials" && asideOpen ? "call" : "materials"));
+      }}
+      materialsCount={materialsCount}
+      roomFullscreen={roomFullscreen}
+      onToggleFullscreen={() => void toggleRoomFullscreen()}
+      canFinish={Boolean(canManage && status === "live" && showJitsi)}
+      finishing={finishing}
+      onFinish={() => setFinishConfirm(true)}
+    />
+  );
+
+  const boardFrameSrc = workspaceMaterial?.kind === "board"
+    ? (() => {
+      const raw = String(workspaceMaterial.url || "");
+      if (boardSrcCacheRef.current.url !== raw) {
+        boardSrcCacheRef.current = {
+          url: raw,
+          src: withLessonBoardTitle(raw, boardLessonTitle),
+        };
+      }
+      return boardSrcCacheRef.current.src;
+    })()
+    : (workspaceMaterial?.url || "");
+
   return (
     <AnnotationProvider
       screenshareActive={Boolean(screenshareUiActive && showJitsi)}
@@ -3062,8 +3258,10 @@ export default function VideoMeetingPage() {
         liveVariantAnswers ? "video-lesson-page--live-answers" : "",
         mobilePane === "materials" && showJitsi ? "video-lesson-page--mobile-materials" : "",
         roomFullscreen ? "is-css-fullscreen" : "",
+        boardChromeOpen ? "video-lesson-page--board" : "",
       ].filter(Boolean).join(" ")}
     >
+      {boardChromeOpen ? null : (
       <header className="video-lesson-header">
         <div className="video-lesson-header__left">
           <div className="video-lesson-header__meta">
@@ -3082,74 +3280,10 @@ export default function VideoMeetingPage() {
         </div>
 
         <div className="video-lesson-header__actions">
-          {workspaceOpen ? (
-            <button
-              type="button"
-              className="video-lesson-icon-btn"
-              aria-label="Свернуть материал"
-              title="Свернуть материал"
-              onClick={() => {
-                if (syncedWorkspaceOpen) {
-                  if (canManage) void onClearPresented();
-                  else {
-                    applyMaterialSession(null);
-                    setMobilePane("call");
-                  }
-                } else {
-                  closeWorkspaceMaterial();
-                  setAsideOpen(true);
-                  setMobilePane("materials");
-                }
-              }}
-            >
-              <CabinetIcon name="close" />
-            </button>
-          ) : null}
-          {showJitsi ? (
-            <button
-              type="button"
-              // На телефоне и узком планшете (≤820px) под шапкой уже есть
-              // таб-переключатель Звонок/Материалы — эта кнопка дублировала бы его.
-              className={`video-lesson-btn video-lesson-btn--ghost video-lesson-header__materials-btn${asideOpen ? " is-active" : ""}`}
-              onClick={() => {
-                setFocusCall(false);
-                setAsideOpen((v) => !v);
-                setMobilePane((prev) => (prev === "materials" && asideOpen ? "call" : "materials"));
-              }}
-              aria-pressed={asideOpen}
-              title={asideOpen ? "Скрыть материалы" : "Показать материалы"}
-            >
-              Материалы{materialsCount ? ` · ${materialsCount}` : ""}
-            </button>
-          ) : null}
-
-          <button
-            type="button"
-            className={`video-lesson-btn video-lesson-btn--ghost${roomFullscreen ? " is-active" : ""}`}
-            onClick={() => void toggleRoomFullscreen()}
-            aria-pressed={roomFullscreen}
-            aria-label={roomFullscreen ? "Выйти из полноэкранного режима" : "Полноэкранный режим"}
-            title={roomFullscreen ? "Выйти из полноэкранного режима" : "Полноэкранный режим"}
-          >
-            <CabinetIcon name="expand" />
-            <span className="video-lesson-btn__label">{roomFullscreen ? "Окно" : "На весь экран"}</span>
-          </button>
-
-          {canManage && status === "live" && showJitsi ? (
-            <button
-              type="button"
-              className="video-lesson-btn video-lesson-btn--danger"
-              disabled={finishing}
-              onClick={() => setFinishConfirm(true)}
-              aria-label="Завершить звонок"
-            >
-              {finishing ? "…" : (
-                <>Завершить<span className="video-lesson-btn__label-tail"> урок</span></>
-              )}
-            </button>
-          ) : null}
+          {roomActions}
         </div>
       </header>
+      )}
 
       {showJitsi ? (
         <div className="video-lesson-mobile-switch" role="tablist" aria-label="Режим экрана">
@@ -3279,13 +3413,15 @@ export default function VideoMeetingPage() {
               ) : workspaceMaterial.url ? (
                 <iframe
                   key={`${workspaceMaterialIdentityKey(workspaceMaterial)}:${workspaceMaterial.kind === "board" ? workspaceFrameKey : "live"}`}
+                  ref={workspaceMaterial.kind === "board" ? boardFrameRef : undefined}
                   title={workspaceMaterial.title}
-                  src={workspaceMaterial.url}
+                  src={workspaceMaterial.kind === "board" ? boardFrameSrc : workspaceMaterial.url}
                   className={[
                     "video-lesson-workspace__frame",
                     workspaceMaterial.kind === "board" ? "video-lesson-workspace__frame--board" : "",
                   ].filter(Boolean).join(" ")}
                   allow="camera; microphone; display-capture; autoplay; clipboard-read; clipboard-write; fullscreen"
+                  onLoad={workspaceMaterial.kind === "board" ? () => setBoardFrameEpoch((value) => value + 1) : undefined}
                 />
               ) : (
                 <div className="vl-empty">
@@ -3302,8 +3438,10 @@ export default function VideoMeetingPage() {
           className={[
             "video-lesson-content",
             compactCallDragging || compactCallResizing ? "video-lesson-content--dragging" : "",
-            compactCall && callCollapsed ? "video-lesson-content--call-collapsed" : "",
-            compactCall && !callCollapsed ? "video-lesson-content--resizable" : "",
+            compactCall && callView === "minimized" ? "video-lesson-content--call-collapsed" : "",
+            compactCall && callView === "expanded" ? "video-lesson-content--call-expanded" : "",
+            compactCall ? "video-lesson-content--resizable" : "",
+            minimizedShowsVideo ? "video-lesson-content--call-sized" : "",
           ].filter(Boolean).join(" ")}
           data-participant-video-mode={participantVideoMode}
           data-screen-share-active={screenShareActive ? "true" : "false"}
@@ -3478,15 +3616,23 @@ export default function VideoMeetingPage() {
 
           {pageState === "error" ? (
             <div className="video-lesson-state" data-testid="room-error-fallback">
-              <p className="video-lesson-state__title">Не удалось открыть урок.</p>
-              <p className="video-lesson-state__text">{error || "Комната не загрузилась. Можно переподключиться или вернуться в кабинет."}</p>
+              <p className="video-lesson-state__title">
+                {String(error || "").includes("видеозвонок")
+                  ? "Не удалось подключить видеозвонок."
+                  : "Не удалось открыть урок."}
+              </p>
+              <p className="video-lesson-state__text">
+                {String(error || "").includes("видеозвонок")
+                  ? "Проверьте сеть и повторите подключение."
+                  : (error || "Комната не загрузилась. Можно переподключиться или вернуться в кабинет.")}
+              </p>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
                 <button
                   type="button"
                   className="video-lesson-btn video-lesson-btn--primary"
                   onClick={() => void bootstrap()}
                 >
-                  Переподключиться
+                  {String(error || "").includes("видеозвонок") ? "Повторить" : "Переподключиться"}
                 </button>
                 <Link to={returnUrl} className="video-lesson-btn">
                   Вернуться в кабинет
@@ -3518,38 +3664,39 @@ export default function VideoMeetingPage() {
 
           {compactCall ? (
             <MiniCallBar
-              collapsed={callCollapsed}
+              view={callView}
               waiting={!callRoster.remotes?.length}
-              remoteName={pipParticipant?.displayName || callRoster.remotes?.[0]?.displayName || displayName || "Участник"}
+              statusLabel={callStatusLabel({
+                waiting: !callRoster.remotes?.length,
+                canManage,
+                peerName: pipParticipant?.displayName || callRoster.remotes?.[0]?.displayName || "",
+              })}
+              remoteName={pipParticipant?.displayName || callRoster.remotes?.[0]?.displayName || ""}
+              startedAt={meeting?.actualStartedAt || ""}
               remoteAudioMuted={pipParticipant?.audioMuted ?? callRoster.remotes?.[0]?.audioMuted}
-              remoteVideoMuted={pipParticipant?.videoMuted ?? callRoster.remotes?.[0]?.videoMuted}
-              sharing={screenShareActive}
-              shareMode={shareMiniCall}
-              pipAvailable={callVideoPipReady || videoPipAvailable()}
-              pipActive={stayOnTopActive}
-              pipNeedsGesture={pipNeedsGesture}
-              stayOnTopAvailable={callVideoPipReady || videoPipAvailable()}
-              stayOnTopActive={stayOnTopActive}
-              onToggleCollapsed={() => setCallCollapsed((v) => !v)}
-              onExpand={() => {
-                if (shareMiniCall) setShareMiniDismissed(true);
-                setFocusCall(true);
-                setCallCollapsed(false);
-                setMobilePane("call");
-              }}
-              onStayOnTop={() => { void onMiniCallStayOnTop(); }}
-              onHangup={onMiniCallHangup}
+              stageCameraOff={
+                callRoster.remotes?.length
+                  ? (pipParticipant?.videoMuted ?? callRoster.remotes?.[0]?.videoMuted) === true
+                  : callRoster.local?.videoMuted === true
+              }
+              onMinimize={() => setCallView("minimized")}
+              onShow={() => setCallView("normal")}
+              onExpand={() => setCallView("expanded")}
+              onCompact={() => setCallView("normal")}
             />
           ) : null}
-          {compactCall && !callCollapsed && !shareMiniCall ? (
-            <FloatingResizeHandles onPointerDown={onCompactCallResizePointerDown} />
+          {compactCall ? (
+            <FloatingResizeHandles
+              disabled={callView === "minimized"}
+              onPointerDown={onCompactCallResizePointerDown}
+            />
           ) : null}
 
           <div
             className="video-lesson-jitsi-host"
-            hidden={!showJitsi || (compactCall && callCollapsed)}
+            hidden={!showJitsi || (compactCall && callView === "minimized" && !minimizedShowsVideo)}
           >
-            {connectionHint ? (
+            {connectionHint && connectionHint !== "Ждём ученика" && connectionHint !== "Ждём учителя" ? (
               <div className="video-lesson-media-warning video-lesson-media-warning--info" role="status">
                 <span>{connectionHint}</span>
                 {callReconnectNeeded ? (
@@ -3651,7 +3798,7 @@ export default function VideoMeetingPage() {
               />
             ) : (
               <ScreenShareAnnotationOverlay
-                active={screenshareActive && showJitsi && !(compactCall && callCollapsed)}
+                active={screenshareActive && showJitsi && !(compactCall && callView === "minimized")}
                 compact={compactCall && !shareMiniCall}
                 canManage={canManage}
                 canAnnotate={screenshareCanAnnotate}

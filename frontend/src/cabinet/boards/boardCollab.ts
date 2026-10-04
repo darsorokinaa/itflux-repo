@@ -2,6 +2,7 @@
 
 import { filesForLivePublish } from "./boardFiles";
 import { reportClientEvent } from "../../utils/clientTelemetry";
+import { createRealtimeOutbox } from "../../utils/wsSaturation";
 import { RESUME_TIMING } from "../pwa/pwaResumeLifecycle";
 import { trackRealtimeSocket } from "../pwa/runtimeResources";
 import { boardPerfMarkRealtimePayload } from "./boardPerfDev";
@@ -128,6 +129,7 @@ export type RemoteCursor = {
 };
 
 export type CollabMessage =
+  | { type: "temporary_unavailable"; retry_after_ms?: number; failed_type?: string; client_msg_id?: string; operation_id?: string; action?: string }
   | { type: "ready"; board_id: string; can_edit: boolean; permission: string; role?: string }
   | { type: "room_joined"; board_id: string; client_id: string; can_edit?: boolean; permission?: string; role?: string }
   | { type: "presence_join"; client_id: string; user_id?: number; display_name?: string; can_edit?: boolean; role?: string }
@@ -427,7 +429,7 @@ export function createBoardCollabSession(
     }
   };
 
-  const sendRaw = (payload: Record<string, unknown>) => {
+  const writeRaw = (payload: Record<string, unknown>) => {
     if (!socket || socket.readyState !== WebSocket.OPEN) {
       if (!closed && payload?.type !== "ping") {
         scheduleReconnect();
@@ -445,6 +447,23 @@ export function createBoardCollabSession(
       forceReconnect("send-failed");
       return false;
     }
+  };
+  const outbox = createRealtimeOutbox({ send: writeRaw });
+  let lastScene: Record<string, unknown> | null = null;
+  let sceneAttempts = 0;
+  let sceneTimer: number | null = null;
+  const sendRaw = (payload: Record<string, unknown>) => {
+    const type = String(payload.type || "");
+    if (type === "cursor_move" || type === "cursor" || type === "viewport_update") {
+      outbox.remember(payload);
+    }
+    if (type === "scene_ops" || type === "scene_live") {
+      lastScene = payload;
+      sceneAttempts = 0;
+      if (sceneTimer != null) window.clearTimeout(sceneTimer);
+      sceneTimer = null;
+    }
+    return writeRaw(payload);
   };
 
   const notePayload = (bytes: number, type: string) => {
@@ -950,6 +969,27 @@ export function createBoardCollabSession(
       }
       if (!data || typeof data !== "object") return;
       lastInboundAt = Date.now();
+      if (data.type === "temporary_unavailable") {
+        const failed = String(data.failed_type || "");
+        if (failed === "scene_ops" || failed === "scene_live") {
+          sceneAttempts += 1;
+          if (sceneAttempts > 5 || !lastScene) {
+            lastScene = null;
+            handlers.onStatus?.("error");
+            return;
+          }
+          const delay = Number(data.retry_after_ms) > 0 ? Number(data.retry_after_ms) : 200;
+          if (sceneTimer != null) window.clearTimeout(sceneTimer);
+          const payload = lastScene;
+          sceneTimer = window.setTimeout(() => {
+            sceneTimer = null;
+            writeRaw(payload);
+          }, delay);
+          return;
+        }
+        outbox.onServerMessage(data);
+        return;
+      }
       if (
         data.type !== "pong"
         && data.type !== "cursor_move"

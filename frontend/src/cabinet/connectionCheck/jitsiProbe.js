@@ -257,8 +257,9 @@ export async function probeJitsiInfrastructure({
   }
   if (aborted) return finish({ errorCode: "aborted" });
 
-  const domain = String(config?.domain || "").replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const domain = String(config?.domain || "").replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0];
   const roomName = String(config?.roomName || "").trim();
+  const apiRoomName = String(config?.externalRoomName || roomName).trim();
   const authMode = String(config?.authMode || "");
   const jwtReady = config?.jwtReady !== false;
   if (!domain || !roomName) {
@@ -267,7 +268,7 @@ export async function probeJitsiInfrastructure({
 
   try {
     const scriptStarted = nowMs();
-    await loadApi(domain, { timeoutMs });
+    await loadApi(domain, { timeoutMs, scriptUrl: config?.scriptUrl || "" });
     timings.scriptMs = nowMs() - scriptStarted;
   } catch (error) {
     return finish({
@@ -310,7 +311,7 @@ export async function probeJitsiInfrastructure({
 
   try {
     api = new ApiCtor(domain, {
-      roomName,
+      roomName: apiRoomName,
       parentNode: container,
       width: 2,
       height: 2,

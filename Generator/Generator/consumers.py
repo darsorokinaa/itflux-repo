@@ -7,13 +7,29 @@ from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.apps import apps
 
+from Cabinet.realtime_db import critical_connect
+from Cabinet.ws_lifecycle import (
+    WsLifecycleMixin,
+    log_ws_lifecycle,
+    mark_ws_activity,
+    mark_ws_connected,
+    note_ws_inbound,
+    request_id_from_scope,
+    reraise_if_saturated,
+    temporary_unavailable_body,
+    ws_connection_timing,
+)
+
 from .answer_check import (
     answers_equal,
     expected_answer_for_variant_task,
     normalize_answer,
 )
 
+from Cabinet.loop_log import protect_logger
+
 logger = logging.getLogger(__name__)
+protect_logger(logger.name)
 
 
 def _get_expected_answer_for_variant_task(variant_id: int, task_number_key: str) -> str:
@@ -42,7 +58,7 @@ def _token_from_scope(scope) -> str:
     return (headers.get("x-lesson-token") or "").strip()
 
 
-class LessonConsumer(AsyncWebsocketConsumer):
+class LessonConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
     VARIANT_PAYLOAD_KEY = "_lesson_current_variant"
 
     @staticmethod
@@ -59,12 +75,21 @@ class LessonConsumer(AsyncWebsocketConsumer):
     def _normalize_answer_value(value):
         return normalize_answer(value)
 
+    @critical_connect
     async def connect(self):
         self.room_id = self.scope["url_route"]["kwargs"]["room_id"]
         self.group_name = f"lesson_{self.room_id}"
         self._participant_name = ""
         self._participant_role = ""
         self._jwt_role = ""
+        self._ws_request_id = request_id_from_scope(self.scope)
+        mark_ws_connected(self)
+        log_ws_lifecycle(
+            self,
+            event="connect",
+            request_id=self._ws_request_id,
+            lesson_id=self.room_id,
+        )
 
         token = _token_from_scope(self.scope)
         if not token:
@@ -89,6 +114,12 @@ class LessonConsumer(AsyncWebsocketConsumer):
             self._jwt_role = "student"
         self._participant_role = self._jwt_role
         self._participant_name = str(normalized.get("participant_name") or "").strip()
+        log_ws_lifecycle(
+            self,
+            event="authenticated",
+            request_id=self._ws_request_id,
+            lesson_id=self.room_id,
+        )
 
         if await self._is_lesson_session_closed():
             await self.accept()
@@ -105,6 +136,12 @@ class LessonConsumer(AsyncWebsocketConsumer):
             return
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
+        log_ws_lifecycle(
+            self,
+            event="room_joined",
+            request_id=self._ws_request_id,
+            lesson_id=self.room_id,
+        )
         current_variant = await self._get_saved_variant()
         if current_variant:
             await self.send(
@@ -119,6 +156,14 @@ class LessonConsumer(AsyncWebsocketConsumer):
             )
 
     async def disconnect(self, close_code):
+        log_ws_lifecycle(
+            self,
+            event="disconnect",
+            request_id=getattr(self, "_ws_request_id", ""),
+            lesson_id=getattr(self, "room_id", ""),
+            close_code=close_code,
+            **ws_connection_timing(self),
+        )
         # Уведомляем остальных участников о выходе
         if self._participant_name:
             await self.channel_layer.group_send(
@@ -136,12 +181,14 @@ class LessonConsumer(AsyncWebsocketConsumer):
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
     async def receive(self, text_data):
+        mark_ws_activity(self)
         try:
             data = json.loads(text_data)
         except (json.JSONDecodeError, TypeError):
             return
         if not isinstance(data, dict):
             return
+        note_ws_inbound(self, data)
 
         # Роль и имя — только из JWT; клиент не может стать учителем через join.
         if data.get("type") == "join":
@@ -168,17 +215,32 @@ class LessonConsumer(AsyncWebsocketConsumer):
         if normalized_variant:
             if self._jwt_role != "teacher":
                 return
-            await self._save_variant(normalized_variant)
+            try:
+                await self._save_variant(normalized_variant)
+            except Exception as exc:
+                reraise_if_saturated(exc)
+                logger.exception("lesson variant was not saved")
+                await self._send_save_failed()
+                return
         normalized_answer = self._normalize_student_answer_message(data)
         if normalized_answer:
             try:
                 await self._save_student_answer(normalized_answer)
-            except Exception:
-                logger.exception("lesson _save_student_answer failed (broadcast still sent)")
+            except Exception as exc:
+                reraise_if_saturated(exc)
+                logger.exception("lesson student_answer was not saved")
+                await self._send_save_failed()
+                return
         await self.channel_layer.group_send(
             self.group_name,
             {"type": "lesson_message", "payload": data},
         )
+
+    async def _send_save_failed(self):
+        body = temporary_unavailable_body(self)
+        body["type"] = "save_failed"
+        body.pop("retry_after_ms", None)
+        await self.send(text_data=json.dumps(body, ensure_ascii=False))
 
     async def lesson_message(self, event):
         await self.send(text_data=json.dumps(event["payload"]))

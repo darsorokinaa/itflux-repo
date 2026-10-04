@@ -9,89 +9,71 @@ afterEach(() => {
 });
 
 describe("MiniCallBar", () => {
-  it("does not show mic, camera, or hide as a text control", () => {
+  it("shows the other person or a waiting status, not a generic call title", () => {
     render(
       <MiniCallBar
-        remoteName="Ученик"
-        pipAvailable
-        onStayOnTop={() => {}}
-        onExpand={() => {}}
-        onHangup={() => {}}
-      />,
-    );
-    expect(screen.queryByRole("button", { name: /микрофон/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /камер/i })).toBeNull();
-    expect(screen.getByRole("button", { name: "Скрыть" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Поверх окон" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "На весь экран" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Видео поверх окон" })).toBeTruthy();
-  });
-
-  it("keeps expand in the more menu and uses a PiP icon", () => {
-    const onStayOnTop = vi.fn();
-    const onExpand = vi.fn();
-    render(
-      <MiniCallBar
-        remoteName="Ученик"
-        pipAvailable
-        pipActive
-        onStayOnTop={onStayOnTop}
-        onExpand={onExpand}
-        onHangup={() => {}}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Вернуть видео в урок" }));
-    expect(onStayOnTop).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(screen.getByRole("button", { name: "Ещё" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "На весь экран" }));
-    expect(onExpand).toHaveBeenCalledTimes(1);
-  });
-
-  it("shows a compact participant chrome during screen share", () => {
-    const onStayOnTop = vi.fn();
-    render(
-      <MiniCallBar
-        shareMode
-        remoteName="Дарья"
-        remoteAudioMuted
-        pipAvailable
-        pipNeedsGesture
-        onStayOnTop={onStayOnTop}
-        onToggleCollapsed={() => {}}
-      />,
-    );
-    expect(screen.getByText("Дарья")).toBeTruthy();
-    expect(screen.queryByText("Поверх окон")).toBeNull();
-    expect(screen.queryByRole("button", { name: "На весь экран" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Завершить звонок" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Показать ученика поверх окон" }));
-    expect(onStayOnTop).toHaveBeenCalledTimes(1);
-  });
-
-  it("shows waiting status and can collapse", () => {
-    const onToggleCollapsed = vi.fn();
-    const { rerender } = render(
-      <MiniCallBar
+        view="normal"
+        statusLabel="Ждём ученика"
         waiting
-        onToggleCollapsed={onToggleCollapsed}
+        onMinimize={() => {}}
         onExpand={() => {}}
-        onHangup={() => {}}
       />,
     );
     expect(screen.getByText("Ждём ученика")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Скрыть" }));
-    expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/Видеозвонок/)).toBeNull();
+  });
 
-    rerender(
+  it("shows the peer name once they are in the call", () => {
+    render(
       <MiniCallBar
-        collapsed
-        waiting
-        onToggleCollapsed={onToggleCollapsed}
-        onExpand={() => {}}
-        onHangup={() => {}}
+        view="minimized"
+        statusLabel="Алиса"
+        remoteName="Алиса"
+        onShow={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: "Показать" })).toBeTruthy();
+    expect(screen.getByText("Алиса")).toBeTruthy();
+  });
+
+  it("minimizes to a chip with a single restore action", () => {
+    const onShow = vi.fn();
+    render(
+      <MiniCallBar
+        view="minimized"
+        statusLabel="Алиса"
+        remoteName="Алиса"
+        onShow={onShow}
+      />,
+    );
+    expect(screen.getByText("Алиса")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Свернуть" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Открыть крупнее" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Показать видеозвонок" }));
+    expect(onShow).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses a distinct action to leave the large view", () => {
+    const onCompact = vi.fn();
+    const onMinimize = vi.fn();
+    render(
+      <MiniCallBar
+        view="expanded"
+        statusLabel="Видеозвонок"
+        onCompact={onCompact}
+        onMinimize={onMinimize}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Вернуть компактный вид" }));
+    fireEvent.click(screen.getByRole("button", { name: "Свернуть" }));
+    expect(onCompact).toHaveBeenCalledTimes(1);
+    expect(onMinimize).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Открыть крупнее" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Показать видеозвонок" })).toBeNull();
+  });
+
+  it("does not cover the video with a waiting plaque", () => {
+    render(<MiniCallBar view="normal" waiting participantCount={1} onMinimize={() => {}} onExpand={() => {}} />);
+    expect(screen.getByText("Ждём ученика")).toBeTruthy();
+    expect(screen.queryByText(/Видеозвонок/)).toBeNull();
   });
 });

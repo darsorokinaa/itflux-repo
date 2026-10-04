@@ -2,6 +2,7 @@
 
 import { THROTTLE } from "./materials/collab/constants";
 import { reportClientEvent } from "../utils/clientTelemetry";
+import { createRealtimeOutbox } from "../utils/wsSaturation";
 import { trackRealtimeSocket } from "./pwa/runtimeResources";
 
 export function inferSyncResourceKind(row) {
@@ -154,7 +155,7 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
     eventsLastMinute += 1;
   };
 
-  const send = (payload) => {
+  const writeSocket = (payload) => {
     if (!socket || socket.readyState !== WebSocket.OPEN) return false;
     try {
       socket.send(JSON.stringify(payload));
@@ -164,6 +165,14 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
     }
     bumpEventCount();
     return true;
+  };
+  const outbox = createRealtimeOutbox({
+    send: writeSocket,
+    maxAttempts: 5,
+  });
+  const send = (payload) => {
+    outbox.remember(payload);
+    return writeSocket(payload);
   };
 
   const stopHeartbeat = () => {
@@ -402,6 +411,22 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       }
       if (!data || typeof data !== "object") return;
       bumpEventCount();
+      const saturation = outbox.onServerMessage(data, {
+        onFailed: (payload) => {
+          handlers.onError?.({
+            type: "material.error",
+            code: "not_saved",
+            message: "Не удалось сохранить. Повторите действие.",
+            operation_id: payload.operation_id || payload.client_msg_id,
+          });
+        },
+      });
+      if (saturation.kind === "ack") pendingOps.delete(saturation.id);
+      if (
+        saturation.kind === "ephemeral_retry"
+        || saturation.kind === "durable_retry"
+        || saturation.kind === "durable_retry_all"
+      ) return;
 
       if (data.type === "pong") {
         lastPongAt = Date.now();

@@ -24,12 +24,16 @@ function viewportSize() {
   };
 }
 
-export function clampFloatingBox(box, viewport, minWidth, minHeight) {
+export function clampFloatingBox(box, viewport, minWidth, minHeight, margins) {
   if (!box) return box;
   const vw = viewport?.width ?? 1280;
   const vh = viewport?.height ?? 720;
-  const maxW = Math.max(minWidth, vw - FLOATING_MARGIN * 2);
-  const maxH = Math.max(minHeight, vh - FLOATING_MARGIN * 2);
+  const marginTop = margins?.top ?? FLOATING_MARGIN;
+  const marginRight = margins?.right ?? FLOATING_MARGIN;
+  const marginBottom = margins?.bottom ?? FLOATING_MARGIN;
+  const marginLeft = margins?.left ?? FLOATING_MARGIN;
+  const maxW = Math.max(minWidth, vw - marginLeft - marginRight);
+  const maxH = Math.max(minHeight, vh - marginTop - marginBottom);
   const next = { ...box };
   if (typeof next.width === "number") {
     next.width = Math.min(maxW, Math.max(minWidth, next.width));
@@ -41,17 +45,69 @@ export function clampFloatingBox(box, viewport, minWidth, minHeight) {
   const height = typeof next.height === "number" ? next.height : minHeight;
   if (typeof next.left === "number") {
     next.left = Math.min(
-      Math.max(FLOATING_MARGIN, next.left),
-      Math.max(FLOATING_MARGIN, vw - width - FLOATING_MARGIN),
+      Math.max(marginLeft, next.left),
+      Math.max(marginLeft, vw - width - marginRight),
     );
   }
   if (typeof next.top === "number") {
     next.top = Math.min(
-      Math.max(FLOATING_MARGIN, next.top),
-      Math.max(FLOATING_MARGIN, vh - height - FLOATING_MARGIN),
+      Math.max(marginTop, next.top),
+      Math.max(marginTop, vh - height - marginBottom),
     );
   }
   return next;
+}
+
+export const CALL_FRAME_ASPECT = 16 / 9;
+
+function roundBoxSize(width, height) {
+  return {
+    width: Math.round(width),
+    height: Math.round(height),
+  };
+}
+
+/** Keep a stored or dragged frame at width/height = aspectRatio. */
+export function fitFloatingAspect(layout, aspectRatio) {
+  if (!layout || !(aspectRatio > 0)) return layout;
+  const next = { ...layout };
+  if (typeof next.width === "number") {
+    next.height = Math.round(next.width / aspectRatio);
+  } else if (typeof next.height === "number") {
+    next.width = Math.round(next.height * aspectRatio);
+  }
+  return next;
+}
+
+function sizeForAspect({
+  width,
+  height,
+  aspectRatio,
+  minWidth,
+  minHeight,
+  maxW,
+  maxH,
+  driver,
+}) {
+  let nextWidth = driver === "height" ? height * aspectRatio : width;
+  let nextHeight = driver === "height" ? height : width / aspectRatio;
+  if (nextWidth < minWidth) {
+    nextWidth = minWidth;
+    nextHeight = nextWidth / aspectRatio;
+  }
+  if (nextHeight < minHeight) {
+    nextHeight = minHeight;
+    nextWidth = nextHeight * aspectRatio;
+  }
+  if (nextWidth > maxW) {
+    nextWidth = maxW;
+    nextHeight = nextWidth / aspectRatio;
+  }
+  if (nextHeight > maxH) {
+    nextHeight = maxH;
+    nextWidth = nextHeight * aspectRatio;
+  }
+  return roundBoxSize(nextWidth, nextHeight);
 }
 
 export function applyFloatingResize({
@@ -65,6 +121,8 @@ export function applyFloatingResize({
   viewport,
   minWidth,
   minHeight,
+  margins,
+  aspectRatio = 0,
 }) {
   let width = origWidth;
   let height = origHeight;
@@ -75,19 +133,49 @@ export function applyFloatingResize({
   if (edge.includes("w")) width = origWidth - dx;
   if (edge.includes("n")) height = origHeight - dy;
 
-  const maxW = Math.max(minWidth, (viewport?.width ?? 1280) - FLOATING_MARGIN * 2);
-  const maxH = Math.max(minHeight, (viewport?.height ?? 720) - FLOATING_MARGIN * 2);
-  width = Math.min(maxW, Math.max(minWidth, width));
-  height = Math.min(maxH, Math.max(minHeight, height));
+  const marginTop = margins?.top ?? FLOATING_MARGIN;
+  const marginRight = margins?.right ?? FLOATING_MARGIN;
+  const marginBottom = margins?.bottom ?? FLOATING_MARGIN;
+  const marginLeft = margins?.left ?? FLOATING_MARGIN;
+  const maxW = Math.max(minWidth, (viewport?.width ?? 1280) - marginLeft - marginRight);
+  const maxH = Math.max(minHeight, (viewport?.height ?? 720) - marginTop - marginBottom);
 
-  if (edge.includes("w")) left = origLeft + (origWidth - width);
-  if (edge.includes("n")) top = origTop + (origHeight - height);
+  const horizontal = edge.includes("e") || edge.includes("w");
+  const vertical = edge.includes("s") || edge.includes("n");
+  if (aspectRatio > 0) {
+    const widthLed = Math.abs(width - origWidth) >= Math.abs(height - origHeight) * aspectRatio;
+    const driver = horizontal && !vertical ? "width" : vertical && !horizontal ? "height" : widthLed ? "width" : "height";
+    const sized = sizeForAspect({
+      width,
+      height,
+      aspectRatio,
+      minWidth,
+      minHeight,
+      maxW,
+      maxH,
+      driver,
+    });
+    width = sized.width;
+    height = sized.height;
+    if (edge.includes("w")) left = origLeft + (origWidth - width);
+    else left = origLeft;
+    if (edge.includes("n")) top = origTop + (origHeight - height);
+    else top = origTop;
+    if (horizontal && !vertical) top = origTop + (origHeight - height) / 2;
+    if (vertical && !horizontal) left = origLeft + (origWidth - width) / 2;
+  } else {
+    width = Math.min(maxW, Math.max(minWidth, width));
+    height = Math.min(maxH, Math.max(minHeight, height));
+    if (edge.includes("w")) left = origLeft + (origWidth - width);
+    if (edge.includes("n")) top = origTop + (origHeight - height);
+  }
 
   return clampFloatingBox(
     { left, top, width, height },
     viewport,
     minWidth,
     minHeight,
+    margins,
   );
 }
 
@@ -108,12 +196,14 @@ export function useFloatingDrag({
   resizable = false,
   minWidth = 160,
   minHeight = 120,
+  marginTop = FLOATING_MARGIN,
+  aspectRatio = 0,
 } = {}) {
   const [layout, setLayout] = useState(() => {
     if (!storageKey || typeof window === "undefined") return null;
     try {
       const parsed = JSON.parse(sessionStorage.getItem(storageKey) || "null");
-      return readFloatingLayout(parsed);
+      return fitFloatingAspect(readFloatingLayout(parsed), aspectRatio);
     } catch {
       return null;
     }
@@ -122,6 +212,7 @@ export function useFloatingDrag({
   const [resizing, setResizing] = useState(false);
   const nodeRef = useRef(null);
   const dragStateRef = useRef(null);
+  const layoutKeyRef = useRef(storageKey);
 
   const persist = useCallback((next) => {
     if (!storageKey || !next) return;
@@ -131,6 +222,18 @@ export function useFloatingDrag({
       /* ignore */
     }
   }, [storageKey]);
+
+  useEffect(() => {
+    if (!storageKey || typeof window === "undefined") {
+      setLayout(null);
+      return;
+    }
+    try {
+      setLayout(fitFloatingAspect(readFloatingLayout(JSON.parse(sessionStorage.getItem(storageKey) || "null")), aspectRatio));
+    } catch {
+      setLayout(null);
+    }
+  }, [aspectRatio, storageKey]);
 
   const beginPointer = useCallback((event, extra) => {
     const el = nodeRef.current;
@@ -195,14 +298,16 @@ export function useFloatingDrag({
           viewport: viewportSize(),
           minWidth,
           minHeight,
+          margins: { top: marginTop },
+          aspectRatio,
         });
         setLayout(next);
         return;
       }
       const maxLeft = Math.max(FLOATING_MARGIN, window.innerWidth - state.width - FLOATING_MARGIN);
-      const maxTop = Math.max(FLOATING_MARGIN, window.innerHeight - state.height - FLOATING_MARGIN);
+      const maxTop = Math.max(marginTop, window.innerHeight - state.height - FLOATING_MARGIN);
       const left = Math.min(maxLeft, Math.max(FLOATING_MARGIN, state.origLeft + (event.clientX - state.startX)));
-      const top = Math.min(maxTop, Math.max(FLOATING_MARGIN, state.origTop + (event.clientY - state.startY)));
+      const top = Math.min(maxTop, Math.max(marginTop, state.origTop + (event.clientY - state.startY)));
       setLayout((prev) => ({
         ...(prev || {}),
         left,
@@ -242,10 +347,14 @@ export function useFloatingDrag({
       window.removeEventListener("pointerup", endDrag);
       window.removeEventListener("pointercancel", endDrag);
     };
-  }, [dragging, enabled, minHeight, minWidth, persist, resizing]);
+  }, [aspectRatio, dragging, enabled, marginTop, minHeight, minWidth, persist, resizing]);
 
   useEffect(() => {
     if (!layout) return undefined;
+    if (layoutKeyRef.current !== storageKey) {
+      layoutKeyRef.current = storageKey;
+      return undefined;
+    }
     const clamp = () => {
       setLayout((prev) => {
         if (!prev) return prev;
@@ -259,6 +368,7 @@ export function useFloatingDrag({
           viewportSize(),
           minWidth,
           minHeight,
+          { top: marginTop },
         );
         if (
           next.left === prev.left
@@ -274,7 +384,7 @@ export function useFloatingDrag({
     };
     window.addEventListener("resize", clamp);
     return () => window.removeEventListener("resize", clamp);
-  }, [layout, minHeight, minWidth, persist]);
+  }, [layout, marginTop, minHeight, minWidth, persist, storageKey]);
 
   const style = useMemo(() => {
     if (!layout) return undefined;

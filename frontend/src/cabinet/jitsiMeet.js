@@ -52,6 +52,55 @@ export const JOIN_TIMEOUT_MS = JOIN_SLOW_THRESHOLD_MS;
 export const JITSI_SCRIPT_LOAD_TIMEOUT_MS = JOIN_SLOW_THRESHOLD_MS;
 
 let sessionInitializing = false;
+let activeExternalApi = null;
+
+function disposeActiveExternalApi() {
+  const current = activeExternalApi;
+  activeExternalApi = null;
+  if (!current) return;
+  try {
+    current.dispose();
+  } catch {
+    /* ignore */
+  }
+}
+
+export function jitsiExternalApiScriptUrl(domain, scriptUrl = "") {
+  const explicit = String(scriptUrl || "").trim();
+  const host = String(domain || "").replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0];
+  if (explicit) {
+    try {
+      const parsed = new URL(explicit);
+      const scriptHost = parsed.hostname.toLowerCase();
+      const expected = host.toLowerCase();
+      const allowed = parsed.protocol === "https:" && (
+        scriptHost === expected
+        || scriptHost === "8x8.vc"
+        || scriptHost.endsWith(".8x8.vc")
+        || scriptHost === "meet.jit.si"
+      );
+      if (allowed) return parsed.toString();
+    } catch {
+      /* backend прислал не URL — используем домен */
+    }
+  }
+  if (!host) return "";
+  return `https://${host}/libs/external_api.min.js`;
+}
+
+export function resolveJitsiApiRoomName(config) {
+  const external = String(config?.externalRoomName || "").trim();
+  if (external) return external;
+  return String(config?.roomName || "").trim();
+}
+
+function encodeConferencePath(roomName) {
+  return String(roomName || "")
+    .split("/")
+    .filter(Boolean)
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+}
 
 function jitsiScriptError() {
   const err = new Error("Не удалось загрузить Jitsi Meet");
@@ -65,13 +114,25 @@ function jitsiScriptTimeoutError() {
   return err;
 }
 
-export function loadJitsiExternalApi(domain, { timeoutMs = JITSI_SCRIPT_LOAD_TIMEOUT_MS } = {}) {
-  const host = String(domain || "").replace(/^https?:\/\//, "").replace(/\/$/, "");
+export function loadJitsiExternalApi(domain, { timeoutMs = JITSI_SCRIPT_LOAD_TIMEOUT_MS, scriptUrl = "" } = {}) {
+  const host = String(domain || "").replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0];
   if (!host) {
     return Promise.reject(new Error("Не задан домен Jitsi"));
   }
+  const src = jitsiExternalApiScriptUrl(host, scriptUrl);
   if (typeof window !== "undefined" && window.JitsiMeetExternalAPI) {
-    return Promise.resolve(window.JitsiMeetExternalAPI);
+    const existing = document.getElementById(SCRIPT_ID);
+    const existingSrc = existing?.getAttribute("src") || "";
+    const wantsDifferentScript = Boolean(scriptUrl) && existingSrc && existingSrc !== src;
+    if (!wantsDifferentScript) {
+      return Promise.resolve(window.JitsiMeetExternalAPI);
+    }
+    existing.remove();
+    try {
+      delete window.JitsiMeetExternalAPI;
+    } catch {
+      window.JitsiMeetExternalAPI = undefined;
+    }
   }
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -113,15 +174,16 @@ export function loadJitsiExternalApi(domain, { timeoutMs = JITSI_SCRIPT_LOAD_TIM
     };
 
     const existing = document.getElementById(SCRIPT_ID);
-    if (existing) {
+    if (existing && existing.getAttribute("src") === src) {
       attach(existing);
       return;
     }
+    if (existing) existing.remove();
     const script = document.createElement("script");
     script.id = SCRIPT_ID;
     script.async = true;
     // Свой Jitsi (lesson.itflux-academy.ru) — без VPN. meet.jit.si в РФ часто недоступен.
-    script.src = `https://${host}/libs/external_api.min.js`;
+    script.src = src;
     attach(script);
     document.head.appendChild(script);
   });
@@ -185,6 +247,17 @@ export function setMeetingMicEnabled(meetingUuid, enabled) {
   }
 }
 
+export function shouldPreferBosh(domain) {
+  const host = String(domain || "")
+    .replace(/^https?:\/\//, "")
+    .replace(/\/$/, "")
+    .split("/")[0]
+    .toLowerCase();
+  if (!host) return true;
+  if (host === "meet.jit.si" || host === "8x8.vc" || host.endsWith(".8x8.vc")) return false;
+  return true;
+}
+
 export function buildJitsiHostsOverwrite(domain) {
   const host = String(domain || "")
     .replace(/^https?:\/\//, "")
@@ -203,6 +276,87 @@ export function buildJitsiHostsOverwrite(domain) {
     domain: host,
     muc: `conference.${host}`,
   };
+}
+
+/** Верхний штатный уровень камеры Jitsi (Full HD). Ниже в меню качества остаются 180–720. */
+export const JITSI_CAMERA_MAX_HEIGHT = 1080;
+
+export function jitsiCameraConstraints() {
+  return {
+    video: {
+      height: { ideal: JITSI_CAMERA_MAX_HEIGHT, max: JITSI_CAMERA_MAX_HEIGHT, min: 180 },
+      width: { ideal: 1920, max: 1920 },
+    },
+  };
+}
+
+/** Ставит в меню качества камеры максимальное разрешение, не переподключая звонок. */
+export function applyJitsiCameraResolution(api) {
+  if (!api || typeof api.executeCommand !== "function") return;
+  try {
+    api.executeCommand("setVideoQuality", JITSI_CAMERA_MAX_HEIGHT);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Короткий набор: компактное и обычное окно звонка. */
+export const JITSI_COMPACT_TOOLBAR = ["microphone", "camera", "desktop", "hangup"];
+
+/**
+ * Все штатные кнопки Jitsi. Неизвестные имена клиент сам пропускает.
+ * Включаются только в развёрнутом окне звонка.
+ */
+export const JITSI_EXPANDED_TOOLBAR = [
+  "microphone",
+  "camera",
+  "desktop",
+  "chat",
+  "raisehand",
+  "reactions",
+  "participants-pane",
+  "tileview",
+  "toggle-camera",
+  "select-background",
+  "closedcaptions",
+  "noisesuppression",
+  "whiteboard",
+  "shareaudio",
+  "sharedvideo",
+  "recording",
+  "livestreaming",
+  "security",
+  "mute-everyone",
+  "mute-video-everyone",
+  "videoquality",
+  "filmstrip",
+  "fullscreen",
+  "invite",
+  "profile",
+  "settings",
+  "stats",
+  "shortcuts",
+  "help",
+  "feedback",
+  "download",
+  "etherpad",
+  "highlight",
+  "hangup",
+];
+
+export function jitsiCallChromeConfig(expanded) {
+  return {
+    toolbarButtons: expanded ? JITSI_EXPANDED_TOOLBAR : JITSI_COMPACT_TOOLBAR,
+    toolbarConfig: expanded
+      ? { alwaysVisible: true, initialTimeout: 0, timeout: 0 }
+      : { alwaysVisible: false, initialTimeout: 4000, timeout: 4000 },
+  };
+}
+
+/** Меняет панель Jitsi без переподключения. В компактном виде остаётся короткий набор. */
+export function applyJitsiCallChrome(api, { expanded = false } = {}) {
+  if (!api || typeof api.executeCommand !== "function") return;
+  api.executeCommand("overwriteConfig", jitsiCallChromeConfig(expanded));
 }
 
 /**
@@ -238,25 +392,30 @@ export function buildJitsiConfigOverwrite({
     hideConferenceTimer: true,
     disableModeratorIndicator: false,
     enableClosePage: false,
+    toolbarButtons: JITSI_COMPACT_TOOLBAR,
     // 1:1 учитель–ученик почти всегда за разными NAT. P2P даёт «видим в списке,
     // но нет звука/видео». Медиа идёт через JVB.
     p2p: { enabled: false },
-    // XMPP websocket на native Prosody может отдавать 501; BOSH уже работает.
-    preferBosh: true,
+    // XMPP websocket на своём Prosody может отдавать 501. На 8x8 и meet.jit.si BOSH не форсируем.
+    preferBosh: shouldPreferBosh(domain),
     // Повторный вход с тем же JWT user.id (обновление, мини-окно, проверка связи)
     // иначе Prosody отвечает not-allowed → «Ошибка аутентификации».
     replaceParticipant: true,
     channelLastN: 8,
-    startBitrate: 400,
+    resolution: JITSI_CAMERA_MAX_HEIGHT,
+    startBitrate: 1500,
     disableSimulcast: false,
     enableNoAudioDetection: true,
     enableNoisyMicDetection: true,
     enableIceRestart: true,
     stereo: false,
-    constraints: {
-      video: {
-        height: { ideal: 360, max: 720 },
-        width: { ideal: 640, max: 1280 },
+    constraints: jitsiCameraConstraints(),
+    videoQuality: {
+      maxFullResolution: JITSI_CAMERA_MAX_HEIGHT,
+      minHeightForQualityLvl: {
+        360: "standard",
+        720: "high",
+        1080: "fullHd",
       },
     },
     // Скрываем дефолтный тост «Получены права модератора» — показываем свой.
@@ -654,14 +813,20 @@ export function buildJitsiEmbedUrl(config) {
     "config.hideLoginButton=true",
     "config.hideConferenceSubject=true",
     "config.hideConferenceTimer=true",
+    `config.toolbarButtons=${JSON.stringify(JITSI_COMPACT_TOOLBAR)}`,
     'config.defaultLanguage="ru"',
     `config.subject=${encodeURIComponent(JSON.stringify(subject))}`,
     `config.localSubject=${encodeURIComponent(JSON.stringify(subject))}`,
     `config.inviteAppName=${encodeURIComponent(JSON.stringify("Цифровой поток"))}`,
     "config.p2p.enabled=false",
     "config.enableIceRestart=true",
-    "config.preferBosh=true",
     "config.replaceParticipant=true",
+    `config.resolution=${JITSI_CAMERA_MAX_HEIGHT}`,
+    `config.constraints.video.height.ideal=${JITSI_CAMERA_MAX_HEIGHT}`,
+    `config.constraints.video.height.max=${JITSI_CAMERA_MAX_HEIGHT}`,
+    "config.constraints.video.height.min=180",
+    "config.constraints.video.width.ideal=1920",
+    "config.constraints.video.width.max=1920",
     ...(hosts ? [
       `config.hosts.domain=${encodeURIComponent(JSON.stringify(hosts.domain))}`,
       `config.hosts.muc=${encodeURIComponent(JSON.stringify(hosts.muc))}`,
@@ -677,14 +842,66 @@ export function buildJitsiEmbedUrl(config) {
     `userInfo.displayName=${encodeURIComponent(JSON.stringify(displayName))}`,
   ];
 
+  if (shouldPreferBosh(domain)) {
+    hashParts.push("config.preferBosh=true");
+  }
   const q = params.toString();
+  const pathRoom = encodeConferencePath(resolveJitsiApiRoomName(config));
   // Не передаём appData.localStorageContent: Jitsi падает на Object.keys(null).
   return stripNullJitsiLocalStorageContentFromUrl(
-    `https://${domain}/${encodeURIComponent(roomName)}${q ? `?${q}` : ""}#${hashParts.join("&")}`,
+    `https://${domain}/${pathRoom}${q ? `?${q}` : ""}#${hashParts.join("&")}`,
   );
 }
 
+function conferenceParticipantCount(api) {
+  try {
+    const listed = api.getParticipantsInfo?.();
+    if (Array.isArray(listed) && listed.length > 0) return listed.length;
+  } catch {
+    /* ignore */
+  }
+  try {
+    const count = api.getNumberOfParticipants?.();
+    if (typeof count === "number" && count > 0) return count;
+  } catch {
+    /* ignore */
+  }
+  return 1;
+}
+
+/**
+ * Один участник остаётся на крупном кадре: принудительная плитка прячет его и оставляет чёрный фон.
+ * Двое и больше встают рядом. Во время демонстрации экрана раскладку не трогаем.
+ */
+export function showCallTilesSideBySide(api) {
+  if (!api || typeof api.executeCommand !== "function") return;
+  try {
+    const sharing = typeof api.getContentSharingParticipants === "function"
+      ? api.getContentSharingParticipants()
+      : [];
+    if (Array.isArray(sharing) && sharing.length > 0) return;
+  } catch {
+    /* ignore */
+  }
+  const sideBySide = conferenceParticipantCount(api) >= 2;
+  try {
+    api.executeCommand("setTileView", sideBySide);
+  } catch {
+    /* ignore */
+  }
+}
+
 function wireParticipantListeners(api, hooks) {
+  const placeTiles = () => showCallTilesSideBySide(api);
+  const selectMaxCamera = () => applyJitsiCameraResolution(api);
+  try {
+    api.addListener?.("videoConferenceJoined", placeTiles);
+    api.addListener?.("videoConferenceJoined", selectMaxCamera);
+    api.addListener?.("participantJoined", placeTiles);
+    api.addListener?.("participantLeft", placeTiles);
+  } catch {
+    /* ignore */
+  }
   const presence = attachConferencePresence(api, hooks);
   const screenShare = attachScreenSharePresence(api, {
     onChange: hooks.onScreenShare,
@@ -940,7 +1157,7 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
     length: displayName.length,
   });
 
-  const JitsiMeetExternalAPI = await loadJitsiExternalApi(domain);
+  const JitsiMeetExternalAPI = await loadJitsiExternalApi(domain, { scriptUrl: config.scriptUrl || "" });
   if (hooks.signal?.aborted) {
     const err = new Error("Подключение к конференции отменено");
     err.code = "jitsi_aborted";
@@ -951,8 +1168,9 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
   const subject = resolveJitsiSubject(config);
   const startWithVideoMuted = Boolean(config.startWithVideoMuted);
   const startWithAudioMuted = config.startWithAudioMuted !== false;
+  const apiRoomName = resolveJitsiApiRoomName(config);
   const options = buildJitsiExternalApiOptions({
-    roomName,
+    roomName: apiRoomName,
     parentNode: container,
     lang: "ru",
     jwt: config.jwt,
@@ -1003,9 +1221,11 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
 
   const unhookCreate = installJitsiIframeCreateSanitizer();
   const unhookAppend = hookContainerForJitsiIframeSanitize(container);
+  disposeActiveExternalApi();
   let api;
   try {
     api = new JitsiMeetExternalAPI(domain, options);
+    activeExternalApi = api;
   } finally {
     unhookCreate();
   }
@@ -1061,6 +1281,7 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
     } catch {
       /* ignore */
     }
+    if (activeExternalApi === api) activeExternalApi = null;
     try {
       api.dispose();
     } catch {

@@ -1095,9 +1095,8 @@
       const wsTokenQ = lessonPageToken
         ? `?token=${encodeURIComponent(lessonPageToken)}`
         : "";
-      const ws = new WebSocket(
-        `${wsProto}://${location.host}/ws/lesson/${encodeURIComponent(roomId)}/${wsTokenQ}`
-      );
+      let ws = null;
+      const lessonHandlers = { open: null, message: null };
       const me = participantName || (isTeacher ? "Учитель" : "Ученик");
       const participants = { [me]: isTeacher ? "teacher" : "student" };
       const cursors = {}; // { name: {x, y, role} }
@@ -1105,8 +1104,43 @@
       let variantLoaded = false;
       let wsReady = false;
       let announcedVariantKey = "";
+      const lessonWsUrl = `${wsProto}://${location.host}/ws/lesson/${encodeURIComponent(roomId)}/${wsTokenQ}`;
+      let lessonEnded = false;
+      let lessonReconnectAttempt = 0;
+      let lessonReconnectTimer = null;
+      const durablePending = new Map();
+      let ephemeralLatest = null;
+      let ephemeralTimer = null;
+      const lessonEphemeral = {
+        cursor_move: 1, cursor: 1, pointer: 1, viewport: 1, preview: 1, wb_stroke_active: 1,
+      };
+      const lessonMsgId = () => `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+      const rememberLessonFrame = (payload) => {
+        if (!payload || !payload.type || payload.type === 'ping' || payload.type === 'join') return payload;
+        if (lessonEphemeral[payload.type]) {
+          ephemeralLatest = payload;
+          return payload;
+        }
+        if (!payload.client_msg_id) payload.client_msg_id = lessonMsgId();
+        const key = payload.type === 'student_answer'
+          ? `student_answer:${payload.task_id || payload.task_number || ''}`
+          : payload.client_msg_id;
+        if (payload.type === 'student_answer') {
+          for (const [id, row] of durablePending) {
+            if (row.coalesceKey === key && id !== payload.client_msg_id) {
+              if (row.timer) clearTimeout(row.timer);
+              durablePending.delete(id);
+            }
+          }
+        }
+        durablePending.set(payload.client_msg_id, {
+          payload, attempts: durablePending.get(payload.client_msg_id)?.attempts || 0, timer: null, coalesceKey: key,
+        });
+        return payload;
+      };
       const sendWs = (payload) => {
-        if (!payload || ws.readyState !== WebSocket.OPEN) return false;
+        if (!payload || !ws || ws.readyState !== WebSocket.OPEN) return false;
+        rememberLessonFrame(payload);
         try {
           ws.send(JSON.stringify(payload));
           return true;
@@ -1114,6 +1148,84 @@
           return false;
         }
       };
+      const retryLessonFrame = (row, delay) => {
+        if (!row) return;
+        if (row.timer) clearTimeout(row.timer);
+        row.attempts += 1;
+        if (row.attempts > 5) {
+          durablePending.delete(row.payload.client_msg_id);
+          showLessonStatusToast('Ответ не сохранился. Отправьте его ещё раз.');
+          return;
+        }
+        row.timer = setTimeout(() => {
+          row.timer = null;
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          try { ws.send(JSON.stringify(row.payload)); } catch (_) {}
+        }, delay);
+      };
+      const onLessonBusy = (msg) => {
+        const delay = Number(msg.retry_after_ms) > 0 ? Number(msg.retry_after_ms) : 200;
+        if (lessonEphemeral[msg.failed_type]) {
+          if (ephemeralTimer) clearTimeout(ephemeralTimer);
+          ephemeralTimer = setTimeout(() => {
+            ephemeralTimer = null;
+            if (!ephemeralLatest || !ws || ws.readyState !== WebSocket.OPEN) return;
+            try { ws.send(JSON.stringify(ephemeralLatest)); } catch (_) {}
+          }, delay);
+          return;
+        }
+        const id = msg.client_msg_id || '';
+        if (id && durablePending.has(id)) {
+          retryLessonFrame(durablePending.get(id), delay);
+          return;
+        }
+        for (const row of durablePending.values()) retryLessonFrame(row, delay);
+      };
+      const confirmLessonFrame = (id) => {
+        if (!id || !durablePending.has(id)) return false;
+        const row = durablePending.get(id);
+        if (row.timer) clearTimeout(row.timer);
+        durablePending.delete(id);
+        return true;
+      };
+      const openLessonSocket = () => {
+        if (lessonEnded) return;
+        if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
+        if (lessonReconnectTimer) {
+          clearTimeout(lessonReconnectTimer);
+          lessonReconnectTimer = null;
+        }
+        ws = new WebSocket(lessonWsUrl);
+        ws.onopen = () => {
+          lessonReconnectAttempt = 0;
+          lessonHandlers.open?.();
+          for (const row of durablePending.values()) {
+            try { ws.send(JSON.stringify(row.payload)); } catch (_) {}
+          }
+        };
+        ws.onmessage = (event) => lessonHandlers.message?.(event);
+        ws.onclose = () => {
+          wsReady = false;
+          if (lessonEnded) return;
+          if (document.visibilityState === "hidden") return;
+          lessonReconnectAttempt += 1;
+          const delay = Math.min(8000, 400 * (2 ** Math.min(lessonReconnectAttempt, 5)));
+          lessonReconnectTimer = setTimeout(openLessonSocket, delay);
+        };
+      };
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState !== "visible" || lessonEnded) return;
+        if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) openLessonSocket();
+      });
+      window.addEventListener("online", () => {
+        if (lessonEnded) return;
+        if (!ws || ws.readyState !== WebSocket.OPEN) openLessonSocket();
+      });
+      window.addEventListener("pageshow", () => {
+        if (lessonEnded) return;
+        if (!ws || ws.readyState !== WebSocket.OPEN) openLessonSocket();
+      });
+      openLessonSocket();
       
       // --- Whiteboard Logic ---
       const WB_TOOLS = [
@@ -1666,7 +1778,7 @@
         });
       };
 
-      ws.onopen = () => {
+      lessonHandlers.open = () => {
         wsReady = true;
         sendWs({ type: "join", name: me, role: participants[me] });
         flushPendingBoardObjects();
@@ -2575,15 +2687,18 @@
             const pl = {
               type: 'student_answer',
               task_number: taskNum,
+              task_key: taskKey,
               answer: readTaskAnswer(task),
               name: participantName || 'Ученик'
             };
             addElapsedToPayload(pl);
             if (taskIdAttr) pl.task_id = taskIdAttr;
             const sent = sendWs(pl);
-            if (!sent) return;
-            submittedTaskNumbers[taskKey] = true;
-            lockCheckButton(task);
+            if (!sent) {
+              showLessonStatusToast('Нет соединения. Ответ отправится после восстановления.');
+              return;
+            }
+            if (!String(btn.textContent || '').includes('Отправка')) btn.textContent = 'Отправка…';
           }, true);
 
           const publishTaskAnswer = (task) => {
@@ -2603,10 +2718,7 @@
             };
             addElapsedToPayload(pl);
             if (taskIdAttr) pl.task_id = taskIdAttr;
-            const sent = sendWs(pl);
-            if (!sent) return;
-            submittedTaskNumbers[taskKey] = true;
-            lockCheckButton(task);
+            sendWs(pl);
           };
 
           doc.addEventListener('change', (e) => {
@@ -2638,11 +2750,42 @@
         });
       };
 
-      ws.onmessage = (event) => {
+      lessonHandlers.message = (event) => {
         let msg = {};
         try { msg = JSON.parse(event.data || '{}'); } catch (_) { return; }
 
+        if (msg.type === 'temporary_unavailable') {
+          onLessonBusy(msg);
+          return;
+        }
+        if (msg.type === 'save_failed') {
+          const failedId = msg.client_msg_id || '';
+          if (failedId && durablePending.has(failedId)) {
+            const row = durablePending.get(failedId);
+            if (row.timer) clearTimeout(row.timer);
+            durablePending.delete(failedId);
+          }
+          showLessonStatusToast('Ответ не сохранился. Отправьте его ещё раз.');
+          const failedDoc = getDoc();
+          if (failedDoc) {
+            failedDoc.querySelectorAll('button').forEach((btn) => {
+              if (String(btn.textContent || '').includes('Отправка')) btn.textContent = 'Проверить';
+            });
+          }
+          return;
+        }
+        if (msg.client_msg_id && confirmLessonFrame(msg.client_msg_id) && msg.type === 'student_answer') {
+          const taskKey = String(msg.task_key || msg.task_id || msg.task_number || '');
+          if (taskKey) submittedTaskNumbers[taskKey] = true;
+          const doc = getDoc();
+          if (doc) {
+            const task = [...doc.querySelectorAll('.task')].find((el) => answerKeyFromDomTask(el) === taskKey);
+            if (task) lockCheckButton(task);
+          }
+        }
+
         if (msg.type === 'lesson_ended') {
+          lessonEnded = true;
           if (isTeacher) {
             showLessonStatusToast('Работы сохранены. Показываю результаты учеников.');
             openFinishModal();

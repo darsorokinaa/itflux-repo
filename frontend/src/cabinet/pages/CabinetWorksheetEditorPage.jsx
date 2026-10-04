@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import CabinetIcon from "../CabinetIcons";
+import { typesetElement } from "../../utils/loadMathJax";
 import { ensureCsrfCookie, getCsrfToken } from "../../utils/cabinetAuth";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { FormulaTextField, TaskInspector, TaskSheetFace, TaskTypePicker } from "../worksheet/TaskTypeEditors";
@@ -391,16 +392,8 @@ function MathHtml({ html, className, onClick }) {
     const node = ref.current;
     if (!node) return undefined;
     node.innerHTML = html || "";
-    const mj = window.MathJax;
-    if (!mj?.typesetPromise) return undefined;
     let dead = false;
-    const run = () => {
-      if (dead) return;
-      mj.typesetPromise([node]).catch(() => {});
-    };
-    const startup = mj.startup?.promise;
-    if (startup?.then) startup.then(run).catch(run);
-    else run();
+    typesetElement(node, () => dead);
     return () => { dead = true; };
   }, [html]);
   return <div ref={ref} className={className} onClick={onClick} />;
@@ -769,12 +762,11 @@ export default function CabinetWorksheetEditorPage() {
 
   useEffect(() => {
     const stage = stageRef.current;
-    const mj = window.MathJax;
-    if (!stage || !mj?.typesetPromise) return undefined;
+    if (!stage) return undefined;
     let cancelled = false;
     const timer = window.setTimeout(() => {
       if (cancelled) return;
-      mj.typesetPromise([stage]).catch(() => {});
+      typesetElement(stage, () => cancelled);
     }, 60);
     return () => {
       cancelled = true;

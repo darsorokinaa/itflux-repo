@@ -8,6 +8,7 @@ import logging
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 
+from .material_adapters import EPHEMERAL_ACTIONS
 from .meeting_material_session import (
     apply_material_operation,
     close_material_session,
@@ -26,24 +27,48 @@ from .meeting_screenshare import (
     set_screenshare_permission,
 )
 from .video_meeting_service import VideoMeetingError, get_meeting_by_uuid, resolve_access
+from .realtime_db import critical_connect
+from .ws_lifecycle import (
+    WsLifecycleMixin,
+    log_ws_lifecycle,
+    mark_ws_activity,
+    mark_ws_connected,
+    note_ws_inbound,
+    request_id_from_scope,
+    reraise_if_saturated,
+    ws_connection_timing,
+)
+
+from .loop_log import protect_logger
 
 logger = logging.getLogger(__name__)
+protect_logger(logger.name)
 
 MAX_WS_TEXT_BYTES = 64_000
 
 
-class VideoMeetingConsumer(AsyncWebsocketConsumer):
+class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
     """
     Одно соединение на участника видеоурока.
     Доска и варианты остаются на своих каналах/REST; здесь — остальные материалы.
     """
 
+    @critical_connect
     async def connect(self):
         self.meeting_uuid = self.scope["url_route"]["kwargs"]["meeting_uuid"]
         self.group_name = meeting_material_group_name(self.meeting_uuid)
         self.user = self.scope.get("user")
         self.role = "none"
         self.client_id = ""
+        self._ws_request_id = request_id_from_scope(self.scope)
+        mark_ws_connected(self)
+        log_ws_lifecycle(
+            self,
+            event="connect",
+            request_id=self._ws_request_id,
+            user_id=getattr(self.user, "pk", None),
+            lesson_id=self.meeting_uuid,
+        )
 
         if not self.user or not self.user.is_authenticated:
             await self.close(code=4401)
@@ -58,8 +83,22 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
         self.role = access.role
         self.display_name = await self._display_name()
         self.client_id = ""
+        log_ws_lifecycle(
+            self,
+            event="authenticated",
+            request_id=self._ws_request_id,
+            user_id=self.user.pk,
+            lesson_id=self.meeting_uuid,
+        )
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
+        log_ws_lifecycle(
+            self,
+            event="room_joined",
+            request_id=self._ws_request_id,
+            user_id=self.user.pk,
+            lesson_id=self.meeting_uuid,
+        )
         logger.info(
             "material_ws_connect meeting=%s user=%s role=%s",
             self.meeting_uuid,
@@ -78,6 +117,15 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
         })
 
     async def disconnect(self, close_code):
+        log_ws_lifecycle(
+            self,
+            event="disconnect",
+            request_id=getattr(self, "_ws_request_id", ""),
+            user_id=getattr(getattr(self, "user", None), "pk", None),
+            lesson_id=getattr(self, "meeting_uuid", ""),
+            close_code=close_code,
+            **ws_connection_timing(self),
+        )
         if getattr(self, "group_name", None):
             await self._broadcast({
                 "type": "material.presence_leave",
@@ -96,6 +144,7 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
         )
 
     async def receive(self, text_data=None, bytes_data=None):
+        mark_ws_activity(self)
         if bytes_data and len(bytes_data) > MAX_WS_TEXT_BYTES:
             await self._send_error("Слишком большое сообщение", code="payload_too_large")
             return
@@ -112,6 +161,7 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
         if not isinstance(data, dict):
             await self._send_error("Сообщение должно быть объектом", code="invalid_json")
             return
+        note_ws_inbound(self, data)
 
         msg_type = (data.get("type") or "").strip()
         if msg_type == "material.request_sync":
@@ -165,6 +215,10 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
             "material.state",
             "material.annotation",
         ):
+            action = (data.get("action") or "").strip()
+            if action in EPHEMERAL_ACTIONS:
+                await self._broadcast_ephemeral(data)
+                return
             await self._handle_operation(data)
             return
         if msg_type in ("material.cursor", "material.pointer", "material.student_viewport"):
@@ -176,7 +230,7 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
                     else "cursor"
                 ),
             }
-            await self._handle_operation(data)
+            await self._broadcast_ephemeral(data)
             return
 
         if msg_type in ("material.follow_status", "FOLLOW_TEACHER_CHANGED"):
@@ -240,7 +294,8 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
         except VideoMeetingError as exc:
             await self._send_error(exc.message, code=exc.code)
             return
-        except Exception:
+        except Exception as exc:
+            reraise_if_saturated(exc)
             logger.exception("screenshare_report_failed meeting=%s", self.meeting_uuid)
             await self._send_error("Не удалось обновить демонстрацию экрана", code="server_error")
             return
@@ -301,7 +356,8 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
                 extra={"operation_id": data.get("operation_id") or data.get("operationId")},
             )
             return
-        except Exception:
+        except Exception as exc:
+            reraise_if_saturated(exc)
             logger.exception("screenshare_op_failed meeting=%s", self.meeting_uuid)
             await self._send_error("Ошибка применения аннотации", code="server_error")
             return
@@ -400,7 +456,8 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
         except VideoMeetingError as exc:
             await self._send_error(exc.message, code=exc.code)
             return
-        except Exception:
+        except Exception as exc:
+            reraise_if_saturated(exc)
             logger.exception("material_open_failed meeting=%s", self.meeting_uuid)
             await self._send_error("Не удалось открыть материал", code="server_error")
             return
@@ -464,6 +521,29 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
             "materialSession": serialized,
         })
 
+    async def _broadcast_ephemeral(self, data: dict):
+        """Cursor, viewport and previews are latest-state-wins.
+
+        They are not written and they do not take a database worker. A newer
+        frame replaces the previous one on the wire; a dropped frame is not
+        an error the client should wait on.
+        """
+        action = (data.get("action") or "").strip()
+        if action not in EPHEMERAL_ACTIONS:
+            return
+        payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
+        await self._broadcast({
+            "type": "material.cursor" if action in ("cursor", "pointer") else f"material.{action}",
+            "session_id": data.get("session_id") or data.get("sessionId"),
+            "operation_id": str(data.get("operation_id") or data.get("operationId") or "")[:64],
+            "author_id": self.user.pk,
+            "author_role": self.role,
+            "display_name": self.display_name,
+            "action": action,
+            "payload": payload,
+            "ephemeral": True,
+        })
+
     async def _handle_operation(self, data: dict):
         action = data.get("action") or ""
         # author_id / author_role с клиента игнорируем — берём из сессии.
@@ -476,7 +556,8 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
                 extra={"operation_id": data.get("operation_id") or data.get("operationId")},
             )
             return
-        except Exception:
+        except Exception as exc:
+            reraise_if_saturated(exc)
             logger.exception("material_op_failed meeting=%s", self.meeting_uuid)
             await self._send_error("Ошибка применения операции", code="server_error")
             return

@@ -819,47 +819,69 @@
   background: rgba(255, 255, 255, 0.18);
 }
 
-/* Свёрнутый звонок: маленькое окно поверх / сбоку, пока открыт ресурс */
+/* Звонок при открытом материале: компактная карточка справа сверху, доска остаётся главной. */
 .video-lesson-page--compact .video-lesson-body {
   position: relative;
 }
 
 .video-lesson-page--compact .video-lesson-content {
   position: fixed;
+  top: calc(var(--vl-header-height) + 12px);
   right: 16px;
-  bottom: 16px;
-  width: min(268px, calc(100vw - 24px));
-  height: min(160px, 28vh);
-  min-width: 160px;
-  min-height: 120px;
-  max-width: calc(100vw - 16px);
-  max-height: calc(100dvh - 16px);
+  bottom: auto;
+  left: auto;
+  width: min(360px, calc(100vw - 32px));
+  aspect-ratio: 16 / 9;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - var(--vl-header-height) - 24px);
   z-index: 40;
-  border-radius: 16px;
+  border-radius: 14px;
   overflow: hidden;
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
-  border: 1px solid var(--vl-border);
-  background: #0f172a;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12), 0 0 0 1px rgba(15, 23, 42, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: #000;
   display: flex;
   flex-direction: column;
   touch-action: none;
+  transition: width 180ms ease, height 180ms ease, border-radius 180ms ease;
+}
+
+@media (max-width: 900px) {
+  .video-lesson-page--compact .video-lesson-content {
+    width: min(240px, calc(100vw - 24px));
+  }
+}
+
+.video-lesson-page--compact .video-lesson-content--call-expanded {
+  top: calc(var(--vl-header-height) + 12px);
+  left: max(12px, calc((100vw - min(1120px, 92vw)) / 2));
+  right: auto;
+  bottom: auto;
+  width: min(1120px, calc(100vw - 24px));
+  height: auto;
+  aspect-ratio: 16 / 9;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - var(--vl-header-height) - 24px);
+  z-index: 45;
+}
+
+.video-lesson-page--workspace.video-lesson-page--compact.video-lesson-page--aside .video-lesson-content {
+  right: calc(var(--vl-aside-width) + 16px);
 }
 
 .video-lesson-page.video-lesson-page--share-mini .video-lesson-content,
 .video-lesson-page.video-lesson-page--compact.video-lesson-page--share-mini .video-lesson-content,
 .video-lesson-page.video-lesson-page--workspace.video-lesson-page--compact.video-lesson-page--share-mini .video-lesson-content {
   z-index: 11050;
-  width: 260px;
-  height: 156px;
-  min-width: 240px;
-  min-height: 140px;
-  max-width: 280px;
-  max-height: 170px;
 }
 
 .video-lesson-content--dragging {
   cursor: grabbing;
   user-select: none;
+  transition: none;
 }
 
 .video-lesson-content--resizable {
@@ -922,17 +944,28 @@
 .vl-resize-handle--se { bottom: 0; right: 0; cursor: nwse-resize; }
 .vl-resize-handle--sw { bottom: 0; left: 0; cursor: nesw-resize; }
 
-.vl-resize-handle--se::after {
+.vl-resize-handle--se::after,
+.vl-resize-handle--sw::after,
+.vl-resize-handle--ne::after,
+.vl-resize-handle--nw::after {
   content: "";
   position: absolute;
-  right: 5px;
-  bottom: 5px;
-  width: 9px;
-  height: 9px;
-  border-right: 2px solid rgba(248, 250, 252, 0.72);
-  border-bottom: 2px solid rgba(248, 250, 252, 0.72);
-  border-radius: 0 0 1px 0;
+  width: 10px;
+  height: 10px;
+  border: 0 solid rgba(255, 255, 255, 0.55);
+  opacity: 0;
   pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+.vl-resize-handle--se::after { right: 7px; bottom: 7px; border-right-width: 1.5px; border-bottom-width: 1.5px; border-bottom-right-radius: 3px; }
+.vl-resize-handle--sw::after { left: 7px; bottom: 7px; border-left-width: 1.5px; border-bottom-width: 1.5px; border-bottom-left-radius: 3px; }
+.vl-resize-handle--ne::after { right: 7px; top: 7px; border-right-width: 1.5px; border-top-width: 1.5px; border-top-right-radius: 3px; }
+.vl-resize-handle--nw::after { left: 7px; top: 7px; border-left-width: 1.5px; border-top-width: 1.5px; border-top-left-radius: 3px; }
+
+.video-lesson-content--resizable:hover .vl-resize-handle::after,
+.video-lesson-content--dragging .vl-resize-handle::after {
+  opacity: 1;
 }
 
 .video-lesson-call-pip-body {
@@ -956,13 +989,13 @@
 }
 
 .video-lesson-compact-drag {
-  flex: 0 0 40px;
+  flex: 0 0 32px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 0 6px 0 10px;
-  background: rgba(15, 23, 42, 0.72);
+  padding: 0 4px 0 10px;
+  background: transparent;
   border-bottom: 0;
   color: #f8fafc;
   font-size: 0.72rem;
@@ -970,6 +1003,65 @@
   cursor: grab;
   touch-action: none;
   user-select: none;
+}
+
+.video-lesson-page--compact .video-lesson-compact-drag:not(.mini-call-bar--share) {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 6;
+  height: 40px;
+  background: #000;
+  color: #fff;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.video-lesson-page--compact .video-lesson-content:not(.video-lesson-content--call-collapsed) > .video-lesson-compact-drag {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+.video-lesson-page--compact .video-lesson-content:not(.video-lesson-content--call-collapsed):hover > .video-lesson-compact-drag,
+.video-lesson-page--compact .video-lesson-content:not(.video-lesson-content--call-collapsed):focus-within > .video-lesson-compact-drag,
+.video-lesson-page--compact .video-lesson-content--dragging > .video-lesson-compact-drag {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.video-lesson-page--compact .mini-call-bar__iconbtn {
+  width: 40px;
+  height: 40px;
+  color: #fff;
+}
+
+.video-lesson-page--compact .mini-call-bar__iconbtn:hover,
+.video-lesson-page--compact .mini-call-bar__iconbtn:focus-visible {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.video-lesson-page--compact .mini-call-bar__iconbtn:focus-visible {
+  outline: 2px solid var(--vl-blue);
+  outline-offset: 1px;
+}
+
+.mini-call-bar__actions {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+@media (pointer: coarse) {
+  .video-lesson-page--compact .mini-call-bar__iconbtn {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+.video-lesson-page--compact .mini-call-bar__flags {
+  display: none;
 }
 
 .video-lesson-compact-drag:active,
@@ -1145,33 +1237,68 @@
 .vl-participant-fallback {
   position: absolute;
   inset: 0;
-  z-index: 4;
+  z-index: 5;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  background: #0f172a;
+  box-sizing: border-box;
+  padding: 48px 16px 16px;
+  overflow: hidden;
+  background: #000;
   pointer-events: none;
+  container-type: size;
 }
 
 .vl-participant-fallback__avatar {
-  width: 48px;
-  height: 48px;
+  width: 44px;
+  height: 44px;
+  width: min(52px, 46cqmin);
+  height: min(52px, 46cqmin);
+  max-width: 100%;
+  max-height: 100%;
+  flex: 0 0 auto;
+  box-sizing: border-box;
   border-radius: 999px;
+  overflow: hidden;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: #334155;
-  color: #f8fafc;
-  font-size: 0.92rem;
+  background: #1f2937;
+  color: #fff;
+  font-size: 0.78rem;
+  font-size: clamp(0.65rem, 16cqmin, 0.85rem);
   font-weight: 700;
+  line-height: 1;
 }
 
 .vl-participant-fallback__name {
-  color: #e2e8f0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #e5e7eb;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.vl-participant-fallback__muted {
+  display: inline-flex;
+  color: #b91c1c;
+}
+
+.vl-participant-fallback__muted svg {
+  width: 16px;
+  height: 16px;
+}
+
+.mini-call-bar__elapsed {
+  flex: 0 0 auto;
+  color: rgba(255, 255, 255, 0.72);
   font-size: 0.75rem;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .video-lesson-compact-drag__expand.is-active {
@@ -1179,19 +1306,82 @@
   border-color: rgba(147, 197, 253, 0.55);
 }
 
+.video-lesson-page--compact .video-lesson-content--call-collapsed,
 .video-lesson-content--call-collapsed {
-  width: auto !important;
-  height: auto !important;
-  min-width: 0;
-  min-height: 36px;
+  width: max-content;
+  max-width: min(360px, calc(100vw - 24px));
+  height: 48px;
+  aspect-ratio: auto;
+  min-width: 180px;
+  min-height: 48px;
   border-radius: 999px;
+  background: #000;
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
 }
 
-.video-lesson-content--call-collapsed .video-lesson-compact-drag {
+.video-lesson-content--call-collapsed.video-lesson-content--call-sized {
+  border-radius: 14px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+}
+
+.video-lesson-page--compact .video-lesson-content--call-collapsed .video-lesson-compact-drag {
+  position: static;
+  height: 48px;
+  flex-basis: auto;
+  min-height: 48px;
   border-bottom: 0;
+  background: transparent;
+  color: #fff;
 }
 
-.video-lesson-content--call-collapsed #jitsi-container {
+.video-lesson-page--compact .video-lesson-content--call-collapsed.video-lesson-content--call-sized .video-lesson-compact-drag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 6;
+  height: 40px;
+  background: #000;
+}
+
+.video-lesson-page--compact .video-lesson-content--call-collapsed .mini-call-bar__iconbtn {
+  width: 44px;
+  height: 44px;
+  color: #fff;
+}
+
+.video-lesson-page--compact .video-lesson-content--call-collapsed .mini-call-bar__iconbtn:hover,
+.video-lesson-page--compact .video-lesson-content--call-collapsed .mini-call-bar__iconbtn.is-active {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.video-lesson-page--compact .video-lesson-content--call-collapsed .video-lesson-compact-drag__expand {
+  background: transparent;
+  border-color: transparent;
+  color: var(--vl-blue);
+}
+
+.video-lesson-page--compact .video-lesson-content--call-collapsed .mini-call-bar__iconbtn {
+  color: #fff;
+}
+
+.video-lesson-page--compact .video-lesson-content--call-collapsed .mini-call-bar__iconbtn:hover,
+.video-lesson-page--compact .video-lesson-content--call-collapsed .mini-call-bar__iconbtn.is-active {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.video-lesson-page--compact .video-lesson-content--call-collapsed .mini-call-bar__iconbtn--hangup {
+  color: #b91c1c;
+}
+
+.video-lesson-page--compact .video-lesson-content--call-collapsed .mini-call-bar__iconbtn--hangup:hover {
+  background: rgba(185, 28, 28, 0.08);
+  color: #991b1b;
+}
+
+.video-lesson-content--call-collapsed:not(.video-lesson-content--call-sized) #jitsi-container {
   display: none !important;
 }
 
@@ -1255,8 +1445,9 @@
    z-index выше доски (~220) и экрана варианта (~10020), иначе окошко не видно. */
 .meeting-call-dock {
   position: fixed;
+  top: 16px;
   right: 16px;
-  bottom: 16px;
+  bottom: auto;
   z-index: 11050;
   display: flex;
   flex-direction: column;
@@ -1404,9 +1595,24 @@
 }
 
 .video-lesson-page--compact .video-lesson-jitsi-host {
-  min-height: 0;
-  height: auto;
+  position: relative;
   flex: 1 1 auto;
+  align-self: stretch;
+  min-height: 0;
+  width: 100%;
+  height: auto;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.video-lesson-page--compact #jitsi-container,
+.video-lesson-page--compact #jitsi-container iframe {
+  border-radius: inherit;
+  overflow: hidden;
+}
+
+.video-lesson-content--call-collapsed:not(.video-lesson-content--call-sized) .video-lesson-jitsi-host {
+  display: none !important;
 }
 
 #jitsi-container {
@@ -2159,6 +2365,28 @@
   overscroll-behavior: none;
 }
 
+.video-lesson-page--board {
+  --vl-header-height: 0px;
+}
+
+.video-lesson-board-dock {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  max-width: calc(100% - 180px);
+  padding: 0 8px 0 10px;
+  background: #f5f6f8;
+  border-bottom: 2px solid #fff;
+  border-left: 2px solid #fff;
+  border-bottom-left-radius: 12px;
+  pointer-events: auto;
+}
+
 .video-lesson-workspace__text {
   padding: 20px;
   white-space: pre-wrap;
@@ -2397,15 +2625,21 @@ body.vl-room-fullscreen .student-cabinet-nav {
     flex: 1 1 auto;
   }
 
-  /* Плавающий звонок: не перекрывать холст, но оставить узнаваемое видео. */
+  /* Плавающий звонок: справа сверху, не на нижней кромке доски. */
   .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-content {
     position: fixed;
     z-index: 40;
     flex: 0 0 auto;
-    width: min(52vw, 200px);
-    height: min(40vw, 148px);
+    width: min(300px, calc(100vw - 24px));
+    height: auto;
+    top: calc(var(--vl-header-height) + 8px);
     right: max(8px, env(safe-area-inset-right, 0px));
-    bottom: max(8px, env(safe-area-inset-bottom, 0px));
+    bottom: auto;
+    left: auto;
+  }
+
+  .video-lesson-page--workspace.video-lesson-page--compact.video-lesson-page--aside .video-lesson-content {
+    right: max(8px, env(safe-area-inset-right, 0px));
   }
 
   .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-compact-drag {
@@ -2418,8 +2652,8 @@ body.vl-room-fullscreen .student-cabinet-nav {
 
 @media (max-width: 480px) {
   .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-content {
-    width: min(56vw, 188px);
-    height: min(42vw, 136px);
+    width: min(56vw, 220px);
+    height: auto;
   }
 }
 
@@ -2536,16 +2770,22 @@ body.vl-room-fullscreen .student-cabinet-nav {
 
   .video-lesson-page--compact .video-lesson-content,
   .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-content {
-    width: min(48vw, 188px);
-    height: min(34vw, 132px);
+    width: min(280px, calc(100vw - 20px));
+    height: auto;
+    top: calc(var(--vl-header-height) + 8px);
     right: max(8px, env(safe-area-inset-right, 0px));
-    bottom: max(8px, env(safe-area-inset-bottom, 0px));
+    bottom: auto;
+    left: auto;
+  }
+
+  .video-lesson-page--workspace.video-lesson-page--compact.video-lesson-page--aside .video-lesson-content {
+    right: max(8px, env(safe-area-inset-right, 0px));
   }
 
   .video-lesson-content--call-collapsed {
     min-width: 0;
-    width: auto !important;
-    height: auto !important;
+    width: max-content;
+    height: 48px;
   }
 
   .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-compact-drag {
@@ -2562,16 +2802,25 @@ body.vl-room-fullscreen .student-cabinet-nav {
 }
 
 @media (max-height: 600px) and (orientation: landscape) {
-  .video-lesson-page--compact .video-lesson-content,
-  .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-content {
-    width: min(32vw, 176px);
-    height: min(48vh, 120px);
+  .video-lesson-page--compact .video-lesson-content:not(.video-lesson-content--call-collapsed):not(.video-lesson-content--call-expanded),
+  .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-content:not(.video-lesson-content--call-collapsed):not(.video-lesson-content--call-expanded) {
+    width: min(300px, 46vw);
+    height: auto;
   }
 
   .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-content--call-collapsed {
-    width: auto !important;
-    height: auto !important;
+    width: max-content;
+    height: 48px;
   }
+}
+
+/* Доска: звонок стартует под верхней панелью урока (64px) и в минимальном размере. */
+.video-lesson-page--board.video-lesson-page--compact .video-lesson-content {
+  top: 72px;
+}
+
+.video-lesson-page--board.video-lesson-page--compact .video-lesson-content:not(.video-lesson-content--call-collapsed):not(.video-lesson-content--call-expanded) {
+  width: 280px;
 }
 
 /* ── Синхронный материал / совместное управление ─────────────────────────── */

@@ -107,6 +107,29 @@ JITSI_EMBED_EXTRA_HOSTS = tuple(
     for h in os.environ.get("JITSI_EMBED_EXTRA_HOSTS", "").split(",")
     if h.strip()
 )
+# meet — текущий провайдер (meet.jit.si или свой Jitsi). jaas — 8x8.
+# Private key только на backend. См. Cabinet/jaas_service.py.
+VIDEO_PROVIDER = (os.environ.get("VIDEO_PROVIDER", "meet") or "meet").strip().lower()
+# excalidraw — текущая доска. tldraw — Board V2 рядом, без удаления Excalidraw.
+# Откат: BOARD_PROVIDER=excalidraw и перезапуск процесса. Сцену Excalidraw не трогает.
+BOARD_PROVIDER = (os.environ.get("BOARD_PROVIDER", "excalidraw") or "excalidraw").strip().lower()
+# Общий секрет с Node-сервисом services/tldraw-sync. В DEBUG пустое значение
+# заменяется локальным допуском; в production токен без секрета не выдаётся.
+TLDRAW_SYNC_SECRET = (os.environ.get("TLDRAW_SYNC_SECRET") or "").strip()
+# Каталог sqlite комнат. Без него удаление файла tldraw-доски отклоняется.
+TLDRAW_SYNC_DATA = (os.environ.get("TLDRAW_SYNC_DATA") or "").strip()
+try:
+    TLDRAW_SYNC_TOKEN_TTL_SECONDS = int(os.environ.get("TLDRAW_SYNC_TOKEN_TTL_SECONDS", "600") or "600")
+except ValueError:
+    TLDRAW_SYNC_TOKEN_TTL_SECONDS = 600
+JAAS_APP_ID = os.environ.get("JAAS_APP_ID", "").strip()
+JAAS_API_KEY_ID = os.environ.get("JAAS_API_KEY_ID", "").strip()
+JAAS_PRIVATE_KEY = os.environ.get("JAAS_PRIVATE_KEY", "")
+JAAS_PRIVATE_KEY_PATH = os.environ.get("JAAS_PRIVATE_KEY_PATH", "").strip()
+try:
+    JAAS_TOKEN_TTL_SECONDS = int(os.environ.get("JAAS_TOKEN_TTL_SECONDS", "7200") or "7200")
+except ValueError:
+    JAAS_TOKEN_TTL_SECONDS = 7200
 
 # VK notifications (optional — mock when token not set)
 VK_ACCESS_TOKEN = os.environ.get("VK_ACCESS_TOKEN", "").strip()
@@ -280,7 +303,18 @@ if _channel_backend == "redis":
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
-            "CONFIG": {"hosts": [(_redis_host, _redis_port)]},
+            "CONFIG": {
+                "hosts": [
+                    {
+                        "host": _redis_host,
+                        "port": _redis_port,
+                        # Same deadline collision as Generator/Generator/settings.py:
+                        # redis-py 8 socket_timeout=5 vs BZPOPMIN block of 5s.
+                        "socket_timeout": None,
+                        "socket_connect_timeout": 5,
+                    }
+                ]
+            },
         }
     }
 else:
@@ -375,6 +409,8 @@ CSRF_TRUSTED_ORIGINS = [
     "http://127.0.0.1:5000",
     "http://localhost:5001",
     "http://127.0.0.1:5001",
+    "http://localhost:5002",
+    "http://127.0.0.1:5002",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ] + _csrf_extra
@@ -411,6 +447,8 @@ elif DEBUG:
         "http://127.0.0.1:5000",
         "http://localhost:5001",
         "http://127.0.0.1:5001",
+        "http://localhost:5002",
+        "http://127.0.0.1:5002",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ]

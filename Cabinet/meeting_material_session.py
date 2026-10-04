@@ -36,7 +36,10 @@ from .meeting_present import append_meeting_query, list_event_students
 from .models import Interactive, Material, VideoMeeting
 from .video_meeting_service import VideoMeetingError, assert_can_manage_meeting, resolve_access
 
+from Cabinet.loop_log import protect_logger
+
 logger = logging.getLogger(__name__)
+protect_logger(logger.name)
 
 MAX_RECENT_OPERATION_IDS = 300
 PERSIST_EVERY_N_VERSIONS = 5

@@ -11,6 +11,7 @@ from typing import Any
 
 from django.conf import settings
 
+from .jaas_service import get_video_provider, jaas_is_configured
 from .jitsi_service import get_jitsi_auth_mode, get_jitsi_domain, get_jitsi_sub
 
 SECRET_ENV_RE = re.compile(r"(SECRET|PASSWORD|TOKEN|KEY)=.*", re.I)
@@ -53,19 +54,25 @@ def _add(findings: list[dict], *, status: str, code: str, message: str, data: di
 
 
 def inspect_settings() -> dict[str, Any]:
-    domain = get_jitsi_domain()
-    auth_mode = get_jitsi_auth_mode()
+    provider = get_video_provider()
+    domain = "8x8.vc" if provider == "jaas" else get_jitsi_domain()
+    auth_mode = "jwt" if provider == "jaas" else get_jitsi_auth_mode()
     app_id = (getattr(settings, "JITSI_APP_ID", "") or "").strip()
     app_secret = (getattr(settings, "JITSI_APP_SECRET", "") or "").strip()
+    jaas_ready = jaas_is_configured() if provider == "jaas" else False
+    jaas_app_id = (getattr(settings, "JAAS_APP_ID", "") or "").strip()
     return {
+        "provider": provider,
         "domain": domain,
         "sub": get_jitsi_sub(),
         "aud": (getattr(settings, "JITSI_AUD", "") or "").strip() or "jitsi",
         "authMode": auth_mode,
         "appIdSet": bool(app_id),
         "appSecretSet": bool(app_secret),
-        "appId": app_id[:32] if app_id else "",
-        "jwtConfigured": bool(app_id and app_secret),
+        "appId": (jaas_app_id or app_id)[:48] if (jaas_app_id or app_id) else "",
+        "jwtConfigured": jaas_ready if provider == "jaas" else bool(app_id and app_secret),
+        "jaasConfigured": jaas_ready,
+        "jaasPrivateKeySet": bool((getattr(settings, "JAAS_PRIVATE_KEY", "") or "").strip() or (getattr(settings, "JAAS_PRIVATE_KEY_PATH", "") or "").strip()),
     }
 
 
@@ -161,7 +168,11 @@ def diagnose(snapshot: dict[str, Any] | None = None, cfg: dict[str, Any] | None 
 
     if not cfg.get("domain"):
         _add(findings, status="CRITICAL", code="no_domain", message="JITSI_DOMAIN не задан")
-    if cfg.get("authMode") == "jwt" and not cfg.get("jwtConfigured"):
+    if cfg.get("provider") == "jaas" and not cfg.get("jaasConfigured"):
+        _add(findings, status="CRITICAL", code="jaas_incomplete", message="VIDEO_PROVIDER=jaas, но JAAS_APP_ID / JAAS_API_KEY_ID / private key не заданы")
+    elif cfg.get("provider") == "jaas" and cfg.get("jaasConfigured"):
+        _add(findings, status="OK", code="jaas_present", message="JaaS настроен, private key не выводится", data={"appIdSet": True})
+    elif cfg.get("authMode") == "jwt" and not cfg.get("jwtConfigured"):
         _add(findings, status="CRITICAL", code="jwt_incomplete", message="JWT включён, но APP_ID/SECRET не заданы")
     elif cfg.get("jwtConfigured"):
         _add(

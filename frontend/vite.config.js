@@ -166,6 +166,11 @@ const backendProxy = {
     target: 'http://127.0.0.1:8000',
     changeOrigin: true,
   },
+  '/ws/tldraw': {
+    target: 'http://127.0.0.1:5858',
+    changeOrigin: true,
+    ws: true,
+  },
   '/ws': {
     target: 'http://127.0.0.1:8000',
     changeOrigin: true,
@@ -177,6 +182,7 @@ export default defineConfig(({ command }) => ({
   plugins: [react(), tailwindcss(), injectAppVersionPlugin()],
   optimizeDeps: {
     exclude: ["@jitsi/robotjs"],
+    include: ["tldraw", "@tldraw/sync", "@tldraw/state", "@tldraw/tlschema"],
   },
   base: command === 'build' ? '/static/' : '/',
   experimental: {

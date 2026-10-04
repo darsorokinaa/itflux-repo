@@ -2,12 +2,13 @@
 
 import base64
 import io
+import json
 
 from datetime import timedelta
 
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -162,12 +163,56 @@ class InteractiveBoardApiTests(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["id"], str(board.id))
         self.assertTrue(res.json()["can_edit"])
+        self.assertEqual(res.json()["board_provider"], "excalidraw")
+        self.assertTrue(res.json()["viewer_display_name"])
+        self.assertNotIn("@", res.json()["viewer_display_name"])
+
+    def test_board_provider_tldraw_does_not_change_excalidraw_scene(self):
+        scene = empty_board_scene()
+        scene["elements"] = [{"id": "keep-me", "type": "rectangle"}]
+        board = InteractiveBoard.objects.create(owner=self.teacher, title="T", scene_data=scene)
+        self.teacher.profile.display_name = "teacher@school.test"
+        self.teacher.profile.name = ""
+        self.teacher.profile.surname = ""
+        self.teacher.profile.save()
+        self._auth(self.teacher)
+        with override_settings(BOARD_PROVIDER="tldraw"):
+            res = self.client.get(f"/api/cabinet/interactive-boards/{board.id}/")
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertEqual(body["board_provider"], "tldraw")
+        self.assertEqual(body["viewer_display_name"], "Учитель")
+        self.assertNotIn("@", body["viewer_display_name"])
+        self.assertEqual(body["scene_data"]["elements"][0]["id"], "keep-me")
+        board.refresh_from_db()
+        self.assertEqual(board.scene_data["elements"][0]["id"], "keep-me")
+
+    def test_unknown_board_provider_falls_back_to_excalidraw(self):
+        board = InteractiveBoard.objects.create(owner=self.teacher, title="T")
+        self._auth(self.teacher)
+        with override_settings(BOARD_PROVIDER="yjs"):
+            res = self.client.get(f"/api/cabinet/interactive-boards/{board.id}/")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["board_provider"], "excalidraw")
 
     def test_other_teacher_cannot_access_board(self):
         board = InteractiveBoard.objects.create(owner=self.teacher, title="Secret")
         self._auth(self.other_teacher)
         res = self.client.get(f"/api/cabinet/interactive-boards/{board.id}/")
         self.assertEqual(res.status_code, 404)
+
+    def test_sync_token_is_issued_only_to_someone_who_can_open_the_board(self):
+        board = InteractiveBoard.objects.create(owner=self.teacher, title="Sync")
+        self._auth(self.teacher)
+        with override_settings(TLDRAW_SYNC_SECRET="test-sync-secret", DEBUG=False):
+            allowed = self.client.post(f"/api/cabinet/interactive-boards/{board.id}/sync-token/")
+        self.assertEqual(allowed.status_code, 200)
+        self.assertTrue(allowed.json()["token"])
+        self.assertTrue(allowed.json()["can_edit"])
+        self._auth(self.other_teacher)
+        with override_settings(TLDRAW_SYNC_SECRET="test-sync-secret", DEBUG=False):
+            denied = self.client.post(f"/api/cabinet/interactive-boards/{board.id}/sync-token/")
+        self.assertEqual(denied.status_code, 404)
 
     def test_save_scene_and_version_bump(self):
         board = InteractiveBoard.objects.create(owner=self.teacher, title="Scene")
@@ -560,6 +605,30 @@ class InteractiveBoardApiTests(TestCase):
         self.assertEqual(dl.status_code, 200)
         self.assertEqual(dl["Content-Type"], "application/pdf")
 
+    def test_document_upload_keeps_original_name(self):
+        board = InteractiveBoard.objects.create(owner=self.teacher, title="DocxOk")
+        self._auth(self.teacher)
+        document = SimpleUploadedFile(
+            "praktika.docx",
+            b"PK\x03\x04docx",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        res = self.client.post(
+            f"/api/cabinet/interactive-boards/{board.id}/upload-file/",
+            {"file": document},
+            format="multipart",
+        )
+        self.assertEqual(res.status_code, 201, res.content)
+        data = res.json()
+        self.assertEqual(data["originalName"], "praktika.docx")
+        self.assertTrue(data["mimeType"].startswith("application/"))
+        asset = InteractiveBoardAsset.objects.get(pk=data["asset_id"])
+        dl = self.client.get(
+            f"/api/cabinet/interactive-boards/{board.id}/assets/{asset.id}/"
+        )
+        self.assertEqual(dl.status_code, 200)
+        self.assertIn("praktika.docx", dl["Content-Disposition"])
+
     def test_pdf_upload_accepts_pdf_with_generic_content_type(self):
         board = InteractiveBoard.objects.create(owner=self.teacher, title="PdfOctet")
         self._auth(self.teacher)
@@ -827,3 +896,71 @@ class InteractiveBoardApiTests(TestCase):
         self.assertEqual(res.status_code, 200, res.content)
         self.assertEqual(InteractiveBoardAsset.objects.filter(board=board).count(), 6)
         self.assertIn(str(used.id), res.json()["scene_data"]["files"]["f1"]["dataURL"])
+
+    def test_delete_asset_keeps_referenced_file(self):
+        import sqlite3
+        import tempfile
+        from pathlib import Path
+
+        board = InteractiveBoard.objects.create(owner=self.teacher, title="Asset lifecycle")
+        used = InteractiveBoardAsset(
+            board=board,
+            mime_type="image/png",
+            original_name="used.png",
+            size_bytes=len(MINI_PNG),
+            created_by=self.teacher,
+        )
+        used.file.save("used.png", io.BytesIO(MINI_PNG), save=True)
+        orphan = InteractiveBoardAsset(
+            board=board,
+            mime_type="image/png",
+            original_name="orphan.png",
+            size_bytes=len(MINI_PNG),
+            created_by=self.teacher,
+        )
+        orphan.file.save("orphan.png", io.BytesIO(MINI_PNG), save=True)
+        path = f"/api/cabinet/interactive-boards/{board.id}/assets/{used.id}/"
+        board.scene_data = {
+            "elements": [],
+            "appState": {},
+            "files": {"f1": {"dataURL": path, "url": path}},
+        }
+        board.save(update_fields=["scene_data"])
+        self._auth(self.teacher)
+        kept = self.client.delete(f"/api/cabinet/interactive-boards/{board.id}/assets/{used.id}/")
+        self.assertEqual(kept.status_code, 409, kept.content)
+        self.assertTrue(InteractiveBoardAsset.objects.filter(pk=used.id).exists())
+
+        with tempfile.TemporaryDirectory() as directory:
+            room = Path(directory) / f"{board.id}.sqlite"
+            connection = sqlite3.connect(room)
+            connection.execute("CREATE TABLE documents (id TEXT, state BLOB, lastChangedClock INTEGER)")
+            asset_row = json.dumps({
+                "id": "asset:picture",
+                "typeName": "asset",
+                "props": {"src": f"/api/cabinet/interactive-boards/{board.id}/assets/{orphan.id}/"},
+            }).encode()
+            shape_row = json.dumps({
+                "id": "shape:img",
+                "typeName": "shape",
+                "props": {"assetId": "asset:picture"},
+            }).encode()
+            connection.execute(
+                "INSERT INTO documents (id, state, lastChangedClock) VALUES (?, ?, ?)",
+                ("asset:picture", asset_row, 1),
+            )
+            connection.execute(
+                "INSERT INTO documents (id, state, lastChangedClock) VALUES (?, ?, ?)",
+                ("shape:img", shape_row, 1),
+            )
+            connection.commit()
+            with override_settings(TLDRAW_SYNC_DATA=directory, BOARD_PROVIDER="tldraw"):
+                blocked = self.client.delete(f"/api/cabinet/interactive-boards/{board.id}/assets/{orphan.id}/")
+                self.assertEqual(blocked.status_code, 409, blocked.content)
+                connection.execute("DELETE FROM documents WHERE id = ?", ("shape:img",))
+                connection.commit()
+                connection.close()
+                removed = self.client.delete(f"/api/cabinet/interactive-boards/{board.id}/assets/{orphan.id}/")
+        self.assertEqual(removed.status_code, 204, removed.content)
+        self.assertFalse(InteractiveBoardAsset.objects.filter(pk=orphan.id).exists())
+        self.assertTrue(InteractiveBoardAsset.objects.filter(pk=used.id).exists())

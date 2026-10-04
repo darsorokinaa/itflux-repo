@@ -57,15 +57,15 @@ def _get_redis():
         return None
 
 
-def set_teacher_viewport(board_id: str, payload: dict[str, Any], force: bool = False) -> None:
-    """Persist last teacher viewport for late joiners on any worker.
+def stage_teacher_viewport(board_id: str, payload: dict[str, Any], force: bool = False) -> bool:
+    """Remember the latest viewport in this process.
 
-    L1 always. Redis/cache at most every REDIS_MIN_INTERVAL_SEC unless force
-    (end of pan / flush) — viewport arrives ~22 Hz and must not saturate
-    the ASGI thread pool during a live lesson.
+    Returns True when a durable Redis/cache flush is due. The caller can do
+    that flush off the event loop. The in-process write itself does no I/O,
+    so a pointer move does not take a database worker.
     """
     if not board_id or not isinstance(payload, dict):
-        return
+        return False
     bid = str(board_id)
     clean = dict(payload)
     clean["type"] = "viewport_state"
@@ -76,8 +76,16 @@ def set_teacher_viewport(board_id: str, payload: dict[str, Any], force: bool = F
     now = time.monotonic()
     last = _LAST_REDIS_AT.get(bid, 0.0)
     if not force and (now - last) < REDIS_MIN_INTERVAL_SEC:
-        return
+        return False
     _LAST_REDIS_AT[bid] = now
+    return True
+
+
+def flush_teacher_viewport(board_id: str) -> None:
+    """Write the staged viewport to Redis or the Django cache."""
+    clean = _LOCAL.get(str(board_id))
+    if not isinstance(clean, dict):
+        return
     raw = None
     try:
         raw = json.dumps(clean, ensure_ascii=False, separators=(",", ":"))
@@ -87,7 +95,7 @@ def set_teacher_viewport(board_id: str, payload: dict[str, Any], force: bool = F
     client = _get_redis()
     if client is not None:
         try:
-            client.setex(_cache_key(bid), VIEWPORT_TTL_SEC, raw)
+            client.setex(_cache_key(str(board_id)), VIEWPORT_TTL_SEC, raw)
             return
         except Exception:
             logger.debug("board viewport redis set failed", exc_info=True)
@@ -95,9 +103,20 @@ def set_teacher_viewport(board_id: str, payload: dict[str, Any], force: bool = F
     try:
         from django.core.cache import cache
 
-        cache.set(_cache_key(bid), clean, timeout=VIEWPORT_TTL_SEC)
+        cache.set(_cache_key(str(board_id)), clean, timeout=VIEWPORT_TTL_SEC)
     except Exception:
         logger.debug("board viewport django cache set failed", exc_info=True)
+
+
+def set_teacher_viewport(board_id: str, payload: dict[str, Any], force: bool = False) -> None:
+    """Persist last teacher viewport for late joiners on any worker.
+
+    L1 always. Redis/cache at most every REDIS_MIN_INTERVAL_SEC unless force
+    (end of pan / flush) — viewport arrives ~22 Hz and must not saturate
+    the ASGI thread pool during a live lesson.
+    """
+    if stage_teacher_viewport(board_id, payload, force=force):
+        flush_teacher_viewport(board_id)
 
 
 def _viewport_seq(payload: dict | None) -> int:

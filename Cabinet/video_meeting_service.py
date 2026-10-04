@@ -17,6 +17,12 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 from .choices import MeetingProvider, ParticipantRole, ParticipantStatus
+from .jaas_service import (
+    JAAS_DOMAIN,
+    generate_jaas_jwt,
+    get_video_provider,
+    jaas_client_config,
+)
 from .jitsi_service import (
     JitsiConfigError,
     build_user_info,
@@ -1155,6 +1161,63 @@ def record_technical_event(
     return event
 
 
+def _conference_credentials(
+    *,
+    room_name: str,
+    user: User,
+    is_moderator: bool,
+    request,
+    role: str,
+    lesson_id,
+    ttl_seconds: int | None,
+) -> dict:
+    """meet сохраняет текущий JWT/домен. jaas подменяет только видеопровайдера."""
+    if get_video_provider() == "jaas":
+        token = generate_jaas_jwt(
+            room_name=room_name,
+            user=user,
+            is_moderator=is_moderator,
+            request=request,
+            role=role,
+            lesson_id=lesson_id,
+            ttl_seconds=ttl_seconds,
+        )
+        client = jaas_client_config(room_name)
+        return {
+            "provider": "jaas",
+            "jwt": token,
+            "auth_mode": "jwt",
+            "domain": client["domain"],
+            "app_id": client["appId"],
+            "external_room_name": client["externalRoomName"],
+            "script_url": client["scriptUrl"],
+        }
+
+    if ttl_seconds is None:
+        configured_ttl = int(getattr(settings, "JITSI_TOKEN_TTL_SECONDS", 7200) or 7200)
+        # Live-урок 60–120 мин не должен обрываться из-за exp. Не wildcard и не бессрочный токен.
+        live_ttl = max(configured_ttl, 4 * 3600)
+    else:
+        live_ttl = ttl_seconds
+    token = generate_jitsi_jwt(
+        room_name=room_name,
+        user=user,
+        is_moderator=is_moderator,
+        request=request,
+        ttl_seconds=live_ttl,
+    )
+    domain = get_jitsi_domain()
+    return {
+        "provider": "meet",
+        "jwt": token,
+        "auth_mode": get_jitsi_auth_mode(),
+        "domain": domain,
+        "app_id": "",
+        "external_room_name": room_name,
+        "script_url": f"https://{domain}/libs/external_api.min.js",
+    }
+
+
 def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dict:
     access = assert_can_join_meeting(user, meeting, for_config=True)
     # Перечитываем статус: между проверкой и выдачей JWT урок мог завершиться.
@@ -1171,22 +1234,21 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
         user_info["displayName"] = f"Пользователь {user.pk}"
         display_name = user_info["displayName"]
 
-    jwt_token = None
     try:
-        configured_ttl = int(getattr(settings, "JITSI_TOKEN_TTL_SECONDS", 7200) or 7200)
-        # Live-урок 60–120 мин не должен обрываться из-за exp. Не wildcard и не бессрочный токен.
-        live_ttl = max(configured_ttl, 4 * 3600)
-        jwt_token = generate_jitsi_jwt(
+        credentials = _conference_credentials(
             room_name=room_name,
             user=user,
             is_moderator=access.is_moderator,
             request=request,
-            ttl_seconds=live_ttl,
+            role=access.role,
+            lesson_id=event.pk,
+            ttl_seconds=None,
         )
     except JitsiConfigError as exc:
         raise VideoMeetingError(str(exc), code="jwt_config", status=503) from exc
 
-    auth_mode = get_jitsi_auth_mode()
+    jwt_token = credentials["jwt"]
+    auth_mode = credentials["auth_mode"]
     # Важно: используем эффективный режим (в т.ч. auto-jwt на своём домене),
     # а не сырой JITSI_AUTH_MODE — иначе JWT может отсутствовать при AUTH_MODE=none.
     if auth_mode == "jwt" and not jwt_token:
@@ -1200,7 +1262,7 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
     if not teacher_name:
         teacher_name = owner.get_full_name() or owner.username
 
-    domain = get_jitsi_domain()
+    domain = credentials["domain"]
     # Без JWT публичный meet.jit.si (и любой хост с wait-for-moderator) не даёт
     # права организатора из профиля — учителю нужно жать «Я организатор».
     requires_moderator_login = bool(access.is_moderator and not jwt_token)
@@ -1236,7 +1298,7 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
     call_session_id = _session_id_from_request(request, "callSessionId", "call_session_id")
     logger.info(
         "jitsi_join_config lesson_id=%s schedule_event_id=%s meeting_uuid=%s "
-        "user_id=%s role=%s room_name=%s domain=%s auth_mode=%s is_moderator=%s "
+        "user_id=%s role=%s room_name=%s domain=%s provider=%s auth_mode=%s is_moderator=%s "
         "password_required=%s has_jwt=%s jwt_aud=%s jwt_iss=%s jwt_sub=%s "
         "jwt_room=%s jwt_exp=%s endpoint=%s tab=%s call=%s",
         event.lesson_id or "",
@@ -1246,6 +1308,7 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
         access.role,
         meeting.room_name,
         domain,
+        credentials["provider"],
         auth_mode,
         access.is_moderator,
         False,
@@ -1276,6 +1339,7 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
                 "jwtRoom": jwt_claims.get("room") or room_name,
                 "isModerator": access.is_moderator,
                 "authMode": auth_mode,
+                "provider": credentials["provider"],
             },
         )
     except Exception:
@@ -1287,6 +1351,10 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
     return {
         "domain": domain,
         "roomName": meeting.room_name,
+        "externalRoomName": credentials["external_room_name"],
+        "scriptUrl": credentials["script_url"],
+        "appId": credentials["app_id"],
+        "provider": credentials["provider"],
         "jwt": jwt_token,
         "authMode": auth_mode,
         "requiresModeratorLogin": requires_moderator_login,
@@ -1314,6 +1382,8 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
             "browserTabSessionId": tab_session_id,
             "callSessionId": call_session_id,
             "canonicalRoomName": canonical_jitsi_room_name(meeting.room_name),
+            "provider": credentials["provider"],
+            "externalRoomName": credentials["external_room_name"],
         },
         "meeting": {
             "uuid": str(meeting.uuid),
@@ -1345,37 +1415,51 @@ def build_connection_probe_config(*, user: User, request=None) -> dict:
     Комната diagnostic_* живёт только на сервере Jitsi (если клиент её откроет)
     и не попадает в расписание, посещаемость, журнал и биллинг.
     """
-    domain = get_jitsi_domain()
-    auth_mode = get_jitsi_auth_mode()
     room_name = f"{DIAGNOSTIC_ROOM_PREFIX}{secrets.token_hex(16)}"
     user_info = build_user_info(user, request)
     display_name = str(user_info.get("displayName") or "").strip() or f"Пользователь {user.pk}"
+    provider = get_video_provider()
 
     jwt_token = None
+    auth_mode = "jwt" if provider == "jaas" else get_jitsi_auth_mode()
+    domain = JAAS_DOMAIN if provider == "jaas" else get_jitsi_domain()
+    script_url = jaas_client_config(room_name)["scriptUrl"] if provider == "jaas" else f"https://{domain}/libs/external_api.min.js"
+    external_room = jaas_client_config(room_name)["externalRoomName"] if provider == "jaas" else room_name
+    app_id = jaas_client_config(room_name)["appId"] if provider == "jaas" else ""
     jwt_ready = auth_mode != "jwt"
     if auth_mode == "jwt":
         try:
-            jwt_token = generate_jitsi_jwt(
+            credentials = _conference_credentials(
                 room_name=room_name,
                 user=user,
                 is_moderator=True,
                 request=request,
+                role="probe",
+                lesson_id="",
                 ttl_seconds=DIAGNOSTIC_JWT_TTL_SECONDS,
             )
+            jwt_token = credentials["jwt"]
+            domain = credentials["domain"]
+            auth_mode = credentials["auth_mode"]
+            script_url = credentials["script_url"]
+            external_room = credentials["external_room_name"]
+            app_id = credentials["app_id"]
+            provider = credentials["provider"]
             jwt_ready = bool(jwt_token)
         except JitsiConfigError as exc:
             logger.warning(
                 "jitsi_connection_probe_jwt_error user_id=%s domain=%s error=%s",
                 user.pk,
                 domain,
-                exc,
+                type(exc).__name__,
             )
             jwt_ready = False
 
     logger.info(
-        "jitsi_connection_probe user_id=%s domain=%s auth_mode=%s has_jwt=%s jwt_ready=%s room=%s",
+        "jitsi_connection_probe user_id=%s domain=%s provider=%s auth_mode=%s has_jwt=%s jwt_ready=%s room=%s",
         user.pk,
         domain,
+        provider,
         auth_mode,
         bool(jwt_token),
         jwt_ready,
@@ -1385,9 +1469,12 @@ def build_connection_probe_config(*, user: User, request=None) -> dict:
     return {
         "domain": domain,
         "roomName": room_name,
+        "externalRoomName": external_room,
+        "scriptUrl": script_url,
+        "appId": app_id,
+        "provider": provider,
         "jwt": jwt_token,
         "authMode": auth_mode,
-        "scriptUrl": f"https://{domain}/libs/external_api.min.js",
         "userInfo": {"displayName": display_name},
         "jwtReady": jwt_ready,
         "probe": True,

@@ -1,101 +1,119 @@
-import { useEffect, useLayoutEffect } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect } from "react";
 import { BrowserRouter, Routes, Route, useLocation, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import Layout from "./pages/Layout";
 import HomePage from "./pages/HomePage";
-import AllTasksPage from "./pages/AllTasksPage";
-import MyTaskBankPage from "./pages/MyTaskBankPage";
-import MyTaskEditorPage from "./pages/MyTaskEditorPage";
-import MyTaskDetailPage from "./pages/MyTaskDetailPage";
-import ExamLevelHubPage from "./pages/ExamLevelHubPage";
-import SubjectPage from "./pages/SubjectPage";
-import TasksPage from "./pages/TasksPage";
-import ExamPage from "./pages/ExamPage";
-import SearchTaskPage from "./pages/SearchTaskPage";
-import SearchVariantPage from "./pages/SearchVariantPage";
-import PrivacyPage from "./pages/PrivacyPage";
-import MessagingAgreementPage from "./pages/MessagingAgreementPage";
-import PricingPage from "./pages/PricingPage";
-import NotFoundPage from "./pages/NotFoundPage";
-import LessonJoinBridge from "./pages/LessonJoinBridge";
-import ReadyLessonsPage from "./pages/ReadyLessonsPage";
-import LessonCollectionPage from "./pages/LessonCollectionPage";
-import LessonViewerPage from "./pages/LessonViewerPage";
-import InterestingPage from "./pages/InterestingPage";
-import InterestingViewerPage from "./pages/InterestingViewerPage";
-import ForTeachersPage from "./pages/ForTeachersPage";
-import TutorLandingPage from "./pages/TutorLandingPage";
-import TeacherBookingPage from "./pages/TeacherBookingPage";
-import CabinetAuthPage from "./pages/CabinetAuthPage";
-import CabinetJoinPage from "./cabinet/pages/CabinetJoinPage";
-import CabinetNotificationsSettingsPage from "./cabinet/pages/CabinetNotificationsSettingsPage";
-import CabinetPage from "./pages/CabinetPage";
-import CabinetDashboard from "./cabinet/CabinetDashboard";
-import CabinetStudentsPage from "./cabinet/pages/CabinetStudentsPage";
-import CabinetStudentMaterialsPage from "./cabinet/pages/CabinetStudentMaterialsPage";
-import CabinetLessonsPage from "./cabinet/pages/CabinetLessonsPage";
-import CabinetReviewPage from "./cabinet/pages/CabinetReviewPage";
-import CabinetReviewDetailPage from "./cabinet/pages/CabinetReviewDetailPage";
-import CabinetHomeworkEditPage from "./cabinet/pages/CabinetHomeworkEditPage";
-import CabinetLibraryPage from "./cabinet/pages/CabinetLibraryPage";
-import CabinetSchedulePage from "./cabinet/pages/CabinetSchedulePage";
-import CabinetMessagesPage from "./cabinet/pages/CabinetMessagesPage";
-import CommunityInvitePage from "./cabinet/pages/CommunityInvitePage";
-import CabinetLessonPlansPage from "./cabinet/pages/CabinetLessonPlansPage";
-import CabinetLessonPlanDetailPage from "./cabinet/pages/CabinetLessonPlanDetailPage";
-import CabinetLessonPlanEditorPage from "./cabinet/pages/CabinetLessonPlanEditorPage";
-import CabinetInteractivesPage from "./cabinet/pages/CabinetInteractivesPage";
-import CabinetInteractiveCreatePage from "./cabinet/pages/CabinetInteractiveCreatePage";
-import CabinetInteractiveEditorPage from "./cabinet/pages/CabinetInteractiveEditorPage";
-import CabinetInteractiveDetailPage from "./cabinet/pages/CabinetInteractiveDetailPage";
-import CabinetInteractivePlayPage from "./cabinet/pages/CabinetInteractivePlayPage";
-import CabinetBoardsPage from "./cabinet/pages/CabinetBoardsPage";
-import CabinetWorksheetEditorPage from "./cabinet/pages/CabinetWorksheetEditorPage";
-import WorksheetAIWizard from "./cabinet/worksheet/WorksheetAIWizard";
-import WorksheetSoonPage from "./pages/WorksheetSoonPage";
+const AllTasksPage = lazy(() => import("./pages/AllTasksPage"));
+const MyTaskBankPage = lazy(() => import("./pages/MyTaskBankPage"));
+const MyTaskEditorPage = lazy(() => import("./pages/MyTaskEditorPage"));
+const MyTaskDetailPage = lazy(() => import("./pages/MyTaskDetailPage"));
+const ExamLevelHubPage = lazy(() => import("./pages/ExamLevelHubPage"));
+const SubjectPage = lazy(() => import("./pages/SubjectPage"));
+const TasksPage = lazy(() => import("./pages/TasksPage"));
+const SearchTaskPage = lazy(() => import("./pages/SearchTaskPage"));
+const SearchVariantPage = lazy(() => import("./pages/SearchVariantPage"));
+const PrivacyPage = lazy(() => import("./pages/PrivacyPage"));
+const MessagingAgreementPage = lazy(() => import("./pages/MessagingAgreementPage"));
+const PricingPage = lazy(() => import("./pages/PricingPage"));
+const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
+const LessonJoinBridge = lazy(() => import("./pages/LessonJoinBridge"));
+const ReadyLessonsPage = lazy(() => import("./pages/ReadyLessonsPage"));
+const LessonCollectionPage = lazy(() => import("./pages/LessonCollectionPage"));
+const LessonViewerPage = lazy(() => import("./pages/LessonViewerPage"));
+const InterestingPage = lazy(() => import("./pages/InterestingPage"));
+const InterestingViewerPage = lazy(() => import("./pages/InterestingViewerPage"));
+const ForTeachersPage = lazy(() => import("./pages/ForTeachersPage"));
+const TutorLandingPage = lazy(() => import("./pages/TutorLandingPage"));
+const TeacherBookingPage = lazy(() => import("./pages/TeacherBookingPage"));
+const CabinetAuthPage = lazy(() => import("./pages/CabinetAuthPage"));
+const CabinetJoinPage = lazy(() => import("./cabinet/pages/CabinetJoinPage"));
+const CabinetNotificationsSettingsPage = lazy(() => import("./cabinet/pages/CabinetNotificationsSettingsPage"));
+const CabinetPage = lazy(() => import("./pages/CabinetPage"));
+const CabinetDashboard = lazy(() => import("./cabinet/CabinetDashboard"));
+const CabinetStudentsPage = lazy(() => import("./cabinet/pages/CabinetStudentsPage"));
+const CabinetStudentMaterialsPage = lazy(() => import("./cabinet/pages/CabinetStudentMaterialsPage"));
+const CabinetLessonsPage = lazy(() => import("./cabinet/pages/CabinetLessonsPage"));
+const CabinetReviewPage = lazy(() => import("./cabinet/pages/CabinetReviewPage"));
+const CabinetHomeworkEditPage = lazy(() => import("./cabinet/pages/CabinetHomeworkEditPage"));
+const CabinetLibraryPage = lazy(() => import("./cabinet/pages/CabinetLibraryPage"));
+const CabinetSchedulePage = lazy(() => import("./cabinet/pages/CabinetSchedulePage"));
+const CabinetMessagesPage = lazy(() => import("./cabinet/pages/CabinetMessagesPage"));
+const CommunityInvitePage = lazy(() => import("./cabinet/pages/CommunityInvitePage"));
+const CabinetLessonPlansPage = lazy(() => import("./cabinet/pages/CabinetLessonPlansPage"));
+const CabinetLessonPlanDetailPage = lazy(() => import("./cabinet/pages/CabinetLessonPlanDetailPage"));
+const CabinetLessonPlanEditorPage = lazy(() => import("./cabinet/pages/CabinetLessonPlanEditorPage"));
+const CabinetInteractivesPage = lazy(() => import("./cabinet/pages/CabinetInteractivesPage"));
+const CabinetInteractiveCreatePage = lazy(() => import("./cabinet/pages/CabinetInteractiveCreatePage"));
+const CabinetInteractiveEditorPage = lazy(() => import("./cabinet/pages/CabinetInteractiveEditorPage"));
+const CabinetInteractiveDetailPage = lazy(() => import("./cabinet/pages/CabinetInteractiveDetailPage"));
+const CabinetInteractivePlayPage = lazy(() => import("./cabinet/pages/CabinetInteractivePlayPage"));
+const CabinetBoardsPage = lazy(() => import("./cabinet/pages/CabinetBoardsPage"));
+const CabinetWorksheetEditorPage = lazy(() => import("./cabinet/pages/CabinetWorksheetEditorPage"));
+const WorksheetAIWizard = lazy(() => import("./cabinet/worksheet/WorksheetAIWizard"));
+const WorksheetSoonPage = lazy(() => import("./pages/WorksheetSoonPage"));
 import { WORKSHEETS_CONSTRUCTOR_ENABLED } from "./cabinet/featureFlags";
-import CabinetBoardEditorPage from "./cabinet/pages/CabinetBoardEditorPage";
-import HomeworkNotebookEditor, { HomeworkPublishedNotebookPage } from "./cabinet/notebook/HomeworkNotebookEditor";
-import CabinetFilesPage from "./cabinet/pages/CabinetFilesPage";
-import VideoMeetingPage from "./cabinet/pages/VideoMeetingPage";
-import MeetingCallDock from "./cabinet/components/MeetingCallDock";
-import CabinetMorePage from "./cabinet/pages/CabinetMorePage";
-import CabinetReportsPage from "./cabinet/CabinetReportsPage";
-import CabinetUpgradePage from "./cabinet/pages/CabinetUpgradePage";
-import CabinetVariantThemesPage from "./cabinet/pages/CabinetVariantThemesPage";
-import CabinetVariantThemeEditorPage from "./cabinet/pages/CabinetVariantThemeEditorPage";
-import CabinetPaymentsPage from "./cabinet/pages/CabinetPaymentsPage";
-import CabinetJournalPage from "./cabinet/pages/CabinetJournalPage";
-import CabinetJournalAnalyticsPage from "./cabinet/pages/CabinetJournalAnalyticsPage";
-import CabinetLessonSummaryPage from "./cabinet/pages/CabinetLessonSummaryPage";
-import ParentCabinetPage from "./cabinet/pages/ParentCabinetPage";
-import ParentDashboardPage from "./cabinet/pages/ParentDashboardPage";
-import ParentHomeworkPage from "./cabinet/pages/ParentHomeworkPage";
-import ParentResultsPage from "./cabinet/pages/ParentResultsPage";
-import ParentSchedulePage from "./cabinet/pages/ParentSchedulePage";
-import ParentBillingPage from "./cabinet/pages/ParentBillingPage";
-import ParentMorePage from "./cabinet/pages/ParentMorePage";
-import ParentInviteAcceptPage from "./cabinet/pages/ParentInviteAcceptPage";
-import StudentCabinetPage from "./pages/StudentCabinetPage";
-import StudentDashboard from "./cabinet/student/pages/StudentDashboard";
-import StudentLessonsPage from "./cabinet/student/pages/StudentLessonsPage";
-import StudentLessonDetailPage from "./cabinet/student/pages/StudentLessonDetailPage";
-import StudentAssignmentsPage from "./cabinet/student/pages/StudentAssignmentsPage";
-import StudentAssignmentDetailPage from "./cabinet/student/pages/StudentAssignmentDetailPage";
-import StudentInteractivePlayPage from "./cabinet/student/pages/StudentInteractivePlayPage";
-import StudentMaterialsPage from "./cabinet/student/pages/StudentMaterialsPage";
-import StudentFilesPage from "./cabinet/student/pages/StudentFilesPage";
-import StudentBoardsPage from "./cabinet/student/pages/StudentBoardsPage";
-import StudentProfilePage from "./cabinet/student/pages/StudentProfilePage";
-import StudentResultsPage from "./cabinet/student/pages/StudentResultsPage";
-import StudentTopicsPage from "./cabinet/student/pages/StudentTopicsPage";
-import StudentProgressPage from "./cabinet/student/pages/StudentProgressPage";
-import StudentMorePage from "./cabinet/student/pages/StudentMorePage";
+const CabinetFilesPage = lazy(() => import("./cabinet/pages/CabinetFilesPage"));
+const CabinetMorePage = lazy(() => import("./cabinet/pages/CabinetMorePage"));
+const CabinetReportsPage = lazy(() => import("./cabinet/CabinetReportsPage"));
+const CabinetUpgradePage = lazy(() => import("./cabinet/pages/CabinetUpgradePage"));
+const CabinetVariantThemesPage = lazy(() => import("./cabinet/pages/CabinetVariantThemesPage"));
+const CabinetVariantThemeEditorPage = lazy(() => import("./cabinet/pages/CabinetVariantThemeEditorPage"));
+const CabinetPaymentsPage = lazy(() => import("./cabinet/pages/CabinetPaymentsPage"));
+const CabinetJournalPage = lazy(() => import("./cabinet/pages/CabinetJournalPage"));
+const CabinetJournalAnalyticsPage = lazy(() => import("./cabinet/pages/CabinetJournalAnalyticsPage"));
+const CabinetLessonSummaryPage = lazy(() => import("./cabinet/pages/CabinetLessonSummaryPage"));
+const ParentCabinetPage = lazy(() => import("./cabinet/pages/ParentCabinetPage"));
+const ParentDashboardPage = lazy(() => import("./cabinet/pages/ParentDashboardPage"));
+const ParentHomeworkPage = lazy(() => import("./cabinet/pages/ParentHomeworkPage"));
+const ParentResultsPage = lazy(() => import("./cabinet/pages/ParentResultsPage"));
+const ParentSchedulePage = lazy(() => import("./cabinet/pages/ParentSchedulePage"));
+const ParentBillingPage = lazy(() => import("./cabinet/pages/ParentBillingPage"));
+const ParentMorePage = lazy(() => import("./cabinet/pages/ParentMorePage"));
+const ParentInviteAcceptPage = lazy(() => import("./cabinet/pages/ParentInviteAcceptPage"));
+const StudentCabinetPage = lazy(() => import("./pages/StudentCabinetPage"));
+const StudentDashboard = lazy(() => import("./cabinet/student/pages/StudentDashboard"));
+const StudentLessonsPage = lazy(() => import("./cabinet/student/pages/StudentLessonsPage"));
+const StudentLessonDetailPage = lazy(() => import("./cabinet/student/pages/StudentLessonDetailPage"));
+const StudentAssignmentsPage = lazy(() => import("./cabinet/student/pages/StudentAssignmentsPage"));
+const StudentAssignmentDetailPage = lazy(() => import("./cabinet/student/pages/StudentAssignmentDetailPage"));
+const StudentInteractivePlayPage = lazy(() => import("./cabinet/student/pages/StudentInteractivePlayPage"));
+const StudentMaterialsPage = lazy(() => import("./cabinet/student/pages/StudentMaterialsPage"));
+const StudentFilesPage = lazy(() => import("./cabinet/student/pages/StudentFilesPage"));
+const StudentBoardsPage = lazy(() => import("./cabinet/student/pages/StudentBoardsPage"));
+const StudentProfilePage = lazy(() => import("./cabinet/student/pages/StudentProfilePage"));
+const StudentResultsPage = lazy(() => import("./cabinet/student/pages/StudentResultsPage"));
+const StudentTopicsPage = lazy(() => import("./cabinet/student/pages/StudentTopicsPage"));
+const StudentProgressPage = lazy(() => import("./cabinet/student/pages/StudentProgressPage"));
+const StudentMorePage = lazy(() => import("./cabinet/student/pages/StudentMorePage"));
 import ErrorBoundary from "./components/ErrorBoundary";
 import AppUpdateBanner from "./components/AppUpdateBanner";
 import { ensureSiteFavicon } from "./utils/ensureSiteFavicon";
 import { markUpdateFromClientRequired } from "./utils/appUpdate";
 import { SeasonalThemeProvider } from "./seasonal/SeasonalThemeProvider";
+
+const ExamPage = lazy(() => import("./pages/ExamPage"));
+const CabinetReviewDetailPage = lazy(() => import("./cabinet/pages/CabinetReviewDetailPage"));
+const BoardEditorGate = lazy(() => import("./cabinet/boards/BoardEditorGate"));
+const HomeworkNotebookEditor = lazy(() => import("./cabinet/notebook/HomeworkNotebookEditor"));
+const HomeworkPublishedNotebookPage = lazy(() =>
+  import("./cabinet/notebook/HomeworkNotebookEditor").then((mod) => ({
+    default: mod.HomeworkPublishedNotebookPage,
+  })),
+);
+const VideoMeetingPage = lazy(() => import("./cabinet/pages/VideoMeetingPage"));
+const JaasBareProbe = lazy(() => import("./cabinet/pages/JaasBareProbe"));
+const MeetingCallDock = lazy(() => import("./cabinet/components/MeetingCallDock"));
+
+function MeetingCallDockGate() {
+  const location = useLocation();
+  const meeting = new URLSearchParams(location.search).get("meeting");
+  if (!meeting) return null;
+  return (
+    <Suspense fallback={null}>
+      <MeetingCallDock />
+    </Suspense>
+  );
+}
 
 const DEFAULT_META_DESCRIPTION =
   "Цифровой поток: подготовка к ОГЭ и ЕГЭ, генератор вариантов, банк задач, интерактивные уроки и личный кабинет учителя.";
@@ -294,7 +312,9 @@ function App() {
       <MetaDescriptionSync />
       <ClientUpdateRequiredListener />
       <AppUpdateBanner />
+      <Suspense fallback={null}>
       <Routes>
+        <Route path="/dev/jaas-bare/:meetingUuid" element={<JaasBareProbe />} />
 
         <Route element={<Layout />}>
 
@@ -339,7 +359,7 @@ function App() {
             path="/cabinet/boards/:boardId"
             element={(
               <ErrorBoundary kind="room" homeHref="/cabinet">
-                <CabinetBoardEditorPage />
+                <BoardEditorGate />
               </ErrorBoundary>
             )}
           />
@@ -363,7 +383,7 @@ function App() {
             path="/teacher/boards/:boardId"
             element={(
               <ErrorBoundary kind="room" homeHref="/cabinet">
-                <CabinetBoardEditorPage />
+                <BoardEditorGate />
               </ErrorBoundary>
             )}
           />
@@ -521,7 +541,8 @@ function App() {
         </Route>
 
       </Routes>
-      <MeetingCallDock />
+      </Suspense>
+      <MeetingCallDockGate />
       </SeasonalThemeProvider>
     </BrowserRouter>
   );

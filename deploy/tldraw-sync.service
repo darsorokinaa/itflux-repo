@@ -1,0 +1,23 @@
+[Unit]
+Description=tldraw sync for lesson boards
+After=network.target
+
+[Service]
+User=itflux
+Group=itflux
+WorkingDirectory=/opt/itfluxacademy/itflux/services/tldraw-sync
+EnvironmentFile=-/etc/itflux/itflux.env
+Environment=NODE_ENV=production
+Environment=TLDRAW_SYNC_PORT=5858
+Environment=TLDRAW_SYNC_DATA=/var/lib/itflux/tldraw-sync
+ExecStart=/usr/bin/node --experimental-sqlite server.mjs
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/itflux/tldraw-sync
+
+[Install]
+WantedBy=multi-user.target

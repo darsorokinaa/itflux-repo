@@ -14,7 +14,8 @@ import { formatFipiUnicodeMathHtml } from "../utils/formatFipiUnicodeMathHtml";
 import { formatTaskProseHtml } from "../utils/formatTaskProseHtml";
 import { parseTaskHtmlFragment } from "../utils/parseTaskHtmlFragment";
 import { repairOrphanSpanTags } from "../utils/repairTaskHtmlSpans";
-import { sanitizeTaskHtml } from "../utils/sanitizeTaskHtml";
+import { ensureSanitizer, sanitizeTaskHtml } from "../utils/sanitizeTaskHtml";
+import { loadMathJax } from "../utils/loadMathJax";
 
 /** Снять слои &lt;…&gt; если HTML целиком попал в БД как экранированный текст. */
 function decodeHtmlEntityLayersIfStoredEscaped(raw) {
@@ -340,13 +341,14 @@ function withTimeout(promise, ms) {
 }
 
 function typesetMathInElement(el, { plainHtml = false } = {}) {
-  const mj = window.MathJax;
-  if (!mj?.typesetPromise) return Promise.resolve();
   mathJaxPromise = mathJaxPromise
-    .then(() => waitForMathJaxStartup(mj))
-    .then(() => {
-      mj.typesetClear?.([el]);
-      return withTimeout(mj.typesetPromise([el]), 8000);
+    .then(() => loadMathJax())
+    .then((mj) => {
+      if (!mj?.typesetPromise) return undefined;
+      return waitForMathJaxStartup(mj).then(() => {
+        mj.typesetClear?.([el]);
+        return withTimeout(mj.typesetPromise([el]), 8000);
+      });
     })
     .then(() => {
       if (plainHtml) polishBankTaskMathJaxTables(el);
@@ -1520,7 +1522,9 @@ function MathContentInner({
   const ref = useRef(null);
 
   useEffect(() => {
-    if (!ref.current) return;
+    let cancelled = false;
+    ensureSanitizer().then(() => {
+    if (cancelled || !ref.current) return;
     const el = ref.current;
     const s = (html != null ? String(html) : "") || "";
     const decoded = decodeHtmlEntityLayersIfStoredEscaped(s);
@@ -1633,20 +1637,12 @@ function MathContentInner({
       }
     }
 
-    let cancelled = false;
-    let attempts = 0;
-    const run = () => {
-      if (cancelled) return;
-      if (window.MathJax?.typesetPromise) {
-        typesetMathInElement(el, { plainHtml }).catch((err) => {
-          console.error("MATHJAX_TYPESET_ERR:", err);
-        });
-      } else if (attempts < 50) {
-        attempts += 1;
-        setTimeout(run, 100);
-      }
-    };
-    run();
+    if (!cancelled) {
+      typesetMathInElement(el, { plainHtml }).catch((err) => {
+        console.error("MATHJAX_TYPESET_ERR:", err);
+      });
+    }
+    });
     return () => {
       cancelled = true;
     };

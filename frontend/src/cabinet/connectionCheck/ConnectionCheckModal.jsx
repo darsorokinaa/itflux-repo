@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import CabinetModal from "../components/CabinetModal";
-import { probeJitsiInfrastructure, abortJitsiConnectionProbe } from "./jitsiProbe";
+let jitsiProbePromise = null;
+
+function loadJitsiProbe() {
+  if (!jitsiProbePromise) {
+    jitsiProbePromise = import("./jitsiProbe");
+  }
+  return jitsiProbePromise;
+}
 import { probeConnectionQuality } from "./connectionProbe";
 import {
   attachVideoPreview,
@@ -70,7 +77,9 @@ export default function ConnectionCheckModal({
   const [jitsi, setJitsi] = useState(EMPTY_ITEM);
 
   const cleanupMedia = useCallback(() => {
-    abortJitsiConnectionProbe();
+    if (jitsiProbePromise) {
+      jitsiProbePromise.then((mod) => mod.abortJitsiConnectionProbe()).catch(() => {});
+    }
     meterRef.current?.stop?.();
     meterRef.current = null;
     detachVideoPreview(videoRef.current);
@@ -218,6 +227,7 @@ export default function ConnectionCheckModal({
     setBusy(true);
     setJitsi({ status: "checking", label: "Проверяем комнату урока…", message: "" });
     try {
+      const { probeJitsiInfrastructure } = await loadJitsiProbe();
       const result = await probeJitsiInfrastructure();
       if (result?.aborted) return;
       setJitsi({

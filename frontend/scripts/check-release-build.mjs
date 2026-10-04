@@ -69,11 +69,8 @@ if (
 if (!/src="\/assets\/main-[^"]+\.js"/.test(index) && !/src='\/assets\/main-[^']+\.js'/.test(index)) {
   fail("index.html must load the hashed bundle from /assets/main-*.js (the URL that nginx actually serves)");
 }
-if (!index.includes('src="/vendor/mathjax/itflux-config.js"') && !index.includes("src='/vendor/mathjax/itflux-config.js'")) {
-  fail("index.html missing local MathJax config at /vendor/mathjax/itflux-config.js");
-}
-if (!index.includes("/vendor/mathjax/tex-mml-chtml.js") || index.includes("/static/vendor/mathjax/")) {
-  fail("index.html missing local MathJax bundle at /vendor/mathjax/tex-mml-chtml.js");
+if (index.includes("/vendor/mathjax/") || index.includes("bootstrap.min.js")) {
+  fail("index.html must not load MathJax or bootstrap.min.js; MathJax loads only on formula pages");
 }
 if (!index.includes("/boot-watchdog.js")) fail("index.html missing boot-watchdog.js");
 if (!fs.existsSync(path.join(distDir, "boot-watchdog.js"))) fail("boot-watchdog.js missing from dist");

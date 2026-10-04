@@ -78,10 +78,9 @@ def sync_plan_on_event_complete(sender, instance, created, **kwargs):
     Когда событие переходит в done/completed — продвигаем план вперёд.
     Срабатывает только при реальной смене статуса на завершённый.
     """
+    old_status = _pre_save_statuses.pop(instance.pk, None)
     if instance.status not in PLAN_SYNC_STATUSES:
         return
-
-    old_status = _pre_save_statuses.pop(instance.pk, None)
     if old_status == instance.status:
         return  # статус не изменился, повторный save — пропускаем
 

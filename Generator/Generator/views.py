@@ -60,6 +60,7 @@ from .models import (
     ErrorReport,
     InterestingItem,
     Lesson,
+    LessonRoom,
     Level,
     LinkedTaskGroup,
     Mark,

@@ -1438,6 +1438,13 @@ export function fetchInteractiveBoard(id) {
   return cabinetFetch(`/interactive-boards/${id}/`, { method: "GET" });
 }
 
+export function fetchTldrawSyncToken(id) {
+  return cabinetFetch(`/interactive-boards/${id}/sync-token/`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
 export function createInteractiveBoard(payload) {
   return cabinetFetch("/interactive-boards/", {
     method: "POST",
@@ -1487,6 +1494,10 @@ export function uploadInteractiveBoardImage(id, formData) {
 
 export function uploadInteractiveBoardFile(id, formData) {
   return cabinetFetchMultipart(`/interactive-boards/${id}/upload-file/`, formData);
+}
+
+export function deleteInteractiveBoardAsset(boardId, assetId) {
+  return cabinetFetch(`/interactive-boards/${boardId}/assets/${assetId}/`, { method: "DELETE" });
 }
 
 export function fetchStudentInteractiveBoards() {

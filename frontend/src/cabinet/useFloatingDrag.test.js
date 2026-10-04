@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  CALL_FRAME_ASPECT,
   applyFloatingResize,
   clampFloatingBox,
+  fitFloatingAspect,
   readFloatingLayout,
 } from "./useFloatingDrag";
 
@@ -78,5 +80,34 @@ describe("useFloatingDrag layout", () => {
     expect(next.height).toBe(210);
     expect(next.left).toBe(160);
     expect(next.top).toBe(150);
+  });
+
+  it("keeps a 16:9 frame when the corner is dragged", () => {
+    const next = applyFloatingResize({
+      edge: "se",
+      origLeft: 40,
+      origTop: 40,
+      origWidth: 320,
+      origHeight: 180,
+      dx: 160,
+      dy: 20,
+      viewport: { width: 1200, height: 800 },
+      minWidth: 280,
+      minHeight: 158,
+      aspectRatio: CALL_FRAME_ASPECT,
+    });
+    expect(next.width / next.height).toBeCloseTo(CALL_FRAME_ASPECT, 1);
+    expect(next.left).toBe(40);
+    expect(next.top).toBe(40);
+    expect(next.width).toBeGreaterThan(320);
+  });
+
+  it("corrects a previously stretched frame back to 16:9", () => {
+    expect(fitFloatingAspect({ left: 10, top: 20, width: 360, height: 800 }, CALL_FRAME_ASPECT)).toEqual({
+      left: 10,
+      top: 20,
+      width: 360,
+      height: 203,
+    });
   });
 });

@@ -7,11 +7,14 @@ import binascii
 import copy
 import hashlib
 import json
+import mimetypes
 import os
 import re
+import sqlite3
 import uuid
 from typing import Any
 
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.files.base import ContentFile
 from django.db import transaction
@@ -25,6 +28,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .avatar_api import build_avatar_url
+from .board_provider import get_board_provider
+from .tldraw_sync_token import issue_tldraw_sync_token
 from .files_services import FileServiceError, assert_quota_allows, lock_user_storage
 from .models import (
     InteractiveBoard,
@@ -38,7 +44,7 @@ from .models import (
     empty_board_scene,
 )
 from .schedule_events import parse_local_event_id
-from .upload_validation import UploadValidationError, validate_uploaded_image
+from .upload_validation import UploadValidationError, validate_uploaded_file, validate_uploaded_image
 
 
 def _parse_optional_pk(value):
@@ -57,6 +63,32 @@ def _parse_optional_pk(value):
         return n
     except (TypeError, ValueError):
         return None
+
+
+def viewer_board_presence(user) -> dict:
+    """Имя и аватар для курсора. Email в presence не отдаём."""
+    profile = getattr(user, "profile", None)
+    role = str(getattr(profile, "role", "") or "") if profile is not None else ""
+    name = ""
+    if profile is not None:
+        try:
+            name = (profile.get_display_name() or "").strip()
+        except Exception:
+            name = ""
+    if "@" in name:
+        name = ""
+    if not name:
+        if role == Profile.Role.TEACHER:
+            name = "Учитель"
+        elif role == Profile.Role.STUDENT:
+            name = "Ученик"
+        else:
+            name = "Участник"
+    return {
+        "viewer_display_name": name[:80],
+        "viewer_avatar_url": build_avatar_url(user) or "",
+    }
+
 
 MAX_THUMBNAIL_CHARS = 200_000
 DEFAULT_BOARD_TITLE = "Новая доска"
@@ -461,6 +493,82 @@ def validate_board_pdf_upload(uploaded) -> bytes:
 
 def board_asset_api_path(board_id, asset_id) -> str:
     return f"/api/cabinet/interactive-boards/{board_id}/assets/{asset_id}/"
+
+
+def _board_room_state_text(state) -> str:
+    if isinstance(state, memoryview):
+        state = state.tobytes()
+    if isinstance(state, (bytes, bytearray)):
+        return state.decode("utf-8", "ignore")
+    return str(state or "")
+
+
+def board_asset_reference_status(board, asset_id) -> str:
+    """scene, room, unknown или clear.
+
+    Собственный src записи asset ссылкой не считается: deleteAssets
+    снимает файл, пока эта запись ещё лежит в sqlite. Ссылка — фигура
+    с этим assetId или любой другой документ, где есть uuid файла.
+    unknown — доска tldraw, а каталог sqlite не задан или не читается.
+    """
+    needle = str(asset_id).lower()
+    scene_blob = json.dumps(board.scene_data or {}, ensure_ascii=False).lower()
+    if needle in scene_blob:
+        return "scene"
+    root = str(getattr(settings, "TLDRAW_SYNC_DATA", "") or "").strip()
+    if not root:
+        if get_board_provider() == "tldraw":
+            return "unknown"
+        return "clear"
+    path = os.path.join(root, f"{str(board.id).lower()}.sqlite")
+    if not os.path.isfile(path):
+        return "clear"
+    records = []
+    asset_ids = set()
+    try:
+        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return "unknown"
+    try:
+        for table in ("documents", "objects"):
+            try:
+                rows = connection.execute(f"SELECT id, state FROM {table}")
+            except sqlite3.Error:
+                continue
+            for row_id, state in rows:
+                text = _board_room_state_text(state)
+                try:
+                    record = json.loads(text) if text else None
+                except json.JSONDecodeError:
+                    record = None
+                records.append((str(row_id), text, record))
+                if isinstance(record, dict) and record.get("typeName") == "asset":
+                    src = str((record.get("props") or {}).get("src") or "")
+                    if needle in src.lower():
+                        asset_ids.add(str(record.get("id") or row_id))
+    except sqlite3.Error:
+        return "unknown"
+    finally:
+        connection.close()
+
+    for row_id, text, record in records:
+        if not isinstance(record, dict):
+            if needle in text.lower():
+                return "room"
+            continue
+        record_id = str(record.get("id") or row_id)
+        if record.get("typeName") == "asset" and record_id in asset_ids:
+            props = dict(record.get("props") or {})
+            props.pop("src", None)
+            remainder = json.dumps({**record, "props": props}, ensure_ascii=False).lower()
+            if needle in remainder:
+                return "room"
+            continue
+        if record.get("typeName") == "shape" and str((record.get("props") or {}).get("assetId") or "") in asset_ids:
+            return "room"
+        if needle in text.lower():
+            return "room"
+    return "clear"
 
 
 def board_asset_content_sha256(content: bytes) -> str:
@@ -1128,6 +1236,25 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
         out = InteractiveBoardDetailSerializer(board, context={"request": request})
         return Response(out.data, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=["post"], url_path="sync-token")
+    def sync_token(self, request, id=None):
+        board = self.get_object()
+        perm = board.get_permission_for(request.user)
+        if not perm:
+            return Response({"detail": "Доска не найдена."}, status=status.HTTP_404_NOT_FOUND)
+        can_edit = perm in ("owner", InteractiveBoardAccess.EDIT)
+        token = issue_tldraw_sync_token(
+            board_id=board.id,
+            user_id=request.user.id,
+            can_edit=can_edit,
+        )
+        if not token:
+            return Response(
+                {"detail": "Синхронизация доски не настроена."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response({"token": token, "can_edit": can_edit})
+
     def retrieve(self, request, *args, **kwargs):
         board = self.get_object()
         perm = board.get_permission_for(request.user)
@@ -1140,6 +1267,8 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
         data["can_export"] = bool(board.allow_export or perm == "owner")
         data["viewer_user_id"] = request.user.id
         data["viewer_role"] = "teacher" if perm == "owner" else ("student" if perm == InteractiveBoardAccess.EDIT else "viewer")
+        data["board_provider"] = get_board_provider()
+        data.update(viewer_board_presence(request.user))
         return Response(data)
 
     def update(self, request, *args, **kwargs):
@@ -1550,9 +1679,25 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
             )
 
         uploaded = request.FILES.get("file") or request.FILES.get("pdf")
+        if not uploaded:
+            return Response(
+                {"detail": "Файл не передан", "code": "FILE_REQUIRED"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if hasattr(uploaded, "seek"):
+            uploaded.seek(0)
+        raw = uploaded.read()
+        if hasattr(uploaded, "seek"):
+            uploaded.seek(0)
         try:
-            raw = validate_board_pdf_upload(uploaded)
-            mime = validate_board_pdf_bytes(raw)
+            if detect_pdf_mime(raw):
+                mime = validate_board_pdf_bytes(raw)
+            else:
+                validate_uploaded_file(uploaded)
+                name = getattr(uploaded, "name", "") or "file"
+                mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
+                if len(mime) > 64:
+                    mime = "application/octet-stream"
         except UploadValidationError as exc:
             return Response(
                 {"detail": exc.message, "code": exc.code},
@@ -1591,7 +1736,7 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
 
     @action(
         detail=True,
-        methods=["get"],
+        methods=["get", "delete"],
         url_path=r"assets/(?P<asset_id>[0-9a-f-]{36})",
     )
     def download_asset(self, request, id=None, asset_id=None):
@@ -1600,6 +1745,27 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
         if not perm:
             return Response({"detail": "Доска не найдена."}, status=status.HTTP_404_NOT_FOUND)
         asset = get_object_or_404(InteractiveBoardAsset, pk=asset_id, board=board)
+        if request.method == "DELETE":
+            if perm not in ("owner", InteractiveBoardAccess.EDIT):
+                return Response(
+                    {"detail": "Недостаточно прав для удаления файла."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            reference = board_asset_reference_status(board, asset_id)
+            if reference == "unknown":
+                return Response(
+                    {"detail": "Нельзя проверить, используется ли файл на доске.", "code": "asset_reference_unknown"},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            if reference in ("scene", "room"):
+                return Response(
+                    {"detail": "Файл ещё используется на доске.", "code": "asset_in_use"},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            if asset.file:
+                asset.file.delete(save=False)
+            asset.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
         if not asset.file:
             raise Http404()
         return FileResponse(

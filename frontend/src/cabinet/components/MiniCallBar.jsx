@@ -1,191 +1,105 @@
-/** Chrome around the existing Jitsi iframe while screen sharing / compact. */
+/** Window chrome for the floating lesson call. Does not touch the Jitsi session. */
 
-import { useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import CabinetIcon from "../CabinetIcons";
-import CabinetFloatingMenu from "./CabinetFloatingMenu";
 import { participantInitials } from "../participantVideo";
 
-export default function MiniCallBar({
-  collapsed = false,
-  waiting = false,
-  remoteName = "",
-  remoteAudioMuted = null,
-  remoteVideoMuted = null,
-  sharing = false,
-  shareMode = false,
-  pipAvailable = false,
-  pipActive = false,
-  pipNeedsGesture = false,
-  stayOnTopAvailable = false,
-  stayOnTopActive = false,
-  onToggleCollapsed,
-  onExpand,
-  onStayOnTop,
-  onHangup,
-}) {
-  const [moreOpen, setMoreOpen] = useState(false);
-  const moreBtnRef = useRef(null);
-  const name = remoteName || "Участник";
-  const status = collapsed
-    ? "Звонок скрыт"
-    : waiting
-      ? "Ждём ученика"
-      : name;
-  const showPip = Boolean(pipAvailable || stayOnTopAvailable || pipNeedsGesture || pipActive);
-  const pipOn = Boolean(pipActive || stayOnTopActive);
-  const pipLabel = pipOn ? "Вернуть видео в урок" : "Видео поверх окон";
-  const pipPromptLabel = pipNeedsGesture && !pipOn ? "Показать ученика поверх окон" : pipLabel;
+function formatCallElapsed(ms) {
+  const total = Math.max(0, Math.floor(Number(ms) / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const mm = String(minutes).padStart(2, "0");
+  const ss = String(seconds).padStart(2, "0");
+  return hours > 0 ? `${hours}:${mm}:${ss}` : `${minutes}:${ss}`;
+}
 
-  const pipButton = showPip ? (
+function useCallElapsedLabel(startedAt, active) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active || !startedAt) return undefined;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [active, startedAt]);
+  const started = Date.parse(startedAt || "");
+  if (!startedAt || !Number.isFinite(started)) return "";
+  return formatCallElapsed(now - started);
+}
+
+function WindowButton({ label, icon, onClick }) {
+  return (
     <button
       type="button"
-      className={`mini-call-bar__iconbtn${pipOn ? " is-active" : ""}${pipNeedsGesture && !pipOn ? " is-prompt" : ""}`}
-      aria-label={pipPromptLabel}
-      title={pipLabel}
-      aria-pressed={pipOn}
-      onClick={onStayOnTop}
+      className="mini-call-bar__iconbtn"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
     >
-      <CabinetIcon name="pip" />
+      <CabinetIcon name={icon} />
     </button>
-  ) : null;
+  );
+}
 
-  if (shareMode) {
-    return (
-      <>
-        {!collapsed && (waiting || remoteVideoMuted) ? (
-          <div className="vl-participant-fallback" aria-hidden="true">
-            <span className="vl-participant-fallback__avatar">{participantInitials(name)}</span>
-            <span className="vl-participant-fallback__name">{waiting ? "Ждём ученика" : name}</span>
-          </div>
-        ) : null}
-        <div
-          className={[
-            "video-lesson-compact-drag mini-call-bar mini-call-bar--share",
-            pipNeedsGesture && !pipOn ? "is-pip-prompt" : "",
-          ].filter(Boolean).join(" ")}
-        >
-          <div className="mini-call-bar__who">
-            <span className="mini-call-bar__name">{waiting ? "Ждём ученика" : name}</span>
-            <span
-              className={`mini-call-bar__mic${remoteAudioMuted ? " is-off" : ""}`}
-              title={remoteAudioMuted ? "Микрофон выкл." : "Микрофон вкл."}
-              aria-label={remoteAudioMuted ? "Микрофон выкл." : "Микрофон вкл."}
-            >
-              <CabinetIcon name={remoteAudioMuted ? "micOff" : "mic"} />
-            </span>
-          </div>
-          <div className="video-lesson-compact-drag__actions mini-call-bar__actions">
-            {collapsed ? (
-              <button
-                type="button"
-                className="video-lesson-compact-drag__expand"
-                aria-label="Показать"
-                onClick={onToggleCollapsed}
-              >
-                Развернуть
-              </button>
-            ) : (
-              <>
-                {pipButton}
-                <button
-                  type="button"
-                  className="mini-call-bar__iconbtn"
-                  aria-label="Скрыть"
-                  title="Свернуть"
-                  onClick={onToggleCollapsed}
-                >
-                  <CabinetIcon name="minus" />
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      </>
-    );
-  }
+export default function MiniCallBar({
+  view = "normal",
+  waiting = false,
+  statusLabel = "",
+  remoteName = "",
+  startedAt = "",
+  remoteAudioMuted = null,
+  stageCameraOff = false,
+  onMinimize,
+  onShow,
+  onExpand,
+  onCompact,
+}) {
+  const minimized = view === "minimized";
+  const expanded = view === "expanded";
+  const callLabel = statusLabel || (waiting ? "Ждём ученика" : remoteName || "Видеозвонок");
+  const elapsedLabel = useCallElapsedLabel(startedAt, minimized);
+  const name = remoteName || callLabel;
+  const showAvatar = !minimized && !waiting && Boolean(stageCameraOff);
 
   return (
-    <div className="video-lesson-compact-drag mini-call-bar">
-      <div className="mini-call-bar__who">
-        <span
-          className={`mini-call-bar__dot${waiting && !collapsed ? " is-wait" : " is-on"}`}
-          aria-hidden="true"
-        />
-        <span className="mini-call-bar__meta">
-          <span className="mini-call-bar__name">{status}</span>
-          {!collapsed ? (
-            <span className="mini-call-bar__flags">
-              {sharing ? <span className="mini-call-bar__share">Демонстрация</span> : null}
-              {remoteAudioMuted === true ? <span>микрофон выкл.</span> : null}
-              {remoteVideoMuted === true ? <span>камера выкл.</span> : null}
+    <>
+      {showAvatar ? (
+        <div className="vl-participant-fallback" aria-hidden="true">
+          <span className="vl-participant-fallback__avatar">{participantInitials(name)}</span>
+          <span className="vl-participant-fallback__name">{name}</span>
+          {remoteAudioMuted === true ? (
+            <span className="vl-participant-fallback__muted" title="Микрофон выключен">
+              <CabinetIcon name="micOff" />
             </span>
           ) : null}
-        </span>
+        </div>
+      ) : null}
+      <div className={`video-lesson-compact-drag mini-call-bar${minimized ? " mini-call-bar--chip" : ""}`}>
+        <div className="mini-call-bar__who">
+          <span
+            className={`mini-call-bar__dot${waiting ? " is-wait" : " is-on"}`}
+            aria-hidden="true"
+          />
+          <span className="mini-call-bar__name">{callLabel}</span>
+          {minimized && elapsedLabel ? (
+            <span className="mini-call-bar__elapsed">{elapsedLabel}</span>
+          ) : null}
+        </div>
+        <div className="mini-call-bar__actions">
+          {minimized ? (
+            <WindowButton label="Показать видеозвонок" icon="video" onClick={onShow} />
+          ) : null}
+          {expanded ? (
+            <WindowButton label="Вернуть компактный вид" icon="compress" onClick={onCompact} />
+          ) : null}
+          {!minimized ? (
+            <WindowButton label="Свернуть" icon="minus" onClick={onMinimize} />
+          ) : null}
+          {!minimized && !expanded ? (
+            <WindowButton label="Открыть крупнее" icon="expand" onClick={onExpand} />
+          ) : null}
+        </div>
       </div>
-      <div className="video-lesson-compact-drag__actions mini-call-bar__actions">
-        {collapsed ? (
-          <button
-            type="button"
-            className="video-lesson-compact-drag__expand"
-            aria-label="Показать"
-            onClick={onToggleCollapsed}
-          >
-            Развернуть
-          </button>
-        ) : (
-          <>
-            {pipButton}
-            <button
-              type="button"
-              className="mini-call-bar__iconbtn"
-              aria-label="Скрыть"
-              title="Свернуть звонок"
-              onClick={onToggleCollapsed}
-            >
-              <CabinetIcon name="minus" />
-            </button>
-            <button
-              ref={moreBtnRef}
-              type="button"
-              className={`mini-call-bar__iconbtn${moreOpen ? " is-active" : ""}`}
-              aria-label="Ещё"
-              title="Ещё"
-              aria-expanded={moreOpen}
-              onClick={() => setMoreOpen((v) => !v)}
-            >
-              <CabinetIcon name="more" />
-            </button>
-            <CabinetFloatingMenu
-              open={moreOpen}
-              anchorEl={moreBtnRef.current}
-              onClose={() => setMoreOpen(false)}
-              className="vl-dropdown mini-call-bar__menu"
-              width={220}
-            >
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setMoreOpen(false);
-                  onExpand?.();
-                }}
-              >
-                На весь экран
-              </button>
-            </CabinetFloatingMenu>
-            <button
-              type="button"
-              className="mini-call-bar__iconbtn mini-call-bar__iconbtn--hangup"
-              aria-label="Завершить звонок"
-              title="Завершить звонок"
-              onClick={onHangup}
-            >
-              <CabinetIcon name="close" />
-            </button>
-          </>
-        )}
-      </div>
-    </div>
+    </>
   );
 }
