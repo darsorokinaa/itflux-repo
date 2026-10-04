@@ -22,6 +22,7 @@ import {
   startVideoMeeting,
   updateLessonPlanItem,
 } from "../../utils/cabinetAuth";
+import { requestHardReload } from "../../utils/liveSessionGuard";
 import {
   applyJitsiCallChrome,
   createJitsiMeetSession,
@@ -3675,7 +3676,12 @@ export default function VideoMeetingPage() {
                 <button
                   type="button"
                   className="video-lesson-btn"
-                  onClick={() => window.location.reload()}
+                  onClick={() => requestHardReload({
+                    manual: true,
+                    reason: "meeting-error-reload",
+                    source: "VideoMeetingPage",
+                    navigate: () => window.location.reload(),
+                  })}
                 >
                   Обновить
                 </button>

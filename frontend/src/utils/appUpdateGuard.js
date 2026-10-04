@@ -1,3 +1,5 @@
+import { isLiveSessionPath } from "./liveSessionGuard";
+
 /**
  * Blocks automatic hard-reload when the user is mid-edit / in a live lesson.
  * Pages can also register custom blockers via registerAppUpdateBlocker.
@@ -15,8 +17,10 @@ function pathLooksUnsafe(pathname) {
   const path = pathname || (typeof window !== "undefined" ? window.location.pathname : "");
   if (!path) return false;
 
-  // Live lesson / meeting
-  if (path.includes("/meetings/") || path.includes("/lesson/join")) return true;
+  // Live lesson. isLiveSessionPath is the only check for /cabinet/meetings/ and /lesson/join.
+  if (isLiveSessionPath(path)) return true;
+  // Any other meeting URL stays protected too.
+  if (path.includes("/meetings/")) return true;
   // Board editor
   if (/\/boards\/[^/]+\/?$/.test(path) && path.includes("/cabinet/")) return true;
   if (path.includes("/boards/") && (path.includes("/edit") || path.includes("/editor"))) return true;

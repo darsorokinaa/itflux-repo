@@ -3,6 +3,8 @@
  * No names, emails, JWT, scene contents, or file payloads.
  */
 
+import { isLiveSessionPath, requestHardReload } from "./liveSessionGuard";
+
 const ENDPOINT = "/api/cabinet/client-telemetry/";
 const MAX_PER_MINUTE = 40;
 const CHUNK_RECOVER_KEY = "itflux.chunk-recover";
@@ -77,6 +79,9 @@ export const CLIENT_TELEMETRY_EVENTS = Object.freeze([
   "SW_CONTROLLER_CHANGE",
   "SW_NAVIGATION_FETCH",
   "SW_UPDATE_FOUND",
+  "APP_HARD_RELOAD",
+  "APP_HARD_RELOAD_BLOCKED_LIVE_SESSION",
+  "CHUNK_RECOVERY_BLOCKED_LIVE_SESSION",
 ]);
 
 const ALLOWED = new Set(CLIENT_TELEMETRY_EVENTS);
@@ -86,6 +91,29 @@ let sentAt = [];
 const pending = [];
 let flushTimer = null;
 let pausedUntil = 0;
+let chunkRecoveryBlocked = false;
+const chunkRecoveryListeners = new Set();
+
+export function isChunkRecoveryBlocked() {
+  return chunkRecoveryBlocked;
+}
+
+export function subscribeChunkRecoveryBlocked(fn) {
+  if (typeof fn !== "function") return () => {};
+  chunkRecoveryListeners.add(fn);
+  return () => chunkRecoveryListeners.delete(fn);
+}
+
+function noteChunkRecoveryBlocked() {
+  chunkRecoveryBlocked = true;
+  chunkRecoveryListeners.forEach((fn) => {
+    try {
+      fn(true);
+    } catch {
+      /* ignore */
+    }
+  });
+}
 
 function postsInWindow(now) {
   pruneWindow(now);
@@ -178,20 +206,32 @@ function markChunkRecovered() {
   }
 }
 
-/** One-shot cache-bust after a missing hashed chunk. Never loops. */
+/** One-shot cache-bust after a missing hashed chunk. Never loops. Never reloads a live lesson. */
 export function recoverChunkLoadOnce() {
   if (typeof window === "undefined") return false;
+  if (isLiveSessionPath()) {
+    reportClientEvent("CHUNK_RECOVERY_BLOCKED_LIVE_SESSION", {
+      path: window.location.pathname,
+    });
+    noteChunkRecoveryBlocked();
+    return false;
+  }
   if (alreadyRecoveredChunk()) return false;
   markChunkRecovered();
-  try {
-    const url = new URL(window.location.href);
-    url.searchParams.set(VERSION_QUERY, String(Date.now()));
-    window.location.replace(url.href);
-    return true;
-  } catch {
-    window.location.reload();
-    return true;
-  }
+  return requestHardReload({
+    manual: false,
+    reason: "chunk-load",
+    source: "recoverChunkLoadOnce",
+    navigate() {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set(VERSION_QUERY, String(Date.now()));
+        window.location.replace(url.href);
+      } catch {
+        window.location.reload();
+      }
+    },
+  });
 }
 
 function scheduleFlush(delay) {

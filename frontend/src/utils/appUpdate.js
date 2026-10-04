@@ -1,6 +1,7 @@
 import { getAppVersion } from "./appVersion";
 import { isAppUpdateUnsafe } from "./appUpdateGuard";
 import { reportClientEvent } from "./clientTelemetry";
+import { isLiveSessionPath, requestHardReload } from "./liveSessionGuard";
 
 const RELOAD_ONCE_KEY = "itflux.reload-for-version";
 const VERSION_QUERY = "_itflux_v";
@@ -88,21 +89,37 @@ function isStandaloneShell() {
   }
 }
 
-function reloadWithCacheBust(target) {
-  try {
-    const url = new URL(window.location.href);
-    url.searchParams.set(VERSION_QUERY, String(target || Date.now()));
-    window.location.replace(url.href);
-    return;
-  } catch {
-    /* fall through */
-  }
-  window.location.reload();
+function reloadWithCacheBust(target, { manual = false, reason = "app-update", source = "reloadWithCacheBust" } = {}) {
+  return requestHardReload({
+    manual,
+    reason,
+    source,
+    navigate() {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set(VERSION_QUERY, String(target || Date.now()));
+        window.location.replace(url.href);
+      } catch {
+        window.location.reload();
+      }
+    },
+  });
 }
 
 /** Hard reload once per target version — avoids infinite reload loops. */
-export function applyAppUpdate({ force = false } = {}) {
+export function applyAppUpdate({
+  force = false,
+  manual = false,
+  reason = "app-update",
+  source = "applyAppUpdate",
+} = {}) {
   const target = remoteVersion || getAppVersion();
+  // Fail-safe: a live lesson is never auto-reloaded, even if a caller passes force.
+  if (!manual && isLiveSessionPath()) {
+    markUpdateAvailable(target);
+    requestHardReload({ manual: false, reason, source });
+    return false;
+  }
   if (!force && isAppUpdateUnsafe()) {
     markUpdateAvailable(target);
     return false;
@@ -111,8 +128,12 @@ export function applyAppUpdate({ force = false } = {}) {
     markUpdateAvailable(target);
     return false;
   }
+  const reloaded = reloadWithCacheBust(target, { manual, reason, source });
+  if (!reloaded) {
+    markUpdateAvailable(target);
+    return false;
+  }
   markReloaded(target);
-  reloadWithCacheBust(target);
   return true;
 }
 
@@ -176,11 +197,11 @@ async function requestSwUpdate() {
 function onControllerChange() {
   reportClientEvent("SW_CONTROLLER_CHANGE", {});
   // New SW took control — verify against /version.json before reloading.
-  // Never auto-reload a live lesson / board (isAppUpdateUnsafe).
+  // applyAppUpdate refuses a live lesson even if this check is skipped.
   checkForAppUpdate().then((state) => {
     if (!state.updateAvailable) return;
-    if (!isAppUpdateUnsafe() && !alreadyReloadedFor(state.remoteVersion)) {
-      applyAppUpdate();
+    if (!alreadyReloadedFor(state.remoteVersion)) {
+      applyAppUpdate({ reason: "sw-controllerchange", source: "appUpdate.onControllerChange" });
     }
   });
 }
@@ -198,8 +219,8 @@ function onSwMessage(event) {
     const version = event.data.version || "";
     if (!isRemoteNewer(version)) return;
     markUpdateAvailable(version);
-    if (!isAppUpdateUnsafe() && !alreadyReloadedFor(version)) {
-      applyAppUpdate();
+    if (!alreadyReloadedFor(version)) {
+      applyAppUpdate({ reason: "sw-activated", source: "appUpdate.onSwMessage" });
     }
   }
 }
@@ -215,16 +236,16 @@ export function startAppUpdateMonitor() {
 
   unregisterForeignServiceWorkers();
   checkForAppUpdate().then((state) => {
-    if (state.updateAvailable && isStandaloneShell() && !isAppUpdateUnsafe()) {
-      applyAppUpdate();
+    if (state.updateAvailable && isStandaloneShell()) {
+      applyAppUpdate({ reason: "startup-poll", source: "appUpdate.start" });
     }
   });
   requestSwUpdate();
 
   const intervalId = window.setInterval(() => {
     checkForAppUpdate().then((state) => {
-      if (state.updateAvailable && isStandaloneShell() && !isAppUpdateUnsafe()) {
-        applyAppUpdate();
+      if (state.updateAvailable && isStandaloneShell()) {
+        applyAppUpdate({ reason: "poll", source: "appUpdate.poll" });
       }
     });
     requestSwUpdate();
@@ -234,8 +255,8 @@ export function startAppUpdateMonitor() {
     if (document.visibilityState === "visible") {
       checkForAppUpdate();
       requestSwUpdate();
-      if (updateAvailable && !isAppUpdateUnsafe()) {
-        applyAppUpdate();
+      if (updateAvailable) {
+        applyAppUpdate({ reason: "visibility", source: "appUpdate.visibility" });
       }
     }
   };

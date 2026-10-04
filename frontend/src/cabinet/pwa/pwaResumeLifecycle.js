@@ -4,6 +4,7 @@
  */
 
 import { reportClientEvent } from "../../utils/clientTelemetry";
+import { requestHardReload } from "../../utils/liveSessionGuard";
 import { boardFrameGeometryKey, readBoardFrameSnapshot } from "./boardFrameSnapshot";
 import { isIosStandaloneDisplay, isStandaloneDisplay } from "./pwaHelpers";
 import {
@@ -193,19 +194,31 @@ export async function probeAuthSession({
 /** Same-origin room reload. If the board is iframed, reload the parent meeting. */
 export function reloadSameOriginRoom({
   win = typeof window !== "undefined" ? window : null,
+  manual = false,
+  reason = "room-reload",
+  source = "reloadSameOriginRoom",
 } = {}) {
   if (!win) return "none";
+  let mode = "self";
   try {
     const top = win.top;
     if (top && top !== win && top.location.origin === win.location.origin) {
-      top.location.reload();
-      return "parent";
+      mode = "parent";
     }
   } catch {
     /* cross-origin or missing top */
   }
-  win.location.reload();
-  return "self";
+  const allowed = requestHardReload({
+    manual,
+    reason,
+    source,
+    win,
+    navigate() {
+      if (mode === "parent") win.top.location.reload();
+      else win.location.reload();
+    },
+  });
+  return allowed ? mode : "blocked";
 }
 
 export function postResumeToBoardFrames(attemptId, {
@@ -539,7 +552,12 @@ export function createPwaResumeController({
     },
     manualReload() {
       emit("MANUAL_RELOAD_CLICK", { stage: "manual" });
-      return reloadSameOriginRoom({ win: target });
+      return reloadSameOriginRoom({
+        win: target,
+        manual: true,
+        reason: "manual-reload",
+        source: "pwaResumeLifecycle.manualReload",
+      });
     },
     getState: () => state,
     getAttemptId: () => attemptId,

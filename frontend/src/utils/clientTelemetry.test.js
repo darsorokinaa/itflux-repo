@@ -55,6 +55,7 @@ describe("clientTelemetry", () => {
     const replace = vi.fn();
     vi.stubGlobal("location", {
       href: "https://itflux.test/cabinet",
+      pathname: "/cabinet",
       replace,
     });
     expect(recoverChunkLoadOnce()).toBe(true);
@@ -62,6 +63,26 @@ describe("clientTelemetry", () => {
     expect(String(replace.mock.calls[0][0])).toContain("_itflux_v=");
     expect(recoverChunkLoadOnce()).toBe(false);
     expect(replace).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not hard-reload a live meeting after a chunk error", async () => {
+    const replace = vi.fn();
+    const reload = vi.fn();
+    vi.stubGlobal("location", {
+      href: "https://itflux.test/cabinet/meetings/abc",
+      pathname: "/cabinet/meetings/abc",
+      replace,
+      reload,
+    });
+    expect(recoverChunkLoadOnce()).toBe(false);
+    expect(replace).not.toHaveBeenCalled();
+    expect(reload).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem("itflux.chunk-recover")).toBeNull();
+    await flushClientTelemetry({ beacon: true });
+    const payload = await navigator.sendBeacon.mock.calls.at(-1)[1].text();
+    expect(payload).toContain("CHUNK_RECOVERY_BLOCKED_LIVE_SESSION");
+    expect(recoverChunkLoadOnce()).toBe(false);
+    expect(replace).not.toHaveBeenCalled();
   });
 
   it("treats Unexpected token '<' as a stale chunk that can recover once", () => {
