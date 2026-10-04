@@ -4,6 +4,7 @@
  */
 
 import { reportClientEvent } from "../../utils/clientTelemetry";
+import { boardFrameGeometryKey, readBoardFrameSnapshot } from "./boardFrameSnapshot";
 import { isIosStandaloneDisplay, isStandaloneDisplay } from "./pwaHelpers";
 import {
   MAX_AUTO_RECOVERY_FAILURES,
@@ -259,6 +260,7 @@ export function createPwaResumeController({
   let slowTimer = null;
   let failTimer = null;
   let attached = false;
+  let lastResizeKey = "";
 
   const extraBase = (more = {}) => {
     const ctx = typeof getContext === "function" ? (getContext() || {}) : {};
@@ -287,10 +289,20 @@ export function createPwaResumeController({
   };
 
   const noteLifecycle = (event) => {
-    const payload = extraBase({
-      event: String(event || "").slice(0, 32),
-      stage: "lifecycle",
-    });
+    const payload = readBoardFrameSnapshot(documentRef, event);
+    logLifecycle("board_iframe_lifecycle", payload);
+    try {
+      reportEvent("board_iframe_lifecycle", payload);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const onResize = () => {
+    const payload = readBoardFrameSnapshot(documentRef, "resize");
+    const key = boardFrameGeometryKey(payload);
+    if (key === lastResizeKey) return;
+    lastResizeKey = key;
     logLifecycle("board_iframe_lifecycle", payload);
     try {
       reportEvent("board_iframe_lifecycle", payload);
@@ -461,6 +473,7 @@ export function createPwaResumeController({
     noteLifecycle("focus");
     considerResume("focus");
   };
+  const onBlur = () => noteLifecycle("blur");
   const onOnline = () => {
     noteLifecycle("online");
     considerResume("online");
@@ -482,6 +495,8 @@ export function createPwaResumeController({
     target.addEventListener("pagehide", onPageHide);
     target.addEventListener("pageshow", onPageShow);
     target.addEventListener("focus", onFocus);
+    target.addEventListener("blur", onBlur);
+    target.addEventListener("resize", onResize);
     target.addEventListener("online", onOnline);
     target.addEventListener("offline", onOffline);
     target.addEventListener("freeze", onFreeze);
@@ -497,6 +512,8 @@ export function createPwaResumeController({
     target.removeEventListener("pagehide", onPageHide);
     target.removeEventListener("pageshow", onPageShow);
     target.removeEventListener("focus", onFocus);
+    target.removeEventListener("blur", onBlur);
+    target.removeEventListener("resize", onResize);
     target.removeEventListener("online", onOnline);
     target.removeEventListener("offline", onOffline);
     target.removeEventListener("freeze", onFreeze);

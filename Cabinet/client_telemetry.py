@@ -31,6 +31,14 @@ ALLOWED_EVENTS = frozenset(
         "board_iframe_unmount",
         "board_iframe_key_change",
         "board_iframe_lifecycle",
+        "board_iframe_health",
+        "board_document_mount",
+        "board_document_unload",
+        "board_document_pagehide",
+        "board_document_pageshow",
+        "board_document_visibility",
+        "board_sync_status",
+        "board_canvas_geometry",
         "api_timeout",
         "PWA_BACKGROUND",
         "PWA_FOREGROUND",
@@ -78,10 +86,23 @@ ALLOWED_EVENTS = frozenset(
     }
 )
 MAX_BODY_BYTES = 8000
+EXTRA_LOG_KEYS = 24
+EXTRA_LOG_CHARS = 1600
 
 
 def _clip(value, limit: int) -> str:
-    return str(value or "")[:limit]
+    if value is None:
+        return ""
+    return str(value)[:limit]
+
+
+def extra_for_log(extra, limit_keys: int = EXTRA_LOG_KEYS, value_limit: int = 120) -> dict:
+    if not isinstance(extra, dict):
+        return {}
+    logged = {}
+    for key, value in list(extra.items())[:limit_keys]:
+        logged[str(key)[:40]] = _clip(value, value_limit)
+    return logged
 
 
 @csrf_exempt
@@ -136,10 +157,7 @@ def client_telemetry(request):
             _clip(context.get("viewport"), 32),
             _clip(context.get("screen"), 32),
             _clip(context.get("os"), 64),
-            json.dumps(
-                {str(k)[:40]: _clip(v, 120) for k, v in list(extra.items())[:12]},
-                ensure_ascii=False,
-            )[:800],
+            json.dumps(extra_for_log(extra), ensure_ascii=False)[:EXTRA_LOG_CHARS],
             _clip(context.get("browser"), 240),
         )
         accepted += 1

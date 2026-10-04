@@ -29,15 +29,46 @@ import {
 import { fetchTldrawSyncToken } from "../../utils/cabinetAuth";
 import { markPerf } from "../../utils/appBoot";
 import { reportClientEvent } from "../../utils/clientTelemetry";
+import {
+  boardSyncStatusName,
+  nextCanvasGeometry,
+} from "./boardDocumentTelemetry";
 import { createLessonBoardAssetStore } from "./lessonBoardAssetStore";
 import BoardV2ErrorBoundary from "./BoardV2ErrorBoundary";
 import LessonBoardMessage from "./LessonBoardMessage";
 import "../styles/boards.css";
 
-function LessonBoardFrame({ roomId, children }) {
+function LessonBoardFrame({ roomId, boardId, children }) {
+  const rootRef = useRef(null);
   useEffect(() => lockBoardPageScroll(), []);
+  useEffect(() => {
+    const node = rootRef.current;
+    if (!node) return undefined;
+    let previous = null;
+    const publish = () => {
+      const rect = node.getBoundingClientRect();
+      const next = nextCanvasGeometry(previous, rect?.width, rect?.height);
+      if (!next) return;
+      previous = next;
+      reportClientEvent("board_canvas_geometry", {
+        board_id: String(boardId || "").slice(0, 64),
+        width: next.width,
+        height: next.height,
+      });
+    };
+    publish();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(publish);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [boardId]);
   return (
-    <div className="cb-board-editor lesson-board-shell" data-testid="tldraw-board" data-room-id={roomId || ""}>
+    <div
+      ref={rootRef}
+      className="cb-board-editor lesson-board-shell"
+      data-testid="tldraw-board"
+      data-room-id={roomId || ""}
+    >
       <div className="lesson-board">{children}</div>
     </div>
   );
@@ -128,9 +159,21 @@ function TldrawBoardSynced({
   }, []);
 
   const syncStatusRef = useRef(sync.status);
+  const reportedSyncRef = useRef("");
   useEffect(() => {
     const previous = syncStatusRef.current;
     syncStatusRef.current = sync.status;
+    const nextName = boardSyncStatusName(sync.status);
+    const prevName = reportedSyncRef.current;
+    if (prevName !== nextName) {
+      reportedSyncRef.current = nextName;
+      reportClientEvent("board_sync_status", {
+        board_id: String(boardId || "").slice(0, 64),
+        status: nextName,
+        previous: prevName,
+        raw: String(sync.status || "").slice(0, 32),
+      });
+    }
     if (sync.status && sync.status !== "loading" && sync.status !== "error") {
       markPerf("board_synced");
     }
@@ -141,16 +184,27 @@ function TldrawBoardSynced({
       phase: String(sync.status || "").slice(0, 32),
       previous: String(previous || "").slice(0, 32),
     });
-  }, [sync.status]);
+  }, [boardId, sync.status]);
 
   useEffect(() => {
     if (sync.status !== "loading") {
       setStalled(false);
       return undefined;
     }
-    const timer = window.setTimeout(() => setStalled(true), 8000);
+    const timer = window.setTimeout(() => {
+      setStalled(true);
+      if (reportedSyncRef.current === "error") return;
+      const previous = reportedSyncRef.current;
+      reportedSyncRef.current = "error";
+      reportClientEvent("board_sync_status", {
+        board_id: String(boardId || "").slice(0, 64),
+        status: "error",
+        previous,
+        raw: "stalled",
+      });
+    }, 8000);
     return () => window.clearTimeout(timer);
-  }, [sync.status]);
+  }, [boardId, sync.status]);
 
   if (sync.status === "loading" && !stalled) {
     return <LessonBoardMessage text="Подключаем доску…" />;
@@ -227,7 +281,7 @@ export default function TldrawBoard(props) {
   const roomId = lessonBoardRoomId(props.boardId);
 
   return (
-    <LessonBoardFrame roomId={roomId}>
+    <LessonBoardFrame roomId={roomId} boardId={props.boardId}>
       <BoardV2ErrorBoundary onRetry={retry}>
         <TldrawBoardSession key={attempt} {...props} onRetry={retry} />
       </BoardV2ErrorBoundary>

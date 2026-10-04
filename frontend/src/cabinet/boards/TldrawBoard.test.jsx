@@ -183,6 +183,28 @@ describe("TldrawBoard", () => {
     expect(syncCalls.every((call) => call.roomId === BOARD)).toBe(true);
   });
 
+  it("reports the sync status transition without opening another room", () => {
+    reportClientEvent.mockClear();
+    syncResult = { status: "synced-remote", store: { ok: true } };
+    const view = render(boardTree());
+    expect(reportClientEvent).toHaveBeenCalledWith("board_sync_status", expect.objectContaining({
+      board_id: BOARD,
+      status: "synced",
+      previous: "",
+      raw: "synced-remote",
+    }));
+    expect(reportClientEvent).toHaveBeenCalledWith("board_canvas_geometry", expect.objectContaining({
+      board_id: BOARD,
+    }));
+    syncResult = { status: "error", store: { ok: true } };
+    view.rerender(boardTree());
+    expect(reportClientEvent).toHaveBeenCalledWith("board_sync_status", expect.objectContaining({
+      status: "error",
+      previous: "synced",
+      raw: "error",
+    }));
+  });
+
   it("reports when a connected canvas is replaced by a loading or error state", () => {
     syncResult = { status: "synced-remote", store: { ok: true } };
     const view = render(boardTree());

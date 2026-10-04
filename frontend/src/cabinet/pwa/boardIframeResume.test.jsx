@@ -107,8 +107,11 @@ describe("board iframe resume", () => {
       "board_iframe_lifecycle",
       expect.objectContaining({
         event: "focus",
-        visibilityState: "hidden",
+        document_visibilityState: "hidden",
+        board_id: "board-1",
+        frame_key: "board:board-1:0",
         iframe_isConnected: true,
+        iframe_src: "/cabinet/boards/board-1",
       }),
     );
   });
@@ -145,5 +148,49 @@ describe("board iframe resume", () => {
     expect(after.getAttribute("src")).toBe("/cabinet/boards/board-1");
     expect(reportClientEvent).not.toHaveBeenCalledWith("board_iframe_unmount", expect.anything());
     expect(reportClientEvent).not.toHaveBeenCalledWith("board_iframe_key_change", expect.anything());
+  });
+
+  it("logs resize when the board iframe geometry changes and skips a repeat", async () => {
+    const onResume = vi.fn();
+    render(
+      <BoardFrameHarness nowRef={nowRef} onResume={onResume} remount="always" />,
+    );
+    const frame = boardFrame();
+    const box = (width, height) => () => ({
+      width,
+      height,
+      top: 0,
+      left: 0,
+      right: width,
+      bottom: height,
+      x: 0,
+      y: 0,
+      toJSON() { return {}; },
+    });
+    frame.getBoundingClientRect = box(320, 480);
+    reportClientEvent.mockClear();
+    await act(async () => {
+      window.dispatchEvent(new Event("resize"));
+      window.dispatchEvent(new Event("resize"));
+    });
+    const resizeCalls = () => reportClientEvent.mock.calls.filter(
+      (call) => call[0] === "board_iframe_lifecycle" && call[1]?.event === "resize",
+    );
+    expect(resizeCalls()).toHaveLength(1);
+    expect(resizeCalls()[0][1]).toEqual(expect.objectContaining({
+      iframe_isConnected: true,
+      iframe_rect_width: 320,
+      iframe_rect_height: 480,
+      frame_key: "board:board-1:0",
+    }));
+    frame.getBoundingClientRect = box(0, 0);
+    await act(async () => {
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(resizeCalls()).toHaveLength(2);
+    expect(resizeCalls()[1][1].iframe_rect_width).toBe(0);
+    expect(resizeCalls()[1][1].iframe_rect_height).toBe(0);
+    expect(onResume).not.toHaveBeenCalled();
+    expect(boardFrame()).toBe(frame);
   });
 });

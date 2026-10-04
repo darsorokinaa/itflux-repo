@@ -76,6 +76,7 @@ import {
   logVariantLifecycle,
 } from "../meetingPresent";
 import LessonBoardWorkspaceFrame from "../pwa/lessonBoardWorkspaceFrame";
+import { BOARD_IFRAME_HEALTH_MS, startBoardIframeHealth } from "../pwa/boardFrameSnapshot";
 import {
   LESSON_BOARD_CHROME_SOURCE,
   LESSON_ROOM_CHROME_SOURCE,
@@ -1896,6 +1897,14 @@ export default function VideoMeetingPage() {
       resumeControllerRef.current = null;
     };
   }, [meetingUuid, pageState, remountJitsi, roleLabel]);
+
+  useEffect(() => {
+    if (workspaceMaterial?.kind !== "board") return undefined;
+    return startBoardIframeHealth({
+      intervalMs: BOARD_IFRAME_HEALTH_MS,
+      report: reportClientEvent,
+    });
+  }, [workspaceMaterial?.kind]);
 
   useEffect(() => {
     const pending =
