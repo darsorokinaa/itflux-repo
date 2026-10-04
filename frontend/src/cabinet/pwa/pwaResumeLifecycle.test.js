@@ -299,7 +299,7 @@ describe("createPwaResumeController", () => {
     expect(reportEvent).not.toHaveBeenCalledWith("RESUME_START", expect.any(Object));
     expect(reportEvent).toHaveBeenCalledWith(
       "board_iframe_lifecycle",
-      expect.objectContaining({ event: "focus", visibilityState: "hidden" }),
+      expect.objectContaining({ event: "focus", document_visibilityState: "hidden" }),
     );
     Object.defineProperty(document, "visibilityState", {
       configurable: true,

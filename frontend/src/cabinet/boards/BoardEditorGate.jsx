@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { fetchInteractiveBoard } from "../../utils/cabinetAuth";
+import { bindBoardDocumentTelemetry } from "./boardDocumentTelemetry";
 import { normalizeBoardProvider } from "./boardProvider";
 import BoardV2ErrorBoundary from "./BoardV2ErrorBoundary";
 import LessonBoardMessage from "./LessonBoardMessage";
@@ -22,6 +23,8 @@ export default function BoardEditorGate() {
     phase: "loading",
     board: null,
   });
+
+  useEffect(() => bindBoardDocumentTelemetry(boardId), [boardId]);
 
   useEffect(() => {
     let cancelled = false;

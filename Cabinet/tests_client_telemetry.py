@@ -119,6 +119,48 @@ class ClientTelemetryApiTests(TestCase):
         self.assertIn(429, statuses)
         self.assertEqual(retry, "60")
 
+    def test_iframe_lifecycle_extra_keeps_dom_fields(self):
+        from Cabinet.client_telemetry import extra_for_log
+
+        extra = {
+            "event": "visibilitychange",
+            "document_visibilityState": "visible",
+            "board_id": "fac021",
+            "frame_key": "board:fac021:0",
+            "iframe_isConnected": False,
+            "iframe_src": "/cabinet/boards/fac021",
+            "iframe_rect_width": 0,
+            "iframe_rect_height": 0,
+            "iframe_display": "none",
+            "iframe_visibility": "hidden",
+            "iframe_opacity": "0",
+            "workspace_display": "none",
+            "workspace_visibility": "hidden",
+            "workspace_width": 0,
+            "workspace_height": 0,
+            "workspace_className": "video-lesson-workspace is-minimized",
+            "connectionAttemptId": "should-not-be-required",
+        }
+        logged = extra_for_log(extra)
+        self.assertEqual(logged["frame_key"], "board:fac021:0")
+        self.assertEqual(logged["iframe_isConnected"], "False")
+        self.assertEqual(logged["iframe_rect_width"], "0")
+        self.assertEqual(logged["iframe_src"], "/cabinet/boards/fac021")
+        self.assertIn("workspace_className", logged)
+
+        with self.assertLogs("Cabinet.client_telemetry", level="INFO") as captured:
+            res = self.client.post(
+                "/api/cabinet/client-telemetry/",
+                data={"event": "board_iframe_lifecycle", "extra": extra},
+                content_type="application/json",
+            )
+        self.assertEqual(res.status_code, 200)
+        blob = "\n".join(captured.output)
+        self.assertIn("frame_key", blob)
+        self.assertIn("iframe_isConnected", blob)
+        self.assertIn("iframe_src", blob)
+        self.assertIn("/cabinet/boards/fac021", blob)
+
     def test_frontend_event_names_are_allowed(self):
         from Cabinet.client_telemetry import ALLOWED_EVENTS
 
