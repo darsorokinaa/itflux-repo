@@ -435,8 +435,10 @@ export function SeasonalThemeProvider({ children }) {
   );
 
   // Одноразовый canvas при входе на страницу / смене вкладки приложения.
+  const isMaintenanceHome = (pathname || "").replace(/\/+$/, "") === "" || pathname === "/";
   const showEffects =
-    Boolean(effectiveTheme)
+    !isMaintenanceHome
+    && Boolean(effectiveTheme)
     && effectIntensity !== "off"
     && !heavy
     && !reducedMotion;
@@ -451,7 +453,7 @@ export function SeasonalThemeProvider({ children }) {
           isMobile={isMobile}
         />
       ) : null}
-      {effectiveTheme ? (
+      {!isMaintenanceHome && effectiveTheme ? (
         <SeasonalThemeDecorations
           decorations={effectiveTheme.decorations || []}
           intensity={meetingChrome ? "off" : intensity}
@@ -463,13 +465,13 @@ export function SeasonalThemeProvider({ children }) {
           className={meetingChrome ? "seasonal-decor-layer--chrome" : ""}
         />
       ) : null}
-      {preview?.active ? (
+      {!isMaintenanceHome && preview?.active ? (
         <SeasonalPreviewBanner
           themeName={preview.theme_name || theme?.name || "тема"}
           onStop={stopPreview}
         />
       ) : null}
-      {!heavy && hasSeasonalAppearance ? <SeasonalAppearanceFab /> : null}
+      {!isMaintenanceHome && !heavy && hasSeasonalAppearance ? <SeasonalAppearanceFab /> : null}
     </SeasonalThemeContext.Provider>
   );
 }
