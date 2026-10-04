@@ -287,6 +287,7 @@ def send_web_push_to_user(
                 vapid_private_key=vapid,
                 vapid_claims=_vapid_claims(),
                 ttl=86400,
+                timeout=10,
             )
             sub.last_seen_at = timezone.now()
             sub.last_error_at = None

@@ -15,7 +15,6 @@ function Layout() {
   const { pathname, search } = useLocation();
   /** Маркетинг и выбор заданий — свой Nav, без шапки/подвала генератора */
   const pathNorm = (pathname || "").replace(/\/+$/, "") || "/";
-  const isMaintenanceHome = pathNorm === "/";
   const isTasksPrepPicker = /^\/(oge|ege|vpr)\/[^/]+$/.test(pathNorm);
   const isLessonViewerPage = /^\/lessons\/[^/]+\/view$/.test(pathNorm);
   const isInterestingViewerPage = /^\/interesting\/[^/]+\/view$/.test(pathNorm);
@@ -111,10 +110,9 @@ function Layout() {
   }, [pathname, search, cookieAccepted]);
 
   const showMobileTabBar =
-    !isMaintenanceHome && !isLessonOrHomeworkContext && !isChromelessPage && !isExamVariantPage && !isCabinetArea && !isBookingPage && !isWorksheetPage;
+    !isLessonOrHomeworkContext && !isChromelessPage && !isExamVariantPage && !isCabinetArea && !isBookingPage && !isWorksheetPage;
 
   const showSiteFooter =
-    !isMaintenanceHome &&
     !isChromelessPage &&
     !isLessonOrHomeworkContext &&
     !isBookingPage &&
@@ -123,7 +121,6 @@ function Layout() {
 
   /** Скрываем на полноэкранных сценариях, где кнопка мешает работе. */
   const showSupportFab =
-    !isMaintenanceHome &&
     !isChromelessPage &&
     !isLessonOrHomeworkContext &&
     !isHomeworkEmbedContext &&
@@ -140,7 +137,7 @@ function Layout() {
       {/* Фон-паттерн: по умолчанию скрыт (home.css). Сезонная тема включает через CSS-переменные. */}
       <div className="app-shell-pattern" aria-hidden="true" />
       <div className="app-shell-content">
-      {!isMaintenanceHome && !isLessonOrHomeworkContext && !isChromelessPage && !isBookingPage && (!isCabinetArea || pathname === '/cabinet/login') && (
+      {!isLessonOrHomeworkContext && !isChromelessPage && !isBookingPage && (!isCabinetArea || pathname === '/cabinet/login') && (
         <div className="no-print">
           <Nav />
         </div>
@@ -171,7 +168,7 @@ function Layout() {
       </footer>
       ) : null}
 
-      {!isMaintenanceHome && !cookieAccepted && !isLessonOrHomeworkContext && !isChromelessPage && (
+      {!cookieAccepted && !isLessonOrHomeworkContext && !isChromelessPage && (
         <div className="cookie-banner no-print" role="alertdialog" aria-label="Уведомление об использовании файлов cookie">
           <div className="cookie-banner-inner">
             <p className="cookie-banner-text">

@@ -146,3 +146,22 @@ class ContentSecurityPolicyReportOnlyMiddleware:
         if "Content-Security-Policy-Report-Only" not in response:
             response["Content-Security-Policy-Report-Only"] = CABINET_CSP_REPORT_ONLY
         return response
+
+
+class LargeJsonContextMiddleware:
+    """Attach path and request id so a large json.loads can be attributed."""
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        from Cabinet.large_json import reset_json_request_meta, set_json_request_meta
+
+        token = set_json_request_meta(
+            path=request.path or "",
+            request_id=(request.headers.get("X-Request-ID") or "")[:64],
+        )
+        try:
+            return self.get_response(request)
+        finally:
+            reset_json_request_meta(token)

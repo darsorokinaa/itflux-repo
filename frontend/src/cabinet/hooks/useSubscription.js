@@ -11,12 +11,19 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { fetchSubscriptionUsage } from "../../utils/cabinetAuth";
+import {
+  fetchSubscriptionUsage,
+  invalidateCabinetRead,
+  readCabinetSnapshot,
+  rememberCabinetSnapshot,
+} from "../../utils/cabinetAuth";
 
 export const SUBSCRIPTION_CHANGED_EVENT = "cabinet:subscription-changed";
 
 /** Сообщить всему кабинету, что тариф/подписка изменились. */
 export function notifySubscriptionChanged() {
+  rememberCabinetSnapshot("subscription-usage", null);
+  invalidateCabinetRead("subscription-usage");
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(SUBSCRIPTION_CHANGED_EVENT));
 }
@@ -34,7 +41,7 @@ const INITIAL_STATE = {
 };
 
 export function useSubscription() {
-  const [state, setState] = useState(INITIAL_STATE);
+  const [state, setState] = useState(() => readCabinetSnapshot("subscription-usage") || INITIAL_STATE);
 
   const load = useCallback(async ({ soft = false } = {}) => {
     if (!soft) {
@@ -42,7 +49,7 @@ export function useSubscription() {
     }
     try {
       const data = await fetchSubscriptionUsage();
-      setState({
+      const next = {
         currentPlan: data.plan,
         assignedPlan: data.assigned_plan || data.plan,
         limits: data.limits || {},
@@ -52,7 +59,9 @@ export function useSubscription() {
         subscription: data.subscription,
         loading: false,
         error: null,
-      });
+      };
+      rememberCabinetSnapshot("subscription-usage", next);
+      setState(next);
     } catch (err) {
       setState((s) => ({
         ...s,
@@ -63,6 +72,11 @@ export function useSubscription() {
   }, []);
 
   useEffect(() => {
+    const cached = readCabinetSnapshot("subscription-usage");
+    if (cached && !cached.loading && !cached.error) {
+      setState(cached);
+      return;
+    }
     load();
   }, [load]);
 

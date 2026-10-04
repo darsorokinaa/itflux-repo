@@ -31,6 +31,18 @@ vi.mock("@tldraw/tlschema", () => ({
   },
   getDefaultUserPresence: () => null,
   geoShapeMigrations: { sequence: [] },
+  DefaultColorStyle: {
+    type: { validate: (value) => value },
+    addValues() {},
+    removeValues() {},
+  },
+  geoShapeProps: {
+    labelColor: {
+      type: { validate: (value) => value },
+      addValues() {},
+      removeValues() {},
+    },
+  },
 }));
 
 vi.mock("tldraw", () => ({
@@ -97,9 +109,9 @@ afterEach(() => {
 });
 
 describe("tldraw room resume", () => {
-  it("reconnects the same room after wake without a manual reload", () => {
-    expect(shouldResumeTldrawRoom({ visibilityState: "visible", status: "error", stalled: false })).toBe(true);
-    expect(shouldResumeTldrawRoom({ visibilityState: "visible", status: "synced-remote", stalled: true })).toBe(true);
+  it("does not remount the room when the tab wakes or the network blips", () => {
+    expect(shouldResumeTldrawRoom({ visibilityState: "visible", status: "error", stalled: false })).toBe(false);
+    expect(shouldResumeTldrawRoom({ visibilityState: "visible", status: "synced-remote", stalled: true })).toBe(false);
     expect(shouldResumeTldrawRoom({ visibilityState: "hidden", status: "error", stalled: true })).toBe(false);
     expect(shouldResumeTldrawRoom({ visibilityState: "visible", status: "synced-remote", stalled: false })).toBe(false);
   });
@@ -166,6 +178,17 @@ describe("TldrawBoard", () => {
     expect(syncCalls.every((call) => call.roomId === BOARD)).toBe(true);
   });
 
+  it("keeps the same sync session when the tab wakes or the network returns", () => {
+    syncResult = { status: "synced-remote", store: { ok: true }, connectionStatus: "offline" };
+    render(boardTree());
+    const before = syncCalls.length;
+    fireEvent(document, new Event("visibilitychange"));
+    fireEvent(window, new Event("online"));
+    fireEvent(window, new Event("pageshow"));
+    expect(syncCalls.length).toBe(before);
+    expect(screen.getByTestId("tldraw-canvas")).toBeTruthy();
+  });
+
   it("sends a stable user id and display name, not an email", () => {
     render(boardTree({ displayName: "teacher@school.test", role: "teacher", userId: 4 }));
     const user = syncCalls.at(-1).users.currentUser.get();
@@ -188,6 +211,7 @@ describe("TldrawBoard", () => {
     explode = true;
     render(boardTree());
     expect(screen.getByText("Не удалось подключить доску")).toBeTruthy();
+    expect(screen.getByText(/tldraw failed/)).toBeTruthy();
     expect(screen.getByText("Видеозвонок")).toBeTruthy();
     expect(screen.queryByTestId("tldraw-canvas")).toBeNull();
     explode = false;

@@ -79,6 +79,11 @@ nginx -t && systemctl reload nginx
 echo "=== Перезапуск Daphne (itflux) ==="
 systemctl restart itflux
 
+if systemctl cat tldraw-sync.service >/dev/null 2>&1; then
+  echo "=== Перезапуск tldraw sync ==="
+  systemctl restart tldraw-sync
+fi
+
 echo "=== Установка cron (напоминания, ДЗ, подписка) ==="
 chmod +x "$APP_DIR/deploy/run_management.sh" "$APP_DIR/deploy/install_cron.sh"
 APP_DIR="$APP_DIR" bash "$APP_DIR/deploy/install_cron.sh" || echo "WARN: cron не установился — запустите вручную deploy/install_cron.sh"

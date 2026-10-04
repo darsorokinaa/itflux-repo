@@ -360,108 +360,124 @@ class NotificationDispatcher:
             push_title = private_title or title
             push_body = private_message or message
 
+        from .notification_delivery import notification_delivery_is_async, schedule_notification
+
         push_result = {"sent": 0, "active": 0, "reason": ""}
-        if CHANNEL_PUSH in channels or (force and create_push is not False):
-            from .webpush import send_web_push_to_user
 
-            push_url = payload.get("url") if isinstance(payload.get("url"), str) else "/cabinet"
-            push_result = send_web_push_to_user(
-                recipient,
-                title=push_title,
-                body=push_body,
-                url=push_url,
-                tag=push_tag or event_type,
-                priority=priority,
-                urgent=urgent,
-                payload_extra=payload,
-                create_log=True,
-                force=force,
-                notification=in_app_note,
-                event_type=event_type,
-            )
-            result.push_sent = int(push_result.get("sent") or 0)
-            result.push_active = int(push_result.get("active") or 0)
-            if result.push_sent:
-                result.channels.append(CHANNEL_PUSH)
-            logger.info(
-                "notify_push event=%s recipient=%s sent=%s active=%s reason=%s",
-                event_type,
-                recipient.pk,
-                result.push_sent,
-                result.push_active,
-                push_result.get("reason") or "",
-            )
+        def _deliver_push_and_telegram():
+            nonlocal push_result
+            if CHANNEL_PUSH in channels or (force and create_push is not False):
+                from .webpush import send_web_push_to_user
 
-        if CHANNEL_TELEGRAM in channels:
-            logger.info(
-                "notify_telegram event=%s recipient=%s pref_enabled=%s",
-                event_type,
-                recipient.pk,
-                True,
-            )
-            existing_tg = None
-            if event_key:
-                existing_tg = Notification.objects.filter(
-                    recipient_user=recipient,
-                    channel=NotificationChannel.TELEGRAM,
-                    event_key=event_key,
-                ).first()
-            if existing_tg:
+                push_url = payload.get("url") if isinstance(payload.get("url"), str) else "/cabinet"
+                push_result = send_web_push_to_user(
+                    recipient,
+                    title=push_title,
+                    body=push_body,
+                    url=push_url,
+                    tag=push_tag or event_type,
+                    priority=priority,
+                    urgent=urgent,
+                    payload_extra=payload,
+                    create_log=True,
+                    force=force,
+                    notification=in_app_note,
+                    event_type=event_type,
+                )
+                result.push_sent = int(push_result.get("sent") or 0)
+                result.push_active = int(push_result.get("active") or 0)
+                if result.push_sent:
+                    result.channels.append(CHANNEL_PUSH)
                 logger.info(
-                    "notify_telegram_skip event=%s recipient=%s reason=duplicate key=%s",
+                    "notify_push event=%s recipient=%s sent=%s active=%s reason=%s",
                     event_type,
                     recipient.pk,
-                    event_key,
+                    result.push_sent,
+                    result.push_active,
+                    push_result.get("reason") or "",
                 )
-            else:
-                try:
-                    from .telegram_connect import send_telegram_to_user
 
-                    if getattr(prefs, "push_privacy_mode", False) and not force and (private_title or private_message):
-                        text = telegram_text or (
-                            f"{private_title or title}\n\n"
-                            f"{private_message or message}"
-                        )
-                    else:
-                        text = telegram_text or f"{title}\n\n{message}"
-                    from .notification_links import strip_open_path_from_message
-                    from .telegram_connect import telegram_message_with_open
-
-                    text = strip_open_path_from_message(text)
-                    open_path = url if isinstance(url, str) and url.startswith("/") else ""
-                    if not open_path:
-                        raw_payload_url = payload.get("url")
-                        if isinstance(raw_payload_url, str) and raw_payload_url.startswith("/"):
-                            open_path = raw_payload_url
-                    if open_path and "<a href" not in text:
-                        text = telegram_message_with_open(text, open_path)
-                    ok = send_telegram_to_user(recipient, text)
-                    try:
-                        Notification.objects.create(
-                            recipient_user=recipient,
-                            recipient_student=recipient_student,
-                            recipient_teacher=recipient_teacher,
-                            actor=actor,
-                            channel=NotificationChannel.TELEGRAM,
-                            event_type=event_type,
-                            event_key=event_key or "",
-                            title=title[:255],
-                            message=message,
-                            payload=payload,
-                            status=NotificationStatus.SENT if ok else NotificationStatus.FAILED,
-                            sent_at=timezone.now() if ok else None,
-                            is_read=True,
-                        )
-                    except IntegrityError:
-                        ok = False
-                    if ok:
-                        result.channels.append(CHANNEL_TELEGRAM)
-                except Exception:
-                    logger.exception(
-                        "notify_telegram_failed event=%s recipient=%s",
+            if CHANNEL_TELEGRAM in channels:
+                logger.info(
+                    "notify_telegram event=%s recipient=%s pref_enabled=%s",
+                    event_type,
+                    recipient.pk,
+                    True,
+                )
+                existing_tg = None
+                if event_key:
+                    existing_tg = Notification.objects.filter(
+                        recipient_user=recipient,
+                        channel=NotificationChannel.TELEGRAM,
+                        event_key=event_key,
+                    ).first()
+                if existing_tg:
+                    logger.info(
+                        "notify_telegram_skip event=%s recipient=%s reason=duplicate key=%s",
                         event_type,
                         recipient.pk,
+                        event_key,
                     )
+                else:
+                    try:
+                        from .telegram_connect import send_telegram_to_user
+
+                        if getattr(prefs, "push_privacy_mode", False) and not force and (private_title or private_message):
+                            text = telegram_text or (
+                                f"{private_title or title}\n\n"
+                                f"{private_message or message}"
+                            )
+                        else:
+                            text = telegram_text or f"{title}\n\n{message}"
+                        from .notification_links import strip_open_path_from_message
+                        from .telegram_connect import telegram_message_with_open
+
+                        text = strip_open_path_from_message(text)
+                        open_path = url if isinstance(url, str) and url.startswith("/") else ""
+                        if not open_path:
+                            raw_payload_url = payload.get("url")
+                            if isinstance(raw_payload_url, str) and raw_payload_url.startswith("/"):
+                                open_path = raw_payload_url
+                        if open_path and "<a href" not in text:
+                            text = telegram_message_with_open(text, open_path)
+                        ok = send_telegram_to_user(recipient, text)
+                        try:
+                            Notification.objects.create(
+                                recipient_user=recipient,
+                                recipient_student=recipient_student,
+                                recipient_teacher=recipient_teacher,
+                                actor=actor,
+                                channel=NotificationChannel.TELEGRAM,
+                                event_type=event_type,
+                                event_key=event_key or "",
+                                title=title[:255],
+                                message=message,
+                                payload=payload,
+                                status=NotificationStatus.SENT if ok else NotificationStatus.FAILED,
+                                sent_at=timezone.now() if ok else None,
+                                is_read=True,
+                            )
+                        except IntegrityError:
+                            ok = False
+                        if ok:
+                            result.channels.append(CHANNEL_TELEGRAM)
+                    except Exception:
+                        logger.exception(
+                            "notify_telegram_failed event=%s recipient=%s",
+                            event_type,
+                            recipient.pk,
+                        )
+
+        external = CHANNEL_PUSH in channels or CHANNEL_TELEGRAM in channels or (
+            force and create_push is not False
+        )
+        if external and notification_delivery_is_async():
+            schedule_notification(_deliver_push_and_telegram)
+            if not result.channels and not result.in_app:
+                result.reason = "external_scheduled"
+            return result
+        if external:
+            _deliver_push_and_telegram()
 
         if not result.channels and not result.in_app:
             result.skipped = True

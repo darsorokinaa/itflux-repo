@@ -27,6 +27,7 @@ import {
   tldrawLicenseKey,
 } from "./boardProvider";
 import { fetchTldrawSyncToken } from "../../utils/cabinetAuth";
+import { markPerf } from "../../utils/appBoot";
 import { createLessonBoardAssetStore } from "./lessonBoardAssetStore";
 import BoardV2ErrorBoundary from "./BoardV2ErrorBoundary";
 import LessonBoardMessage from "./LessonBoardMessage";
@@ -74,9 +75,11 @@ async function lessonBoardConnectUri(boardId) {
   return url.toString();
 }
 
-export function shouldResumeTldrawRoom({ visibilityState, status, stalled }) {
-  if (visibilityState === "hidden") return false;
-  return status === "error" || Boolean(stalled);
+// useSync reconnects a dropped socket on the same store. Remounting on wake,
+// online, or a short stall opens a second socket with the same tab session id
+// and throws away strokes that have not been committed.
+export function shouldResumeTldrawRoom() {
+  return false;
 }
 
 function lessonUserPresence(store, user) {
@@ -120,6 +123,16 @@ function TldrawBoardSynced({
   const [stalled, setStalled] = useState(false);
 
   useEffect(() => {
+    markPerf("board_mount");
+  }, []);
+
+  useEffect(() => {
+    if (sync.status && sync.status !== "loading" && sync.status !== "error") {
+      markPerf("board_synced");
+    }
+  }, [sync.status]);
+
+  useEffect(() => {
     if (sync.status !== "loading") {
       setStalled(false);
       return undefined;
@@ -127,25 +140,6 @@ function TldrawBoardSynced({
     const timer = window.setTimeout(() => setStalled(true), 8000);
     return () => window.clearTimeout(timer);
   }, [sync.status]);
-
-  useEffect(() => {
-    const resume = () => {
-      if (!shouldResumeTldrawRoom({
-        visibilityState: document.visibilityState,
-        status: sync.status,
-        stalled,
-      })) return;
-      onRetry?.();
-    };
-    document.addEventListener("visibilitychange", resume);
-    window.addEventListener("pageshow", resume);
-    window.addEventListener("online", resume);
-    return () => {
-      document.removeEventListener("visibilitychange", resume);
-      window.removeEventListener("pageshow", resume);
-      window.removeEventListener("online", resume);
-    };
-  }, [onRetry, stalled, sync.status]);
 
   if (sync.status === "loading" && !stalled) {
     return <LessonBoardMessage text="Подключаем доску…" />;

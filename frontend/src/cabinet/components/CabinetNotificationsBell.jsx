@@ -121,6 +121,56 @@ function parseNotificationContent(n) {
   };
 }
 
+const feeds = new Map();
+
+function feedFor(studentMode) {
+  const key = studentMode ? "student" : "teacher";
+  let feed = feeds.get(key);
+  if (feed) return feed;
+  const listeners = new Set();
+  let timer = null;
+  let latest = null;
+  const load = async () => {
+    const data = await fetchNotifications({ student: studentMode });
+    latest = data;
+    listeners.forEach((listener) => listener(data));
+    return data;
+  };
+  feed = {
+    subscribe(listener) {
+      listeners.add(listener);
+      if (!timer) {
+        timer = setInterval(() => {
+          load().catch(() => {});
+        }, 60000);
+        load().catch(() => {});
+      } else if (latest) {
+        listener(latest);
+      }
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0 && timer != null) {
+          clearInterval(timer);
+          timer = null;
+        }
+      };
+    },
+    reload() {
+      return load();
+    },
+  };
+  feeds.set(key, feed);
+  return feed;
+}
+
+export function subscribeNotificationFeed(studentMode, listener) {
+  return feedFor(studentMode).subscribe(listener);
+}
+
+export function reloadNotificationFeed(studentMode = false) {
+  return feedFor(studentMode).reload();
+}
+
 export default function CabinetNotificationsBell({ studentMode = false }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -131,35 +181,35 @@ export default function CabinetNotificationsBell({ studentMode = false }) {
   const [busy, setBusy] = useState("");
   const rootRef = useRef(null);
 
+  const applyFeed = useCallback((data) => {
+    const raw = data?.items || data?.results || [];
+    const seen = new Set();
+    const deduped = raw.filter((n) => {
+      const key = `${n.id ?? ""}|${n.title}|${n.message}|${(n.created_at || "").slice(0, 16)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    setItems(deduped);
+    setUnread(data?.unread_count ?? data?.count ?? 0);
+    setError("");
+    setLoading(false);
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const data = await fetchNotifications({ student: studentMode });
-      const raw = data?.items || data?.results || [];
-      const seen = new Set();
-      const deduped = raw.filter((n) => {
-        const key = `${n.id ?? ""}|${n.title}|${n.message}|${(n.created_at || "").slice(0, 16)}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-      setItems(deduped);
-      setUnread(data?.unread_count ?? data?.count ?? 0);
+      applyFeed(await reloadNotificationFeed(studentMode));
     } catch {
       setItems([]);
       setUnread(0);
       setError("Не удалось загрузить уведомления");
-    } finally {
       setLoading(false);
     }
-  }, [studentMode]);
+  }, [applyFeed, studentMode]);
 
-  useEffect(() => {
-    load();
-    const id = setInterval(load, 60000);
-    return () => clearInterval(id);
-  }, [load]);
+  useEffect(() => subscribeNotificationFeed(studentMode, applyFeed), [applyFeed, studentMode]);
 
   useEffect(() => {
     const onDoc = (e) => {

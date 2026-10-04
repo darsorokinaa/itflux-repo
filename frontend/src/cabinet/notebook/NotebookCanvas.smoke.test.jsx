@@ -80,7 +80,39 @@ describe("NotebookCanvas pointer smoke", () => {
     const canvas = container.querySelector("canvas");
     fireEvent.pointerDown(canvas, pagePoint(canvas, 100, 120));
     expect(promptSpy).not.toHaveBeenCalled();
-    expect(container.querySelector("textarea")).toBeTruthy();
+    const area = container.querySelector("textarea");
+    expect(area).toBeTruthy();
+    expect(parseFloat(area.style.width)).toBeGreaterThan(0);
+    expect(parseFloat(area.style.width)).toBeLessThan(40);
     promptSpy.mockRestore();
+  });
+
+  it("keeps typed text on the page after the editor closes", () => {
+    const onCommit = vi.fn();
+    const page = { id: "p1", width: 1000, height: 1414 };
+    const { container } = render(
+      <NotebookCanvas
+        page={page}
+        objects={[]}
+        tool={TOOL.TEXT}
+        color="#DC2626"
+        fontSize={24}
+        selectedIds={[]}
+        onSelectIds={() => {}}
+        onObjectsCommit={onCommit}
+      />,
+    );
+    const canvas = container.querySelector("canvas");
+    fireEvent.pointerDown(canvas, pagePoint(canvas, 120, 200));
+    const area = container.querySelector("textarea");
+    fireEvent.change(area, { target: { value: "Заметка" } });
+    fireEvent.keyDown(area, { key: "Enter" });
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    const [objects, historyType] = onCommit.mock.calls[0];
+    expect(historyType).toBe("ADD_ANNOTATION");
+    expect(objects).toHaveLength(1);
+    expect(objects[0].text).toBe("Заметка");
+    expect(objects[0].type).toBe("text");
+    expect(container.querySelector("textarea")).toBeNull();
   });
 });

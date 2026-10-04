@@ -167,6 +167,7 @@ body:has(.hw-notebook) .cb-ai-embed-launcher {
 
 .hw-notebook-text-editor {
   position: absolute;
+  z-index: 2;
   min-width: 48px;
   min-height: 24px;
   margin: 0;

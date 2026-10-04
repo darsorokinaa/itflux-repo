@@ -55,9 +55,20 @@ export function isColdStart({ win = typeof window !== "undefined" ? window : nul
   return !win.__ITFLUX_BOOTED;
 }
 
+export function markPerf(name) {
+  if (!import.meta.env?.DEV || typeof performance === "undefined" || typeof performance.mark !== "function") return;
+  try {
+    performance.mark(String(name || "").slice(0, 64));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function markBootStage(stage, extra = {}) {
   if (typeof window === "undefined") return;
   window.__ITFLUX_BOOT_STAGE = String(stage || "").slice(0, 40);
+  if (stage === BOOT_STAGES.BOOTSTRAPPING) markPerf("app_start");
+  if (stage === BOOT_STAGES.READY) markPerf("app_shell_rendered");
   const debug = Boolean(
     import.meta.env?.DEV
     || (() => {

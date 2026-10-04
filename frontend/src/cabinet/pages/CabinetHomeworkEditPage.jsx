@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import CabinetIcon from "../CabinetIcons";
 import { CabinetPageShell, CabinetPageHeader } from "../CabinetSectionUi";
+import { usePageTitle } from "../hooks/usePageTitle";
+import "../styles/homework-edit.css";
 import EducationalLoading, { LOADING_MESSAGES } from "../../components/EducationalLoading";
 import ConfirmActionModal from "../components/ConfirmActionModal";
 import HomeworkAttachmentsField from "../components/HomeworkAttachmentsField";
@@ -17,6 +19,12 @@ import {
   isHomeworkInstructionTask,
   taskDuplicatesAttachment,
 } from "../homeworkTaskDisplay";
+
+function editInitials(name) {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "•";
+  return parts.slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+}
 
 function taskMeta(task) {
   if (task.is_variant) return "Вариант";
@@ -391,6 +399,8 @@ export default function CabinetHomeworkEditPage() {
     navigate(returnPath);
   };
 
+  usePageTitle(title ? `Редактировать ДЗ — ${title}` : "Редактировать ДЗ");
+
   if (loading) {
     return (
       <CabinetPageShell className="cb-section--review">
@@ -414,69 +424,75 @@ export default function CabinetHomeworkEditPage() {
   }
 
   return (
-    <CabinetPageShell className="cb-section--review cb-section--hw-edit">
-      <div className="cb-review-detail__topbar">
-        <button type="button" className="cb-review-detail__back" onClick={handleCancel}>
-          ← Назад
-        </button>
+    <CabinetPageShell className="cb-section--review cb-section--hw-edit he">
+      <div className="he">
+      <button type="button" className="he-back" onClick={handleCancel}>
+        <CabinetIcon name="arrowLeft" />
+        {reviewId ? "К проверке" : "К списку работ"}
+      </button>
+      <div className="he-heading">
+        <h1>Редактировать ДЗ</h1>
+        {studentName ? (
+          <div className="he-student">
+            <span className="he-avatar">{editInitials(studentName)}</span>
+            <strong>{studentName}</strong>
+          </div>
+        ) : null}
       </div>
-
-      <CabinetPageHeader
-        title="Редактировать ДЗ"
-        subtitle={studentName ? `Ученик: ${studentName}` : undefined}
-      />
 
       {error ? <p className="cb-inline-error" role="alert">{error}</p> : null}
 
       {!canEdit ? (
-        <p className="cb-inline-warn" role="status">
+        <p className="he-warn" role="status">
           {checkedMessage
             || "Нельзя изменить проверенное и принятое домашнее задание."}
         </p>
       ) : null}
 
-      <form className="cb-modal-form cb-hw-assign-form cb-hw-edit-form" onSubmit={handleSubmit}>
-        <label className="cb-field">
-          <span>Название</span>
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            disabled={submitting || !canEdit}
-            required
-          />
-        </label>
+      <form className="he-form" onSubmit={handleSubmit}>
+        <section className="he-card he-card--details">
+          <label className="cb-field">
+            <span>Название</span>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              disabled={submitting || !canEdit}
+              required
+            />
+          </label>
 
-        <label className="cb-field cb-field--wide">
-          <span>Описание и инструкция</span>
-          <textarea
-            rows={4}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            disabled={submitting || !canEdit}
-          />
-        </label>
+          <label className="cb-field">
+            <span>Описание и инструкция</span>
+            <textarea
+              rows={4}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              disabled={submitting || !canEdit}
+            />
+          </label>
 
-        <label className="cb-field">
-          <span>Срок выполнения</span>
-          <input
-            type="datetime-local"
-            name="due_at"
-            value={deadline}
-            onChange={(e) => setDeadlineValue(e.target.value)}
-            onInput={(e) => setDeadlineValue(e.target.value)}
-            onBlur={(e) => setDeadlineValue(e.target.value)}
-            disabled={submitting || !canEdit}
-          />
-        </label>
+          <label className="cb-field">
+            <span>Срок выполнения</span>
+            <input
+              type="datetime-local"
+              name="due_at"
+              value={deadline}
+              onChange={(e) => setDeadlineValue(e.target.value)}
+              onInput={(e) => setDeadlineValue(e.target.value)}
+              onBlur={(e) => setDeadlineValue(e.target.value)}
+              disabled={submitting || !canEdit}
+            />
+          </label>
+        </section>
 
-        <div className="cb-attach-section">
-          <div className="cb-hw-assign-section-head">
-            <h3 className="cb-attach-section__title">Задания и материалы</h3>
+        <section className="he-card">
+          <div className="he-card__head">
+            <h2>Задания и материалы</h2>
             {canEdit ? (
               <button
                 type="button"
-                className="cb-btn cb-btn--outline cb-btn--sm"
+                className="he-btn"
                 onClick={() => setResourcePickerOpen(true)}
                 disabled={submitting}
               >
@@ -485,11 +501,11 @@ export default function CabinetHomeworkEditPage() {
             ) : null}
           </div>
           {visibleTasks.length === 0 ? (
-            <p className="cabinet-auth-muted">
+            <p className="he-empty">
               Можно добавить материалы, варианты или интерактивы.
             </p>
           ) : (
-            <div className="cb-hw-assign-resource-list">
+            <div className="he-tasks">
               {visibleTasks.map(({ task, index }) => (
                 <TaskRow
                   key={task.clientKey || task.id || `task-${index}`}
@@ -503,33 +519,32 @@ export default function CabinetHomeworkEditPage() {
               ))}
             </div>
           )}
-        </div>
+        </section>
 
-        <div className="cb-attach-section">
+        <section className="he-card he-card--files">
           <HomeworkAttachmentsField
             homeworkId={homeworkId}
             disabled={submitting || !canEdit}
           />
-        </div>
+        </section>
 
-        <div className="cb-modal-form__actions">
-          <div className="cb-modal-form__actions-main">
-            <button
-              type="button"
-              className="cb-btn cb-btn--outline"
-              onClick={handleCancel}
-              disabled={submitting}
-            >
-              {canEdit ? "Отмена" : "Назад"}
+        <div className="he-bottom">
+          <button
+            type="button"
+            className="he-btn"
+            onClick={handleCancel}
+            disabled={submitting}
+          >
+            {canEdit ? "Отмена" : "Назад"}
+          </button>
+          {canEdit ? (
+            <button type="submit" className="he-btn he-btn--blue" disabled={submitting}>
+              {submitting ? "Сохранение…" : "Сохранить изменения"}
             </button>
-            {canEdit ? (
-              <button type="submit" className="cb-btn cb-btn--primary" disabled={submitting}>
-                {submitting ? "Сохранение…" : "Сохранить изменения"}
-              </button>
-            ) : null}
-          </div>
+          ) : null}
         </div>
       </form>
+      </div>
 
       <ConfirmActionModal
         open={Boolean(confirmAction)}

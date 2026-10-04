@@ -71,6 +71,14 @@ const ALLOWED = new Set(CLIENT_TELEMETRY_EVENTS);
 
 let started = false;
 let sentAt = [];
+const pending = [];
+let flushTimer = null;
+let pausedUntil = 0;
+
+function postsInWindow(now) {
+  pruneWindow(now);
+  return sentAt.length;
+}
 
 function pruneWindow(now) {
   sentAt = sentAt.filter((t) => now - t < 60_000);
@@ -174,38 +182,89 @@ export function recoverChunkLoadOnce() {
   }
 }
 
-export function reportClientEvent(event, extra = {}) {
-  const name = String(event || "").slice(0, 64);
-  if (!ALLOWED.has(name) || typeof window === "undefined") return false;
-  const now = Date.now();
-  pruneWindow(now);
-  if (sentAt.length >= MAX_PER_MINUTE) return false;
-  sentAt.push(now);
+function scheduleFlush(delay) {
+  if (flushTimer != null) return;
+  flushTimer = window.setTimeout(() => {
+    flushTimer = null;
+    void flushClientTelemetry();
+  }, delay);
+}
 
+/** One POST for the queued events. 400 drops the batch. 429 waits for Retry-After. */
+export async function flushClientTelemetry({ beacon = false } = {}) {
+  if (typeof window === "undefined") return false;
+  if (flushTimer != null) {
+    window.clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  const now = Date.now();
+  if (!beacon && now < pausedUntil) {
+    scheduleFlush(pausedUntil - now);
+    return false;
+  }
+  if (!beacon && postsInWindow(now) >= MAX_PER_MINUTE) {
+    scheduleFlush(1000);
+    return false;
+  }
+  const batch = pending.splice(0, 20);
+  if (!batch.length) return false;
   const body = JSON.stringify({
-    event: name,
-    t: now,
+    events: batch,
     context: collectContext(),
-    extra: extra && typeof extra === "object" ? extra : {},
   });
-  try {
-    const blob = new Blob([body], { type: "application/json" });
-    if (navigator.sendBeacon && navigator.sendBeacon(ENDPOINT, blob)) return true;
-  } catch {
-    /* fall through */
+  if (beacon && navigator.sendBeacon) {
+    try {
+      const blob = new Blob([body], { type: "application/json" });
+      if (navigator.sendBeacon(ENDPOINT, blob)) {
+        sentAt.push(now);
+        return true;
+      }
+    } catch {
+      /* fall through and put the batch back */
+    }
+    pending.unshift(...batch);
+    return false;
   }
   try {
-    fetch(ENDPOINT, {
+    const response = await fetch(ENDPOINT, {
       method: "POST",
       credentials: "same-origin",
       keepalive: true,
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body,
-    }).catch(() => {});
-    return true;
+    });
+    if (response.status === 429) {
+      pending.unshift(...batch);
+      const header = Number(response.headers.get("Retry-After"));
+      const waitSec = Number.isFinite(header) && header > 0 ? header : 60;
+      pausedUntil = Date.now() + waitSec * 1000;
+      scheduleFlush(waitSec * 1000);
+      return false;
+    }
+    if (response.status === 400) return false;
+    sentAt.push(Date.now());
+    if (pending.length) scheduleFlush(2000);
+    return response.ok;
   } catch {
+    pending.unshift(...batch);
+    scheduleFlush(5000);
     return false;
   }
+}
+
+export function reportClientEvent(event, extra = {}) {
+  const name = String(event || "").slice(0, 64);
+  if (!ALLOWED.has(name) || typeof window === "undefined") return false;
+  const now = Date.now();
+  if (postsInWindow(now) >= MAX_PER_MINUTE && pending.length >= 20) return false;
+  pending.push({
+    event: name,
+    t: now,
+    extra: extra && typeof extra === "object" ? extra : {},
+  });
+  if (pending.length >= 15) void flushClientTelemetry();
+  else scheduleFlush(2000);
+  return true;
 }
 
 export function startClientTelemetry() {
@@ -243,12 +302,19 @@ export function startClientTelemetry() {
     });
   };
 
+  const onHide = () => {
+    if (document.visibilityState === "hidden") void flushClientTelemetry({ beacon: true });
+  };
   window.addEventListener("error", onError);
   window.addEventListener("unhandledrejection", onRejection);
+  window.addEventListener("pagehide", onHide);
+  document.addEventListener("visibilitychange", onHide);
 
   return () => {
     window.removeEventListener("error", onError);
     window.removeEventListener("unhandledrejection", onRejection);
+    window.removeEventListener("pagehide", onHide);
+    document.removeEventListener("visibilitychange", onHide);
     started = false;
   };
 }

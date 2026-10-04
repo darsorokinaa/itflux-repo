@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import MathContent from "../../components/MathContent";
+import CabinetIcon from "../CabinetIcons";
+import { usePageTitle } from "../hooks/usePageTitle";
+import "../styles/review-workspace.css";
 import { TaskFileAttachments } from "../../components/TaskFileAttachment";
 import {
   CabinetPageShell,
@@ -23,6 +26,7 @@ import {
   taskMaxScore,
 } from "../cabinetReviewUtils";
 import { assignDisplayNumbers } from "../../utils/taskDocument";
+import { SUBJECTS_BY_LEVEL, buildSubjectDefinition } from "../../data/subjects";
 import { TaskPosition } from "../../components/taskDocument/TaskNumber";
 import {
   isEgeInfParallelProcessesTask,
@@ -392,6 +396,412 @@ function ReviewFeedbackUpload({
       ) : null}
       {err ? <p className="cb-inline-error" role="alert">{err}</p> : null}
     </div>
+  );
+}
+
+const COMMENT_CHIPS = [
+  "Отличное решение!",
+  "Проверь вычисления и запиши промежуточные шаги.",
+  "Обоснуй этот переход подробнее.",
+];
+
+function reviewInitials(name) {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "•";
+  return parts.slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+}
+
+function reviewSubjectTitle(level, subject, subjectLabel) {
+  const short = String(subject || "").trim().toLowerCase();
+  const stored = String(subjectLabel || "").trim();
+  if (stored && stored.toLowerCase() !== short) return stored;
+  const fromLevel = SUBJECTS_BY_LEVEL[String(level || "").trim().toLowerCase()]?.find((item) => item.id === short);
+  if (fromLevel?.title) return fromLevel.title;
+  if (short) {
+    const fallback = buildSubjectDefinition(short);
+    if (fallback.title && fallback.title !== short) return fallback.title;
+  }
+  return stored || subject || "";
+}
+
+function reviewSubjectLine(level, subject, subjectLabel) {
+  const levelLabel = level === "ege" ? "ЕГЭ" : level === "oge" ? "ОГЭ" : (level || "");
+  const title = reviewSubjectTitle(level, subject, subjectLabel);
+  if (title && levelLabel && title.toLowerCase().includes(String(levelLabel).toLowerCase())) return title;
+  return [title, levelLabel].filter(Boolean).join(" · ");
+}
+
+function taskStatus(task, part, scores, verdict) {
+  if (part === 2) {
+    const raw = scores[String(task.id)];
+    if (raw === "" || raw == null) return "pending";
+    const max = taskMaxScore(task);
+    const score = Number(raw);
+    if (score <= 0) return "wrong";
+    if (score >= max) return "correct";
+    return "partial";
+  }
+  if (verdict === true) return "correct";
+  if (verdict === false) return "wrong";
+  return "missing";
+}
+
+function ReviewWorkspace({
+  part1Tasks,
+  part2Tasks,
+  result,
+  subject,
+  level,
+  scores,
+  setScores,
+  taskComments,
+  setTaskComments,
+  isReadOnly,
+  isPending,
+  reviewId,
+  submission,
+  patchReviewAttachments,
+  getPart1Verdict,
+  reviewTaskTotal,
+  assignment,
+}) {
+  const tasks = useMemo(() => [
+    ...part1Tasks.map((task) => ({ ...task, part: 1 })),
+    ...part2Tasks.map((task) => ({ ...task, part: 2 })),
+  ], [part1Tasks, part2Tasks]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [filter, setFilter] = useState("all");
+
+  const statusFor = useCallback((task) => {
+    const verdict = task.part === 1
+      ? getPart1Verdict(task, homeworkTaskAnswer(result, task.id, task.number, [...part1Tasks, ...part2Tasks]))
+      : null;
+    return taskStatus(task, task.part, scores, verdict);
+  }, [getPart1Verdict, part1Tasks, part2Tasks, result, scores]);
+
+  const pendingTasks = tasks.filter((task) => task.part === 2 && statusFor(task) === "pending");
+
+  useEffect(() => {
+    if (!tasks.length) return;
+    setSelectedId((current) => {
+      if (current != null && tasks.some((task) => String(task.id) === String(current))) return current;
+      return (pendingTasks[0] || tasks[0]).id;
+    });
+  }, [tasks, pendingTasks]);
+
+  const visible = filter === "pending" ? pendingTasks : tasks;
+  const part1Visible = visible.filter((task) => task.part === 1);
+  const part2Visible = visible.filter((task) => task.part === 2);
+  const selected = tasks.find((task) => String(task.id) === String(selectedId)) || tasks[0] || null;
+  const selectedIndex = selected ? tasks.findIndex((task) => task.id === selected.id) : -1;
+
+  const correctCount = part1Tasks.filter((task) => (
+    getPart1Verdict(task, homeworkTaskAnswer(result, task.id, task.number, tasks)) === true
+  )).length;
+  const answeredCount = tasks.filter((task) => {
+    const answer = homeworkTaskAnswer(result, task.id, task.number, tasks);
+    const files = homeworkTaskAttachments(result, task.id, task.number);
+    return Boolean(String(answer || "").trim()) || files.length > 0 || (task.part === 2 && scores[String(task.id)] != null && scores[String(task.id)] !== "");
+  }).length;
+  const earned = correctCount + part2Tasks.reduce((sum, task) => {
+    const raw = scores[String(task.id)];
+    const n = Number(raw);
+    return sum + (raw === "" || raw == null || Number.isNaN(n) ? 0 : n);
+  }, 0);
+  const possible = part1Tasks.length + part2Tasks.reduce((sum, task) => sum + taskMaxScore(task), 0);
+
+  if (!tasks.length) {
+    return <p className="cb-review-detail__empty-answer">Задания варианта ещё загружаются.</p>;
+  }
+
+  const answer = homeworkTaskAnswer(result, selected.id, selected.number, tasks);
+  const verdict = selected.part === 1 ? getPart1Verdict(selected, answer) : null;
+  const status = statusFor(selected);
+  const studentFiles = homeworkTaskAttachments(result, selected.id, selected.number);
+  const teacherFiles = homeworkTeacherAttachments(result, selected.id, selected.number);
+  const images = studentFiles.filter(isImageAttachment);
+  const max = taskMaxScore(selected);
+  const scoreVal = scores[String(selected.id)];
+  const comment = taskComments[String(selected.id)] || "";
+  const statusText = {
+    correct: "Верно",
+    wrong: "Неверно",
+    missing: "Нет ответа",
+    pending: "Нужна проверка",
+    partial: "Частично",
+  }[status];
+
+  const setScore = (value) => {
+    setScores((prev) => ({ ...prev, [selected.id]: value }));
+  };
+
+  return (
+    <>
+      <section className="rv-summary" aria-label="Сводка работы">
+        <div className="rv-summary__item">
+          <span className="rv-summary__mark"><CabinetIcon name="tasks" /></span>
+          <div><b>{answeredCount} <small>из {tasks.length}</small></b><p>Заданий с ответом</p></div>
+        </div>
+        <div className="rv-summary__item">
+          <span className="rv-summary__mark"><CabinetIcon name="check" /></span>
+          <div><b>{correctCount} <small>ответов</small></b><p>Верно по автопроверке</p></div>
+        </div>
+        <div className="rv-summary__item">
+          <span className="rv-summary__mark"><CabinetIcon name="pencil" /></span>
+          <div><b>{pendingTasks.length} <small>задания</small></b><p>Нужна ручная проверка</p></div>
+        </div>
+        <div className="rv-summary__item">
+          <span className="rv-summary__mark"><CabinetIcon name="spark" /></span>
+          <div><b>{earned} <small>баллов</small></b><p>Подтверждено из {possible} возможных</p></div>
+        </div>
+      </section>
+
+      <div className="rv-work">
+        <aside className="rv-card rv-tasks" aria-label="Задания">
+          <div className="rv-card__head">
+            <h2>Задания</h2>
+            <span className="rv-count">{tasks.length}</span>
+          </div>
+          <div className="rv-filters">
+            <button type="button" className={filter === "all" ? "is-on" : ""} onClick={() => setFilter("all")}>
+              Все {tasks.length}
+            </button>
+            <button type="button" className={filter === "pending" ? "is-on" : ""} onClick={() => setFilter("pending")}>
+              Проверить {pendingTasks.length}
+            </button>
+          </div>
+          {part1Visible.length ? (
+            <div className="rv-part">
+              <div className="rv-part__title"><span>Часть 1</span><span>Краткий ответ</span></div>
+              <div className="rv-tiles">
+                {part1Visible.map((task) => (
+                  <button
+                    key={task.id}
+                    type="button"
+                    className={`rv-tile is-${statusFor(task)}${task.id === selected.id ? " is-on" : ""}`}
+                    onClick={() => setSelectedId(task.id)}
+                  >
+                    {task.displayNumber || task.number}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {part2Visible.length ? (
+            <div className="rv-part">
+              <div className="rv-part__title"><span>Часть 2</span><span>Решение</span></div>
+              <div className="rv-manual">
+                {part2Visible.map((task) => {
+                  const graded = statusFor(task) !== "pending";
+                  const raw = scores[String(task.id)];
+                  return (
+                    <button
+                      key={task.id}
+                      type="button"
+                      className={`rv-manual__item${task.id === selected.id ? " is-on" : ""}${graded ? " is-graded" : ""}`}
+                      onClick={() => setSelectedId(task.id)}
+                    >
+                      <span className="rv-manual__num">{task.displayNumber || task.number}</span>
+                      <span>
+                        <b>{task.task_title || `Задание ${task.displayNumber || task.number}`}</b>
+                        <small>{graded ? `${raw} из ${taskMaxScore(task)}` : "Нужна проверка"}</small>
+                      </span>
+                      <CabinetIcon name={graded ? "check" : "arrow"} />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+          {!visible.length ? <p className="rv-help">Все задания проверены.</p> : null}
+          <div className="rv-legend">
+            <span><i className="is-green" />Верно</span>
+            <span><i className="is-red" />Ошибка</span>
+            <span><i className="is-amber" />На проверку</span>
+            <span><i />Нет ответа</span>
+          </div>
+          {assignment?.instruction || assignment?.tasks?.length || assignment?.attachments?.length ? (
+            <div className="rv-note">
+              <b>Задание ученику</b>
+              {assignment.instruction ? <p>{assignment.instruction}</p> : null}
+              <div className="rv-note__actions">
+                {assignment.canEdit ? <Link to={assignment.editTo}>Состав задания</Link> : null}
+                {assignment.canAdd ? (
+                  <button type="button" disabled={assignment.adding} onClick={assignment.onAdd}>
+                    {assignment.adding ? "Добавление…" : "Добавить задание"}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+        </aside>
+
+        <div className="rv-main">
+          <section className="rv-card rv-question">
+            <div className="rv-question__head">
+              <div>
+                <h2>
+                  Задание {selected.displayNumber || selected.number}
+                  <small>из {reviewTaskTotal || tasks.length}</small>
+                </h2>
+                <div className="rv-context">
+                  <span>{selected.part === 2 ? "Развёрнутый ответ" : "Краткий ответ"}</span>
+                  <span className={`rv-pill is-${status === "correct" ? "checked" : status === "wrong" ? "wrong" : status === "pending" || status === "partial" ? "pending" : "neutral"}`}>
+                    {statusText}
+                  </span>
+                </div>
+              </div>
+              <div className="rv-nav">
+                <button type="button" aria-label="Предыдущее задание" disabled={selectedIndex <= 0} onClick={() => setSelectedId(tasks[selectedIndex - 1].id)}>
+                  <CabinetIcon name="arrowLeft" />
+                </button>
+                <button type="button" aria-label="Следующее задание" disabled={selectedIndex >= tasks.length - 1} onClick={() => setSelectedId(tasks[selectedIndex + 1].id)}>
+                  <CabinetIcon name="arrow" />
+                </button>
+              </div>
+            </div>
+            <TaskCondition task={selected} level={level} subject={subject} />
+            <details className="rv-ref">
+              <summary>Эталонный ответ</summary>
+              <div className="rv-ref__value">
+                {hasOfficialTaskAnswer(selected.answer) ? (
+                  <MathContent html={String(selected.answer)} plainHtml />
+                ) : "Нет ответа в базе"}
+              </div>
+            </details>
+          </section>
+
+          <section className="rv-card rv-solution">
+            <div className="rv-solution__head">
+              <h2>{selected.part === 2 || studentFiles.length ? "Решение ученика" : "Ответ ученика"}</h2>
+              <span className={`rv-pill is-${status === "correct" ? "checked" : status === "pending" ? "pending" : "neutral"}`}>{statusText}</span>
+            </div>
+            {images.length ? (
+              <div className="rv-stage">
+                <img src={images[0].url} alt={images[0].filename || images[0].name || "Решение ученика"} />
+              </div>
+            ) : null}
+            <p className="rv-label">Ответ ученика</p>
+            <div className={`rv-answer${answer ? "" : " is-empty"}`}>
+              {answer ? <MathContent html={String(answer)} plainHtml /> : "Ответ отсутствует"}
+            </div>
+            {hasOfficialTaskAnswer(selected.answer) ? (
+              <div className="rv-compare">
+                <span>Эталонный ответ</span>
+                <b><MathContent html={String(selected.answer)} plainHtml /></b>
+              </div>
+            ) : null}
+            <div className="cb-review-detail__task-files">
+              <AttachmentList attachments={studentFiles} emptyLabel="Файлы не прикреплены" />
+              <TeacherNotebookActions
+                submissionId={submission?.id}
+                taskId={selected.id}
+                taskNumber={selected.number}
+                enabled={isPending}
+                onComplete={(payload) => {
+                  if (!payload.attachment) return;
+                  patchReviewAttachments((list) => appendHomeworkAttachments(list, [payload.attachment]), {
+                    taskId: selected.id,
+                    taskNumber: selected.number,
+                  });
+                }}
+              />
+            </div>
+          </section>
+        </div>
+
+        <aside className="rv-card rv-grade" id="gradePanel">
+          <div className="rv-card__head">
+            <h2>Проверка задания</h2>
+            <span className="rv-count">№ {selected.displayNumber || selected.number}</span>
+          </div>
+          <p className="rv-grade__sub">
+            {selected.part === 2 ? "Оцените решение и дайте обратную связь" : "Результат автоматической проверки"}
+          </p>
+          {selected.part === 2 ? (
+            <>
+              <span className="rv-label">Баллы за задание · максимум {max}</span>
+              {isReadOnly ? (
+                <p className="rv-help">{scoreVal === "" || scoreVal == null ? "Балл не выставлен" : `${scoreVal} из ${max}`}</p>
+              ) : (
+                <div className="rv-scores" style={{ gridTemplateColumns: `repeat(${Math.min(max + 1, 6)}, minmax(0, 1fr))` }}>
+                  {Array.from({ length: max + 1 }, (_, value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={`rv-score${Number(scoreVal) === value && scoreVal !== "" && scoreVal != null ? " is-on" : ""}`}
+                      onClick={() => setScore(value)}
+                    >
+                      {value}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <p className="rv-help">
+                {scoreVal === "" || scoreVal == null ? "Выберите балл после просмотра решения" : "Оценка сохранится вместе с проверкой"}
+              </p>
+            </>
+          ) : (
+            <div className={`rv-auto${verdict === true ? " is-ok" : verdict === false ? " is-bad" : ""}`}>
+              <CabinetIcon name={verdict === true ? "check" : verdict === false ? "close" : "minus"} />
+              {statusText}
+            </div>
+          )}
+          <label className="rv-label" htmlFor={`rv-comment-${selected.id}`}>Комментарий ученику</label>
+          {isReadOnly ? (
+            <p className="rv-help">{comment || homeworkTaskComment(result, selected.id, selected.number) || "Комментарий не указан"}</p>
+          ) : (
+            <>
+              <textarea
+                id={`rv-comment-${selected.id}`}
+                className="rv-comment"
+                value={comment}
+                placeholder="Что получилось? На что обратить внимание?"
+                onChange={(event) => setTaskComments((prev) => ({ ...prev, [selected.id]: event.target.value }))}
+              />
+              <div className="rv-chips">
+                {COMMENT_CHIPS.map((chip) => (
+                  <button
+                    key={chip}
+                    type="button"
+                    onClick={() => setTaskComments((prev) => {
+                      const current = prev[String(selected.id)] || "";
+                      return { ...prev, [selected.id]: current.trim() ? `${current.trim()}\n${chip}` : chip };
+                    })}
+                  >
+                    {chip.split(" ").slice(0, 2).join(" ")}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+          <ReviewFeedbackUpload
+            reviewId={reviewId}
+            taskId={selected.id}
+            taskNumber={selected.number}
+            enabled={isPending}
+            initialAttachments={teacherFiles}
+            onAttachmentsChange={(updater) => patchReviewAttachments(updater, {
+              taskId: selected.id,
+              taskNumber: selected.number,
+            })}
+          />
+          {selected.part === 2 ? (
+            <button
+              type="button"
+              className="rv-btn rv-btn--blue rv-next"
+              onClick={() => {
+                const next = pendingTasks.find((task) => task.id !== selected.id) || pendingTasks[0];
+                if (next) setSelectedId(next.id);
+              }}
+            >
+              {pendingTasks.filter((task) => task.id !== selected.id).length ? "Следующее на проверку" : "Все задания проверены"}
+              <CabinetIcon name="arrow" />
+            </button>
+          ) : null}
+        </aside>
+      </div>
+    </>
   );
 }
 
@@ -774,6 +1184,15 @@ export default function CabinetReviewDetailPage() {
   };
 
   const getPart1Verdict = (task, answer) => resolvePart1Verdict(task, answer, result, subject);
+  usePageTitle(review?.title || "Проверка");
+  const subjectLine = reviewSubjectLine(level, subject, reviewCtx?.subject_label);
+  const statusKind = review?.status === "checked"
+    ? "checked"
+    : review?.status === "returned"
+      ? "returned"
+      : review?.status === "pending"
+        ? "pending"
+        : "neutral";
 
   if (loading) {
     return (
@@ -820,42 +1239,42 @@ export default function CabinetReviewDetailPage() {
   }
 
   return (
-    <CabinetPageShell className="cb-section--review cb-section--review-detail">
-      <div className="cb-review-detail__topbar">
-        <Link to={reviewListPath} className="cb-review-detail__back">Назад к проверке</Link>
-        {variantUrl ? (
-          <Link to={variantUrl} className="cb-review-detail__open-variant">
-            Открыть вариант
-          </Link>
-        ) : null}
-      </div>
-
-      <CabinetPageHeader title={review.title || "Проверка домашнего задания"} />
-
-      <section className="cb-review-detail__meta">
+    <CabinetPageShell className="cb-section--review cb-section--review-detail rv">
+      <div className="rv">
+      <Link to={reviewListPath} className="rv-back">
+        <CabinetIcon name="arrowLeft" />
+        К списку работ
+      </Link>
+      <div className="rv-heading">
         <div>
-          <span className="cb-review-detail__meta-label">Ученик</span>
-          <strong>{review.student_name || "—"}</strong>
-        </div>
-        <div>
-          <span className="cb-review-detail__meta-label">Статус</span>
-          <strong>{review.status_label || review.status}</strong>
-        </div>
-        <div>
-          <span className="cb-review-detail__meta-label">Сдано</span>
-          <strong>{formatReviewDate(submission?.submitted_at)}</strong>
-        </div>
-        {submission?.score != null ? (
-          <div>
-            <span className="cb-review-detail__meta-label">Авто-баллы</span>
-            <strong>{submission.score}%</strong>
+          <h1>{review.title || "Проверка домашнего задания"}</h1>
+          <div className="rv-student">
+            <span className="rv-avatar">{reviewInitials(review.student_name)}</span>
+            <strong>{review.student_name || "Ученик"}</strong>
+            {subjectLine ? <span className="rv-dot" /> : null}
+            {subjectLine ? <span>{subjectLine}</span> : null}
+            {submission?.submitted_at ? <span className="rv-dot" /> : null}
+            {submission?.submitted_at ? <span>Сдано {formatReviewDate(submission.submitted_at)}</span> : null}
+            <span className={`rv-pill is-${statusKind}`}>
+              <CabinetIcon name={statusKind === "checked" ? "check" : "clock"} />
+              {review.status_label || review.status}
+            </span>
           </div>
-        ) : null}
-      </section>
+        </div>
+        <div className="rv-heading__actions">
+          {variantUrl ? (
+            <Link to={variantUrl} className="rv-btn">
+              <CabinetIcon name="export" />
+              Открыть вариант
+            </Link>
+          ) : null}
+        </div>
+      </div>
 
       {error ? <p className="cb-inline-error" role="alert">{error}</p> : null}
       {notice ? <p className="cb-inline-success" role="status">{notice}</p> : null}
 
+      {reviewCtx?.has_variant ? null : (
       <section className="cb-review-detail__panel">
         <div className="cb-review-detail__panel-head">
           <h2 className="cb-review-detail__panel-title">Состав задания</h2>
@@ -938,6 +1357,7 @@ export default function CabinetReviewDetailPage() {
           </p>
         ) : null}
       </section>
+      )}
 
       {awaitingSubmission ? (
         <section className="cb-review-detail__panel">
@@ -948,7 +1368,7 @@ export default function CabinetReviewDetailPage() {
         </section>
       ) : null}
 
-      {!awaitingSubmission && homeworkReviewData ? (
+      {!awaitingSubmission && homeworkReviewData && !reviewCtx?.has_variant ? (
         <section className="cb-review-detail__panel cb-review-detail__panel--summary">
           <HomeworkReviewSummary
             review={homeworkReviewData}
@@ -1056,245 +1476,37 @@ export default function CabinetReviewDetailPage() {
             ) : null}
           </section>
         </>
-      ) : !awaitingSubmission ? (
-        <>
-          <section className="cb-review-detail__panel">
-            <h2 className="cb-review-detail__panel-title">Часть 1 — краткий ответ</h2>
-            <p className="cb-review-detail__panel-hint">
-              Ответы проверяются автоматически. Добавьте комментарий при необходимости.
-            </p>
-            {part1Tasks.length === 0 ? (
-              <p className="cb-review-detail__empty-answer">Задания части 1 не загружены</p>
-            ) : (
-              <div className="cb-review-detail__tasks">
-                {part1Tasks.map((task) => {
-                  const answer = homeworkTaskAnswer(result, task.id, task.number, variant?.tasks);
-                  const verdict = getPart1Verdict(task, answer);
-                  const tableAnswer = isTableAnswerTask(subject, task.number);
-                  const studentAttachments = homeworkTaskAttachments(result, task.id, task.number);
-                  const teacherAttachments = homeworkTeacherAttachments(result, task.id, task.number);
-                  return (
-                    <article key={task.id} className="cb-review-detail__task">
-                      <div className="cb-review-detail__task-head">
-                        <TaskPosition
-                          mode="review"
-                          position={task.displayNumber}
-                          total={reviewTaskTotal}
-                          examNumber={task.number}
-                          level={level}
-                          topic={task.task_title}
-                        />
-                        <VerdictBadge verdict={verdict} />
-                      </div>
-                      <TaskCondition task={task} level={level} subject={subject} />
-                      <div className="cb-review-detail__answer-block">
-                        <span className="cb-review-detail__section-label">Правильный ответ</span>
-                        <div
-                          className={`cb-review-detail__task-answer${tableAnswer ? " cb-review-detail__task-answer--pre" : ""}`}
-                        >
-                          {hasOfficialTaskAnswer(task.answer) ? (
-                            <MathContent html={String(task.answer)} plainHtml />
-                          ) : (
-                            <span className="cb-review-detail__empty-answer">Нет ответа в базе</span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="cb-review-detail__answer-block">
-                        <span className="cb-review-detail__section-label">Ответ ученика</span>
-                        <div
-                          className={`cb-review-detail__task-answer${tableAnswer ? " cb-review-detail__task-answer--pre" : ""}`}
-                        >
-                          {answer ? (
-                            <MathContent html={String(answer)} plainHtml />
-                          ) : (
-                            <span className="cb-review-detail__empty-answer">Нет ответа</span>
-                          )}
-                        </div>
-                      </div>
-                      {!isReadOnly ? (
-                        <textarea
-                          className="cb-review-detail__comment"
-                          rows={2}
-                          placeholder="Комментарий к заданию (необязательно)"
-                          value={taskComments[String(task.id)] || ""}
-                          onChange={(e) => setTaskComments((p) => ({
-                            ...p,
-                            [task.id]: e.target.value,
-                          }))}
-                        />
-                      ) : homeworkTaskComment(result, task.id, task.number) ? (
-                        <p className="cb-review-detail__task-note">
-                          {homeworkTaskComment(result, task.id, task.number)}
-                        </p>
-                      ) : null}
-                      <div className="cb-review-detail__task-files">
-                        <span className="cb-review-detail__section-label">Файлы ученика</span>
-                        <AttachmentList attachments={studentAttachments} />
-                        <TeacherNotebookActions
-                          submissionId={submission?.id}
-                          taskId={task.id}
-                          taskNumber={task.number}
-                          enabled={isPending}
-                          onComplete={(payload) => {
-                            if (!payload.attachment) return;
-                            patchReviewAttachments((list) => appendHomeworkAttachments(list, [payload.attachment]), {
-                              taskId: task.id,
-                              taskNumber: task.number,
-                            });
-                          }}
-                        />
-                      </div>
-                      <div className="cb-review-detail__task-files">
-                        <span className="cb-review-detail__section-label">Файлы с разбором ошибок</span>
-                        <ReviewFeedbackUpload
-                          reviewId={reviewId}
-                          taskId={task.id}
-                          taskNumber={task.number}
-                          enabled={isPending}
-                          initialAttachments={teacherAttachments}
-                          onAttachmentsChange={(updater) => patchReviewAttachments(updater, {
-                            taskId: task.id,
-                            taskNumber: task.number,
-                          })}
-                        />
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-
-          <section className="cb-review-detail__panel">
-            <h2 className="cb-review-detail__panel-title">Часть 2 — развёрнутый ответ</h2>
-            {part2Tasks.length === 0 ? (
-              <p className="cb-review-detail__empty-answer">Задания части 2 не загружены</p>
-            ) : (
-              <div className="cb-review-detail__tasks">
-                {part2Tasks.map((task) => {
-                  const answer = homeworkTaskAnswer(result, task.id, task.number, variant?.tasks);
-                  const studentAttachments = homeworkTaskAttachments(result, task.id, task.number);
-                  const teacherAttachments = homeworkTeacherAttachments(result, task.id, task.number);
-                  const max = taskMaxScore(task);
-                  const scoreVal = scores[String(task.id)] ?? homeworkTaskScore(result, task.id);
-                  return (
-                    <article key={task.id} className="cb-review-detail__task">
-                      <div className="cb-review-detail__task-head">
-                        <TaskPosition
-                          mode="review"
-                          position={task.displayNumber}
-                          total={reviewTaskTotal}
-                          examNumber={task.number}
-                          level={level}
-                          topic={task.task_title}
-                        />
-                      </div>
-                      <TaskCondition task={task} level={level} subject={subject} />
-                      <div className="cb-review-detail__answer-block">
-                        <span className="cb-review-detail__section-label">Правильный ответ</span>
-                        {hasOfficialTaskAnswer(task.answer) ? (
-                          <div className="cb-review-detail__task-answer">
-                            <MathContent html={String(task.answer)} plainHtml />
-                          </div>
-                        ) : (
-                          <p className="cb-review-detail__empty-answer">Нет ответа в базе</p>
-                        )}
-                      </div>
-                      <div className="cb-review-detail__answer-block">
-                        <span className="cb-review-detail__section-label">Ответ ученика</span>
-                        {answer ? (
-                          <div className="cb-review-detail__task-answer">
-                            <MathContent html={String(answer)} plainHtml />
-                          </div>
-                        ) : (
-                          <p className="cb-review-detail__empty-answer">Текстовый ответ не указан</p>
-                        )}
-                      </div>
-                      <div className="cb-review-detail__task-files">
-                        <span className="cb-review-detail__section-label">Файлы ученика</span>
-                        <AttachmentList attachments={studentAttachments} />
-                        <TeacherNotebookActions
-                          submissionId={submission?.id}
-                          taskId={task.id}
-                          taskNumber={task.number}
-                          enabled={isPending}
-                          onComplete={(payload) => {
-                            if (!payload.attachment) return;
-                            patchReviewAttachments((list) => appendHomeworkAttachments(list, [payload.attachment]), {
-                              taskId: task.id,
-                              taskNumber: task.number,
-                            });
-                          }}
-                        />
-                      </div>
-                      <div className="cb-review-detail__score-row">
-                        <label htmlFor={`score-${task.id}`}>
-                          Баллы (0–{max})
-                        </label>
-                        {isReadOnly ? (
-                          <strong>{scoreVal === "" ? "—" : scoreVal}</strong>
-                        ) : (
-                          <input
-                            id={`score-${task.id}`}
-                            type="number"
-                            min={0}
-                            max={max}
-                            step={1}
-                            value={scoreVal === "" ? "" : scoreVal}
-                            onChange={(e) => {
-                              const raw = e.target.value;
-                              if (raw === "") {
-                                setScores((p) => {
-                                  const next = { ...p };
-                                  delete next[String(task.id)];
-                                  return next;
-                                });
-                                return;
-                              }
-                              const n = Math.max(0, Math.min(max, Number(raw) || 0));
-                              setScores((p) => ({ ...p, [task.id]: n }));
-                            }}
-                          />
-                        )}
-                      </div>
-                      {!isReadOnly ? (
-                        <textarea
-                          className="cb-review-detail__comment"
-                          rows={2}
-                          placeholder="Комментарий к заданию (необязательно)"
-                          value={taskComments[String(task.id)] || ""}
-                          onChange={(e) => setTaskComments((p) => ({
-                            ...p,
-                            [task.id]: e.target.value,
-                          }))}
-                        />
-                      ) : homeworkTaskComment(result, task.id, task.number) ? (
-                        <p className="cb-review-detail__task-note">
-                          {homeworkTaskComment(result, task.id, task.number)}
-                        </p>
-                      ) : null}
-                      <div className="cb-review-detail__task-files">
-                        <span className="cb-review-detail__section-label">Файлы с разбором ошибок</span>
-                        <ReviewFeedbackUpload
-                          reviewId={reviewId}
-                          taskId={task.id}
-                          taskNumber={task.number}
-                          enabled={isPending}
-                          initialAttachments={teacherAttachments}
-                          onAttachmentsChange={(updater) => patchReviewAttachments(updater, {
-                            taskId: task.id,
-                            taskNumber: task.number,
-                          })}
-                        />
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-        </>
+      ) : reviewCtx?.has_variant ? (
+        <ReviewWorkspace
+          part1Tasks={part1Tasks}
+          part2Tasks={part2Tasks}
+          result={result}
+          subject={subject}
+          level={level}
+          scores={scores}
+          setScores={setScores}
+          taskComments={taskComments}
+          setTaskComments={setTaskComments}
+          isReadOnly={isReadOnly}
+          isPending={isPending}
+          reviewId={reviewId}
+          submission={submission}
+          patchReviewAttachments={patchReviewAttachments}
+          getPart1Verdict={getPart1Verdict}
+          reviewTaskTotal={reviewTaskTotal}
+          assignment={{
+            instruction: homeworkInstruction,
+            tasks: homeworkTasks,
+            attachments: homeworkAttachments,
+            canEdit: canEditHomework,
+            editTo: `/cabinet/homework/${encodeURIComponent(String(homeworkIdForCopy || ""))}/edit?review=${encodeURIComponent(String(reviewId))}`,
+            canAdd: canAddHomeworkTask,
+            adding: addingTask,
+            onAdd: () => setResourcePickerOpen(true),
+          }}
+        />
       ) : null}
+
 
       {!awaitingSubmission ? (
       <section className="cb-review-detail__panel">
@@ -1352,7 +1564,18 @@ export default function CabinetReviewDetailPage() {
         </section>
       ) : null}
 
-      <div className="cb-review-detail__footer">
+      <div className="cb-review-detail__footer rv-bottom">
+        {reviewCtx?.has_variant ? (
+          <span className="rv-progress">
+            Проверено <b>{part1Tasks.filter((task) => (
+              getPart1Verdict(task, homeworkTaskAnswer(result, task.id, task.number, [...part1Tasks, ...part2Tasks])) != null
+            )).length + part2Tasks.filter((task) => {
+              const raw = scores[String(task.id)];
+              return raw !== "" && raw != null;
+            }).length} из {part1Tasks.length + part2Tasks.length}</b>
+          </span>
+        ) : <span />}
+        <div className="rv-bottom__actions">
         <Link
           to={
             review?.student || submission?.student
@@ -1466,6 +1689,7 @@ export default function CabinetReviewDetailPage() {
             </button>
           </>
         ) : null}
+        </div>
       </div>
 
       <ConfirmActionModal
@@ -1509,6 +1733,7 @@ export default function CabinetReviewDetailPage() {
           }}
         />
       ) : null}
+      </div>
     </CabinetPageShell>
   );
 }

@@ -126,6 +126,7 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
   let lastPingAt = 0;
   let lastPongAt = 0;
   let lastHiddenAt = 0;
+  let resumedVisibleAt = 0;
   let pingAckTimer = null;
   let awaitingPingAck = false;
   let resumeInProgress = false;
@@ -182,22 +183,64 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
     }
   };
 
+  const isForeground = () => {
+    if (typeof document === "undefined") return true;
+    return document.visibilityState !== "hidden";
+  };
+
+  const resumeGraceActive = () =>
+    resumedVisibleAt > 0 && Date.now() - resumedVisibleAt < 20_000;
+
+  /**
+   * Wall-clock silence is not proof the socket died. Timers freeze in
+   * background, so an old lastPong must not reconnect by itself.
+   */
+  const foregroundSilenceExceedsSafetyNet = (now = Date.now()) => {
+    if (!isForeground() || resumeGraceActive() || !lastPongAt) return false;
+    return now - lastPongAt > MATERIAL_RECONNECT.PONG_STALE_MS;
+  };
+
+  const noteBackground = () => {
+    if (!lastHiddenAt) lastHiddenAt = Date.now();
+    clearPingAckTimer();
+    awaitingPingAck = false;
+    unlockResume();
+    stopHeartbeat();
+  };
+
+  const ensureHeartbeat = () => {
+    if (!closed && isForeground() && socket?.readyState === WebSocket.OPEN && heartbeatTimer == null) {
+      startHeartbeat();
+    }
+  };
+
+  const softPing = () => {
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    lastPingAt = Date.now();
+    send({ type: "ping", t: lastPingAt });
+  };
+
   const startHeartbeat = () => {
     stopHeartbeat();
+    let lastTickAt = Date.now();
     heartbeatTimer = window.setInterval(() => {
       const now = Date.now();
-      if (lastPongAt && now - lastPongAt > MATERIAL_RECONNECT.PONG_STALE_MS) {
-        forceReconnect("pong-timeout");
+      const gap = now - lastTickAt;
+      lastTickAt = now;
+      if (!isForeground()) return;
+      // setInterval slept through background. Age of the last pong is not a failure.
+      if (gap > 25_000 + 5_000) {
+        resumeIfNeeded("resume");
+        return;
+      }
+      if (awaitingPingAck || resumeInProgress) return;
+      if (foregroundSilenceExceedsSafetyNet(now)) {
+        verifyOpenSocket("pong-timeout");
         return;
       }
       lastPingAt = now;
       send({ type: "ping", t: lastPingAt });
     }, 25000);
-  };
-
-  const isPongStale = () => {
-    if (!lastPongAt) return false;
-    return Date.now() - lastPongAt > MATERIAL_RECONNECT.PONG_STALE_MS;
   };
 
   const clearPingAckTimer = () => {
@@ -279,44 +322,73 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
     clearPingAckTimer();
     pingAckTimer = window.setTimeout(() => {
       pingAckTimer = null;
-      if (awaitingPingAck) {
-        awaitingPingAck = false;
-        forceReconnect("ping-ack-timeout");
+      if (!awaitingPingAck) {
+        unlockResume();
         return;
       }
-      unlockResume();
+      const elapsed = Date.now() - pingAt;
+      const timerWasFrozen = elapsed > MATERIAL_RECONNECT.PING_ACK_MS + 2_000;
+      if (!isForeground() || timerWasFrozen) {
+        awaitingPingAck = false;
+        if (
+          isForeground()
+          && !closed
+          && socket
+          && socket.readyState === WebSocket.OPEN
+          && !resumeInProgress
+        ) {
+          verifyOpenSocket("resume");
+        }
+        return;
+      }
+      awaitingPingAck = false;
+      forceReconnect("ping-ack-timeout");
     }, MATERIAL_RECONNECT.PING_ACK_MS);
   };
 
   const resumeIfNeeded = (reason) => {
     if (closed) return;
     if (reason === "visibility" && document.visibilityState === "hidden") {
-      lastHiddenAt = Date.now();
+      noteBackground();
       return;
     }
     if (reason === "pagehide" || reason === "freeze") {
-      lastHiddenAt = Date.now();
+      noteBackground();
       return;
     }
     if (reason === "manual") unlockResume();
     if (!lockResume()) return;
-    const hiddenMs = lastHiddenAt ? Date.now() - lastHiddenAt : null;
+    const hiddenMs = lastHiddenAt ? Date.now() - lastHiddenAt : 0;
+    const wasBackground = lastHiddenAt > 0;
     lastHiddenAt = 0;
-    const knownShort = hiddenMs != null && hiddenMs < MATERIAL_RECONNECT.HIDDEN_RESUME_MS;
-    if (knownShort && reason !== "online" && reason !== "manual") {
+    resumedVisibleAt = Date.now();
+    const knownShort = wasBackground && hiddenMs < MATERIAL_RECONNECT.HIDDEN_RESUME_MS;
+    const state = socket?.readyState;
+    const open = state === WebSocket.OPEN;
+    // pageshow/focus without a real hide, or a very short hide: probe without killing.
+    // A long hide or an online event must ack a fresh ping before the socket is replaced.
+    const softWake = reason !== "online" && reason !== "resume" && (knownShort || !wasBackground);
+    if (open && softWake && reason !== "manual") {
       unlockResume();
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        lastPingAt = Date.now();
-        send({ type: "ping", t: lastPingAt });
-      }
+      softPing();
+      ensureHeartbeat();
       return;
     }
-    const open = Boolean(socket && socket.readyState === WebSocket.OPEN);
-    const frozenOpen = open && hiddenMs != null && hiddenMs >= MATERIAL_RECONNECT.HIDDEN_RESUME_MS;
-    if (!open || isPongStale() || frozenOpen) {
+    if (reason === "manual" && open && !wasBackground && !foregroundSilenceExceedsSafetyNet()) {
+      unlockResume();
+      softPing();
+      ensureHeartbeat();
+      return;
+    }
+    if (!socket || state === WebSocket.CLOSING || state === WebSocket.CLOSED) {
       forceReconnect(reason);
       return;
     }
+    if (state === WebSocket.CONNECTING) {
+      unlockResume();
+      return;
+    }
+    ensureHeartbeat();
     verifyOpenSocket(reason);
   };
 
@@ -431,6 +503,9 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       if (data.type === "pong") {
         lastPongAt = Date.now();
         awaitingPingAck = false;
+        clearPingAckTimer();
+        unlockResume();
+        ensureHeartbeat();
         handlers.onPong?.({ pingAt: data.t, pongAt: lastPongAt });
         return;
       }
@@ -580,11 +655,10 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
     };
 
     ws.onclose = (event) => {
+      if (socket !== ws) return;
       lastCloseCode = typeof event?.code === "number" ? event.code : null;
-      if (socket === ws) {
-        stopHeartbeat();
-        socket = null;
-      }
+      stopHeartbeat();
+      socket = null;
       if (closed) return;
       if (_isSocketLive(socket)) return;
       handlers.onStatus?.("closed");

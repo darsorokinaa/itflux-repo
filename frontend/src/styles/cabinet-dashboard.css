@@ -685,23 +685,6 @@
   overflow-wrap: anywhere;
 }
 
-.cabinet-header--dashboard .cabinet-header-title {
-  display: flex;
-}
-
-.cabinet-header--dashboard .cabinet-header-section {
-  display: none;
-}
-
-.cabinet-header--dashboard .cabinet-header-right {
-  flex: 1 1 auto;
-}
-
-.cabinet-header--dashboard .cabinet-global-search {
-  max-width: min(560px, 100%);
-  margin-right: auto;
-}
-
 .cabinet-header-greeting {
   font-size: clamp(1.05rem, 2vw, 1.25rem);
   font-weight: 700;
@@ -8975,11 +8958,14 @@ select.cb-lesson-card__about-input.is-empty {
 
 .cb-lesson-card__meeting-info {
   min-width: 0;
-  flex: 1;
+  flex: 1 1 8rem;
 }
 
 .cb-lesson-card__meeting-provider {
   display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 13px;
   font-weight: 800;
   color: #0F172A;
@@ -9010,6 +8996,10 @@ select.cb-lesson-card__about-input.is-empty {
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
+}
+
+.cb-lesson-card__meeting-actions {
+  flex: 1 0 100%;
 }
 
 .cb-lesson-card__link-form {

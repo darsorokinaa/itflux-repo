@@ -24,48 +24,59 @@ export function connectMessagingSocket({ onEvent, onOpenChange }) {
 
   const connect = () => {
     if (closed || seq !== connectionSeq) return;
+    if (socket && (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN)) return;
+    let ws;
     try {
-      socket = new WebSocket(messagingWsUrl());
+      ws = new WebSocket(messagingWsUrl());
     } catch {
       onOpenChange(false);
       return;
     }
-    socket.onopen = () => {
-      if (seq !== connectionSeq) {
-        socket.close();
+    socket = ws;
+    ws.onopen = () => {
+      if (closed || seq !== connectionSeq || socket !== ws) {
+        try { ws.close(); } catch { /* stale */ }
         return;
       }
+      window.clearTimeout(timer);
+      timer = null;
       attempt = 0;
       everOpened = true;
-      activeSocket = socket;
+      activeSocket = ws;
       onOpenChange(true);
     };
-    socket.onmessage = (event) => {
-      if (seq !== connectionSeq) return;
+    ws.onmessage = (event) => {
+      if (seq !== connectionSeq || socket !== ws) return;
       try {
         onEvent(JSON.parse(event.data));
       } catch {
         /* ignore malformed frame */
       }
     };
-    socket.onerror = () => {
-      if (seq !== connectionSeq) return;
+    ws.onerror = () => {
+      if (seq !== connectionSeq || socket !== ws) return;
       onOpenChange(false);
     };
-    socket.onclose = (event) => {
-      if (activeSocket === socket) activeSocket = null;
-      if (seq !== connectionSeq) return;
+    ws.onclose = (event) => {
+      // A replaced socket closes after the next one is already current.
+      // That close belongs to the old socket and must not drop the live session.
+      if (socket !== ws) return;
+      if (activeSocket === ws) activeSocket = null;
       onOpenChange(false);
-      if (closed) return;
+      if (closed || seq !== connectionSeq) return;
       const code = event && event.code;
       // 4401/4403 — сервер закрыл сокет: нет сессии, нет согласия или мессенджер выключен.
       // До accept браузер часто видит только 1006, поэтому после полной лестницы
       // backoff останавливаемся, если соединение ни разу не открылось.
       if (AUTH_CLOSE_CODES.has(code)) return;
       if (!everOpened && attempt >= RECONNECT_DELAYS_MS.length) return;
+      if (timer != null) return;
       const delay = RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)];
       attempt += 1;
-      timer = window.setTimeout(connect, delay);
+      timer = window.setTimeout(() => {
+        timer = null;
+        connect();
+      }, delay);
     };
   };
 

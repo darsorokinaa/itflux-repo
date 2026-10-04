@@ -96,6 +96,65 @@ export async function ensureCsrfCookie() {
   await fetch("/api/csrf/", { credentials: "same-origin", cache: "no-store" });
 }
 
+const cabinetReadInflight = new Map();
+
+/** Concurrent identical GETs share one request. Auth changes drop the shared slot. */
+function shareCabinetRead(key, run) {
+  const existing = cabinetReadInflight.get(key);
+  if (existing) return existing;
+  let pending;
+  pending = Promise.resolve().then(run).finally(() => {
+    if (cabinetReadInflight.get(key) === pending) cabinetReadInflight.delete(key);
+  });
+  cabinetReadInflight.set(key, pending);
+  return pending;
+}
+
+export function invalidateCabinetRead(key) {
+  if (key) cabinetReadInflight.delete(key);
+}
+
+const cabinetSnapshots = new Map();
+
+export function readCabinetSnapshot(key) {
+  return cabinetSnapshots.get(key) || null;
+}
+
+export function rememberCabinetSnapshot(key, value) {
+  if (value == null) cabinetSnapshots.delete(key);
+  else cabinetSnapshots.set(key, value);
+}
+
+/** Timeouts by request class. 0 means no timer. Callers may still pass timeoutMs. */
+export function resolveCabinetTimeout(path, options = {}) {
+  if (options.timeoutMs === 0) return 0;
+  if (typeof options.timeoutMs === "number" && options.timeoutMs > 0) return options.timeoutMs;
+  const method = String(options.method || "GET").toUpperCase();
+  if (options.upload) return 300000;
+  const normalized = String(path || "");
+  if (normalized.includes("/ai/") && method !== "GET") return 120000;
+  if (method === "GET" || method === "HEAD") return 20000;
+  return 45000;
+}
+
+function combineAbortSignal(timeoutMs, external) {
+  const controller = new AbortController();
+  let timer = null;
+  if (timeoutMs > 0) {
+    timer = setTimeout(() => controller.abort(), timeoutMs);
+  }
+  if (external) {
+    if (external.aborted) controller.abort();
+    else external.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+  return {
+    signal: controller.signal,
+    clear() {
+      if (timer != null) clearTimeout(timer);
+    },
+  };
+}
+
 async function cabinetFetch(path, options = {}) {
   await ensureCsrfCookie();
   const headers = {
@@ -110,12 +169,19 @@ async function cabinetFetch(path, options = {}) {
     headers["X-Request-ID"] = crypto.randomUUID();
   }
 
-  const res = await fetch(`${apiBase()}${path}`, {
-    credentials: "same-origin",
-    cache: "no-store",
-    ...options,
-    headers,
-  });
+  const timeout = combineAbortSignal(resolveCabinetTimeout(path, options), options.signal);
+  let res;
+  try {
+    res = await fetch(`${apiBase()}${path}`, {
+      credentials: "same-origin",
+      cache: "no-store",
+      ...options,
+      headers,
+      signal: timeout.signal,
+    });
+  } finally {
+    timeout.clear();
+  }
 
   let data = null;
   try {
@@ -192,11 +258,25 @@ async function cabinetDownload(path, fallbackName, { method = "GET", body, json 
   return name;
 }
 
-export function fetchCabinetSession() {
-  return cabinetFetch("/me/", { method: "GET" });
+export function fetchCabinetSession({ fresh = false } = {}) {
+  if (fresh) {
+    rememberCabinetSnapshot("me", null);
+    invalidateCabinetRead("me");
+  } else {
+    const existing = readCabinetSnapshot("me");
+    if (existing) return Promise.resolve(existing);
+  }
+  return shareCabinetRead("me", () =>
+    cabinetFetch("/me/", { method: "GET" }).then((data) => {
+      rememberCabinetSnapshot("me", data);
+      return data;
+    }),
+  );
 }
 
 export function loginCabinet(payload) {
+  invalidateCabinetRead("me");
+  rememberCabinetSnapshot("me", null);
   return cabinetFetch("/login/", {
     method: "POST",
     body: JSON.stringify(payload),
@@ -204,6 +284,8 @@ export function loginCabinet(payload) {
 }
 
 export function registerCabinet(payload) {
+  invalidateCabinetRead("me");
+  rememberCabinetSnapshot("me", null);
   return cabinetFetch("/register/", {
     method: "POST",
     body: JSON.stringify(payload),
@@ -229,6 +311,12 @@ export function fetchReferralPreview(code) {
 }
 
 export function logoutCabinet() {
+  invalidateCabinetRead("me");
+  invalidateCabinetRead("vapid");
+  invalidateCabinetRead("subscription-usage");
+  rememberCabinetSnapshot("me", null);
+  rememberCabinetSnapshot("vapid", null);
+  rememberCabinetSnapshot("subscription-usage", null);
   return cabinetFetch("/logout/", { method: "POST" });
 }
 
@@ -270,7 +358,14 @@ export async function logoutCabinetAndDetachPush() {
 }
 
 export function fetchPushVapidKey() {
-  return cabinetFetch("/push/vapid-public-key/", { method: "GET" });
+  const existing = readCabinetSnapshot("vapid");
+  if (existing) return Promise.resolve(existing);
+  return shareCabinetRead("vapid", () =>
+    cabinetFetch("/push/vapid-public-key/", { method: "GET" }).then((data) => {
+      rememberCabinetSnapshot("vapid", data);
+      return data;
+    }),
+  );
 }
 
 export async function fetchPushDevices() {
@@ -733,8 +828,9 @@ export function deleteScheduleEvent(eventId, { scope, notifyParticipants = true 
 }
 
 export function fetchNotifications({ student = false } = {}) {
+  const key = student ? "notifications:student" : "notifications:teacher";
   const path = student ? "/student/notifications/" : "/notifications/";
-  return cabinetFetch(path, { method: "GET" });
+  return shareCabinetRead(key, () => cabinetFetch(path, { method: "GET" }));
 }
 
 export function markNotificationRead(id, { student = false } = {}) {
@@ -1085,19 +1181,29 @@ export function createHomeworkFromReview(reviewId, payload = {}) {
   );
 }
 
-async function cabinetFetchMultipart(path, formData, { method = "POST" } = {}) {
+async function cabinetFetchMultipart(path, formData, { method = "POST", timeoutMs, signal } = {}) {
   await ensureCsrfCookie();
   const headers = { Accept: "application/json", ...clientVersionHeaders() };
   const csrf = getCsrfToken();
   if (csrf) headers["X-CSRFToken"] = csrf;
+  const timeout = combineAbortSignal(
+    resolveCabinetTimeout(path, { method, upload: true, timeoutMs }),
+    signal,
+  );
 
-  const res = await fetch(`${apiBase()}${path}`, {
-    method,
-    body: formData,
-    credentials: "same-origin",
-    cache: "no-store",
-    headers,
-  });
+  let res;
+  try {
+    res = await fetch(`${apiBase()}${path}`, {
+      method,
+      body: formData,
+      credentials: "same-origin",
+      cache: "no-store",
+      headers,
+      signal: timeout.signal,
+    });
+  } finally {
+    timeout.clear();
+  }
 
   let data = null;
   try {
@@ -1649,7 +1755,7 @@ export function fetchReportsOverview() {
 // --- Subscription ---
 
 export function fetchSubscriptionUsage() {
-  return cabinetFetch("/subscription/usage/", { method: "GET" });
+  return shareCabinetRead("subscription-usage", () => cabinetFetch("/subscription/usage/", { method: "GET" }));
 }
 
 export function fetchSubscriptionCurrent() {

@@ -1,7 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 
-import CabinetBoardEditorPage from "../pages/CabinetBoardEditorPage";
 import { fetchInteractiveBoard } from "../../utils/cabinetAuth";
 import { normalizeBoardProvider } from "./boardProvider";
 import BoardV2ErrorBoundary from "./BoardV2ErrorBoundary";
@@ -9,6 +8,7 @@ import LessonBoardMessage from "./LessonBoardMessage";
 import "../styles/boards.css";
 
 const TldrawBoard = lazy(() => import("./TldrawBoard"));
+const CabinetBoardEditorPage = lazy(() => import("../pages/CabinetBoardEditorPage"));
 
 /**
  * Одна реализация доски за раз. Пока флаг неизвестен, ни Excalidraw, ни tldraw не монтируются.
@@ -112,5 +112,17 @@ export default function BoardEditorGate() {
     );
   }
 
-  return <CabinetBoardEditorPage />;
+  return (
+    <Suspense
+      fallback={(
+        <div className="cb-board-editor lesson-board-shell">
+          <div className="lesson-board">
+            <LessonBoardMessage text="Подключаем доску…" />
+          </div>
+        </div>
+      )}
+    >
+      <CabinetBoardEditorPage />
+    </Suspense>
+  );
 }

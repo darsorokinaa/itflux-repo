@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isChunkLoadError, recoverChunkLoadOnce, reportClientEvent } from "./clientTelemetry";
+import { flushClientTelemetry, isChunkLoadError, recoverChunkLoadOnce, reportClientEvent } from "./clientTelemetry";
 
 describe("clientTelemetry", () => {
   beforeEach(() => {
@@ -21,14 +21,34 @@ describe("clientTelemetry", () => {
     expect(navigator.sendBeacon).not.toHaveBeenCalled();
   });
 
-    it("sends allowed events without scene payloads", () => {
+    it("batches allowed events into one request and does not retry 400", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 400, headers: { get: () => null } });
+    vi.stubGlobal("fetch", fetchMock);
     expect(reportClientEvent("collaboration_connected")).toBe(true);
     expect(reportClientEvent("screen_share_started")).toBe(true);
     expect(reportClientEvent("pip_opened")).toBe(true);
     expect(reportClientEvent("RESUME_START", { pwa: true, stage: "start" })).toBe(true);
-    expect(navigator.sendBeacon).toHaveBeenCalledTimes(4);
-    const body = navigator.sendBeacon.mock.calls[0][1];
-    expect(body).toBeInstanceOf(Blob);
+    await flushClientTelemetry();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.events).toHaveLength(4);
+    expect(body.events[0].extra || {}).not.toHaveProperty("scene");
+    await flushClientTelemetry();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds the batch on 429 until Retry-After", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      headers: { get: (name) => (name === "Retry-After" ? "60" : null) },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    reportClientEvent("collaboration_connected");
+    await flushClientTelemetry();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await flushClientTelemetry();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("recovers a missing chunk only once per tab", () => {

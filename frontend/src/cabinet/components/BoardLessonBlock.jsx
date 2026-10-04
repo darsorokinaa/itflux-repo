@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import CabinetIcon from "../CabinetIcons";
+import "../styles/board-lesson-block.css";
 import BoardCreateModal from "./BoardCreateModal";
 import CabinetModal from "./CabinetModal";
 import {
@@ -140,10 +141,10 @@ export default function BoardLessonBlock({
   }
 
   const btnPrimary = embedded
-    ? "video-lesson-btn video-lesson-btn--primary"
+    ? "cb-btn cb-btn--primary cb-btn--xs"
     : "cb-lesson-card__meeting-btn cb-lesson-card__meeting-btn--primary";
   const btnSecondary = embedded
-    ? "video-lesson-btn video-lesson-btn--primary"
+    ? "cb-btn cb-btn--outline cb-btn--xs"
     : "cb-lesson-card__meeting-btn";
 
   const body = (
@@ -177,7 +178,7 @@ export default function BoardLessonBlock({
                   <div className="vl-mat-item__present-actions">
                     <button
                       type="button"
-                      className="video-lesson-btn video-lesson-btn--ghost"
+                      className="cb-btn cb-btn--outline cb-btn--xs"
                       onClick={() => {
                         if (typeof onOpenLocally === "function") {
                           onOpenLocally(board);
@@ -191,7 +192,7 @@ export default function BoardLessonBlock({
                     {showingToStudent && typeof onHideFromStudent === "function" ? (
                       <button
                         type="button"
-                        className="video-lesson-btn video-lesson-btn--ghost"
+                        className="cb-btn cb-btn--outline cb-btn--xs"
                         disabled={showBusy}
                         aria-pressed="true"
                         onClick={() => onHideFromStudent()}
@@ -201,7 +202,7 @@ export default function BoardLessonBlock({
                     ) : (
                       <button
                         type="button"
-                        className="video-lesson-btn video-lesson-btn--ghost"
+                        className="cb-btn cb-btn--outline cb-btn--xs"
                         disabled={showBusy}
                         aria-pressed="false"
                         onClick={() => onShowToStudent(board)}
@@ -211,7 +212,7 @@ export default function BoardLessonBlock({
                     )}
                     <button
                       type="button"
-                      className="video-lesson-btn video-lesson-btn--ghost"
+                      className="cb-btn cb-btn--outline cb-btn--xs"
                       onClick={openPicker}
                     >
                       Другое
@@ -222,7 +223,7 @@ export default function BoardLessonBlock({
                 <div className="vl-mat-item__actions">
                   <button
                     type="button"
-                    className="video-lesson-btn video-lesson-btn--ghost"
+                    className="cb-btn cb-btn--outline cb-btn--xs"
                     onClick={() => {
                       if (typeof onOpenLocally === "function") {
                         onOpenLocally(board);
@@ -299,12 +300,12 @@ export default function BoardLessonBlock({
               <div className="vl-mat-item__present-actions">
                 <button
                   type="button"
-                  className="video-lesson-btn video-lesson-btn--ghost"
+                  className="cb-btn cb-btn--outline cb-btn--xs"
                   onClick={() => setShowCreate(true)}
                 >
                   Создать
                 </button>
-                <button type="button" className="video-lesson-btn video-lesson-btn--ghost" onClick={openPicker}>
+                <button type="button" className="cb-btn cb-btn--outline cb-btn--xs" onClick={openPicker}>
                   Выбрать
                 </button>
               </div>

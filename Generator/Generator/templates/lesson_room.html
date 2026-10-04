@@ -1195,16 +1195,22 @@
           clearTimeout(lessonReconnectTimer);
           lessonReconnectTimer = null;
         }
-        ws = new WebSocket(lessonWsUrl);
-        ws.onopen = () => {
+        const socket = new WebSocket(lessonWsUrl);
+        ws = socket;
+        socket.onopen = () => {
+          if (ws !== socket) return;
           lessonReconnectAttempt = 0;
           lessonHandlers.open?.();
           for (const row of durablePending.values()) {
-            try { ws.send(JSON.stringify(row.payload)); } catch (_) {}
+            try { socket.send(JSON.stringify(row.payload)); } catch (_) {}
           }
         };
-        ws.onmessage = (event) => lessonHandlers.message?.(event);
-        ws.onclose = () => {
+        socket.onmessage = (event) => {
+          if (ws !== socket) return;
+          lessonHandlers.message?.(event);
+        };
+        socket.onclose = () => {
+          if (ws !== socket) return;
           wsReady = false;
           if (lessonEnded) return;
           if (document.visibilityState === "hidden") return;

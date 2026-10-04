@@ -16,6 +16,7 @@ import {
 } from "@tldraw/tlschema";
 
 import { loadMathJax } from "../../utils/loadMathJax";
+import { LESSON_CUSTOM_COLOR } from "./lessonCustomColor";
 import { isLessonLinkUrl } from "./lessonGeoUrl";
 import { lessonBoardAssetCanUpload } from "./lessonBoardAssetStore";
 import {
@@ -160,8 +161,27 @@ function paintCustomColors(editor, entries) {
   });
 }
 
+function documentCustomColorEntries(editor) {
+  const entries = [];
+  const seen = new Set();
+  const records = editor?.store?.allRecords?.() || [];
+  for (const record of records) {
+    if (record?.typeName !== "shape") continue;
+    for (const key of ["color", "labelColor"]) {
+      const id = record.props?.[key];
+      if (typeof id !== "string" || seen.has(id) || !LESSON_CUSTOM_COLOR.test(id)) continue;
+      seen.add(id);
+      entries.push([id, id.slice(1)]);
+    }
+  }
+  return entries;
+}
+
 export function installSavedCustomColors(editor) {
-  paintCustomColors(editor, customColorEntries());
+  const saved = customColorEntries();
+  const known = new Set(saved.map(([id]) => id));
+  const fromDocument = documentCustomColorEntries(editor).filter(([id]) => !known.has(id));
+  paintCustomColors(editor, [...saved, ...fromDocument]);
 }
 
 export function applyCustomColor(editor, hex) {

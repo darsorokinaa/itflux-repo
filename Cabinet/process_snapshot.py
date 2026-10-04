@@ -135,11 +135,24 @@ def _top_traces(limit: int = 8) -> list[str]:
     return lines
 
 
+def _heavy_snapshot() -> bool:
+    if tracemalloc_enabled():
+        return True
+    raw = (os.environ.get("ITFLUX_PROCESS_SNAPSHOT_HEAVY") or "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
 def log_process_snapshot(reason: str) -> None:
     with _lock:
         rss_before = _rss_kb()
-        collected = gc.collect()
-        rss_after = _rss_kb()
+        if _heavy_snapshot():
+            collected = gc.collect()
+            rss_after = _rss_kb()
+            gc_objects = len(gc.get_objects())
+        else:
+            collected = 0
+            rss_after = rss_before
+            gc_objects = -1
         try:
             from Cabinet.channel_retention import channel_layer_stats, clean_expired_channels
 
@@ -181,7 +194,7 @@ def log_process_snapshot(reason: str) -> None:
             f"pss_kb={_pss_kb()}",
             f"python_heap_kb={heap_kb}",
             f"gc_collected={collected}",
-            f"gc_objects={len(gc.get_objects())}",
+            f"gc_objects={gc_objects}",
             f"threads={threading.active_count()}",
             f"fds={_fd_count()}",
             f"tasks={tasks}",
@@ -268,12 +281,18 @@ def _watch_rss_jumps() -> None:
         samples[:] = [(now, rss)]
 
 
+def tracemalloc_enabled() -> bool:
+    """Tracing every allocation kept multi-gigabyte RSS while the traced heap stayed ~0.5 GB."""
+    raw = (os.environ.get("ITFLUX_TRACEMALLOC") or "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
 def start_process_snapshots(interval_s: float = 900.0) -> None:
     global _started
     if _started:
         return
     _started = True
-    if not tracemalloc.is_tracing():
+    if tracemalloc_enabled() and not tracemalloc.is_tracing():
         tracemalloc.start(5)
 
     def _loop():

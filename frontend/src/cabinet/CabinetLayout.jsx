@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
 import { displayName } from "../pages/CabinetAuthPage";
 import { fetchCabinetSession, fetchNavCounts, logoutCabinetAndDetachPush, ensureCabinetPushSubscription } from "../utils/cabinetAuth";
+import { markPerf } from "../utils/appBoot";
 import { fetchMessageUnread } from "./messages/api";
 import { connectMessagingSocket } from "./messages/live";
 import CabinetIcon from "./CabinetIcons";
@@ -161,7 +162,11 @@ export default function CabinetLayout() {
   useEffect(() => {
     let cancelled = false;
     fetchCabinetSession()
-      .then((d) => { if (!cancelled) setUser(d?.authenticated ? d.user : null); })
+      .then((d) => {
+        if (cancelled) return;
+        setUser(d?.authenticated ? d.user : null);
+        markPerf("auth_ready");
+      })
       .catch(() => { if (!cancelled) setUser(null); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -185,6 +190,7 @@ export default function CabinetLayout() {
     }
   }, []);
 
+  // Счётчики не зависят от маршрута: pathname перезапускал запрос на каждый переход.
   useEffect(() => {
     if (loading || !user || user.role === "student") return undefined;
     loadNavCounts();
@@ -197,7 +203,7 @@ export default function CabinetLayout() {
       window.removeEventListener("cabinet:nav-counts-refresh", onRefresh);
       window.removeEventListener("focus", onRefresh);
     };
-  }, [loading, user, loadNavCounts, location.pathname]);
+  }, [loading, user, loadNavCounts]);
 
   const loadMessageUnread = useCallback(async () => {
     try {
@@ -285,7 +291,7 @@ export default function CabinetLayout() {
 
   const refreshUser = useCallback(async () => {
     try {
-      const d = await fetchCabinetSession();
+      const d = await fetchCabinetSession({ fresh: true });
       setUser(d?.authenticated ? d.user : null);
     } catch {
       /* ignore */

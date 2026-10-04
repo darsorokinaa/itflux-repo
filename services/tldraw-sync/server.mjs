@@ -65,33 +65,45 @@ export function syncSecretFromEnv() {
   return DEV_SYNC_SECRET;
 }
 
-function socketBridge(socket) {
+function socketBridge(socket, slot) {
+  const listeners = {
+    message: new Set(),
+    close: new Set(),
+    error: new Set(),
+  };
+  const emit = (type, event) => {
+    // A replaced tab keeps the same session id. The old socket closes after the
+    // new one is already in the room; forwarding that close cancels the live session.
+    if (!slot.active) return;
+    for (const handler of [...listeners[type]]) handler(event);
+  };
+  socket.on("message", (data) => {
+    const text = typeof data === "string" ? data : data.toString("utf8");
+    if (process.env.TLDRAW_SYNC_DEBUG === "1") {
+      console.log("ws message", text.slice(0, 160));
+    }
+    emit("message", { data: text });
+  });
+  socket.on("close", () => emit("close", {}));
+  socket.on("error", () => emit("error", {}));
   return {
     get readyState() {
       return socket.readyState;
     },
     send(data) {
+      if (!slot.active) return;
       socket.send(data);
     },
     close(code, reason) {
       socket.close(code, reason);
     },
     addEventListener(type, handler) {
-      if (type === "message") {
-        socket.on("message", (data) => {
-          const text = typeof data === "string" ? data : data.toString("utf8");
-          if (process.env.TLDRAW_SYNC_DEBUG === "1") {
-            console.log("ws message", text.slice(0, 160));
-          }
-          handler({ data: text });
-        });
-      } else if (type === "close") {
-        socket.on("close", () => handler({}));
-      } else if (type === "error") {
-        socket.on("error", () => handler({}));
-      }
+      if (typeof handler !== "function") return;
+      listeners[type]?.add(handler);
     },
-    removeEventListener() {},
+    removeEventListener(type, handler) {
+      listeners[type]?.delete(handler);
+    },
   };
 }
 
@@ -112,6 +124,7 @@ export async function createSyncServer({ port = 5858, host = "127.0.0.1", secret
   const schema = lessonSyncSchema();
   const rooms = new Map();
   const sessionUsers = new Map();
+  const sessionSlots = new Map();
 
   function dropRoom(boardId) {
     const entry = rooms.get(boardId);
@@ -229,10 +242,15 @@ export async function createSyncServer({ port = 5858, host = "127.0.0.1", secret
       board_id: boardId,
     });
     sessionUsers.set(sessionId, presenceUserId);
+    const slotKey = `${boardId}:${sessionId}`;
+    const slot = { active: true };
+    const previous = sessionSlots.get(slotKey);
+    if (previous) previous.active = false;
+    sessionSlots.set(slotKey, slot);
     try {
       roomFor(boardId).handleSocketConnect({
         sessionId,
-        socket: socketBridge(socket),
+        socket: socketBridge(socket, slot),
         isReadonly: !payload.can_edit,
       });
       logWsLifecycle({
@@ -242,6 +260,8 @@ export async function createSyncServer({ port = 5858, host = "127.0.0.1", secret
         board_id: boardId,
       });
     } catch (error) {
+      slot.active = false;
+      if (sessionSlots.get(slotKey) === slot) sessionSlots.delete(slotKey);
       sessionUsers.delete(sessionId);
       console.error("tldraw-sync room failed", error);
       logWsLifecycle({ event: "disconnect", request_id: requestId, board_id: boardId, close_code: 1011 });
@@ -249,6 +269,7 @@ export async function createSyncServer({ port = 5858, host = "127.0.0.1", secret
       return;
     }
     socket.on("close", (code) => {
+      if (sessionSlots.get(slotKey) === slot) sessionSlots.delete(slotKey);
       const now = Date.now();
       logWsLifecycle({
         event: "disconnect",

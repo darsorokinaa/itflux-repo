@@ -1,0 +1,96 @@
+.cb-board-lesson--embedded {
+  margin-top: 14px;
+}
+
+.cb-board-lesson--embedded .vl-mat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.cb-board-lesson--embedded .vl-mat-item__main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cb-board-lesson--embedded .vl-mat-item__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #f1f5f9;
+  color: #334155;
+}
+
+.cb-board-lesson--embedded .vl-mat-item__icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.cb-board-lesson--embedded .vl-mat-item__body {
+  min-width: 0;
+}
+
+.cb-board-lesson--embedded .vl-mat-item__title {
+  font-size: 0.84rem;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.cb-board-lesson--embedded .vl-mat-item__meta {
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 0.75rem;
+  line-height: 1.3;
+}
+
+.cb-board-lesson--embedded .vl-mat-item__present-actions,
+.cb-board-lesson--embedded .cb-board-lesson__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.cb-board-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cb-board-form .cb-field {
+  min-width: 0;
+}
+
+.cb-board-form .cb-field input,
+.cb-board-form .cb-field select,
+.cb-board-form .cb-field textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.cb-board-form .cb-field textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.cb-board-form .cb-field .cb-board-form__hint {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.4;
+  color: #64748b;
+}
+
+.cb-board-form__error {
+  margin: 0;
+  color: #b42318;
+  font-size: 0.9rem;
+}

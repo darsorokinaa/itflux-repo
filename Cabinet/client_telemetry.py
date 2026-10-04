@@ -49,6 +49,28 @@ ALLOWED_EVENTS = frozenset(
         "APP_FATAL_ERROR",
         "APP_UNHANDLED_REJECTION",
         "APP_RENDER_ERROR",
+        "MAIN_THREAD_STALL",
+        "collaboration_connect_start",
+        "collaboration_connected",
+        "collaboration_disconnected",
+        "collaboration_reconnect",
+        "collaboration_error",
+        "participant_join",
+        "participant_leave",
+        "initial_state_received",
+        "screen_share_started",
+        "screen_share_stopped",
+        "pip_requested",
+        "pip_opened",
+        "pip_failed",
+        "pip_closed",
+        "JITSI_DUPLICATE",
+        "RESOURCE_SNAPSHOT",
+        "SW_INSTALL",
+        "SW_ACTIVATE",
+        "SW_CONTROLLER_CHANGE",
+        "SW_NAVIGATION_FETCH",
+        "SW_UPDATE_FOUND",
     }
 )
 MAX_BODY_BYTES = 8000
@@ -62,7 +84,9 @@ def _clip(value, limit: int) -> str:
 @require_POST
 def client_telemetry(request):
     if not rate_limit_check(request, "client_telemetry", 40, 60):
-        return rate_limit_json_response("client_telemetry")
+        limited = rate_limit_json_response("client_telemetry")
+        limited["Retry-After"] = "60"
+        return limited
 
     raw = request.body or b""
     if len(raw) > MAX_BODY_BYTES:
@@ -76,30 +100,46 @@ def client_telemetry(request):
     if not isinstance(data, dict):
         return JsonResponse({"ok": False, "error": "invalid_json"}, status=400)
 
-    event = _clip(data.get("event"), 64)
-    if event not in ALLOWED_EVENTS:
+    raw_events = data.get("events")
+    if isinstance(raw_events, list):
+        items = [item for item in raw_events[:20] if isinstance(item, dict)]
+    elif data.get("event"):
+        items = [data]
+    else:
         return JsonResponse({"ok": False, "error": "unknown_event"}, status=400)
 
-    context = data.get("context") if isinstance(data.get("context"), dict) else {}
-    extra = data.get("extra") if isinstance(data.get("extra"), dict) else {}
     user_id = getattr(getattr(request, "user", None), "pk", None) or 0
+    accepted = 0
+    rejected = 0
+    for item in items:
+        event = _clip(item.get("event"), 64)
+        if event not in ALLOWED_EVENTS:
+            rejected += 1
+            continue
+        context = item.get("context") if isinstance(item.get("context"), dict) else {}
+        if not context and isinstance(data.get("context"), dict) and item is not data:
+            context = data.get("context")
+        extra = item.get("extra") if isinstance(item.get("extra"), dict) else {}
+        logger.info(
+            "mobile_telemetry event=%s user_id=%s page=%s online=%s conn=%s vis=%s "
+            "viewport=%s screen=%s os=%s extra=%s ua=%s",
+            event,
+            user_id,
+            _clip(context.get("page"), 160),
+            context.get("online"),
+            _clip(context.get("connection"), 16),
+            _clip(context.get("visibility"), 16),
+            _clip(context.get("viewport"), 32),
+            _clip(context.get("screen"), 32),
+            _clip(context.get("os"), 64),
+            json.dumps(
+                {str(k)[:40]: _clip(v, 120) for k, v in list(extra.items())[:12]},
+                ensure_ascii=False,
+            )[:800],
+            _clip(context.get("browser"), 240),
+        )
+        accepted += 1
 
-    logger.info(
-        "mobile_telemetry event=%s user_id=%s page=%s online=%s conn=%s vis=%s "
-        "viewport=%s screen=%s os=%s extra=%s ua=%s",
-        event,
-        user_id,
-        _clip(context.get("page"), 160),
-        context.get("online"),
-        _clip(context.get("connection"), 16),
-        _clip(context.get("visibility"), 16),
-        _clip(context.get("viewport"), 32),
-        _clip(context.get("screen"), 32),
-        _clip(context.get("os"), 64),
-        json.dumps(
-            {str(k)[:40]: _clip(v, 120) for k, v in list(extra.items())[:12]},
-            ensure_ascii=False,
-        )[:800],
-        _clip(context.get("browser"), 240),
-    )
-    return JsonResponse({"ok": True})
+    if accepted == 0:
+        return JsonResponse({"ok": False, "error": "unknown_event", "rejected": rejected}, status=400)
+    return JsonResponse({"ok": True, "accepted": accepted, "rejected": rejected})

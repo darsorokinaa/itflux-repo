@@ -127,7 +127,7 @@ export default function ParentCabinetPage() {
 
   const refreshUser = useCallback(async () => {
     try {
-      const d = await fetchCabinetSession();
+      const d = await fetchCabinetSession({ fresh: true });
       setUser(d?.authenticated ? d.user : null);
     } catch {
       /* ignore */

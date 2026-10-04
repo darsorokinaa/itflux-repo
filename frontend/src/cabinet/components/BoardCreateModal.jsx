@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import CabinetModal from "./CabinetModal";
+import "../styles/board-lesson-block.css";
 import { createInteractiveBoard, fetchGroups, fetchLessons, fetchStudents, normalizeCabinetList } from "../../utils/cabinetAuth";
 
 export const DEFAULT_BOARD_TITLE = "Новая доска";
@@ -99,8 +100,8 @@ export default function BoardCreateModal({
       )}
     >
       <form id="cb-board-create-form" className="cb-board-form" onSubmit={handleSubmit}>
-        <label>
-          Название доски
+        <label className="cb-field">
+          <span>Название доски</span>
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -109,8 +110,8 @@ export default function BoardCreateModal({
             autoFocus
           />
         </label>
-        <label>
-          Описание
+        <label className="cb-field">
+          <span>Описание</span>
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -118,8 +119,8 @@ export default function BoardCreateModal({
             placeholder="Необязательно"
           />
         </label>
-        <label>
-          Группа
+        <label className="cb-field">
+          <span>Группа</span>
           <select value={groupId} onChange={(e) => setGroupId(e.target.value)}>
             <option value="">Не выбрана</option>
             {groups.map((g) => (
@@ -127,8 +128,8 @@ export default function BoardCreateModal({
             ))}
           </select>
         </label>
-        <label>
-          Ученик
+        <label className="cb-field">
+          <span>Ученик</span>
           <select value={studentId} onChange={(e) => setStudentId(e.target.value)}>
             <option value="">Не выбран</option>
             {students.map((s) => (
@@ -141,8 +142,8 @@ export default function BoardCreateModal({
             Если выбрать ученика с аккаунтом, он сможет совместно редактировать доску.
           </span>
         </label>
-        <label>
-          Урок
+        <label className="cb-field">
+          <span>Урок</span>
           <select
             value={lessonId}
             onChange={(e) => {

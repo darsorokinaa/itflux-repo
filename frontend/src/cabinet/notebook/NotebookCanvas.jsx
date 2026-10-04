@@ -32,6 +32,23 @@ function pressureOf(event, fallback = 0.5) {
   return pointerPressure(event, fallback);
 }
 
+function textEditorStyle(editor, pageWidth, pageHeight) {
+  const width = pageWidth || 1000;
+  const height = pageHeight || 1414;
+  const fontSize = editor.fontSize || 24;
+  const lines = Math.max(1, String(editor.text || "").split("\n").length);
+  const boxPct = Math.max(8, ((editor.w || 180) / width) * 100);
+  const roomPct = Math.max(8, ((width - (editor.x || 0)) / width) * 100);
+  return {
+    left: `${((editor.x || 0) / width) * 100}%`,
+    top: `${(((editor.y || 0) - fontSize) / height) * 100}%`,
+    width: `${Math.min(boxPct, roomPct)}%`,
+    height: `${((lines * fontSize * 1.35) / height) * 100}%`,
+    fontSize: `calc(${(fontSize / width) * 100}cqi)`,
+    color: editor.stroke || editor.color || "#111827",
+  };
+}
+
 function pagePointFromEvent(event, canvas, page, { clamp = true } = {}) {
   return {
     ...clientToPage(event, canvas, page, { clamp }),
@@ -78,30 +95,54 @@ export default function NotebookCanvas({
   const draftRef = useRef(null);
   const marqueeRef = useRef(null);
   const rafRef = useRef(0);
+  const fallbackRef = useRef(0);
+  const textDraftRef = useRef(null);
+  const editingTextRef = useRef(editingText);
+  const ignoreBlurRef = useRef(false);
   const [textDraft, setTextDraft] = useState(null);
+  editingTextRef.current = editingText;
+  textDraftRef.current = textDraft;
 
   objectsRef.current = sessionRef.current ? objectsRef.current : (objects || []);
   selectedRef.current = selectedIds || [];
   toolRef.current = tool;
 
   const paint = () => {
-    rafRef.current = 0;
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+    }
+    if (fallbackRef.current) {
+      clearTimeout(fallbackRef.current);
+      fallbackRef.current = 0;
+    }
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
+    if (!ctx) return;
     drawNotebookScene(ctx, objectsRef.current, {
       selectedIds: selectedRef.current,
       pageWidth: page?.width || 1000,
       pageHeight: page?.height || 1414,
       draft: draftRef.current,
       marquee: marqueeRef.current,
-      hideTextId: textDraft?.id || editingText?.id || null,
+      hideTextId: textDraftRef.current?.id || editingTextRef.current?.id || null,
     });
   };
 
   const schedulePaint = () => {
-    if (rafRef.current) return;
+    if (rafRef.current || fallbackRef.current) return;
     rafRef.current = requestAnimationFrame(paint);
+    // Some embedded browsers never run the frame; a short timeout still shows the stroke.
+    fallbackRef.current = window.setTimeout(paint, 32);
+  };
+
+  const capturePointer = (event) => {
+    try {
+      canvasRef.current?.setPointerCapture?.(event.pointerId);
+    } catch {
+      /* The pointer can already be inactive; drawing should continue. */
+    }
   };
 
   useEffect(() => {
@@ -129,23 +170,45 @@ export default function NotebookCanvas({
 
   useEffect(() => () => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (fallbackRef.current) clearTimeout(fallbackRef.current);
+    rafRef.current = 0;
+    fallbackRef.current = 0;
   }, []);
 
   const commitObjects = (next, historyType) => {
     onObjectsCommit?.(next, historyType);
   };
 
+  const rememberDraft = (next, { fresh = false } = {}) => {
+    if (fresh) {
+      ignoreBlurRef.current = true;
+      window.setTimeout(() => {
+        ignoreBlurRef.current = false;
+      }, 0);
+    }
+    textDraftRef.current = next;
+    setTextDraft(next);
+    onEditingText?.(next);
+  };
+
   const finishText = (keep) => {
-    const current = textDraft || editingText;
+    const current = textDraftRef.current || editingTextRef.current;
     if (!current) return;
+    textDraftRef.current = null;
+    editingTextRef.current = null;
     const value = keep ? String(current.text || "").trimEnd() : "";
+    const existed = objectsRef.current.some((obj) => obj.id === current.id);
     const next = objectsRef.current.filter((obj) => obj.id !== current.id);
     if (value) {
-      next.push({ ...current, text: current.text, updatedAt: new Date().toISOString() });
+      const stored = { ...current, text: value, updatedAt: new Date().toISOString() };
+      delete stored._created;
+      next.push(stored);
     }
-    commitObjects(next, current._created ? "ADD_ANNOTATION" : "UPDATE_ANNOTATION");
+    objectsRef.current = next;
     setTextDraft(null);
     onEditingText?.(null);
+    paint();
+    if (value || existed) commitObjects(next, current._created ? "ADD_ANNOTATION" : "UPDATE_ANNOTATION");
   };
 
   const pointerDown = (event) => {
@@ -157,7 +220,7 @@ export default function NotebookCanvas({
     if (stylus || event.pointerType === "touch") event.preventDefault();
     const point = pagePointFromEvent(event, canvas, page, { clamp: !stylus });
     const currentTool = spacePan || event.button === 1 ? TOOL.HAND : toolRef.current;
-    if (textDraft && currentTool !== TOOL.TEXT) finishText(true);
+    if ((textDraftRef.current || editingTextRef.current) && currentTool !== TOOL.TEXT) finishText(true);
 
     if (currentTool === TOOL.HAND || event.button === 1) {
       sessionRef.current = {
@@ -166,11 +229,42 @@ export default function NotebookCanvas({
         pointerType: event.pointerType,
         lastClient: { x: event.clientX, y: event.clientY },
       };
-      canvas?.setPointerCapture?.(event.pointerId);
+      capturePointer(event);
       return;
     }
     if (readOnly) return;
-    canvas?.setPointerCapture?.(event.pointerId);
+
+    if (currentTool === TOOL.TEXT) {
+      if (textDraftRef.current || editingTextRef.current) finishText(true);
+      const hit = [...objectsRef.current].reverse().find((obj) => obj.type === "text" && hitTest(obj, point));
+      if (hit) {
+        rememberDraft({ ...hit, _created: false }, { fresh: true });
+        onSelectIds?.([hit.id]);
+        return;
+      }
+      const created = {
+        id: crypto.randomUUID?.() || `text-${Date.now()}`,
+        type: "text",
+        pageId: page.id,
+        x: point.x,
+        y: point.y,
+        w: 180,
+        text: "",
+        stroke: color,
+        color,
+        fontSize,
+        opacity: 1,
+        strokeWidth: 1,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        _created: true,
+      };
+      rememberDraft(created, { fresh: true });
+      onSelectIds?.([created.id]);
+      return;
+    }
+
+    capturePointer(event);
 
     if (currentTool === TOOL.SELECT) {
       const selected = selectedRef.current;
@@ -252,37 +346,6 @@ export default function NotebookCanvas({
       return;
     }
 
-    if (currentTool === TOOL.TEXT) {
-      const hit = [...objectsRef.current].reverse().find((obj) => obj.type === "text" && hitTest(obj, point));
-      if (hit) {
-        setTextDraft({ ...hit, _created: false });
-        onEditingText?.(hit);
-        onSelectIds?.([hit.id]);
-        return;
-      }
-      const created = {
-        id: crypto.randomUUID?.() || `text-${Date.now()}`,
-        type: "text",
-        pageId: page.id,
-        x: point.x,
-        y: point.y,
-        w: 180,
-        text: "",
-        stroke: color,
-        color,
-        fontSize,
-        opacity: 1,
-        strokeWidth: 1,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        _created: true,
-      };
-      setTextDraft(created);
-      onEditingText?.(created);
-      onSelectIds?.([created.id]);
-      return;
-    }
-
     if (event.pointerType === "touch" && !stylus && [TOOL.PEN, TOOL.MARKER, TOOL.LINE, TOOL.ARROW, TOOL.RECT, TOOL.ELLIPSE].includes(currentTool)) {
       sessionRef.current = {
         mode: "pan",
@@ -315,7 +378,7 @@ export default function NotebookCanvas({
         width: strokeWidth,
         opacity: currentTool === TOOL.MARKER ? (opacity ?? 0.28) : 1,
       };
-      schedulePaint();
+      paint();
     }
   };
 
@@ -457,7 +520,7 @@ export default function NotebookCanvas({
             width: strokeWidth,
           };
       }
-      schedulePaint();
+      paint();
     }
   };
 
@@ -537,8 +600,11 @@ export default function NotebookCanvas({
       if (!created || Math.abs(created.w || created.rx || 0) < 2) created = null;
     }
     draftRef.current = null;
-    if (created) commitObjects([...objectsRef.current, created], "ADD_ANNOTATION");
-    else schedulePaint();
+    if (created) {
+      objectsRef.current = [...objectsRef.current, created];
+      paint();
+      commitObjects(objectsRef.current, "ADD_ANNOTATION");
+    } else schedulePaint();
   };
 
   const onDoubleClick = (event) => {
@@ -546,8 +612,7 @@ export default function NotebookCanvas({
     const point = clientToPage(event, canvasRef.current, page);
     const hit = [...objectsRef.current].reverse().find((obj) => obj.type === "text" && hitTest(obj, point));
     if (hit) {
-      setTextDraft({ ...hit, _created: false });
-      onEditingText?.(hit);
+      rememberDraft({ ...hit, _created: false });
       onSelectIds?.([hit.id]);
     }
   };
@@ -577,28 +642,34 @@ export default function NotebookCanvas({
           className="hw-notebook-text-editor"
           autoFocus
           value={editor.text || ""}
-          style={{
-            left: `${((editor.x || 0) / width) * 100}%`,
-            top: `${(((editor.y || 0) - (editor.fontSize || 24)) / height) * 100}%`,
-            width: `${Math.max(12, (editor.w || 180) / width) * 100}%`,
-            fontSize: `calc(${((editor.fontSize || 24) / width) * 100}cqi)`,
-            color: editor.stroke || editor.color || "#111827",
-          }}
+          style={textEditorStyle(editor, width, height)}
           onChange={(event) => {
             const next = { ...editor, text: event.target.value, w: Math.max(80, event.target.value.length * (editor.fontSize || 24) * 0.56) };
-            setTextDraft(next);
-            onEditingText?.(next);
+            rememberDraft(next);
           }}
           onPointerDown={(event) => event.stopPropagation()}
           onKeyDown={(event) => {
             if (event.key === "Escape") {
               event.preventDefault();
               event.stopPropagation();
+              textDraftRef.current = null;
+              editingTextRef.current = null;
               setTextDraft(null);
               onEditingText?.(null);
+              return;
+            }
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              event.stopPropagation();
+              finishText(true);
             }
           }}
-          onBlur={() => finishText(true)}
+          onBlur={() => {
+            if (ignoreBlurRef.current) return;
+            const open = textDraftRef.current || editingTextRef.current;
+            if (open && open.id !== editor.id) return;
+            finishText(true);
+          }}
         />
       ) : null}
     </>

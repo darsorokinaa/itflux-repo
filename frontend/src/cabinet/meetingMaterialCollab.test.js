@@ -228,7 +228,7 @@ describe("createMeetingMaterialCollab reconnect", () => {
     expect(FakeWebSocket.instances.filter((ws) => ws.readyState === FakeWebSocket.OPEN)).toHaveLength(1);
   });
 
-  it("replaces a zombie OPEN socket after returning from background", () => {
+  it("probes an OPEN socket after background instead of replacing it immediately", () => {
     collab = createMeetingMaterialCollab("meet-1");
     lastSocket().open();
     expect(FakeWebSocket.instances).toHaveLength(1);
@@ -243,21 +243,43 @@ describe("createMeetingMaterialCollab reconnect", () => {
       value: "visible",
     });
     document.dispatchEvent(new Event("visibilitychange"));
-    expect(FakeWebSocket.instances).toHaveLength(2);
-    expect(FakeWebSocket.instances[0].readyState).toBe(FakeWebSocket.CLOSED);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(lastSocket().readyState).toBe(FakeWebSocket.OPEN);
+    expect(lastSocket().sent.some((row) => row.includes('"ping"'))).toBe(true);
   });
 
-  it("replaces a zombie OPEN socket when resume ping is not acked", () => {
+  it("keeps the socket on pageshow when there was no background freeze", () => {
     collab = createMeetingMaterialCollab("meet-1");
     lastSocket().open();
     window.dispatchEvent(new Event("pageshow"));
     expect(FakeWebSocket.instances).toHaveLength(1);
     vi.advanceTimersByTime(MATERIAL_RECONNECT.PING_ACK_MS + 1);
-    expect(FakeWebSocket.instances).toHaveLength(2);
-    expect(FakeWebSocket.instances[0].readyState).toBe(FakeWebSocket.CLOSED);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(lastSocket().readyState).toBe(FakeWebSocket.OPEN);
   });
 
-  it("coalesces pageshow and visibility into one reconnect", () => {
+  it("replaces the socket only after a resume ping is not acked", () => {
+    collab = createMeetingMaterialCollab("meet-1");
+    lastSocket().open();
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    vi.advanceTimersByTime(MATERIAL_RECONNECT.HIDDEN_RESUME_MS + 1);
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    vi.advanceTimersByTime(MATERIAL_RECONNECT.PING_ACK_MS + 1);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(FakeWebSocket.instances[0].readyState).toBe(FakeWebSocket.CLOSED);
+    expect(FakeWebSocket.instances[1].readyState).toBe(FakeWebSocket.CONNECTING);
+  });
+
+  it("coalesces pageshow and visibility into one health-check after a freeze", () => {
     collab = createMeetingMaterialCollab("meet-1");
     lastSocket().open();
     Object.defineProperty(document, "visibilityState", {
@@ -274,7 +296,23 @@ describe("createMeetingMaterialCollab reconnect", () => {
     document.dispatchEvent(new Event("visibilitychange"));
     window.dispatchEvent(new Event("pageshow"));
     window.dispatchEvent(new Event("focus"));
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    vi.advanceTimersByTime(MATERIAL_RECONNECT.PING_ACK_MS + 1);
     expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it("does not let a replaced socket's close cancel the live session", () => {
+    collab = createMeetingMaterialCollab("meet-1");
+    const first = lastSocket();
+    first.open();
+    const staleClose = first.onclose;
+    collab.reconnectNow();
+    const second = lastSocket();
+    second.open();
+    staleClose?.({ code: 1006 });
+    vi.advanceTimersByTime(30_000);
+    expect(second.readyState).toBe(FakeWebSocket.OPEN);
+    expect(FakeWebSocket.instances.filter((ws) => ws.readyState === FakeWebSocket.OPEN)).toHaveLength(1);
   });
 
   it("does not drop presence on a brief leave/join blip", () => {
