@@ -356,6 +356,11 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       noteBackground();
       return;
     }
+    // resumeNow() arrives as reason "manual". That used to skip the hidden
+    // check and call forceReconnect("manual") while the document was still hidden.
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+      return;
+    }
     if (reason === "manual") unlockResume();
     if (!lockResume()) return;
     const hiddenMs = lastHiddenAt ? Date.now() - lastHiddenAt : 0;
@@ -847,6 +852,7 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
     }, THROTTLE.POINTER_MS),
     resumeNow: () => resumeIfNeeded("manual"),
     reconnectNow: () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
       unlockResume();
       reconnectAttempt = 0;
       forceReconnect("manual");

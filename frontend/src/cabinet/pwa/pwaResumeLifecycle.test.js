@@ -281,6 +281,35 @@ describe("createPwaResumeController", () => {
     ctl.detach();
   });
 
+  it("does not resume on focus, pageshow, online, or resume while visibility is hidden", () => {
+    const onResume = vi.fn();
+    const ctl = make(onResume);
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    nowValue += RESUME_TIMING.MIN_BACKGROUND_MS + 50;
+    window.dispatchEvent(new Event("focus"));
+    window.dispatchEvent(new Event("pageshow"));
+    window.dispatchEvent(new Event("online"));
+    window.dispatchEvent(new Event("resume"));
+    expect(onResume).not.toHaveBeenCalled();
+    expect(reportEvent).not.toHaveBeenCalledWith("PWA_FOREGROUND", expect.any(Object));
+    expect(reportEvent).not.toHaveBeenCalledWith("RESUME_START", expect.any(Object));
+    expect(reportEvent).toHaveBeenCalledWith(
+      "board_iframe_lifecycle",
+      expect.objectContaining({ event: "focus", visibilityState: "hidden" }),
+    );
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(onResume).toHaveBeenCalledTimes(1);
+    ctl.detach();
+  });
+
   it("bfcache pageshow still verifies", () => {
     const onResume = vi.fn();
     const ctl = make(onResume);

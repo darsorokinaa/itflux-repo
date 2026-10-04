@@ -82,6 +82,12 @@ export function isBackgroundLifecycleReason(reason, visibilityState) {
   return false;
 }
 
+/** Resume, reconnect, and iframe remount are allowed only on a visible document. */
+export function isResumeDocumentVisible(documentRef = typeof document !== "undefined" ? document : null) {
+  if (!documentRef) return true;
+  return documentRef.visibilityState === "visible";
+}
+
 function isPendingResumeState(state) {
   return state === RESUME_STATES.RESUMING
     || state === RESUME_STATES.RECONNECTING
@@ -260,6 +266,7 @@ export function createPwaResumeController({
     const backgroundDurationMs = backgroundStartedAt
       ? Math.max(0, now() - backgroundStartedAt)
       : (typeof more.backgroundDurationMs === "number" ? more.backgroundDurationMs : 0);
+    const frame = documentRef?.querySelector?.("iframe.video-lesson-workspace__frame--board") || null;
     return {
       connectionAttemptId: attemptId,
       meetingId: String(ctx.meetingId || ctx.meetingUuid || "").slice(0, 64),
@@ -270,8 +277,26 @@ export function createPwaResumeController({
       errorCode: String(more.errorCode || "").slice(0, 64),
       pwa: isStandaloneDisplay(),
       iosStandalone: isIosStandaloneDisplay(),
+      visibilityState: String(documentRef?.visibilityState || "").slice(0, 16),
+      workspace_kind: String(ctx.workspaceKind || "").slice(0, 32),
+      board_id: String(ctx.boardId || "").slice(0, 64),
+      frame_key: String(ctx.frameKey || "").slice(0, 96),
+      iframe_isConnected: Boolean(frame?.isConnected),
       ...more,
     };
+  };
+
+  const noteLifecycle = (event) => {
+    const payload = extraBase({
+      event: String(event || "").slice(0, 32),
+      stage: "lifecycle",
+    });
+    logLifecycle("board_iframe_lifecycle", payload);
+    try {
+      reportEvent("board_iframe_lifecycle", payload);
+    } catch {
+      /* ignore */
+    }
   };
 
   const emit = (event, more = {}) => {
@@ -342,6 +367,10 @@ export function createPwaResumeController({
   };
 
   const considerResume = (reason) => {
+    // focus/pageshow/resume/online can fire while the document is still hidden.
+    // Starting recovery here remounts nothing safely and used to reconnect sockets
+    // before pagehide discarded the board iframe.
+    if (!isResumeDocumentVisible(documentRef)) return null;
     if (reason === "manual") {
       inProgress = false;
       recoveryPromise = null;
@@ -411,6 +440,7 @@ export function createPwaResumeController({
 
   const onVisibility = () => {
     const vis = documentRef?.visibilityState || "visible";
+    noteLifecycle("visibilitychange");
     if (vis === "hidden") {
       markBackground("visibility");
       return;
@@ -418,16 +448,32 @@ export function createPwaResumeController({
     considerResume("visibility");
   };
 
-  const onPageHide = () => markBackground("pagehide");
+  const onPageHide = () => {
+    noteLifecycle("pagehide");
+    markBackground("pagehide");
+  };
   const onPageShow = (event) => {
+    noteLifecycle("pageshow");
     if (!backgroundStartedAt && !event?.persisted) return;
     considerResume("pageshow");
   };
-  const onFocus = () => considerResume("focus");
-  const onOnline = () => considerResume("online");
+  const onFocus = () => {
+    noteLifecycle("focus");
+    considerResume("focus");
+  };
+  const onOnline = () => {
+    noteLifecycle("online");
+    considerResume("online");
+  };
   const onOffline = () => markDegraded("offline");
-  const onFreeze = () => markBackground("freeze");
-  const onResumeEvent = () => considerResume("resume");
+  const onFreeze = () => {
+    noteLifecycle("freeze");
+    markBackground("freeze");
+  };
+  const onResumeEvent = () => {
+    noteLifecycle("resume");
+    considerResume("resume");
+  };
 
   const attach = () => {
     if (attached || !target || !documentRef) return;

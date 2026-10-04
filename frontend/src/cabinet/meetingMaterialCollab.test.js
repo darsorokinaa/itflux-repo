@@ -301,6 +301,29 @@ describe("createMeetingMaterialCollab reconnect", () => {
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
+  it("does not forceReconnect manual while the document is hidden", () => {
+    collab = createMeetingMaterialCollab("meet-1");
+    lastSocket().open();
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    lastSocket().close();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    collab.resumeNow();
+    collab.reconnectNow();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(lastSocket().readyState).toBe(FakeWebSocket.CLOSED);
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(lastSocket().readyState).toBe(FakeWebSocket.CONNECTING);
+  });
+
   it("does not let a replaced socket's close cancel the live session", () => {
     collab = createMeetingMaterialCollab("meet-1");
     const first = lastSocket();

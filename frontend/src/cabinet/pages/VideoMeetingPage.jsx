@@ -64,6 +64,7 @@ import {
   appendMeetingParam,
   appendLiveVariantParams,
   meetingLessonContentUrl,
+  boardIdFromUrl,
   presentedIdentityKey,
   postMeetingUnpresent,
   shouldEmbedMaterialInLesson,
@@ -74,6 +75,7 @@ import {
   materialRowIdentityKey,
   logVariantLifecycle,
 } from "../meetingPresent";
+import LessonBoardWorkspaceFrame from "../pwa/lessonBoardWorkspaceFrame";
 import {
   LESSON_BOARD_CHROME_SOURCE,
   LESSON_ROOM_CHROME_SOURCE,
@@ -527,6 +529,8 @@ export default function VideoMeetingPage() {
   const [resumeState, setResumeState] = useState(RESUME_STATES.ACTIVE);
   const [resumeElapsedMs, setResumeElapsedMs] = useState(0);
   const [workspaceFrameKey, setWorkspaceFrameKey] = useState(0);
+  const workspaceFrameKeyRef = useRef(0);
+  workspaceFrameKeyRef.current = workspaceFrameKey;
   const resumeControllerRef = useRef(null);
   const remountPromiseRef = useRef(null);
   const jitsiGenRef = useRef(0);
@@ -1678,16 +1682,31 @@ export default function VideoMeetingPage() {
   useEffect(() => {
     if (pageState !== "live") return undefined;
     const controller = createPwaResumeController({
-      getContext: () => ({
-        meetingId: String(meetingUuid || "").slice(0, 64),
-        role: roleLabel || "",
-      }),
+      getContext: () => {
+        const material = workspaceMaterialRef.current;
+        const frameKey = material?.kind === "board"
+          ? `${workspaceMaterialIdentityKey(material)}:${workspaceFrameKeyRef.current}`
+          : "";
+        return {
+          meetingId: String(meetingUuid || "").slice(0, 64),
+          role: roleLabel || "",
+          workspaceKind: String(material?.kind || ""),
+          boardId: material?.kind === "board"
+            ? String(material.boardId || boardIdFromUrl(material.url) || "")
+            : "",
+          frameKey,
+        };
+      },
       onStateChange: (next, extra) => {
         if (shouldIgnoreReconnect(intentionalLeaveRef.current)) return;
         setResumeState(next);
         setResumeElapsedMs(Number(extra?.elapsedMs) || 0);
       },
       onResume: async (ctx) => {
+        const pageVisible = () => (
+          typeof document === "undefined" || document.visibilityState === "visible"
+        );
+        if (!pageVisible()) return;
         if (shouldIgnoreReconnect(intentionalLeaveRef.current)) return;
         const extra = {
           connectionAttemptId: ctx.attemptId,
@@ -1703,6 +1722,7 @@ export default function VideoMeetingPage() {
         // Live room: finish silently. Waiting on auth here used to flash
         // "Восстанавливаем соединение…" even though the call was still up.
         if (alreadyLive) {
+          if (!pageVisible()) return;
           try {
             materialCollabRef.current?.resumeNow?.();
           } catch {
@@ -1782,6 +1802,7 @@ export default function VideoMeetingPage() {
         }
 
         if (controller.getAttemptId() !== ctx.attemptId) return;
+        if (!pageVisible()) return;
         markResumeStage("realtime");
         reportClientEvent("RESUME_REALTIME_START", { ...extra, stage: "realtime" });
         try {
@@ -1826,11 +1847,11 @@ export default function VideoMeetingPage() {
           controller.markDegraded("jitsi");
         }
 
-        if (controller.getAttemptId() !== ctx.attemptId) return;
+        if (controller.getAttemptId() !== ctx.attemptId || !pageVisible()) return;
         const boardFrame = document.querySelector(
           "iframe.video-lesson-workspace__frame--board",
         );
-        const remountBoard = shouldRemountBoardWorkspace({
+        const remountBoard = pageVisible() && shouldRemountBoardWorkspace({
           frameConnected: Boolean(boardFrame?.isConnected),
           consecutiveFailures: controller.getFailCount?.() || 0,
         });
@@ -1843,7 +1864,7 @@ export default function VideoMeetingPage() {
         try {
           if (remountBoard) {
             setWorkspaceFrameKey((n) => n + 1);
-          } else {
+          } else if (pageVisible()) {
             postResumeToBoardFrames(ctx.attemptId);
           }
           reportClientEvent("RESUME_BOARD_OK", { ...extra, stage: "board", remount: remountBoard });
@@ -3421,17 +3442,12 @@ export default function VideoMeetingPage() {
               {workspaceMaterial.text && !workspaceMaterial.url ? (
                 <div className="video-lesson-workspace__text">{workspaceMaterial.text}</div>
               ) : workspaceMaterial.url ? (
-                <iframe
-                  key={`${workspaceMaterialIdentityKey(workspaceMaterial)}:${workspaceMaterial.kind === "board" ? workspaceFrameKey : "live"}`}
-                  ref={workspaceMaterial.kind === "board" ? boardFrameRef : undefined}
-                  title={workspaceMaterial.title}
-                  src={workspaceMaterial.kind === "board" ? boardFrameSrc : workspaceMaterial.url}
-                  className={[
-                    "video-lesson-workspace__frame",
-                    workspaceMaterial.kind === "board" ? "video-lesson-workspace__frame--board" : "",
-                  ].filter(Boolean).join(" ")}
-                  allow="camera; microphone; display-capture; autoplay; clipboard-read; clipboard-write; fullscreen"
-                  onLoad={workspaceMaterial.kind === "board" ? () => setBoardFrameEpoch((value) => value + 1) : undefined}
+                <LessonBoardWorkspaceFrame
+                  material={workspaceMaterial}
+                  frameKey={workspaceFrameKey}
+                  frameRef={boardFrameRef}
+                  src={boardFrameSrc}
+                  onLoad={() => setBoardFrameEpoch((value) => value + 1)}
                 />
               ) : (
                 <div className="vl-empty">
