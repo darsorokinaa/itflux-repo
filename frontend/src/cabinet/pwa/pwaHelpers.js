@@ -3,7 +3,7 @@
  */
 
 import { reportClientEvent } from "../../utils/clientTelemetry";
-import { requestHardReload } from "../../utils/liveSessionGuard";
+import { isLiveSessionPath, requestHardReload } from "../../utils/liveSessionGuard";
 
 const INSTALL_DISMISS_KEY = "itflux-pwa-install-dismissed";
 const PUSH_PROMPT_DISMISS_KEY = "itflux-push-prompt-dismissed";
@@ -101,8 +101,8 @@ export async function registerServiceWorker() {
     if (reg.installing || reg.waiting) {
       await withTimeout(navigator.serviceWorker.ready, 8000, null);
     }
-    // Не оставлять waiting: просим немедленную активацию (SW тоже делает skipWaiting)
-    if (reg.waiting) {
+    // Во время урока новый SW остаётся waiting: claim перезагружает страницу в браузере.
+    if (reg.waiting && !isLiveSessionPath()) {
       reg.waiting.postMessage({ type: "ITFLUX_SKIP_WAITING" });
     }
     reg.addEventListener?.("updatefound", () => {
@@ -110,16 +110,17 @@ export async function registerServiceWorker() {
       const worker = reg.installing;
       if (!worker) return;
       worker.addEventListener("statechange", () => {
-        if (worker.state === "installed" && navigator.serviceWorker.controller) {
+        if (worker.state === "installed" && navigator.serviceWorker.controller && !isLiveSessionPath()) {
           worker.postMessage({ type: "ITFLUX_SKIP_WAITING" });
         }
       });
     });
-    // Периодическая проверка обновления SW (иначе Chrome может ждать до 24ч)
-    try {
-      await reg.update();
-    } catch {
-      /* ignore */
+    if (!isLiveSessionPath()) {
+      try {
+        await reg.update();
+      } catch {
+        /* ignore */
+      }
     }
     return reg;
   } catch (err) {

@@ -21,9 +21,27 @@ function postSwDiag(type, extra) {
   }).catch(() => {});
 }
 
+function isLiveLessonUrl(url) {
+  try {
+    const path = new URL(url).pathname || "";
+    return path.includes("/cabinet/meetings/") || path.includes("/lesson/join");
+  } catch {
+    return false;
+  }
+}
+
+async function liveLessonIsOpen() {
+  const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  return list.some((client) => isLiveLessonUrl(client.url));
+}
+
 self.addEventListener("install", (event) => {
-  self.skipWaiting();
-  event.waitUntil(postSwDiag("SW_INSTALL", { version: APP_VERSION }));
+  event.waitUntil((async () => {
+    const live = await liveLessonIsOpen();
+    // A waiting worker must not take the open lesson. The browser reloads that page on claim.
+    if (!live) self.skipWaiting();
+    await postSwDiag("SW_INSTALL", { version: APP_VERSION, liveLesson: live });
+  })());
 });
 
 async function clearOldCaches() {
@@ -47,10 +65,13 @@ async function notifyClients() {
 }
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    Promise.all([self.clients.claim(), clearOldCaches(), postSwDiag("SW_ACTIVATE", { version: APP_VERSION })])
-      .then(() => notifyClients()),
-  );
+  event.waitUntil((async () => {
+    const live = await liveLessonIsOpen();
+    const tasks = [clearOldCaches(), postSwDiag("SW_ACTIVATE", { version: APP_VERSION, liveLesson: live })];
+    if (!live) tasks.unshift(self.clients.claim());
+    await Promise.all(tasks);
+    if (!live) await notifyClients();
+  })());
 });
 
 // Только переходы по страницам: всегда свежий HTML (ярлык на рабочем столе).
@@ -155,7 +176,10 @@ self.addEventListener("notificationclick", (event) => {
 self.addEventListener("message", (event) => {
   const type = event.data && event.data.type;
   if (type === "ITFLUX_SKIP_WAITING") {
-    self.skipWaiting();
+    event.waitUntil((async () => {
+      if (await liveLessonIsOpen()) return;
+      self.skipWaiting();
+    })());
     return;
   }
   if (type === "ITFLUX_GET_VERSION") {

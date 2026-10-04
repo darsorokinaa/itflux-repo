@@ -183,6 +183,15 @@ function formatWhen(startsAt, endsAt) {
 
 const STATUS_POLL_MS = 12000;
 const PRESENT_POLL_MS = 10000;
+
+function materialSessionIsBoard(material) {
+  if (!material) return false;
+  const url = String(material.openUrl || material.url || "");
+  return Boolean(material.boardId)
+    || material.kind === "board"
+    || material.type === "board"
+    || url.includes("/cabinet/boards/");
+}
 const LIVE_ANSWERS_POLL_MS = 2000;
 
 function mapJoinError(err) {
@@ -1515,10 +1524,10 @@ export default function VideoMeetingPage() {
               }
               return session;
             });
-            if (
-              workspaceMaterialRef.current?.kind === "variant"
-              || workspaceMaterialRef.current?.kind === "board"
-            ) {
+            const workspaceKind = workspaceMaterialRef.current?.kind;
+            if (workspaceKind === "board" && materialSessionIsBoard(session.material)) {
+              revealHeldWorkspace();
+            } else if (workspaceKind === "variant" || workspaceKind === "board") {
               hideHeldWorkspace({ byTeacher: true });
             } else {
               setWorkspaceMaterial(null);
@@ -1554,7 +1563,7 @@ export default function VideoMeetingPage() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [applyStudentPresented, hideHeldWorkspace, meetingUuid, pageState]);
+  }, [applyStudentPresented, hideHeldWorkspace, meetingUuid, pageState, revealHeldWorkspace]);
 
   useEffect(() => {
     if (pageState !== "live") return undefined;
@@ -2277,10 +2286,13 @@ export default function VideoMeetingPage() {
     setCallView(isLessonCompactViewport() ? "minimized" : "normal");
     setAsideOpen(false);
     setMobilePane("materials");
-    if (workspaceMaterialRef.current?.kind === "variant" || workspaceMaterialRef.current?.kind === "board") {
+    const workspaceKind = workspaceMaterialRef.current?.kind;
+    if (workspaceKind === "board" && materialSessionIsBoard(session.material)) {
+      revealHeldWorkspace();
+    } else if (workspaceKind === "variant" || workspaceKind === "board") {
       hideHeldWorkspace({ byTeacher: true });
     }
-  }, [hideHeldWorkspace]);
+  }, [hideHeldWorkspace, revealHeldWorkspace]);
 
   // WebSocket синхронизации материалов (доска/вариант — отдельно).
   useEffect(() => {

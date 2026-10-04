@@ -185,6 +185,7 @@ async function unregisterForeignServiceWorkers() {
 }
 
 async function requestSwUpdate() {
+  if (isLiveSessionPath()) return;
   if (!("serviceWorker" in navigator)) return;
   try {
     const reg = await navigator.serviceWorker.getRegistration();
