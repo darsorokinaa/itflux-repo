@@ -145,6 +145,36 @@ export default function FilePreviewModal({
   onChange,
   onMenu,
 }) {
+  const [chrome, setChrome] = useState({ top: 0, right: 0, bottom: 0, left: 0 });
+
+  useEffect(() => {
+    const sync = () => {
+      const header = document.querySelector(".cabinet-header");
+      const rect = header?.getBoundingClientRect();
+      const top = rect ? Math.max(0, Math.round(rect.bottom)) : 0;
+      const left = rect ? Math.max(0, Math.round(rect.left)) : 0;
+      const right = rect ? Math.max(0, Math.round(window.innerWidth - rect.right)) : 0;
+      const nav = document.querySelector(".cb-mobile-nav, .st-mobile-nav");
+      let bottom = 0;
+      if (nav) {
+        const style = window.getComputedStyle(nav);
+        if (style.display !== "none" && style.visibility !== "hidden") {
+          bottom = Math.max(0, Math.round(window.innerHeight - nav.getBoundingClientRect().top));
+        }
+      }
+      setChrome({ top, right, bottom, left });
+    };
+    sync();
+    const header = document.querySelector(".cabinet-header");
+    const observer = header && typeof ResizeObserver !== "undefined" ? new ResizeObserver(sync) : null;
+    observer?.observe(header);
+    window.addEventListener("resize", sync);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", sync);
+    };
+  }, []);
+
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === "Escape") onClose?.();
@@ -170,7 +200,13 @@ export default function FilePreviewModal({
   const next = index >= 0 && index < fileItems.length - 1 ? fileItems[index + 1] : null;
 
   return (
-    <div className="cb-files-viewer" role="dialog" aria-modal="true" aria-label="Предпросмотр">
+    <div
+      className="cb-files-viewer"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Предпросмотр"
+      style={{ top: chrome.top, right: chrome.right, bottom: chrome.bottom, left: chrome.left }}
+    >
       <div className="cb-files-viewer__bar">
         <div className="cb-files-viewer__title">
           <strong>{file.display_name || file.name}</strong>

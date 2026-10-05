@@ -55,12 +55,14 @@ def get_plan_level_options():
     return [{"id": key, "label": label} for key, label in LEGACY_LEVEL_LABELS.items()]
 
 
-def normalize_plan_level_id(value):
+def normalize_plan_level_id(value, options=None):
     level_id = _normalize_level_id(value)
     if not level_id:
         return level_id
 
-    options = {item["id"] for item in get_plan_level_options()}
+    if options is None:
+        options = get_plan_level_options()
+    options = {item["id"] for item in options}
 
     if level_id in ("впр",) and "vpr" in options:
         return "vpr"
@@ -74,12 +76,14 @@ def normalize_plan_level_id(value):
     return level_id
 
 
-def get_plan_level_label(value):
+def get_plan_level_label(value, options=None):
     level_id = _normalize_level_id(value)
     if not level_id:
         return ""
-    normalized = normalize_plan_level_id(level_id)
-    for item in get_plan_level_options():
+    if options is None:
+        options = get_plan_level_options()
+    normalized = normalize_plan_level_id(level_id, options=options)
+    for item in options:
         if item["id"] == normalized or item["id"] == level_id:
             return item["label"]
     return LEGACY_LEVEL_LABELS.get(normalized) or LEGACY_LEVEL_LABELS.get(level_id) or value

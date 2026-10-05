@@ -114,6 +114,65 @@ function itemSubtitle(item) {
   ].filter(Boolean).join(" · ");
 }
 
+const FOLDER_TONES = ["#dce7fb", "#f8e7d8", "#e5f3e4", "#eee7f8", "#f8efd4"];
+const BADGE_SHORT = {
+  interactive: "ИНТ",
+  board: "ДОСК",
+  lesson: "УРОК",
+  task_set: "ВАР",
+  worksheet: "ЛИСТ",
+  presentation: "ПРЗ",
+  methodic: "МЕТ",
+  link: "URL",
+  file: "ФАЙЛ",
+};
+
+function folderTone(id) {
+  const value = String(id || "");
+  let n = 0;
+  for (let i = 0; i < value.length; i += 1) n += value.charCodeAt(i);
+  return FOLDER_TONES[n % FOLDER_TONES.length];
+}
+
+function materialBadgeKind(item) {
+  const kind = item?.preview_kind || "";
+  if (kind === "pdf") return "pdf";
+  if (kind === "image") return "image";
+  if (kind === "video") return "video";
+  const ext = String(item?.extension || "").replace(".", "").toLowerCase();
+  if (["xls", "xlsx", "csv"].includes(ext)) return "sheet";
+  if (["doc", "docx", "rtf", "odt"].includes(ext)) return "doc";
+  if (item?.type === "interactive") return "audio";
+  if (item?.type === "task_set" || item?.type === "presentation") return "sheet";
+  if (item?.type === "board" || item?.type === "link") return "doc";
+  return "other";
+}
+
+function materialBadgeLabel(item) {
+  const ext = String(item?.extension || "").replace(".", "").toUpperCase();
+  if (ext && ext.length <= 4) return ext;
+  const kind = item?.preview_kind || "";
+  if (kind === "pdf") return "PDF";
+  if (kind === "image") return "IMG";
+  if (kind === "video") return "ВИД";
+  return BADGE_SHORT[item?.type] || "ФАЙЛ";
+}
+
+function MaterialBadge({ item, large = false }) {
+  return (
+    <span className={`cbf-badge cbf-badge--${materialBadgeKind(item)}${large ? " is-large" : ""}`} aria-hidden>
+      {materialBadgeLabel(item)}
+    </span>
+  );
+}
+
+function fileHint(item) {
+  return [
+    materialTypeLabel(item.type, item.type_label),
+    item.student_subject_label,
+  ].filter(Boolean).join(" · ");
+}
+
 export default function MaterialsDiskBrowser({
   items = [],
   folders = [],
@@ -132,6 +191,8 @@ export default function MaterialsDiskBrowser({
   onDeleteFolder,
   onMove,
   fileMenuItems,
+  layout = "default",
+  toolbarStart = null,
 }) {
   const [internalFolderId, setInternalFolderId] = useState(null);
   const folderId = controlledFolderId !== undefined ? controlledFolderId : internalFolderId;
@@ -141,7 +202,7 @@ export default function MaterialsDiskBrowser({
   };
 
   const [search, setSearch] = useState("");
-  const [view, setView] = useState("grid");
+  const [view, setView] = useState(layout === "cabinet" ? "list" : "grid");
   const [menu, setMenu] = useState(null);
   const [dropOverId, setDropOverId] = useState(null);
   const [folderModal, setFolderModal] = useState(null);
@@ -251,8 +312,288 @@ export default function MaterialsDiskBrowser({
     })),
   ];
 
+  const parentCrumb = crumbs.length > 1 ? crumbs[crumbs.length - 2] : null;
+  const folderItems = visible.filter((item) => item.kind === "folder");
+  const fileItems = visible.filter((item) => item.kind !== "folder");
+
   return (
-    <div className="cb-files">
+    <div className={layout === "cabinet" ? "cbf-students-browser" : "cb-files"}>
+      {layout === "cabinet" ? (
+        <>
+          <div className="cbf-tools">
+            {toolbarStart}
+            {canOrganize ? (
+              <button
+                type="button"
+                className="cbf-btn"
+                onClick={() => {
+                  setFolderModal({ mode: "create" });
+                  setFolderName("");
+                }}
+              >
+                <CabinetIcon name="plus" />
+                Новая папка
+              </button>
+            ) : null}
+            <label className="cbf-search">
+              <span className="cbf-sr">Поиск материалов</span>
+              <CabinetIcon name="search" />
+              <input
+                type="search"
+                value={search}
+                placeholder="Поиск в файлах и папках"
+                autoComplete="off"
+                aria-label="Поиск материалов"
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              {search ? (
+                <button type="button" className="cbf-search-clear" aria-label="Очистить поиск" onClick={() => setSearch("")}>
+                  <CabinetIcon name="close" />
+                </button>
+              ) : null}
+            </label>
+          </div>
+          <div className="cbf-body">
+            <div className="cbf-dir">
+              <button
+                type="button"
+                className="cbf-back"
+                aria-label="На папку выше"
+                disabled={!parentCrumb}
+                onClick={() => parentCrumb?.onClick?.()}
+              >
+                <CabinetIcon name="arrowLeft" />
+              </button>
+              <nav className="cbf-crumbs" aria-label="Путь к папке">
+                {crumbs.map((crumb, idx) => {
+                  const current = idx === crumbs.length - 1;
+                  return (
+                    <span key={`${crumb.id || "root"}-${idx}`} className="cbf-crumb">
+                      {idx > 0 ? <CabinetIcon name="arrow" /> : null}
+                      <button
+                        type="button"
+                        className={current ? "is-current" : ""}
+                        onClick={() => { if (!current) crumb.onClick?.(); }}
+                        onDragOver={(e) => {
+                          if (canOrganize && crumb.id == null && folderId != null) e.preventDefault();
+                        }}
+                        onDrop={crumb.id == null ? handleDropOnRoot : undefined}
+                      >
+                        {crumb.name}
+                      </button>
+                    </span>
+                  );
+                })}
+              </nav>
+              <div className="cbf-dir-controls">
+                <div className="cbf-view" aria-label="Вид файлов">
+                  <button type="button" className={view === "list" ? "is-active" : ""} aria-pressed={view === "list"} aria-label="Список" onClick={() => setView("list")}>
+                    <CabinetIcon name="order" />
+                  </button>
+                  <button type="button" className={view === "grid" ? "is-active" : ""} aria-pressed={view === "grid"} aria-label="Плитки" onClick={() => setView("grid")}>
+                    <CabinetIcon name="cards" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {error ? <div className="cbf-error">{error}</div> : null}
+            {loading ? (
+              <div className="cbf-skeleton" aria-busy="true"><div /><div /><div /></div>
+            ) : visible.length === 0 ? (
+              <div className="cbf-empty">
+                <span className="cbf-empty-icon"><CabinetIcon name="folder" /></span>
+                <h3>Пока пусто</h3>
+                <p>{emptyText}</p>
+              </div>
+            ) : (
+              <>
+                {folderItems.length ? (
+                  <div className="cbf-folders">
+                    {folderItems.map((item) => {
+                      const key = `folder-${item.id}`;
+                      const over = dropOverId === key;
+                      return (
+                        <article
+                          key={key}
+                          className={`cbf-folder${over ? " is-drop" : ""}`}
+                          onDragOver={(e) => {
+                            if (!canOrganize) return;
+                            e.preventDefault();
+                            setDropOverId(key);
+                          }}
+                          onDragLeave={() => {
+                            if (dropOverId === key) setDropOverId(null);
+                          }}
+                          onDrop={(e) => handleDropOnFolder(item, e)}
+                        >
+                          <button
+                            type="button"
+                            className="cbf-folder-open"
+                            style={{ "--cbf-folder": folderTone(item.id) }}
+                            title={`Открыть папку ${item.name}`}
+                            onClick={() => openItem(item)}
+                          >
+                            <span className="cbf-folder-art" aria-hidden />
+                            <span className="cbf-folder-text">
+                              <strong>{item.name}</strong>
+                              <small>{itemSubtitle(item)}</small>
+                            </span>
+                          </button>
+                          {canOrganize ? (
+                            <button
+                              type="button"
+                              className="cbf-folder-more"
+                              aria-label={`Действия с папкой ${item.name}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setMenu(menu?.id === key ? null : {
+                                  id: key,
+                                  item,
+                                  isFolder: true,
+                                  menuItems: [],
+                                  anchor: e.currentTarget,
+                                });
+                              }}
+                            >
+                              <CabinetIcon name="more" />
+                            </button>
+                          ) : null}
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : null}
+
+                {fileItems.length ? (
+                  <div className="cbf-list-head">
+                    <h2>Файлы<span>{fileItems.length}</span></h2>
+                    <p>Нажмите на название, чтобы открыть</p>
+                  </div>
+                ) : null}
+
+                {fileItems.length && view !== "grid" ? (
+                  <table className="cbf-table">
+                    <thead>
+                      <tr>
+                        <th>Название</th>
+                        <th className="cbf-date-col">Изменён</th>
+                        <th className="cbf-menu-col"><span className="cbf-sr">Действия</span></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fileItems.map((item) => {
+                        const key = item.library_key || String(item.id);
+                        const menuItems = fileMenuItems ? fileMenuItems(item) : [];
+                        const title = item.name || item.title;
+                        return (
+                          <tr
+                            key={key}
+                            className="cbf-row"
+                            draggable={canOrganize}
+                            onDragStart={(e) => {
+                              e.dataTransfer.setData("text/plain", JSON.stringify({ key, kind: "file" }));
+                              e.dataTransfer.effectAllowed = "move";
+                            }}
+                          >
+                            <td>
+                              <button type="button" className="cbf-file-open" title={title} onClick={() => openItem(item)}>
+                                <MaterialBadge item={item} />
+                                <span className="cbf-file-name">
+                                  <strong>{title}</strong>
+                                  <small>{fileHint(item)}</small>
+                                </span>
+                              </button>
+                            </td>
+                            <td className="cbf-date-col">{formatDate(item.assigned_at || item.updated_at) || "—"}</td>
+                            <td className="cbf-menu-col">
+                              <div className="cbf-row-actions">
+                                <button
+                                  type="button"
+                                  className="cbf-icon-btn"
+                                  aria-label={`Действия с файлом ${title}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setMenu(menu?.id === key ? null : {
+                                      id: key,
+                                      item,
+                                      isFolder: false,
+                                      menuItems,
+                                      anchor: e.currentTarget,
+                                    });
+                                  }}
+                                >
+                                  <CabinetIcon name="more" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                ) : null}
+
+                {fileItems.length && view === "grid" ? (
+                  <div className="cbf-grid">
+                    {fileItems.map((item) => {
+                      const key = item.library_key || String(item.id);
+                      const menuItems = fileMenuItems ? fileMenuItems(item) : [];
+                      const title = item.name || item.title;
+                      const image = item.preview_kind === "image" && item.preview_url;
+                      return (
+                        <article
+                          key={key}
+                          className="cbf-tile"
+                          draggable={canOrganize}
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData("text/plain", JSON.stringify({ key, kind: "file" }));
+                            e.dataTransfer.effectAllowed = "move";
+                          }}
+                        >
+                          <button
+                            type="button"
+                            className={`cbf-tile-preview${image ? " is-image" : ""}`}
+                            aria-label={`Открыть ${title}`}
+                            onClick={() => openItem(item)}
+                          >
+                            {image ? <img src={item.preview_url} alt="" /> : <MaterialBadge item={item} large />}
+                          </button>
+                          <div className="cbf-tile-meta">
+                            <strong title={title}>{title}</strong>
+                            <p>
+                              <span>{fileHint(item) || materialBadgeLabel(item)}</span>
+                              <span>{formatDate(item.assigned_at || item.updated_at)}</span>
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className="cbf-icon-btn cbf-tile-more"
+                            aria-label={`Действия с файлом ${title}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMenu(menu?.id === key ? null : {
+                                id: key,
+                                item,
+                                isFolder: false,
+                                menuItems,
+                                anchor: e.currentTarget,
+                              });
+                            }}
+                          >
+                            <CabinetIcon name="more" />
+                          </button>
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
+        </>
+      ) : (
+      <>
       <div className="cb-files__toolbar">
         {canOrganize ? (
           <div className="cb-files__create-wrap">
@@ -405,6 +746,8 @@ export default function MaterialsDiskBrowser({
             );
           })}
         </div>
+      )}
+      </>
       )}
 
       <CabinetFloatingMenu

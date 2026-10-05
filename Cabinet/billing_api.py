@@ -55,6 +55,7 @@ from .billing_service import (
     preview_charge_lessons_from_package,
     preview_finalize,
     preview_rebuild_student_balance,
+    prime_billing_account_reads,
     refund_lesson_package_charge,
     register_payment,
     rebuild_student_balance,
@@ -152,9 +153,19 @@ class BillingAccountsView(APIView):
 
     def get(self, request):
         # Ensure accounts exist for all active students
-        for student in Student.objects.filter(teacher=request.user, status="active"):
-            get_or_create_billing_account(request.user, student)
-        qs = visible_billing_accounts(request.user).select_related("student", "settings")
+        active_students = list(Student.objects.filter(teacher=request.user, status="active"))
+        existing_ids = set(
+            BillingAccount.objects.filter(
+                teacher=request.user,
+                student_id__in=[student.pk for student in active_students],
+            ).values_list("student_id", flat=True)
+        )
+        for student in active_students:
+            if student.pk not in existing_ids:
+                get_or_create_billing_account(request.user, student)
+        qs = visible_billing_accounts(request.user).select_related(
+            "student", "student__user", "student__user__profile", "settings",
+        )
         debt_only = request.query_params.get("debt") == "1"
         low_package = request.query_params.get("low_package") == "1"
         no_package = request.query_params.get("no_package") == "1"
@@ -162,8 +173,9 @@ class BillingAccountsView(APIView):
         student_id = request.query_params.get("student_id")
         q = (request.query_params.get("q") or "").strip().lower()
 
+        accounts = prime_billing_account_reads(qs)
         rows = []
-        for acc in qs:
+        for acc in accounts:
             if student_id and str(acc.student_id) != str(student_id):
                 continue
             data = serialize_account(acc)

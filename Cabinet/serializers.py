@@ -2,7 +2,7 @@ from calendar import monthrange
 from datetime import datetime, timedelta
 import logging
 
-from django.db.models import Count, Q
+from django.db.models import Count, Prefetch, Q
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -54,6 +54,7 @@ from .models import (
     ReviewItem,
     ScheduleEvent,
     ScheduleEventChangeLog,
+    ScheduleEventMaterial,
     ScheduleEventParticipant,
     ScheduleEventSeries,
     Notification,
@@ -528,6 +529,8 @@ class MaterialListSerializer(serializers.ModelSerializer):
         return bool(teacher and obj.teacher_id == teacher.id)
 
     def get_is_saved(self, obj):
+        if hasattr(obj, "_is_saved"):
+            return bool(obj._is_saved)
         teacher = self.context.get("teacher")
         if not teacher:
             return False
@@ -1014,7 +1017,11 @@ class LessonPlanListSerializer(serializers.ModelSerializer):
         ]
 
     def get_direction_label(self, obj):
-        return get_plan_level_label(obj.direction)
+        options = self.context.get("_plan_level_options")
+        if options is None:
+            options = get_plan_level_options()
+            self.context["_plan_level_options"] = options
+        return get_plan_level_label(obj.direction, options=options)
 
     def get_subject_label(self, obj):
         return get_plan_subject_label(obj.subject)
@@ -2196,7 +2203,7 @@ def _build_dashboard_attention_students(teacher, *, now, limit=5):
 
     markers = (
         JournalAttentionMarker.objects.filter(teacher=teacher, is_active=True)
-        .select_related("student")
+        .select_related("student", "student__user", "student__user__profile")
         .order_by("-updated_at")[:limit]
     )
     for marker in markers:
@@ -2220,7 +2227,13 @@ def _build_dashboard_attention_students(teacher, *, now, limit=5):
             teacher=teacher,
             status=HomeworkStatus.ASSIGNED,
             due_at__lt=now,
-        ).select_related("student", "group").prefetch_related("group__students")[:40]
+        ).select_related(
+            "student", "student__user", "student__user__profile", "group",
+        ).prefetch_related(
+            "group__students",
+            "group__students__user",
+            "group__students__user__profile",
+        )[:40]
     )
     if overdue:
         hw_ids = [hw.id for hw in overdue]
@@ -2268,7 +2281,7 @@ def _build_dashboard_attention_students(teacher, *, now, limit=5):
             attendance_status=AttendanceStatus.ABSENT_UNEXCUSED,
             journal__lesson_date__gte=(now.date() - timedelta(days=14)),
         )
-        .select_related("student")
+        .select_related("student", "student__user", "student__user__profile")
         .order_by("-journal__lesson_date")[:12]
     )
     for record in absents:
@@ -2286,6 +2299,30 @@ def _build_dashboard_attention_students(teacher, *, now, limit=5):
         )
 
     return items[:limit]
+
+
+def _with_dashboard_event_relations(qs):
+    """Карточки главной читают ученика, пункт плана и материалы без запроса на урок."""
+    return qs.select_related(
+        "student",
+        "student__user",
+        "student__user__profile",
+        "student_subject",
+        "group",
+        "lesson_plan_item",
+        "lesson_plan_item__plan",
+    ).prefetch_related(
+        Prefetch(
+            "participants",
+            queryset=ScheduleEventParticipant.objects.select_related("student", "user"),
+        ),
+        Prefetch(
+            "event_materials",
+            queryset=ScheduleEventMaterial.objects.select_related(
+                "material", "interactive",
+            ).order_by("order", "id"),
+        ),
+    )
 
 
 def build_dashboard_payload(teacher, request=None):
@@ -2325,9 +2362,7 @@ def build_dashboard_payload(teacher, request=None):
     today_events_qs = ScheduleEvent.objects.filter(
         owner=teacher,
         starts_at__date=today,
-    ).exclude(status=ScheduleEvent.Status.CANCELLED).select_related(
-        "student", "student_subject", "group",
-    )
+    ).exclude(status=ScheduleEvent.Status.CANCELLED)
 
     new_submissions = HomeworkSubmission.objects.filter(
         homework__teacher=teacher,
@@ -2335,7 +2370,9 @@ def build_dashboard_payload(teacher, request=None):
         submitted_at__isnull=False,
     ).exclude(
         homework__description__contains="live-meeting:",
-    ).select_related("student", "homework").order_by("-submitted_at", "-id")[:5]
+    ).select_related(
+        "student", "student__user", "student__user__profile", "homework",
+    ).order_by("-submitted_at", "-id")[:5]
 
     pending_reviews_list = list(
         pending_reviews.select_related(
@@ -2400,12 +2437,12 @@ def build_dashboard_payload(teacher, request=None):
     calendar_personal_days = sorted(personal_days)
 
     tomorrow = start_of_day + timedelta(days=1)
-    upcoming_events = ScheduleEvent.objects.filter(
-        owner=teacher,
-        starts_at__gte=tomorrow,
-    ).exclude(status=ScheduleEvent.Status.CANCELLED).select_related(
-        "student", "student_subject", "group",
-    ).order_by("starts_at")[:4]
+    upcoming_events = _with_dashboard_event_relations(
+        ScheduleEvent.objects.filter(
+            owner=teacher,
+            starts_at__gte=tomorrow,
+        ).exclude(status=ScheduleEvent.Status.CANCELLED).order_by("starts_at")[:4]
+    )
 
     bookings_qs = TeacherBooking.objects.filter(
         teacher=teacher,
@@ -2424,7 +2461,7 @@ def build_dashboard_payload(teacher, request=None):
             event_type__in=[ScheduleEvent.EventType.PERSONAL, ScheduleEvent.EventType.BLOCKED],
         ).count(),
         "attention_items": attention_items,
-        "today_events": today_events_qs,
+        "today_events": _with_dashboard_event_relations(today_events_qs),
         "new_submissions": new_submissions,
         "pending_reviews": pending_reviews_list,
         "progress_overview": progress_overview,

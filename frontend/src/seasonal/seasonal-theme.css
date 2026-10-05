@@ -230,10 +230,33 @@ html.seasonal-theme-active aside.cabinet-sidebar {
 }
 
 html.seasonal-theme-active .cabinet-header {
+  position: relative;
+  isolation: isolate;
+  background-color: var(--cb-wrap-bg, #fff);
+  background-image: none;
+}
+
+/* Декор только у правого края. Иначе широкое фото заполняет пустой промежуток шапки. */
+html.seasonal-theme-active .cabinet-header::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(220px, 32%);
+  pointer-events: none;
+  z-index: 0;
   background-image: var(--seasonal-header-decor, none);
-  background-size: auto 100%;
-  background-position: right center;
   background-repeat: no-repeat;
+  background-position: right center;
+  background-size: auto 100%;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 58%);
+  mask-image: linear-gradient(90deg, transparent, #000 58%);
+}
+
+html.seasonal-theme-active .cabinet-header > * {
+  position: relative;
+  z-index: 1;
 }
 
 html.seasonal-theme-active .video-lesson-header,

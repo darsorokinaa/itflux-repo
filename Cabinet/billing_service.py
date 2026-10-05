@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import csv
 import io
 import uuid
@@ -107,7 +108,11 @@ def event_duration_minutes(event: ScheduleEvent) -> int:
 
 
 def get_or_create_teacher_settings(teacher: User) -> TeacherBillingSettings:
+    cached = getattr(teacher, "_itflux_billing_settings", None)
+    if cached is not None:
+        return cached
     settings_obj, _ = TeacherBillingSettings.objects.get_or_create(teacher=teacher)
+    teacher._itflux_billing_settings = settings_obj
     return settings_obj
 
 
@@ -438,12 +443,111 @@ def record_belongs_in_payment_list(record: EventBillingRecord) -> bool:
     return False
 
 
+def prime_billing_account_reads(accounts) -> None:
+    """Подгрузить пакеты, уроки и проводки списка счетов одним проходом."""
+    accounts = list(accounts)
+    ids = [account.pk for account in accounts]
+    if not ids:
+        return accounts
+    from collections import defaultdict
+
+    packages = defaultdict(list)
+    for package in LessonPackage.objects.filter(billing_account_id__in=ids):
+        packages[package.billing_account_id].append(package)
+    records = defaultdict(list)
+    for record in EventBillingRecord.objects.filter(
+        billing_account_id__in=ids,
+    ).select_related("event"):
+        records[record.billing_account_id].append(record)
+    payments = defaultdict(list)
+    for payment in StudentPayment.objects.filter(billing_account_id__in=ids):
+        payments[payment.billing_account_id].append(payment)
+    transactions = defaultdict(list)
+    for tx in BillingTransaction.objects.filter(
+        billing_account_id__in=ids,
+    ).select_related("event_billing"):
+        transactions[tx.billing_account_id].append(tx)
+    for account in accounts:
+        account._itflux_packages = packages.get(account.pk, [])
+        account._itflux_records = records.get(account.pk, [])
+        account._itflux_payments = payments.get(account.pk, [])
+        account._itflux_transactions = transactions.get(account.pk, [])
+        for package in account._itflux_packages:
+            package.billing_account = account
+    return accounts
+
+
+def _cached_packages(account):
+    return getattr(account, "_itflux_packages", None)
+
+
+def _cached_records(account):
+    return getattr(account, "_itflux_records", None)
+
+
+def _record_in_unpaid_list(record) -> bool:
+    if record.delivery_status == DeliveryStatus.RESCHEDULED:
+        return False
+    if (
+        record.delivery_status in (DeliveryStatus.CONDUCTED, DeliveryStatus.NO_SHOW)
+        and record.financial_status in (
+            FinancialStatus.AWAITING_PAYMENT,
+            FinancialStatus.PARTIALLY_PAID,
+            FinancialStatus.NEEDS_DECISION,
+        )
+    ):
+        return True
+    return (
+        record.delivery_status in CANCELLED_DELIVERY_STATUSES
+        and record.financial_status in (
+            FinancialStatus.AWAITING_PAYMENT,
+            FinancialStatus.PARTIALLY_PAID,
+        )
+        and record.charged_amount > 0
+    )
+
+
 def compute_account_balance(account: BillingAccount) -> dict:
     """Баланс > 0 — переплата/аванс; < 0 — задолженность.
 
     К оплате = валидные начисления − платежи + корректировки − возвраты.
     Переносы и непроведённые занятия в расчёт не входят.
     """
+    cached_txs = getattr(account, "_itflux_transactions", None)
+    if cached_txs is not None:
+        payments = ZERO
+        charges = ZERO
+        refunds = ZERO
+        adjustments = ZERO
+        for tx in cached_txs:
+            amount = D(tx.amount)
+            if tx.transaction_type in (TransactionType.PAYMENT, TransactionType.PACKAGE_PURCHASE):
+                payments += amount
+            elif tx.transaction_type in (TransactionType.CHARGE, TransactionType.WRITE_OFF):
+                event_billing = tx.event_billing
+                valid = event_billing is None or (
+                    event_billing.delivery_status in CHARGEABLE_DELIVERY_STATUSES
+                ) or (
+                    event_billing.delivery_status in CANCELLED_DELIVERY_STATUSES
+                    and event_billing.charged_amount > 0
+                )
+                if valid:
+                    charges += amount
+            elif tx.transaction_type == TransactionType.REFUND:
+                refunds += amount
+            elif tx.transaction_type in (TransactionType.ADJUSTMENT, TransactionType.DISCOUNT):
+                adjustments += amount
+        balance = payments - charges - refunds + adjustments
+        return {
+            "paid": payments,
+            "charged": charges,
+            "refunded": refunds,
+            "adjustments": adjustments,
+            "balance": D(balance),
+            "debt": D(abs(balance)) if balance < 0 else ZERO,
+            "credit": D(balance) if balance > 0 else ZERO,
+            "currency": account.currency,
+        }
     qs = BillingTransaction.objects.filter(billing_account=account)
     payments = qs.filter(
         transaction_type__in=(TransactionType.PAYMENT, TransactionType.PACKAGE_PURCHASE)
@@ -754,6 +858,27 @@ def active_package_for_account(
     prefer_auto_use: bool = True,
 ) -> Optional[LessonPackage]:
     today = timezone.localdate()
+    cached = _cached_packages(account)
+    if cached is not None:
+        rows = []
+        for package in cached:
+            if package.status != PackageStatus.ACTIVE:
+                continue
+            if package.expires_at is not None and package.expires_at < today:
+                continue
+            if D_units(package.remaining_units) <= 0:
+                continue
+            if unit_type and package.unit_type != unit_type:
+                continue
+            if prefer_auto_use and not package.auto_use:
+                continue
+            rows.append(package)
+        rows.sort(key=lambda package: (
+            package.expires_at is not None,
+            package.expires_at or package.created_at,
+            package.created_at,
+        ))
+        return rows[0] if rows else None
     qs = LessonPackage.objects.filter(
         billing_account=account,
         status=PackageStatus.ACTIVE,
@@ -768,6 +893,17 @@ def active_package_for_account(
 
 def package_confirmed_paid_amount(package: LessonPackage) -> Decimal:
     """Сколько подтверждённых оплат привязано к абонементу."""
+    cached_payments = getattr(getattr(package, "billing_account", None), "_itflux_payments", None)
+    if cached_payments is not None:
+        paid = sum(
+            (
+                D(payment.amount)
+                for payment in cached_payments
+                if payment.package_id == package.id and payment.status == StudentPaymentStatus.CONFIRMED
+            ),
+            ZERO,
+        )
+        return D(paid)
     paid = (
         StudentPayment.objects.filter(
             package=package,
@@ -789,15 +925,25 @@ def package_amount_due(package: LessonPackage) -> Decimal:
 def awaiting_payment_packages(account: BillingAccount) -> list[LessonPackage]:
     """Активные абонементы, по которым ещё не закрыта стоимость."""
     today = timezone.localdate()
-    packages = list(
-        LessonPackage.objects.filter(
-            billing_account=account,
-            status__in=(PackageStatus.ACTIVE, PackageStatus.FROZEN),
+    cached = _cached_packages(account)
+    if cached is not None:
+        packages = [
+            package for package in cached
+            if package.status in (PackageStatus.ACTIVE, PackageStatus.FROZEN)
+            and (package.expires_at is None or package.expires_at >= today)
+            and D(package.purchase_amount or 0) > 0
+        ]
+        packages.sort(key=lambda package: package.created_at)
+    else:
+        packages = list(
+            LessonPackage.objects.filter(
+                billing_account=account,
+                status__in=(PackageStatus.ACTIVE, PackageStatus.FROZEN),
+            )
+            .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=today))
+            .filter(purchase_amount__gt=0)
+            .order_by("created_at")
         )
-        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=today))
-        .filter(purchase_amount__gt=0)
-        .order_by("created_at")
-    )
     return [pkg for pkg in packages if package_amount_due(pkg) > 0]
 
 
@@ -1271,14 +1417,27 @@ def find_available_packages_for_charge(
 ) -> list[LessonPackage]:
     """Абонементы, из которых можно вручную списать занятия (в т.ч. задним числом)."""
     today = timezone.localdate()
-    qs = (
-        LessonPackage.objects.filter(
-            billing_account=account,
-            status__in=(PackageStatus.ACTIVE, PackageStatus.FROZEN),
+    cached = _cached_packages(account)
+    if cached is not None:
+        qs = [
+            package for package in cached
+            if package.status in (PackageStatus.ACTIVE, PackageStatus.FROZEN)
+            and D_units(package.remaining_units) > 0
+        ]
+        qs.sort(key=lambda package: (
+            package.expires_at is not None,
+            package.expires_at or package.created_at,
+            package.created_at,
+        ))
+    else:
+        qs = (
+            LessonPackage.objects.filter(
+                billing_account=account,
+                status__in=(PackageStatus.ACTIVE, PackageStatus.FROZEN),
+            )
+            .filter(remaining_units__gt=0)
+            .order_by("expires_at", "created_at")
         )
-        .filter(remaining_units__gt=0)
-        .order_by("expires_at", "created_at")
-    )
     result = []
     for pkg in qs:
         # Замороженный — только с явным выбором; в списке показываем active в первую очередь
@@ -1291,11 +1450,21 @@ def find_available_packages_for_charge(
         result.append(pkg)
     # Если активных нет — предложим истёкшие с остатком (ручное погашение долга)
     if not result:
-        expired = LessonPackage.objects.filter(
-            billing_account=account,
-            status__in=(PackageStatus.ACTIVE, PackageStatus.EXPIRED, PackageStatus.EXHAUSTED),
-            remaining_units__gt=0,
-        ).order_by("-created_at")
+        if cached is not None:
+            expired = [
+                package for package in cached
+                if package.status in (
+                    PackageStatus.ACTIVE, PackageStatus.EXPIRED, PackageStatus.EXHAUSTED,
+                )
+                and D_units(package.remaining_units) > 0
+            ]
+            expired.sort(key=lambda package: package.created_at, reverse=True)
+        else:
+            expired = LessonPackage.objects.filter(
+                billing_account=account,
+                status__in=(PackageStatus.ACTIVE, PackageStatus.EXPIRED, PackageStatus.EXHAUSTED),
+                remaining_units__gt=0,
+            ).order_by("-created_at")
         result = list(expired)
     _ = today  # reserved for future strict auto-period checks
     return result
@@ -3987,7 +4156,14 @@ def serialize_account(account: BillingAccount, *, include_history: bool = False)
     ).select_related("event")
     unpaid_amount = ZERO
     unpaid_items = []
-    for rec in unpaid_qs.order_by("-event__starts_at")[:50]:
+    cached_records = _cached_records(account)
+    if cached_records is not None:
+        unpaid_rows = [rec for rec in cached_records if _record_in_unpaid_list(rec)]
+        unpaid_rows.sort(key=lambda rec: rec.event.starts_at, reverse=True)
+        unpaid_source = unpaid_rows[:50]
+    else:
+        unpaid_source = unpaid_qs.order_by("-event__starts_at")[:50]
+    for rec in unpaid_source:
         due = record_due_amount(rec)
         price_missing = record_price_missing(rec)
         if due > 0:
@@ -4023,27 +4199,44 @@ def serialize_account(account: BillingAccount, *, include_history: bool = False)
 
     used_units_total = ZERO
     remaining_units_total = ZERO
-    for pkg in LessonPackage.objects.filter(
-        billing_account=account,
-        status__in=(PackageStatus.ACTIVE, PackageStatus.FROZEN, PackageStatus.EXHAUSTED),
-    ):
+    cached_packages = _cached_packages(account)
+    if cached_packages is not None:
+        unit_packages = [
+            pkg for pkg in cached_packages
+            if pkg.status in (PackageStatus.ACTIVE, PackageStatus.FROZEN, PackageStatus.EXHAUSTED)
+        ]
+    else:
+        unit_packages = LessonPackage.objects.filter(
+            billing_account=account,
+            status__in=(PackageStatus.ACTIVE, PackageStatus.FROZEN, PackageStatus.EXHAUSTED),
+        )
+    for pkg in unit_packages:
         used_units_total += D_units(pkg.total_units - pkg.remaining_units)
         if pkg.status == PackageStatus.ACTIVE:
             remaining_units_total += D_units(pkg.remaining_units)
 
-    last_payment = (
-        StudentPayment.objects.filter(
-            billing_account=account,
-            status=StudentPaymentStatus.CONFIRMED,
+    cached_payments = getattr(account, "_itflux_payments", None)
+    if cached_payments is not None:
+        confirmed = [payment for payment in cached_payments if payment.status == StudentPaymentStatus.CONFIRMED]
+        confirmed.sort(key=lambda payment: (payment.paid_at is not None, payment.paid_at or payment.created_at), reverse=True)
+        last_payment = confirmed[0] if confirmed else None
+    else:
+        last_payment = (
+            StudentPayment.objects.filter(
+                billing_account=account,
+                status=StudentPaymentStatus.CONFIRMED,
+            )
+            .order_by("-paid_at")
+            .first()
         )
-        .order_by("-paid_at")
-        .first()
-    )
 
-    needs = EventBillingRecord.objects.filter(
-        billing_account=account,
-        financial_status=FinancialStatus.NEEDS_DECISION,
-    ).exists()
+    if cached_records is not None:
+        needs = any(rec.financial_status == FinancialStatus.NEEDS_DECISION for rec in cached_records)
+    else:
+        needs = EventBillingRecord.objects.filter(
+            billing_account=account,
+            financial_status=FinancialStatus.NEEDS_DECISION,
+        ).exists()
     # Настройки тарифа ≠ «всё оплачено». Оплаченность — по урокам/абонементу.
     if not has_tariff:
         status_label = "оплата не настроена"
@@ -4064,13 +4257,18 @@ def serialize_account(account: BillingAccount, *, include_history: bool = False)
         )
     ):
         status_label = "заканчивается абонемент"
-    elif package or EventBillingRecord.objects.filter(
-        billing_account=account,
-        financial_status__in=(
-            FinancialStatus.PAID,
-            FinancialStatus.PAID_FROM_PACKAGE,
-        ),
-    ).exists():
+    elif package or (
+        any(
+            rec.financial_status in (FinancialStatus.PAID, FinancialStatus.PAID_FROM_PACKAGE)
+            for rec in cached_records
+        ) if cached_records is not None else EventBillingRecord.objects.filter(
+            billing_account=account,
+            financial_status__in=(
+                FinancialStatus.PAID,
+                FinancialStatus.PAID_FROM_PACKAGE,
+            ),
+        ).exists()
+    ):
         status_label = "всё оплачено"
     else:
         status_label = "условия заданы"
@@ -4088,32 +4286,47 @@ def serialize_account(account: BillingAccount, *, include_history: bool = False)
     )
     scheme_label = _scheme_label(settings, package)
 
-    packages_qs = LessonPackage.objects.filter(
-        billing_account=account,
-    ).exclude(status=PackageStatus.CANCELLED).order_by("-created_at")[:20]
+    if cached_packages is not None:
+        packages_qs = [pkg for pkg in cached_packages if pkg.status != PackageStatus.CANCELLED]
+        packages_qs.sort(key=lambda pkg: pkg.created_at, reverse=True)
+        packages_qs = packages_qs[:20]
+    else:
+        packages_qs = LessonPackage.objects.filter(
+            billing_account=account,
+        ).exclude(status=PackageStatus.CANCELLED).order_by("-created_at")[:20]
     packages_list = [
         serialize_package(p, include_history=False, reconcile=False) for p in packages_qs
     ]
 
-    lesson_agg = EventBillingRecord.objects.filter(
-        billing_account=account,
-        delivery_status__in=CHARGEABLE_DELIVERY_STATUSES,
-    ).aggregate(
-        charged=Sum("charged_amount"),
-        paid=Sum("paid_amount"),
-        charged_n=Count("id", filter=Q(charged_amount__gt=0)),
-    )
-    lesson_charged = D(lesson_agg["charged"] or 0)
-    lesson_paid = D(lesson_agg["paid"] or 0)
-    charged_lesson_count = int(lesson_agg["charged_n"] or 0)
-    unit_prices = {
-        D(p)
-        for p in EventBillingRecord.objects.filter(
+    if cached_records is not None:
+        chargeable = [
+            rec for rec in cached_records
+            if rec.delivery_status in CHARGEABLE_DELIVERY_STATUSES
+        ]
+        lesson_charged = sum((D(rec.charged_amount or 0) for rec in chargeable), ZERO)
+        lesson_paid = sum((D(rec.paid_amount or 0) for rec in chargeable), ZERO)
+        charged_lesson_count = sum(1 for rec in chargeable if D(rec.charged_amount or 0) > 0)
+        unit_prices = {D(rec.charged_amount) for rec in chargeable if D(rec.charged_amount or 0) > 0}
+    else:
+        lesson_agg = EventBillingRecord.objects.filter(
             billing_account=account,
             delivery_status__in=CHARGEABLE_DELIVERY_STATUSES,
-            charged_amount__gt=0,
-        ).values_list("charged_amount", flat=True)
-    }
+        ).aggregate(
+            charged=Sum("charged_amount"),
+            paid=Sum("paid_amount"),
+            charged_n=Count("id", filter=Q(charged_amount__gt=0)),
+        )
+        lesson_charged = D(lesson_agg["charged"] or 0)
+        lesson_paid = D(lesson_agg["paid"] or 0)
+        charged_lesson_count = int(lesson_agg["charged_n"] or 0)
+        unit_prices = {
+            D(p)
+            for p in EventBillingRecord.objects.filter(
+                billing_account=account,
+                delivery_status__in=CHARGEABLE_DELIVERY_STATUSES,
+                charged_amount__gt=0,
+            ).values_list("charged_amount", flat=True)
+        }
     unit_price = next(iter(unit_prices)) if len(unit_prices) == 1 else None
 
     data = {
@@ -4535,14 +4748,23 @@ def _month_bounds(year=None, month=None):
 
 def _estimate_event_student_price_detail(teacher, event, student) -> tuple[Decimal, str]:
     """Return (amount, source_label) for planned-income breakdown."""
-    record = EventBillingRecord.objects.filter(event=event, student=student).first()
+    cache = _planned_price_cache.get()
+    if cache is not None:
+        record = cache["records"].get((event.pk, student.pk))
+        account = cache["accounts"].get(student.pk)
+        package = cache["packages"].get(account.pk) if account is not None else None
+    else:
+        record = EventBillingRecord.objects.filter(event=event, student=student).first()
+        account = None
+        package = None
     if record:
         amt = D(record.charged_amount or 0) or D(record.calculated_amount or 0)
         if amt > 0:
             label = (record.price_source_label or "").strip() or "По расчёту урока"
             return amt, label
-    account = get_or_create_billing_account(teacher, student)
-    package = active_package_for_account(account)
+    if account is None:
+        account = get_or_create_billing_account(teacher, student)
+        package = active_package_for_account(account)
     if package and D_units(package.total_units) > 0 and D(package.purchase_amount) > 0:
         unit = (D(package.purchase_amount) / D_units(package.total_units)).quantize(Decimal("0.01"))
         return unit, f"Абонемент «{package.title}»"
@@ -4578,8 +4800,12 @@ def _month_schedule_events(teacher: User, month_start, month_end):
             starts_at__lt=month_end,
         )
         .exclude(status=ScheduleEvent.Status.CANCELLED)
-        .prefetch_related("group__students")
-        .select_related("student")
+        .prefetch_related(
+            "group__students",
+            "group__students__user",
+            "group__students__user__profile",
+        )
+        .select_related("student", "student__user", "student__user__profile")
         .order_by("starts_at")
     )
 
@@ -4591,8 +4817,57 @@ def _event_billable_students(event) -> list:
             return [student]
         return []
     if event.group_id:
+        group = event.group
+        cached = getattr(group, "_prefetched_objects_cache", None) or {}
+        if "students" in cached:
+            return [student for student in cached["students"] if student.status != StudentStatus.ARCHIVED]
         return list(event.group.students.exclude(status=StudentStatus.ARCHIVED))
     return []
+
+
+_planned_price_cache = contextvars.ContextVar("itflux_planned_price_cache", default=None)
+
+
+def _bind_planned_price_cache(teacher, events):
+    """Один набор счетов, абонементов и записей на все уроки месяца."""
+    events = list(events)
+    students_by_event = {event.pk: _event_billable_students(event) for event in events}
+    student_ids = {student.pk for rows in students_by_event.values() for student in rows}
+    event_ids = [event.pk for event in events]
+    records = {}
+    if event_ids and student_ids:
+        for rec in EventBillingRecord.objects.filter(
+            event_id__in=event_ids,
+            student_id__in=student_ids,
+        ):
+            records.setdefault((rec.event_id, rec.student_id), rec)
+    accounts = {}
+    if student_ids:
+        for account in BillingAccount.objects.filter(
+            teacher=teacher,
+            student_id__in=student_ids,
+        ).select_related("settings"):
+            account.teacher = teacher
+            accounts[account.student_id] = account
+    packages = {}
+    account_ids = [account.pk for account in accounts.values()]
+    if account_ids:
+        today = timezone.localdate()
+        for package in LessonPackage.objects.filter(
+            billing_account_id__in=account_ids,
+            status=PackageStatus.ACTIVE,
+            auto_use=True,
+            remaining_units__gt=0,
+        ).filter(
+            Q(expires_at__isnull=True) | Q(expires_at__gte=today)
+        ).order_by("expires_at", "created_at"):
+            packages.setdefault(package.billing_account_id, package)
+    token = _planned_price_cache.set({
+        "records": records,
+        "accounts": accounts,
+        "packages": packages,
+    })
+    return events, students_by_event, token
 
 
 def dashboard_planned_income_details(teacher: User, *, year=None, month=None) -> dict:
@@ -4603,8 +4878,16 @@ def dashboard_planned_income_details(teacher: User, *, year=None, month=None) ->
     total = ZERO
     by_student: dict[int, dict] = {}
 
-    for event in _month_schedule_events(teacher, month_start, month_end):
-        for student in _event_billable_students(event):
+    events, students_by_event, price_token = _bind_planned_price_cache(
+        teacher, _month_schedule_events(teacher, month_start, month_end),
+    )
+    try:
+        event_students = (
+            (event, student)
+            for event in events
+            for student in students_by_event[event.pk]
+        )
+        for event, student in event_students:
             amount, source = _estimate_event_student_price_detail(teacher, event, student)
             if amount <= 0:
                 continue
@@ -4627,6 +4910,8 @@ def dashboard_planned_income_details(teacher: User, *, year=None, month=None) ->
             )
             bucket["amount"] += amount
             bucket["lessons"] += 1
+    finally:
+        _planned_price_cache.reset(price_token)
 
     by_student_rows = sorted(
         (
@@ -4792,12 +5077,18 @@ def dashboard_summary(teacher: User, *, year=None, month=None) -> dict:
 
     # Плановый доход — стоимость запланированных и проведённых уроков месяца (без отменённых).
     planned_income = ZERO
-    for event in _month_schedule_events(teacher, month_start, month_end):
-        for student in _event_billable_students(event):
-            try:
-                planned_income += _estimate_event_student_price(teacher, event, student)
-            except BillingError:
-                continue
+    events, students_by_event, price_token = _bind_planned_price_cache(
+        teacher, _month_schedule_events(teacher, month_start, month_end),
+    )
+    try:
+        for event in events:
+            for student in students_by_event[event.pk]:
+                try:
+                    planned_income += _estimate_event_student_price(teacher, event, student)
+                except BillingError:
+                    continue
+    finally:
+        _planned_price_cache.reset(price_token)
 
     credit_total = ZERO
     type_sign = Case(

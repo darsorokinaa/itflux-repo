@@ -87,7 +87,14 @@ def plan_item_is_passed(item, *, now=None):
 
 
 def plan_passed_items_count(plan, *, now=None):
-    return sum(1 for item in plan.items.all() if plan_item_is_passed(item, now=now))
+    if now is None:
+        cached = getattr(plan, "_passed_items_count", None)
+        if cached is not None:
+            return cached
+    count = sum(1 for item in plan.items.all() if plan_item_is_passed(item, now=now))
+    if now is None:
+        plan._passed_items_count = count
+    return count
 
 
 @contextmanager

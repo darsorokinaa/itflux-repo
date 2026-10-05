@@ -1151,34 +1151,97 @@ class JournalStudentsSummaryView(APIView):
     permission_classes = [IsAuthenticated, IsCabinetTeacher]
 
     def get(self, request):
-        students = Student.objects.filter(teacher=request.user, status="active")
+        students = list(
+            Student.objects.filter(teacher=request.user, status="active")
+            .select_related("user", "user__profile")[:200]
+        )
+        student_ids = [student.id for student in students]
+        last_by_student = _latest_lesson_records(request.user, student_ids)
+        averages = _average_scores(request.user, student_ids)
+        rates = _attendance_rates(request.user, student_ids)
+        attention_ids = set(
+            JournalAttentionMarker.objects.filter(
+                teacher=request.user,
+                student_id__in=student_ids,
+                is_active=True,
+            ).values_list("student_id", flat=True)
+        ) if student_ids else set()
         results = []
-        for s in students[:200]:
-            last = (
-                StudentLessonRecord.objects.filter(journal__teacher=request.user, student=s)
-                .select_related("journal")
-                .order_by("-journal__lesson_date")
-                .first()
-            )
-            avg = StudentLessonRecord.objects.filter(
-                journal__teacher=request.user, student=s, overall_score__isnull=False
-            ).aggregate(a=Avg("overall_score"))["a"]
-            att = attendance_report(request.user, student_id=s.id)
-            attention = JournalAttentionMarker.objects.filter(
-                teacher=request.user, student=s, is_active=True
-            ).exists()
+        for student in students:
+            last = last_by_student.get(student.id)
+            avg = averages.get(student.id)
             results.append(
                 {
-                    "student_id": s.id,
-                    "student_name": s.full_name,
+                    "student_id": student.id,
+                    "student_name": student.full_name,
                     "last_lesson_date": last.journal.lesson_date.isoformat() if last else None,
                     "last_topic": (last.journal.actual_topic or last.journal.planned_topic) if last else None,
-                    "attendance_rate": att["attendance_rate_percent"],
+                    "attendance_rate": rates.get(student.id, 0.0),
                     "avg_score": float(avg) if avg is not None else None,
-                    "requires_attention": attention,
+                    "requires_attention": student.id in attention_ids,
                 }
             )
         return Response({"results": results})
+
+
+def _latest_lesson_records(teacher, student_ids):
+    if not student_ids:
+        return {}
+    rows = (
+        StudentLessonRecord.objects.filter(
+            journal__teacher=teacher,
+            student_id__in=student_ids,
+        )
+        .select_related("journal")
+        .order_by("student_id", "-journal__lesson_date", "-id")
+        .distinct("student_id")
+    )
+    return {row.student_id: row for row in rows}
+
+
+def _average_scores(teacher, student_ids):
+    if not student_ids:
+        return {}
+    rows = (
+        StudentLessonRecord.objects.filter(
+            journal__teacher=teacher,
+            student_id__in=student_ids,
+            overall_score__isnull=False,
+        )
+        .values("student_id")
+        .annotate(a=Avg("overall_score"))
+    )
+    return {row["student_id"]: row["a"] for row in rows}
+
+
+def _attendance_rates(teacher, student_ids):
+    """Та же формула, что attendance_report, одним запросом на всех учеников."""
+    if not student_ids:
+        return {}
+    rows = (
+        StudentLessonRecord.objects.filter(
+            journal__teacher=teacher,
+            journal__is_archived=False,
+            student_id__in=student_ids,
+        )
+        .values("student_id", "attendance_status")
+        .annotate(c=Count("id"))
+    )
+    by_student = {}
+    for row in rows:
+        by_student.setdefault(row["student_id"], {})[row["attendance_status"]] = row["c"]
+    rates = {}
+    for student_id, by_status in by_student.items():
+        total = sum(by_status.values())
+        present_like = (
+            by_status.get(AttendanceStatus.PRESENT, 0)
+            + by_status.get(AttendanceStatus.LATE, 0)
+            + by_status.get(AttendanceStatus.LEFT_EARLY, 0)
+            + by_status.get(AttendanceStatus.PARTIAL, 0)
+        )
+        rate = float(present_like) / total * 100 if total else 0.0
+        rates[student_id] = round(rate, 1)
+    return rates
 
 
 def _student_result_lesson_fields(record: StudentLessonRecord) -> dict:

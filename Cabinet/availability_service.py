@@ -741,6 +741,7 @@ def public_booking_page(token, *, user=None, request=None):
         "link": serialize_booking_link(link, request=request),
         "date_from": date_from.isoformat() if date_from else None,
         "date_to": date_to.isoformat() if date_to else None,
+        "timezone": str(teacher_timezone(teacher)),
         "dates": dates,
         "slots": slots,
         "authenticated": authenticated,

@@ -1,6 +1,6 @@
 from django.core.cache import cache
 from django.db import transaction
-from django.db.models import Count, Prefetch, Q
+from django.db.models import Count, Exists, OuterRef, Prefetch, Q
 from django.core.files.storage import default_storage
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -1268,6 +1268,27 @@ def _copy_lesson_plan(source, teacher):
 
 
 class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
+    def _plan_items_prefetch(self):
+        """Список планов считает прогресс и не читает материалы пунктов."""
+        if getattr(self, "action", None) == "list":
+            return (
+                LessonPlanItem.objects.select_related("scheduled_event")
+                .prefetch_related("schedule_events_linked")
+                .order_by("order", "id")
+            )
+        return (
+            LessonPlanItem.objects.select_related(
+                "linked_lesson",
+                "scheduled_event",
+            ).prefetch_related(
+                "materials",
+                "attached_interactives",
+                "homework_materials",
+                "homework_interactives",
+                "schedule_events_linked",
+            ).order_by("order", "id")
+        )
+
     def get_queryset(self):
         teacher = self.get_teacher()
         # Личные планы учителя + публичные шаблоны каталога.
@@ -1277,19 +1298,7 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
             # Служебные черновики под материалы урока «вне плана» — не в списке планов.
             description="Автосоздано для материалов занятия",
         ).annotate(items_count=Count("items")).prefetch_related(
-            Prefetch(
-                "items",
-                queryset=LessonPlanItem.objects.select_related(
-                    "linked_lesson",
-                    "scheduled_event",
-                ).prefetch_related(
-                    "materials",
-                    "attached_interactives",
-                    "homework_materials",
-                    "homework_interactives",
-                    "schedule_events_linked",
-                ).order_by("order", "id"),
-            )
+            Prefetch("items", queryset=self._plan_items_prefetch())
         )
         status_param = self.request.query_params.get("status")
         if status_param:
@@ -1862,7 +1871,15 @@ class LessonPlanEnrollmentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         qs = LessonPlanEnrollment.objects.filter(
             teacher=self.get_teacher()
-        ).select_related("plan", "student", "student_subject", "group")
+        ).select_related(
+            "plan", "student", "student__user", "student__user__profile",
+            "student_subject", "group",
+        ).prefetch_related(
+            Prefetch(
+                "plan__items",
+                queryset=LessonPlanItem.objects.order_by("order", "id"),
+            )
+        )
         plan_id = self.request.query_params.get("plan")
         if plan_id:
             qs = qs.filter(plan_id=plan_id)
@@ -2822,6 +2839,15 @@ class MaterialViewSet(
             qs = qs.filter(Q(title__icontains=search) | Q(topic__icontains=search))
         if params.get("mine") == "true":
             qs = qs.filter(Q(teacher=teacher) | Q(owner=teacher))
+        if getattr(self, "action", None) == "list":
+            qs = qs.annotate(
+                _is_saved=Exists(
+                    TeacherSavedMaterial.objects.filter(
+                        teacher=teacher,
+                        material_id=OuterRef("pk"),
+                    )
+                )
+            )
         return qs.order_by("-created_at")
 
     def get_serializer_class(self):

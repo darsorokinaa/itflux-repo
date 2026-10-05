@@ -7,9 +7,9 @@ import {
   emptyMyFilesTrash,
   fetchMyFile,
   fetchMyFiles,
-  fetchStudents,
   moveMyFiles,
   myFileDownloadUrl,
+  myFilePreviewUrl,
   purgeMyFile,
   restoreMyFile,
   restoreMyFilesFolder,
@@ -19,7 +19,6 @@ import {
   updateMyFilesFolder,
   uploadMyFile,
 } from "../../utils/cabinetAuth";
-import { mapApiStudent } from "../cabinetMappers";
 import { formatStorageBytes, isQuotaExceededError, quotaExceededMessage, quotaPayloadFromError } from "../storageFormat";
 import QuotaExceededNotice from "./QuotaExceededNotice";
 import EducationalLoading, { LOADING_MESSAGES } from "../../components/EducationalLoading";
@@ -31,7 +30,7 @@ import StudentFilesWorkspace from "./StudentFilesWorkspace";
 import CabinetIcon from "../CabinetIcons";
 import CopyToStudentsModal from "./files/CopyToStudentsModal";
 import FileMovePickerModal from "./files/FileMovePickerModal";
-import FilePreviewModal, { FileThumb } from "./files/FilePreviewModal";
+import FilePreviewModal from "./files/FilePreviewModal";
 import {
   KIND_OPTIONS,
   extLabel,
@@ -39,18 +38,73 @@ import {
   formatDate,
   isTypingTarget,
   itemName,
+  normalizeExt,
+  previewKind,
   readStoredView,
   storeView,
-  studentLabel,
 } from "./files/fileUtils";
 import "../styles/my-files.css";
 
-const WORKSPACES = [
-  { id: "my", label: "Мои файлы", section: "my" },
-  { id: "students", label: "Файлы учеников" },
-  { id: "recent", label: "Недавние", section: "recent" },
-  { id: "trash", label: "Корзина", section: "trash" },
-];
+const FOLDER_TONES = ["#dce7fb", "#e7f3ea", "#f8ead8", "#efe6f8", "#f8e4e4", "#e4f2f4"];
+const SHEET_EXTS = new Set([".xls", ".xlsx", ".csv", ".ods", ".tsv"]);
+const DOC_EXTS = new Set([".doc", ".docx", ".odt", ".rtf"]);
+
+function folderTone(id) {
+  const value = String(id || "");
+  let n = 0;
+  for (let i = 0; i < value.length; i += 1) n += value.charCodeAt(i);
+  return FOLDER_TONES[n % FOLDER_TONES.length];
+}
+
+function badgeKind(item) {
+  const kind = previewKind(item);
+  const ext = normalizeExt(item);
+  if (kind === "pdf") return "pdf";
+  if (kind === "image") return "image";
+  if (kind === "video") return "video";
+  if (kind === "audio") return "audio";
+  if (kind === "text") return "text";
+  if (SHEET_EXTS.has(ext)) return "sheet";
+  if (DOC_EXTS.has(ext)) return "doc";
+  return "other";
+}
+
+function pluralRu(n, one, few, many) {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${n} ${one}`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${n} ${few}`;
+  return `${n} ${many}`;
+}
+
+function FileBadge({ item, large = false }) {
+  const kind = badgeKind(item);
+  const label = extLabel(item);
+  return (
+    <span className={`cbf-badge cbf-badge--${kind}${large ? " is-large" : ""}`} aria-hidden>
+      {label.length > 4 ? "ФАЙЛ" : label}
+    </span>
+  );
+}
+
+function TileArt({ item, student }) {
+  const kind = previewKind(item);
+  const [failed, setFailed] = useState(false);
+  if (kind === "image" && !failed) {
+    return (
+      <img
+        src={myFilePreviewUrl(item.id, { student })}
+        alt=""
+        loading="lazy"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  if (kind === "video") {
+    return <span className="cbf-video-art"><CabinetIcon name="video" /></span>;
+  }
+  return <FileBadge item={item} large />;
+}
 
 function selectionKey(item) {
   return `${item.kind}:${item.id}`;
@@ -73,8 +127,8 @@ export default function MyFilesManager({
   onStudentFolderChange,
 }) {
   const [workspace, setWorkspace] = useState(controlledWorkspace || "my");
-  const [navOpen, setNavOpen] = useState(false);
   const [internalFolderId, setInternalFolderId] = useState(null);
+  const [recordingsOn, setRecordingsOn] = useState(false);
   const folderId = controlledFolderId !== undefined ? controlledFolderId : internalFolderId;
   const folderIdRef = useRef(folderId);
   folderIdRef.current = folderId;
@@ -88,12 +142,13 @@ export default function MyFilesManager({
   const setActiveWorkspace = (next) => {
     if (next !== activeWorkspace) {
       if (onWorkspaceChange) onWorkspaceChange(next);
-      else setWorkspace(next);
+      else {
+        setWorkspace(next);
+        if (next !== "my") setFolder(null);
+      }
     }
-    setNavOpen(false);
     setSelectedKeys(new Set());
     setPreviewFile(null);
-    if (next !== "my") setFolder(null);
   };
 
   useEffect(() => {
@@ -114,7 +169,6 @@ export default function MyFilesManager({
   const [kind, setKind] = useState("");
   const [view, setView] = useState(() => (compact ? "list" : readStoredView("list")));
   const [selectedKeys, setSelectedKeys] = useState(() => new Set());
-  const [anchorIndex, setAnchorIndex] = useState(0);
   const [menu, setMenu] = useState(null);
   const [dropOverId, setDropOverId] = useState(null);
   const [dropActive, setDropActive] = useState(false);
@@ -124,7 +178,6 @@ export default function MyFilesManager({
   const [renameValue, setRenameValue] = useState("");
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const [createFolderName, setCreateFolderName] = useState("");
-  const [createOpen, setCreateOpen] = useState(false);
   const [purgeItem, setPurgeItem] = useState(null);
   const [purgeForce, setPurgeForce] = useState(false);
   const [purgeRelations, setPurgeRelations] = useState([]);
@@ -135,24 +188,14 @@ export default function MyFilesManager({
   const [previewFile, setPreviewFile] = useState(null);
   const [hasMore, setHasMore] = useState(false);
   const [page, setPage] = useState(1);
-  const [students, setStudents] = useState([]);
-  const [studentNavSearch, setStudentNavSearch] = useState("");
   const fileInputRef = useRef(null);
   const renameRef = useRef(null);
-  const createWrapRef = useRef(null);
+  const shellRef = useRef(null);
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 320);
     return () => window.clearTimeout(t);
   }, [search]);
-
-  useEffect(() => {
-    if (student || compact) return undefined;
-    fetchStudents().then((data) => {
-      const list = Array.isArray(data) ? data : data?.results || [];
-      setStudents(list.map(mapApiStudent));
-    }).catch(() => setStudents([]));
-  }, [student, compact]);
 
   useEffect(() => {
     if (compact) return;
@@ -202,15 +245,6 @@ export default function MyFilesManager({
     }
     load({ nextPage: 1 });
   }, [load, activeWorkspace]);
-
-  useEffect(() => {
-    if (!createOpen) return undefined;
-    const onDoc = (e) => {
-      if (!createWrapRef.current?.contains(e.target)) setCreateOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [createOpen]);
 
   const showNotice = (text) => {
     setNotice(text);
@@ -270,37 +304,6 @@ export default function MyFilesManager({
       return selectedFolders[0].id;
     }
     return apiSection === "my" ? folderIdRef.current : null;
-  };
-
-  const handleSelectClick = (item, index, event) => {
-    if (selectable) {
-      openItem(item);
-      return;
-    }
-    const cmd = event.metaKey || event.ctrlKey;
-    if (item.kind === "folder" && !cmd && !event.shiftKey) {
-      openItem(item);
-      return;
-    }
-    const key = selectionKey(item);
-    if (event.shiftKey) {
-      const from = Math.min(anchorIndex, index);
-      const to = Math.max(anchorIndex, index);
-      setSelectedKeys(new Set(items.slice(from, to + 1).map(selectionKey)));
-      return;
-    }
-    if (cmd) {
-      setSelectedKeys((prev) => {
-        const next = new Set(prev);
-        if (next.has(key)) next.delete(key);
-        else next.add(key);
-        return next;
-      });
-      setAnchorIndex(index);
-      return;
-    }
-    setSelectedKeys(new Set([key]));
-    setAnchorIndex(index);
   };
 
   const handleUploadFiles = async (fileList) => {
@@ -423,6 +426,49 @@ export default function MyFilesManager({
     }
   };
 
+  const handleRestoreItems = async (list) => {
+    if (!list?.length) return;
+    try {
+      for (const item of list) {
+        if (item.kind === "folder") await restoreMyFilesFolder(item.id);
+        else await restoreMyFile(item.id, {}, { student });
+      }
+      setSelectedKeys(new Set());
+      showNotice("Восстановлено");
+      await load();
+    } catch (err) {
+      setError(err?.message || "Не удалось восстановить");
+    }
+  };
+
+  const handleToggleFavorite = async (item) => {
+    const next = !item.is_favorite;
+    try {
+      if (item.kind === "folder") {
+        await updateMyFilesFolder(item.id, { is_favorite: next }, { student });
+      } else {
+        await updateMyFile(item.id, { is_favorite: next }, { student });
+      }
+      setItems((prev) => prev.map((row) => (
+        row.id === item.id && row.kind === item.kind ? { ...row, is_favorite: next } : row
+      )));
+    } catch (err) {
+      setError(err?.message || "Не удалось обновить избранное");
+    }
+  };
+
+  const applyCollection = (id) => {
+    setSelectedKeys(new Set());
+    setRecordingsOn(id === "recordings");
+    if (id === "recordings") {
+      setKind("video");
+      setActiveWorkspace("my");
+      return;
+    }
+    setKind("");
+    setActiveWorkspace(id === "all" ? "my" : id);
+  };
+
   const handlePurge = async () => {
     if (!purgeItem || purgeItem.kind === "folder") return;
     try {
@@ -535,277 +581,224 @@ export default function MyFilesManager({
     return () => window.removeEventListener("keydown", onKey);
   }, [compact, selectable, selectedItems, apiSection, items]);
 
-  const quotaPercent = quota?.percent ?? 0;
   const usedBytes = Number(quota?.storage_used_bytes ?? quota?.used_bytes ?? 0);
   const limitBytes = Number(quota?.storage_limit_bytes ?? quota?.limit_bytes ?? 0);
   const availableBytes = Number(quota?.available_bytes ?? Math.max(0, limitBytes - usedBytes));
   const quotaBreakdown = Array.isArray(quota?.breakdown) ? quota.breakdown.filter((row) => row.used_bytes > 0) : [];
   const canUpgradeStorage = Boolean(quota?.can_upgrade) && !student;
-  const canWrite = apiSection !== "trash" && apiSection !== "recent";
-  const filteredNavStudents = students.filter((s) => studentLabel(s).toLowerCase().includes(studentNavSearch.trim().toLowerCase()));
+  const canWrite = apiSection !== "trash";
   const parentCrumb = breadcrumbs.length > 1 ? breadcrumbs[breadcrumbs.length - 2] : null;
+  const collection = recordingsOn && activeWorkspace === "my"
+    ? "recordings"
+    : activeWorkspace === "recent" ? "recent"
+      : activeWorkspace === "favorites" ? "favorites"
+        : activeWorkspace === "trash" ? "trash"
+          : "all";
+  const showStudents = activeWorkspace === "students" && !student && !compact;
+  const folders = items.filter((item) => item.kind === "folder");
+  const files = items.filter((item) => item.kind === "file");
+  const allSelected = items.length > 0 && items.every((item) => selectedKeys.has(selectionKey(item)));
+  const listTitle = debouncedSearch
+    ? "Результаты поиска"
+    : collection === "trash" ? "Удалённые файлы"
+      : collection === "recordings" ? "Записи уроков"
+        : collection === "favorites" ? "Избранное"
+          : "Файлы";
 
-  const emptyNode = (() => {
-    if (debouncedSearch) return <div className="cb-files__empty">Ничего не найдено</div>;
-    if (apiSection === "trash") return <div className="cb-files__empty">Корзина пуста</div>;
-    if (apiSection === "recent") return <div className="cb-files__empty">Недавних файлов пока нет</div>;
-    if (folderId) {
-      return (
-        <div className="cb-files__empty cb-files__empty--onboard">
-          <strong>Здесь пока нет файлов</strong>
-          <p>Перетащите файлы сюда или нажмите «Создать».</p>
-        </div>
-      );
+  const emptyCopy = (() => {
+    if (debouncedSearch) {
+      return {
+        title: "Ничего не найдено",
+        text: "Попробуйте другое название или сбросьте фильтры.",
+        action: "Сбросить фильтры",
+        onClick: () => { setSearch(""); setKind(""); setRecordingsOn(false); },
+      };
     }
-    return (
-      <div className="cb-files__empty cb-files__empty--onboard">
-        <strong>Храните материалы в одном месте</strong>
-        <p>Создавайте папки, загружайте файлы и отправляйте материалы ученикам.</p>
-        {canWrite ? (
-          <button type="button" className="cb-btn cb-btn--primary" onClick={() => fileInputRef.current?.click()}>
-            Загрузить первый файл
-          </button>
-        ) : null}
-      </div>
-    );
+    if (collection === "trash") {
+      return {
+        title: "Корзина пуста",
+        text: "Здесь появятся удалённые файлы и папки.",
+        action: "К файлам",
+        onClick: () => applyCollection("all"),
+      };
+    }
+    if (collection === "favorites") {
+      return {
+        title: "Здесь будет избранное",
+        text: "Отмечайте важные материалы звёздочкой, чтобы быстро возвращаться к ним.",
+        action: "Посмотреть все файлы",
+        onClick: () => applyCollection("all"),
+      };
+    }
+    if (collection === "recordings") {
+      return {
+        title: "Пока нет записей уроков",
+        text: "Видеофайлы в этой папке появятся в подборке.",
+        action: "К файлам",
+        onClick: () => applyCollection("all"),
+      };
+    }
+    if (kind) {
+      return {
+        title: "Ничего не найдено",
+        text: "В этой папке нет файлов выбранного типа.",
+        action: "Сбросить фильтры",
+        onClick: () => { setKind(""); setRecordingsOn(false); },
+      };
+    }
+    if (collection === "recent") {
+      return {
+        title: "Недавних файлов пока нет",
+        text: "Файлы, которые вы открывали, появятся здесь.",
+        action: "К файлам",
+        onClick: () => applyCollection("all"),
+      };
+    }
+    if (folderId) {
+      return {
+        title: "В этой папке пока пусто",
+        text: "Добавьте материалы с компьютера или создайте вложенную папку.",
+        action: canWrite ? "Загрузить файлы" : "",
+        onClick: () => fileInputRef.current?.click(),
+      };
+    }
+    return {
+      title: "Храните материалы в одном месте",
+      text: "Создавайте папки, загружайте файлы и отмечайте нужное избранным.",
+      action: canWrite ? "Загрузить файлы" : "",
+      onClick: () => fileInputRef.current?.click(),
+    };
   })();
 
-  const renderRow = (item, index) => {
+  const itemEvents = (item) => ({
+    draggable: !compact && canWrite && apiSection !== "trash",
+    onDragStart: (e) => {
+      const moving = selectedKeys.has(selectionKey(item)) ? selectedItems : [item];
+      e.dataTransfer.setData("text/plain", JSON.stringify({
+        ids: moving.filter((row) => row.kind === "file").map((row) => row.id),
+        folder_ids: moving.filter((row) => row.kind === "folder").map((row) => row.id),
+        id: item.id,
+        kind: item.kind,
+      }));
+    },
+    onDragOver: (e) => {
+      if (item.kind === "folder" && canWrite) {
+        e.preventDefault();
+        setDropOverId(item.id);
+      }
+    },
+    onDragLeave: () => {
+      if (dropOverId === item.id) setDropOverId(null);
+    },
+    onDrop: (e) => {
+      const raw = e.dataTransfer.getData("text/plain");
+      if (!raw || item.kind !== "folder") return;
+      e.preventDefault();
+      e.stopPropagation();
+      setDropOverId(null);
+      setDropActive(false);
+      try {
+        const payload = JSON.parse(raw);
+        if (payload.id !== item.id) handleDropOnFolder(item, payload);
+      } catch {
+        /* ignore */
+      }
+    },
+    onContextMenu: (e) => {
+      if (compact || selectable) return;
+      e.preventDefault();
+      const key = selectionKey(item);
+      if (!selectedKeys.has(key)) setSelectedKeys(new Set([key]));
+      setMenu({ id: item.id, item, anchor: e.currentTarget });
+    },
+  });
+
+  const toggleKey = (item, checked) => {
     const key = selectionKey(item);
-    const isSelected = selectedKeys.has(key);
-    const over = dropOverId === item.id;
-    const isGrid = view === "grid" && !compact;
-    return (
-      <div
-        key={item.id}
-        className={`${isGrid ? "cb-files__tile" : "cb-files__row"}${isSelected ? " is-selected" : ""}${over ? " is-drop" : ""}`}
-        role="button"
-        tabIndex={0}
-        draggable={!compact && canWrite}
-        onDragStart={(e) => {
-          const moving = isSelected ? selectedItems : [item];
-          e.dataTransfer.setData("text/plain", JSON.stringify({
-            ids: moving.filter((i) => i.kind === "file").map((i) => i.id),
-            folder_ids: moving.filter((i) => i.kind === "folder").map((i) => i.id),
-            id: item.id,
-            kind: item.kind,
-          }));
-        }}
-        onDragOver={(e) => {
-          if (item.kind === "folder" && canWrite) {
-            e.preventDefault();
-            setDropOverId(item.id);
-          }
-        }}
-        onDragLeave={() => {
-          if (dropOverId === item.id) setDropOverId(null);
-        }}
-        onDrop={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          setDropOverId(null);
-          try {
-            const payload = JSON.parse(e.dataTransfer.getData("text/plain") || "{}");
-            if (payload.id !== item.id) handleDropOnFolder(item, payload);
-          } catch {
-            /* ignore */
-          }
-        }}
-        onClick={(e) => handleSelectClick(item, index, e)}
-        onDoubleClick={(e) => {
-          e.preventDefault();
-          openItem(item);
-        }}
-        onContextMenu={(e) => {
-          if (compact || selectable) return;
-          e.preventDefault();
-          if (!selectedKeys.has(key)) setSelectedKeys(new Set([key]));
-          setMenu({ id: item.id, item, anchor: e.currentTarget });
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            openItem(item);
-          }
-        }}
-      >
-        {!compact && !selectable ? (
-          <label className="cb-files__check" onClick={(e) => e.stopPropagation()}>
-            <input
-              type="checkbox"
-              checked={isSelected}
-              onChange={(e) => {
-                const next = new Set(selectedKeys);
-                if (e.target.checked) next.add(key);
-                else next.delete(key);
-                setSelectedKeys(next);
-              }}
-            />
-          </label>
-        ) : null}
-        <FileThumb item={item} student={student} size={isGrid ? "md" : "sm"} />
-        <div className="cb-files__meta">
-          <div className="cb-files__name" title={itemName(item)}>{itemName(item)}</div>
-          <div className="cb-files__sub">
-            {debouncedSearch && item.path_label ? `${item.path_label} · ` : ""}
-            {item.kind === "folder" ? "Папка" : `${extLabel(item)} · ${formatBytes(item.size)} · ${formatDate(item.updated_at)}`}
-            {apiSection === "trash" && item.days_left != null ? ` · ещё ${item.days_left} дн.` : ""}
-          </div>
-        </div>
-        {!isGrid && !compact ? (
-          <>
-            <div className="cb-files__col cb-files__col--type">{extLabel(item)}</div>
-            <div className="cb-files__col cb-files__col--size">{item.kind === "folder" ? "—" : formatBytes(item.size)}</div>
-            <div className="cb-files__col cb-files__col--date">{formatDate(item.updated_at)}</div>
-          </>
-        ) : null}
-        {!selectable ? (
-          <div className="cb-files__row-actions">
-            <button
-              type="button"
-              className="cb-files__menu-btn"
-              aria-label="Действия"
-              onClick={(e) => {
-                e.stopPropagation();
-                setMenu(menu?.id === item.id ? null : { id: item.id, item, anchor: e.currentTarget });
-              }}
-            >
-              ⋯
-            </button>
-          </div>
-        ) : null}
-      </div>
-    );
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  };
+
+  const openMenu = (item, anchor) => {
+    setMenu(menu?.id === item.id && menu?.item?.kind === item.kind ? null : { id: item.id, item, anchor });
   };
 
   return (
-    <div className={`cb-files${compact ? " cb-files--compact" : ""}`}>
-      {!compact && activeWorkspace !== "students" && canWrite ? (
-        <div className="cb-files__toolbar">
-          <div className="cb-files__create-wrap" ref={createWrapRef}>
+    <div className={`cb-files cb-files-shell${compact ? " cb-files--compact" : ""}`}>
+      {!compact && !showStudents ? (
+        <div className="cbf-actions">
+          <button type="button" className="cbf-btn" disabled={!canWrite} onClick={() => { setCreateFolderOpen(true); setCreateFolderName(""); }}>
+            <CabinetIcon name="plus" />
+            Новая папка
+          </button>
+          <button type="button" className="cbf-btn cbf-btn--blue" disabled={!canWrite} onClick={() => fileInputRef.current?.click()}>
+            <CabinetIcon name="share" />
+            Загрузить файлы
+          </button>
+        </div>
+      ) : null}
+      <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => handleUploadFiles(e.target.files)} />
+
+      <section
+        className={`cbf-shell${dropActive ? " is-drag" : ""}`}
+        ref={shellRef}
+        aria-label="Файловый менеджер"
+        onDragOver={(e) => {
+          if (!canWrite || compact) return;
+          const external = [...e.dataTransfer.items].some((it) => it.kind === "file");
+          if (!external) return;
+          e.preventDefault();
+          setDropActive(true);
+        }}
+        onDragLeave={(e) => {
+          if (!shellRef.current?.contains(e.relatedTarget)) setDropActive(false);
+        }}
+        onDrop={(e) => {
+          if (!canWrite) return;
+          e.preventDefault();
+          setDropActive(false);
+          if (e.dataTransfer.files?.length) handleUploadFiles(e.dataTransfer.files);
+        }}
+      >
+        {!compact && !student ? (
+          <div className="cbf-tabs" role="tablist" aria-label="Чьи файлы">
             <button
               type="button"
-              className="cb-btn cb-btn--primary"
-              onClick={() => setCreateOpen((v) => !v)}
-              aria-expanded={createOpen}
+              className="cbf-tab"
+              role="tab"
+              id="myFilesTab"
+              aria-selected={activeWorkspace !== "students"}
+              onClick={() => applyCollection("all")}
             >
-              + Создать
+              <CabinetIcon name="folder" />
+              Мои файлы
             </button>
-            {createOpen ? (
-              <div className="cb-files__create-menu" role="menu">
-                <button type="button" role="menuitem" onClick={() => { setCreateOpen(false); setCreateFolderOpen(true); setCreateFolderName(""); }}>
-                  Новая папка
-                </button>
-                <button type="button" role="menuitem" onClick={() => { setCreateOpen(false); fileInputRef.current?.click(); }}>
-                  Загрузить файл
-                </button>
-                <button type="button" role="menuitem" onClick={() => { setCreateOpen(false); fileInputRef.current?.click(); }}>
-                  Загрузить несколько файлов
-                </button>
-              </div>
+            <button
+              type="button"
+              className="cbf-tab"
+              role="tab"
+              id="studentFilesTab"
+              aria-selected={activeWorkspace === "students"}
+              onClick={() => setActiveWorkspace("students")}
+            >
+              <CabinetIcon name="users" />
+              Файлы учеников
+            </button>
+            {activeWorkspace !== "students" ? (
+              <span className="cbf-private">
+                <CabinetIcon name="lock" />
+                Личные файлы видны только вам
+              </span>
             ) : null}
           </div>
-          {apiSection === "trash" && !student ? (
-            <button
-              type="button"
-              className="cb-btn cb-btn--outline"
-              onClick={async () => {
-                try {
-                  const res = await emptyMyFilesTrash();
-                  showNotice(res?.blocked?.length ? "Часть файлов не удалена — они используются" : "Корзина очищена");
-                  await load();
-                } catch (err) {
-                  setError(err?.message || "Не удалось очистить корзину");
-                }
-              }}
-            >
-              Очистить корзину
-            </button>
-          ) : null}
-          <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => handleUploadFiles(e.target.files)} />
-        </div>
-      ) : compact ? (
-        <div className="cb-files__toolbar">
-          <button type="button" className="cb-btn cb-btn--outline" onClick={() => fileInputRef.current?.click()}>
-            Загрузить новый
-          </button>
-          <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => handleUploadFiles(e.target.files)} />
-        </div>
-      ) : null}
-
-      {apiSection === "trash" && !compact ? (
-        <div className="cb-files__toolbar">
-          <button
-            type="button"
-            className="cb-btn cb-btn--outline"
-            onClick={async () => {
-              try {
-                const res = await emptyMyFilesTrash();
-                showNotice(res?.blocked?.length ? "Часть файлов не удалена — они используются" : "Корзина очищена");
-                await load();
-              } catch (err) {
-                setError(err?.message || "Не удалось очистить корзину");
-              }
-            }}
-          >
-            Очистить корзину
-          </button>
-        </div>
-      ) : null}
-
-      <div className="cb-files__layout">
-        {!compact && !student ? (
-          <>
-            <button type="button" className="cb-files__nav-toggle" aria-expanded={navOpen} onClick={() => setNavOpen((v) => !v)}>
-              <span>{WORKSPACES.find((w) => w.id === activeWorkspace)?.label || "Раздел"}</span>
-              <CabinetIcon name="menu" />
-            </button>
-            <nav className={`cb-files__nav${navOpen ? " is-open" : ""}`} aria-label="Разделы файлов">
-              {WORKSPACES.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  className={`cb-files__nav-btn${activeWorkspace === s.id && !(s.id === "students" && controlledStudentId) ? " is-active" : ""}${s.id === "recent" ? " cb-files__nav-btn--after-divider" : ""}`}
-                  onClick={() => {
-                    setActiveWorkspace(s.id);
-                    if (s.id === "my") setFolder(null);
-                    if (s.id === "students") onStudentChange?.(null);
-                  }}
-                >
-                  {s.label}
-                </button>
-              ))}
-              {activeWorkspace === "students" || students.length ? (
-                <div className="cb-files__nav-students">
-                  <input
-                    type="search"
-                    className="cb-files__nav-search"
-                    placeholder="Ученик…"
-                    value={studentNavSearch}
-                    onChange={(e) => setStudentNavSearch(e.target.value)}
-                    onFocus={() => setActiveWorkspace("students")}
-                  />
-                  {filteredNavStudents.slice(0, 12).map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      className={`cb-files__nav-btn cb-files__nav-btn--student${String(controlledStudentId) === String(s.id) ? " is-active" : ""}`}
-                      onClick={() => {
-                        setActiveWorkspace("students");
-                        onStudentChange?.(String(s.id));
-                      }}
-                    >
-                      {studentLabel(s)}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </nav>
-          </>
         ) : null}
 
-        <div className="cb-files__main">
-          {activeWorkspace === "students" && !student ? (
+        {showStudents ? (
+          <div className="cbf-students">
             <StudentFilesWorkspace
               studentId={controlledStudentId}
               folderId={controlledStudentFolderId}
@@ -813,160 +806,201 @@ export default function MyFilesManager({
               onFolderChange={onStudentFolderChange}
               onNotice={showNotice}
             />
-          ) : (
-            <>
-              {quota && activeWorkspace === "my" && !compact && !selectable ? (
-                <div className="cb-files__quota">
-                  <div className="cb-files__quota-head">
-                    <span className="cb-files__quota-title">Хранилище</span>
-                    <span className="cb-files__quota-frac">
-                      {formatStorageBytes(usedBytes)} из {formatStorageBytes(limitBytes)}
-                    </span>
-                  </div>
-                  <div
-                    className={`cb-files__quota-bar${quota.warning || quota.over_limit ? " is-warn" : ""}`}
-                    role="progressbar"
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-valuenow={Math.min(100, quotaPercent)}
-                    aria-label={`Хранилище: ${formatStorageBytes(usedBytes)} из ${formatStorageBytes(limitBytes)}`}
-                  >
-                    <span style={{ width: `${Math.min(100, quotaPercent)}%` }} />
-                  </div>
-                  <p className="cb-files__quota-left">Осталось {formatStorageBytes(availableBytes)}</p>
-                  {quotaBreakdown.length ? (
-                    <ul className="cb-files__quota-breakdown">
-                      {quotaBreakdown.map((row) => (
-                        <li key={row.key}>{row.label} — {formatStorageBytes(row.used_bytes)}</li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </div>
-              ) : null}
-
-              <div className="cb-files__crumbs-row">
-                {parentCrumb && apiSection === "my" ? (
-                  <button
-                    type="button"
-                    className="cb-btn cb-btn--outline cb-files__back"
-                    onClick={() => setFolder(parentCrumb.id)}
-                  >
-                    <CabinetIcon name="arrowLeft" />
-                    Назад
+          </div>
+        ) : (
+          <div role="tabpanel" aria-labelledby={activeWorkspace === "students" ? "studentFilesTab" : "myFilesTab"}>
+            <div className="cbf-tools">
+              <label className="cbf-search">
+                <span className="cbf-sr">Поиск в файлах и папках</span>
+                <CabinetIcon name="search" />
+                <input
+                  type="search"
+                  value={search}
+                  placeholder={student ? "Поиск в моих файлах и папках" : "Поиск в моих файлах и папках"}
+                  autoComplete="off"
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+                {search ? (
+                  <button type="button" className="cbf-search-clear" aria-label="Очистить поиск" onClick={() => setSearch("")}>
+                    <CabinetIcon name="close" />
                   </button>
                 ) : null}
-                <div className="cb-files__crumbs">
-                  {breadcrumbs.map((crumb, idx) => {
-                    const current = idx === breadcrumbs.length - 1;
-                    return (
-                      <span key={`${crumb.id || "root"}-${idx}`} className="cb-files__crumb-wrap">
-                        {idx > 0 ? <span className="cb-files__crumb-sep">/</span> : null}
-                        <button
-                          type="button"
-                          className={`cb-files__crumb${current ? " is-current" : ""}`}
-                          onClick={() => {
-                            if (current) return;
-                            setActiveWorkspace("my");
-                            setFolder(crumb.id);
-                          }}
-                        >
-                          {crumb.name}
-                        </button>
-                      </span>
-                    );
-                  })}
-                </div>
-              </div>
+              </label>
+              {compact ? (
+                <button type="button" className="cbf-btn" onClick={() => fileInputRef.current?.click()}>
+                  Загрузить
+                </button>
+              ) : null}
+              <label className="cbf-select cbf-select--type">
+                <span className="cbf-sr">Тип файла</span>
+                <select
+                  value={kind}
+                  onChange={(e) => {
+                    setKind(e.target.value);
+                    setRecordingsOn(false);
+                  }}
+                >
+                  {KIND_OPTIONS.map((opt) => (
+                    <option key={opt.value || "all"} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
 
+            {!compact ? (
+              <nav className="cbf-filters" aria-label="Подборки файлов">
+                {[
+                  { id: "all", label: "Все файлы" },
+                  { id: "recent", label: "Недавние", icon: "clock" },
+                  { id: "favorites", label: "Избранное", icon: "star" },
+                  { id: "recordings", label: "Записи уроков", icon: "video" },
+                  { id: "trash", label: "Корзина", icon: "trash" },
+                ].map((chip) => (
+                  <button
+                    key={chip.id}
+                    type="button"
+                    className={`cbf-chip${collection === chip.id ? " is-active" : ""}`}
+                    aria-pressed={collection === chip.id}
+                    onClick={() => applyCollection(chip.id)}
+                  >
+                    {chip.icon ? <CabinetIcon name={chip.icon} /> : null}
+                    {chip.label}
+                  </button>
+                ))}
+              </nav>
+            ) : null}
+
+            <div className="cbf-body">
               {selectedItems.length && !selectable ? (
-                <div className="cb-files__selection">
-                  <span>Выбрано: {selectedItems.length}</span>
-                  {canWrite ? (
-                    <>
-                      <button type="button" className="cb-btn cb-btn--outline" onClick={() => setMoveOpen(true)}>Переместить</button>
-                      {!student ? (
-                        <button type="button" className="cb-btn cb-btn--outline" onClick={() => setCopyTarget({ files: selectedItems.filter((i) => i.kind === "file"), materials: [] })}>
-                          Скопировать ученикам
-                        </button>
-                      ) : null}
-                      <button type="button" className="cb-btn cb-btn--outline" onClick={() => setDeleteItems(selectedItems)}>Удалить</button>
-                    </>
+                <div className="cbf-bulk">
+                  <span className="cbf-bulk-count">Выбрано: {selectedItems.length}</span>
+                  {canWrite && apiSection !== "recent" ? (
+                    <button type="button" className="cbf-btn" onClick={() => setMoveOpen(true)}>
+                      <CabinetIcon name="folder" />
+                      Переместить
+                    </button>
                   ) : null}
-                  <button type="button" className="cb-btn cb-btn--secondary" onClick={() => setSelectedKeys(new Set())}>Снять выделение</button>
+                  {canWrite && !student ? (
+                    <button
+                      type="button"
+                      className="cbf-btn cbf-btn--blue"
+                      onClick={() => setCopyTarget({ files: selectedItems.filter((i) => i.kind === "file"), materials: [] })}
+                    >
+                      <CabinetIcon name="users" />
+                      Скопировать ученикам
+                    </button>
+                  ) : null}
+                  {apiSection === "trash" ? (
+                    <button type="button" className="cbf-btn cbf-btn--soft" onClick={() => handleRestoreItems(selectedItems)}>
+                      <CabinetIcon name="undo" />
+                      Восстановить
+                    </button>
+                  ) : (
+                    <button type="button" className="cbf-btn cbf-btn--danger" onClick={() => setDeleteItems(selectedItems)}>
+                      <CabinetIcon name="trash" />
+                      Удалить
+                    </button>
+                  )}
+                  <button type="button" className="cbf-icon-btn" aria-label="Снять выделение" onClick={() => setSelectedKeys(new Set())}>
+                    <CabinetIcon name="close" />
+                  </button>
                 </div>
               ) : (
-                <div className="cb-files__toolbar">
-                  <input
-                    type="search"
-                    className="cb-files__search"
-                    placeholder="Поиск в файлах"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                  />
-                  <label className="cb-files__select-wrap">
-                    <span className="cb-files__select-label">Сортировка</span>
-                    <select
-                      className="cb-files__select"
-                      value={sort}
-                      onChange={(e) => {
-                        const next = e.target.value;
-                        setSort(next);
-                        setOrder(next === "updated" || next === "size" ? "desc" : "asc");
-                      }}
-                    >
-                      <option value="name">По названию</option>
-                      <option value="updated">По изменению</option>
-                      <option value="size">По размеру</option>
-                      <option value="type">По типу</option>
-                    </select>
-                  </label>
+                <div className="cbf-dir">
                   <button
                     type="button"
-                    className="cb-files__order"
-                    onClick={() => setOrder((v) => (v === "asc" ? "desc" : "asc"))}
-                    aria-label={order === "asc" ? "По возрастанию" : "По убыванию"}
+                    className="cbf-back"
+                    aria-label="На папку выше"
+                    disabled={!parentCrumb || apiSection !== "my"}
+                    onClick={() => parentCrumb && setFolder(parentCrumb.id)}
                   >
-                    {order === "asc" ? "↑" : "↓"}
+                    <CabinetIcon name="arrowLeft" />
                   </button>
-                  <label className="cb-files__select-wrap">
-                    <span className="cb-files__select-label">Тип</span>
-                    <select className="cb-files__select" value={kind} onChange={(e) => setKind(e.target.value)}>
-                      {KIND_OPTIONS.map((opt) => (
-                        <option key={opt.value || "all"} value={opt.value}>{opt.label}</option>
-                      ))}
-                    </select>
-                  </label>
-                  {!compact ? (
-                    <div className="cb-files__view-toggle" role="group" aria-label="Вид">
-                      <button type="button" className={view === "list" ? "is-active" : ""} onClick={() => setView("list")}>Список</button>
-                      <button type="button" className={view === "grid" ? "is-active" : ""} onClick={() => setView("grid")}>Плитка</button>
-                    </div>
-                  ) : null}
+                  <nav className="cbf-crumbs" aria-label="Путь к папке">
+                    {breadcrumbs.map((crumb, idx) => {
+                      const current = idx === breadcrumbs.length - 1;
+                      return (
+                        <span key={`${crumb.id || "root"}-${idx}`} className="cbf-crumb">
+                          {idx > 0 ? <CabinetIcon name="arrow" /> : null}
+                          <button
+                            type="button"
+                            className={current ? "is-current" : ""}
+                            onClick={() => {
+                              if (current || apiSection !== "my") return;
+                              setActiveWorkspace("my");
+                              setFolder(crumb.id);
+                            }}
+                          >
+                            {crumb.name}
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </nav>
+                  <div className="cbf-dir-controls">
+                    <label className="cbf-select cbf-select--sort">
+                      <span className="cbf-sr">Сортировка</span>
+                      <select
+                        value={sort}
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          setSort(next);
+                          setOrder(next === "updated" || next === "size" ? "desc" : "asc");
+                        }}
+                      >
+                        <option value="updated">По дате</option>
+                        <option value="name">По названию</option>
+                        <option value="size">По размеру</option>
+                        <option value="type">По типу</option>
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className="cbf-icon-btn cbf-sort-dir"
+                      aria-label="Изменить направление сортировки"
+                      title={order === "asc" ? "По возрастанию" : "По убыванию"}
+                      onClick={() => setOrder((v) => (v === "asc" ? "desc" : "asc"))}
+                    >
+                      {order === "asc" ? "↑" : "↓"}
+                    </button>
+                    {!compact ? (
+                      <div className="cbf-view" aria-label="Вид файлов">
+                        <button type="button" className={view === "list" ? "is-active" : ""} aria-pressed={view === "list"} aria-label="Список" onClick={() => setView("list")}>
+                          <CabinetIcon name="order" />
+                        </button>
+                        <button type="button" className={view === "grid" ? "is-active" : ""} aria-pressed={view === "grid"} aria-label="Плитки" onClick={() => setView("grid")}>
+                          <CabinetIcon name="cards" />
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               )}
 
-              {!compact && canWrite ? (
-                <div
-                  className={`cb-files__drop${dropActive ? " is-active" : ""}`}
-                  onDragOver={(e) => {
-                    if ([...e.dataTransfer.items].some((it) => it.kind === "file")) {
-                      e.preventDefault();
-                      setDropActive(true);
-                    }
-                  }}
-                  onDragLeave={() => setDropActive(false)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setDropActive(false);
-                    if (e.dataTransfer.files?.length) handleUploadFiles(e.dataTransfer.files);
-                  }}
-                >
-                  Перетащите файлы сюда, чтобы загрузить
-                </div>
+              {apiSection === "trash" && !compact ? (
+                <p className="cbf-restore-note">
+                  Удалённые материалы можно восстановить. Файлы в корзине продолжают занимать место.
+                  {!student ? (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const res = await emptyMyFilesTrash();
+                          showNotice(res?.blocked?.length ? "Часть файлов не удалена — они используются" : "Корзина очищена");
+                          await load();
+                        } catch (err) {
+                          setError(err?.message || "Не удалось очистить корзину");
+                        }
+                      }}
+                    >
+                      Очистить корзину
+                    </button>
+                  ) : null}
+                </p>
               ) : null}
 
               {uploads.length ? (
-                <div className="cb-files__uploads">
+                <div className="cbf-uploads">
                   <EducationalLoading
                     compact
                     align="start"
@@ -978,7 +1012,7 @@ export default function MyFilesManager({
                     }
                   />
                   {uploads.map((job) => (
-                    <div key={job.name} className={`cb-files__upload-row${job.error ? " is-error" : ""}`}>
+                    <div key={job.name} className={`cbf-upload${job.error ? " is-error" : ""}`}>
                       <span>{job.name}</span>
                       <span>{job.error || `${job.progress}%`}</span>
                     </div>
@@ -986,7 +1020,7 @@ export default function MyFilesManager({
                 </div>
               ) : null}
 
-              {notice ? <p className="cb-page-sub">{notice}</p> : null}
+              {notice ? <p className="cbf-toast" role="status">{notice}</p> : null}
               {quotaError ? (
                 <QuotaExceededNotice
                   message={quotaError.message}
@@ -994,41 +1028,246 @@ export default function MyFilesManager({
                   showOpenFiles={false}
                   showUpgrade={canUpgradeStorage}
                 />
-              ) : error ? <div className="cb-files__error">{error}</div> : null}
+              ) : error ? <div className="cbf-error">{error}</div> : null}
 
               {loading ? (
-                <div className="cb-files__skeleton" aria-busy="true">
-                  <div className="cb-files__skel-row" /><div className="cb-files__skel-row" /><div className="cb-files__skel-row" />
+                <div className="cbf-skeleton" aria-busy="true">
+                  <div /><div /><div />
                 </div>
-              ) : items.length === 0 ? emptyNode : (
+              ) : items.length === 0 ? (
+                <div className="cbf-empty">
+                  <span className="cbf-empty-icon"><CabinetIcon name="folder" /></span>
+                  <h3>{emptyCopy.title}</h3>
+                  <p>{emptyCopy.text}</p>
+                  {emptyCopy.action ? (
+                    <button type="button" className="cbf-btn cbf-btn--blue" onClick={emptyCopy.onClick}>{emptyCopy.action}</button>
+                  ) : null}
+                </div>
+              ) : (
                 <>
-                  {view !== "grid" && !compact ? (
-                    <div className="cb-files__list-head" aria-hidden>
-                      <span />
-                      <span />
-                      <span>Название</span>
-                      <span>Тип</span>
-                      <span>Размер</span>
-                      <span>Изменён</span>
-                      <span />
+                  {folders.length ? (
+                    <div className="cbf-folders">
+                      {folders.map((item) => {
+                        const key = selectionKey(item);
+                        const selected = selectedKeys.has(key);
+                        return (
+                          <article
+                            key={key}
+                            className={`cbf-folder${selected ? " is-selected" : ""}${dropOverId === item.id ? " is-drop" : ""}`}
+                            {...itemEvents(item)}
+                          >
+                            <button
+                              type="button"
+                              className="cbf-folder-open"
+                              style={{ "--cbf-folder": folderTone(item.id) }}
+                              title={`Открыть папку ${itemName(item)}`}
+                              onClick={() => openItem(item)}
+                            >
+                              <span className="cbf-folder-art" aria-hidden />
+                              <span className="cbf-folder-text">
+                                <strong>{itemName(item)}</strong>
+                                <small>{apiSection === "trash" && item.days_left != null ? `Ещё ${item.days_left} дн.` : "Папка"}</small>
+                              </span>
+                            </button>
+                            {!selectable ? (
+                              <button
+                                type="button"
+                                className="cbf-folder-more"
+                                aria-label={`Действия с папкой ${itemName(item)}`}
+                                onClick={(e) => { e.stopPropagation(); openMenu(item, e.currentTarget); }}
+                              >
+                                <CabinetIcon name="more" />
+                              </button>
+                            ) : null}
+                            {!compact ? (
+                              <input
+                                className="cbf-folder-check"
+                                type="checkbox"
+                                checked={selected}
+                                aria-label={`Выбрать папку ${itemName(item)}`}
+                                onChange={(e) => toggleKey(item, e.target.checked)}
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            ) : null}
+                          </article>
+                        );
+                      })}
                     </div>
                   ) : null}
-                  <div className={view === "grid" && !compact ? "cb-files__grid" : "cb-files__list"}>
-                    {items.map(renderRow)}
-                  </div>
+
+                  {files.length ? (
+                    <div className="cbf-list-head">
+                      <h2>{listTitle}<span>{files.length}</span></h2>
+                      <p>Нажмите на название, чтобы открыть</p>
+                    </div>
+                  ) : null}
+
+                  {files.length && (view !== "grid" || compact) ? (
+                    <table className="cbf-table">
+                      <thead>
+                        <tr>
+                          {!compact ? (
+                            <th className="cbf-check-col">
+                              <input
+                                type="checkbox"
+                                checked={allSelected}
+                                aria-label="Выбрать все видимые файлы и папки"
+                                onChange={(e) => setSelectedKeys(e.target.checked ? new Set(items.map(selectionKey)) : new Set())}
+                              />
+                            </th>
+                          ) : null}
+                          <th>Название</th>
+                          {!student && !compact ? <th className="cbf-access-col">У учеников</th> : null}
+                          <th className="cbf-date-col">Изменён</th>
+                          <th className="cbf-size-col">Размер</th>
+                          {!selectable ? <th className="cbf-menu-col"><span className="cbf-sr">Действия</span></th> : null}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {files.map((item) => {
+                          const key = selectionKey(item);
+                          const selected = selectedKeys.has(key);
+                          const hint = debouncedSearch && item.path_label
+                            ? item.path_label
+                            : (apiSection === "trash" && item.days_left != null ? `Ещё ${item.days_left} дн.` : extLabel(item));
+                          return (
+                            <tr key={key} className={`cbf-row${selected ? " is-selected" : ""}`} {...itemEvents(item)}>
+                              {!compact ? (
+                                <td className="cbf-check-col">
+                                  <input
+                                    type="checkbox"
+                                    checked={selected}
+                                    aria-label={`Выбрать ${itemName(item)}`}
+                                    onChange={(e) => toggleKey(item, e.target.checked)}
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                </td>
+                              ) : null}
+                              <td>
+                                <button type="button" className="cbf-file-open" title={itemName(item)} onClick={() => openItem(item)}>
+                                  <FileBadge item={item} />
+                                  <span className="cbf-file-name">
+                                    <strong>{itemName(item)}</strong>
+                                    <small>
+                                      {hint}
+                                      <span className="cbf-file-size-inline"> · {formatBytes(item.size)}</span>
+                                    </small>
+                                  </span>
+                                </button>
+                              </td>
+                              {!student && !compact ? (
+                                <td className="cbf-access-col">
+                                  <span className="cbf-access">
+                                    <CabinetIcon name="lock" />
+                                    Только у меня
+                                  </span>
+                                </td>
+                              ) : null}
+                              <td className="cbf-date-col">{formatDate(item.updated_at)}</td>
+                              <td className="cbf-size-col">{formatBytes(item.size)}</td>
+                              {!selectable ? (
+                                <td className="cbf-menu-col">
+                                  <div className="cbf-row-actions">
+                                    {apiSection !== "trash" ? (
+                                      <button
+                                        type="button"
+                                        className={`cbf-icon-btn cbf-star${item.is_favorite ? " is-on" : ""}`}
+                                        aria-pressed={Boolean(item.is_favorite)}
+                                        aria-label={item.is_favorite ? "Убрать из избранного" : "В избранное"}
+                                        onClick={(e) => { e.stopPropagation(); handleToggleFavorite(item); }}
+                                      >
+                                        <CabinetIcon name="star" />
+                                      </button>
+                                    ) : null}
+                                    <button
+                                      type="button"
+                                      className="cbf-icon-btn"
+                                      aria-label={`Действия с файлом ${itemName(item)}`}
+                                      onClick={(e) => { e.stopPropagation(); openMenu(item, e.currentTarget); }}
+                                    >
+                                      <CabinetIcon name="more" />
+                                    </button>
+                                  </div>
+                                </td>
+                              ) : null}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  ) : null}
+
+                  {files.length && view === "grid" && !compact ? (
+                    <div className="cbf-grid">
+                      {files.map((item) => {
+                        const key = selectionKey(item);
+                        const selected = selectedKeys.has(key);
+                        return (
+                          <article key={key} className={`cbf-tile${selected ? " is-selected" : ""}`} {...itemEvents(item)}>
+                            {!selectable ? (
+                              <input
+                                className="cbf-tile-check"
+                                type="checkbox"
+                                checked={selected}
+                                aria-label={`Выбрать ${itemName(item)}`}
+                                onChange={(e) => toggleKey(item, e.target.checked)}
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            ) : null}
+                            <button
+                              type="button"
+                              className={`cbf-tile-preview${previewKind(item) === "image" ? " is-image" : ""}${previewKind(item) === "video" ? " is-video" : ""}`}
+                              aria-label={`Открыть ${itemName(item)}`}
+                              onClick={() => openItem(item)}
+                            >
+                              <TileArt item={item} student={student} />
+                            </button>
+                            <div className="cbf-tile-meta">
+                              <strong title={itemName(item)}>{itemName(item)}</strong>
+                              <p>
+                                <span>{extLabel(item)} · {formatBytes(item.size)}</span>
+                                <span>{formatDate(item.updated_at)}</span>
+                              </p>
+                            </div>
+                            {!selectable ? (
+                              <button
+                                type="button"
+                                className="cbf-icon-btn cbf-tile-more"
+                                aria-label={`Действия с файлом ${itemName(item)}`}
+                                onClick={(e) => { e.stopPropagation(); openMenu(item, e.currentTarget); }}
+                              >
+                                <CabinetIcon name="more" />
+                              </button>
+                            ) : null}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+
                   {hasMore ? (
-                    <button type="button" className="cb-btn cb-btn--outline" onClick={() => load({ append: true, nextPage: page + 1 })}>
+                    <button type="button" className="cbf-btn cbf-more" onClick={() => load({ append: true, nextPage: page + 1 })}>
                       Показать ещё
                     </button>
                   ) : null}
                 </>
               )}
 
+              {canWrite && !compact && apiSection === "my" ? (
+                <div className="cbf-drop-hint">
+                  <CabinetIcon name="share" />
+                  <span>
+                    Перетащите файлы сюда или{" "}
+                    <button type="button" onClick={() => fileInputRef.current?.click()}>выберите на компьютере</button>
+                  </span>
+                </div>
+              ) : null}
+
               {selectable ? (
-                <div className="cb-files__toolbar" style={{ marginTop: "0.75rem" }}>
+                <div className="cbf-pick">
                   <button
                     type="button"
-                    className="cb-btn cb-btn--primary"
+                    className="cbf-btn cbf-btn--blue"
                     disabled={multiSelect ? selectedItems.filter((i) => i.kind === "file").length === 0 : selectedItems[0]?.kind !== "file"}
                     onClick={confirmSelect}
                   >
@@ -1036,10 +1275,38 @@ export default function MyFilesManager({
                   </button>
                 </div>
               ) : null}
-            </>
-          )}
-        </div>
-      </div>
+            </div>
+
+            {!compact ? (
+              <div className="cbf-foot">
+                <span>
+                  {pluralRu(folders.length, "папка", "папки", "папок")}
+                  {" · "}
+                  {pluralRu(files.length, "файл", "файла", "файлов")}
+                </span>
+                {quota ? (
+                  <span title={quotaBreakdown.map((row) => `${row.label} — ${formatStorageBytes(row.used_bytes)}`).join(", ")}>
+                    {formatStorageBytes(usedBytes)} из {formatStorageBytes(limitBytes)}
+                    {" · осталось "}
+                    {formatStorageBytes(availableBytes)}
+                  </span>
+                ) : (
+                  <span>Материалы всегда под рукой</span>
+                )}
+              </div>
+            ) : null}
+          </div>
+        )}
+
+        {dropActive ? (
+          <div className="cbf-drag">
+            <CabinetIcon name="share" />
+            <strong>Отпустите файлы здесь</strong>
+            <span>{folderId ? "Они появятся в текущей папке" : "Они появятся в моих файлах"}</span>
+          </div>
+        ) : null}
+      </section>
+
 
       <CabinetFloatingMenu open={Boolean(menu)} anchorEl={menu?.anchor} onClose={() => setMenu(null)}>
         {menu?.item && apiSection !== "trash" ? (
@@ -1050,6 +1317,9 @@ export default function MyFilesManager({
               </button>
               <button type="button" onClick={() => { setRenameItem(menu.item); setRenameValue(itemName(menu.item)); setMenu(null); }}>
                 Переименовать
+              </button>
+              <button type="button" onClick={() => { handleToggleFavorite(menu.item); setMenu(null); }}>
+                {menu.item.is_favorite ? "Убрать из избранного" : "В избранное"}
               </button>
               <button type="button" onClick={() => { setSelectedKeys(new Set([selectionKey(menu.item)])); setMoveOpen(true); setMenu(null); }}>
                 Переместить

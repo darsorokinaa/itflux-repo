@@ -296,43 +296,40 @@ export default function StudentFilesWorkspace({
   }
 
   return (
-    <div className="cb-files-students">
-      <div className="cb-files__toolbar cb-files-students__toolbar">
-        <button
-          type="button"
-          className="cb-btn cb-btn--outline cb-files-students__back"
-          onClick={() => {
-            onFolderChange?.(null);
-            onStudentChange?.(null);
-          }}
-        >
-          <CabinetIcon name="arrowLeft" />
-          К ученикам
-        </button>
-        <button type="button" className="cb-btn cb-btn--primary" onClick={() => setAssignOpen(true)}>
-          Выдать материал
-        </button>
-      </div>
-
-      {subjects.length > 1 ? (
-        <label className="cb-files__select-wrap" style={{ marginBottom: 12, maxWidth: 240 }}>
-          <span className="cb-files__select-label">Предмет</span>
-          <select
-            className="cb-files__select"
-            value={subjectId}
-            onChange={(e) => setSubjectId(e.target.value)}
-          >
-            <option value="">Все предметы</option>
-            {subjects.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.display_label || s.subject_label || s.title || "Предмет"}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : null}
-
+    <>
       <MaterialsDiskBrowser
+        layout="cabinet"
+        toolbarStart={(
+          <>
+            <button
+              type="button"
+              className="cbf-btn"
+              onClick={() => {
+                onFolderChange?.(null);
+                onStudentChange?.(null);
+              }}
+            >
+              <CabinetIcon name="arrowLeft" />
+              К ученикам
+            </button>
+            <button type="button" className="cbf-btn cbf-btn--blue" onClick={() => setAssignOpen(true)}>
+              Выдать материал
+            </button>
+            {subjects.length > 1 ? (
+              <label className="cbf-select">
+                <span className="cbf-sr">Предмет</span>
+                <select value={subjectId} onChange={(e) => setSubjectId(e.target.value)}>
+                  <option value="">Все предметы</option>
+                  {subjects.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.display_label || s.subject_label || s.title || "Предмет"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+          </>
+        )}
         items={items}
         folders={folders}
         loading={loading}
@@ -456,6 +453,6 @@ export default function StudentFilesWorkspace({
           onNotice?.(n ? `Скопировано ученикам: ${n}` : "У выбранных учеников этот файл уже был");
         }}
       />
-    </div>
+    </>
   );
 }

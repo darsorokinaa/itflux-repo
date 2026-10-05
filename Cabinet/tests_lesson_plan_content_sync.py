@@ -745,7 +745,7 @@ class LessonPlanContentSyncApiTests(TestCase):
         )
         LessonLearningPlanSyncService.link_plan_item(self.event, self.item, teacher=self.teacher)
         self.client = APIClient()
-        self.client.force_authenticate(self.teacher)
+        self.client.force_login(self.teacher)
 
     def test_content_endpoint_conflict_then_resolve(self):
         """Конфликт темы ловится на /content/, а не на обычном PATCH времени/ссылки."""
@@ -763,6 +763,116 @@ class LessonPlanContentSyncApiTests(TestCase):
         self.assertEqual(res2.status_code, 200, res2.content)
         self.item.refresh_from_db()
         self.assertEqual(self.item.topic, "Конфликтная тема")
+
+    def test_calendar_save_keeps_topic_homework_and_time_after_reload(self):
+        """Сохранение карточки урока пишет тему, ДЗ и время само, без пересчёта при открытии календаря."""
+        from Cabinet.schedule_events import list_schedule_events
+
+        content_url = f"/api/cabinet/schedule/local-{self.event.pk}/content/"
+        saved = self.client.post(
+            content_url,
+            {
+                "topic": "Системы счисления",
+                "subtopic": "Двоичная",
+                "description": "Перевод чисел",
+                "goal": "Уметь переводить",
+                "homework_description": "Номера 12–15",
+                "sync_action": "lesson_and_plan",
+            },
+            format="json",
+        )
+        self.assertEqual(saved.status_code, 200, saved.content)
+
+        new_start = timezone.localtime(self.event.starts_at) + timedelta(hours=2)
+        new_end = new_start + timedelta(minutes=60)
+        patched = self.client.patch(
+            f"/api/cabinet/schedule/events/local-{self.event.pk}/",
+            {
+                "title": "Урок по системам",
+                "starts_at": new_start.strftime("%Y-%m-%dT%H:%M:%S"),
+                "ends_at": new_end.strftime("%Y-%m-%dT%H:%M:%S"),
+                "location": "Кабинет 2",
+                "notify_participants": False,
+            },
+            format="json",
+        )
+        self.assertEqual(patched.status_code, 200, patched.content)
+
+        self.event.refresh_from_db()
+        self.item.refresh_from_db()
+        self.assertEqual(self.event.topic, "Системы счисления")
+        self.assertEqual(self.event.homework_description, "Номера 12–15")
+        self.assertEqual(self.event.title, "Урок по системам")
+        self.assertEqual(self.event.location, "Кабинет 2")
+        self.assertEqual(self.item.topic, "Системы счисления")
+        self.assertEqual(self.item.homework_description, "Номера 12–15")
+
+        day = timezone.localtime(self.event.starts_at).date()
+        listed = list_schedule_events(user=self.teacher, date_from=day, date_to=day)
+        row = next(item for item in listed if item["id"] == f"local-{self.event.pk}")
+        self.assertEqual(row["topic"], "Системы счисления")
+        self.assertEqual(row["subtopic"], "Двоичная")
+        self.assertEqual(row["description"], "Перевод чисел")
+        self.assertEqual(row["goal"], "Уметь переводить")
+        self.assertEqual(row["homeworkDescription"], "Номера 12–15")
+        self.assertEqual(row["title"], "Урок по системам")
+        self.assertEqual(row["location"], "Кабинет 2")
+        self.assertEqual(row["startTime"], new_start.strftime("%H:%M"))
+
+    def test_calendar_create_links_next_plan_topic_and_list_keeps_it(self):
+        """Новое занятие сразу получает следующую тему плана, и список календаря её отдаёт."""
+        from Cabinet.schedule_events import list_schedule_events
+
+        next_item = LessonPlanItem.objects.create(
+            plan=self.plan,
+            order=2,
+            title="Тема 2",
+            topic="Графы",
+            homework_description="Нарисовать граф",
+        )
+        start = timezone.localtime(self.event.starts_at) + timedelta(days=2)
+        end = start + timedelta(minutes=45)
+        created = self.client.post(
+            "/api/cabinet/schedule/events/create/",
+            {
+                "title": "Новый урок",
+                "type": "individual_lesson",
+                "format": "offline",
+                "location": "Кабинет 3",
+                "starts_at": start.strftime("%Y-%m-%dT%H:%M:%S"),
+                "ends_at": end.strftime("%Y-%m-%dT%H:%M:%S"),
+                "timezone": "Europe/Moscow",
+                "student_ids": [self.student.pk],
+                "notify_participants": False,
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.content)
+        body = created.json()["event"]
+        new_id = int(str(body["id"]).replace("local-", ""))
+        new_event = ScheduleEvent.objects.get(pk=new_id)
+        next_item.refresh_from_db()
+        self.event.refresh_from_db()
+        self.assertEqual(new_event.lesson_plan_item_id, next_item.pk)
+        self.assertEqual(new_event.topic, "Графы")
+        self.assertEqual(new_event.homework_description, "Нарисовать граф")
+        self.assertEqual(new_event.title, "Новый урок")
+        self.assertEqual(new_event.location, "Кабинет 3")
+        self.assertEqual(next_item.scheduled_event_id, new_event.pk)
+        self.assertEqual(self.event.lesson_plan_item_id, self.item.pk)
+        self.assertEqual(self.event.topic, "Множества")
+
+        day_from = timezone.localtime(self.event.starts_at).date()
+        day_to = start.date()
+        listed = list_schedule_events(user=self.teacher, date_from=day_from, date_to=day_to)
+        row = next(item for item in listed if item["id"] == f"local-{new_event.pk}")
+        self.assertEqual(row["topic"], "Графы")
+        self.assertEqual(row["homeworkDescription"], "Нарисовать граф")
+        self.assertEqual(row["title"], "Новый урок")
+        self.assertEqual(row["location"], "Кабинет 3")
+        self.assertEqual(row["startTime"], start.strftime("%H:%M"))
+        kept = next(item for item in listed if item["id"] == f"local-{self.event.pk}")
+        self.assertEqual(kept["topic"], "Множества")
 
     def test_patch_non_content_field_unaffected(self):
         url = f"/api/cabinet/schedule/{self.event.pk}/"
