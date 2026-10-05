@@ -135,6 +135,29 @@ function useLessonBoardSync({ boardId, roomId, users, assets }) {
   });
 }
 
+function restoreLegacyScene(editor, sceneData) {
+  let cancelled = false;
+  let dispose = () => {};
+  if (sceneData == null) return undefined;
+  // Отдельный модуль, чтобы обычная tldraw-доска не тянула разбор Excalidraw до открытия старой сцены.
+  import("./excalidrawToTldraw").then((mod) => {
+    if (cancelled) return;
+    const attached = mod.attachLegacyExcalidrawScene(editor, sceneData);
+    dispose = attached.dispose;
+    if (cancelled) {
+      dispose();
+      return;
+    }
+    if (attached.restored) installSavedCustomColors(editor);
+  }).catch((error) => {
+    console.error("failed to restore excalidraw board", error);
+  });
+  return () => {
+    cancelled = true;
+    dispose();
+  };
+}
+
 function TldrawBoardSynced({
   boardId,
   roomId,
@@ -143,6 +166,7 @@ function TldrawBoardSynced({
   color,
   avatarUrl,
   canEdit,
+  sceneData,
   onRetry,
 }) {
   const users = useMemo(
@@ -238,12 +262,13 @@ function TldrawBoardSynced({
           color,
         });
         if (!canEdit) editor.updateInstanceState({ isReadonly: true });
+        return restoreLegacyScene(editor, sceneData);
       }}
     />
   );
 }
 
-function TldrawBoardSession({ boardId, userId, displayName, role, avatarUrl, canEdit, onRetry }) {
+function TldrawBoardSession({ boardId, userId, displayName, role, avatarUrl, canEdit, sceneData, onRetry }) {
   const roomId = lessonBoardRoomId(boardId);
   const name = lessonBoardDisplayName(displayName, role);
   const color = lessonBoardPresenceColor(role, userId);
@@ -266,6 +291,7 @@ function TldrawBoardSession({ boardId, userId, displayName, role, avatarUrl, can
       color={color}
       avatarUrl={avatarUrl || ""}
       canEdit={canEdit}
+      sceneData={sceneData}
       onRetry={onRetry}
     />
   );

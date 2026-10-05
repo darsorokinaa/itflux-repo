@@ -109,6 +109,7 @@ export default function BoardEditorGate() {
             role={board.viewer_role}
             avatarUrl={board.viewer_avatar_url}
             canEdit={Boolean(board.can_edit)}
+            sceneData={board.scene_data}
           />
         </Suspense>
       </BoardV2ErrorBoundary>
