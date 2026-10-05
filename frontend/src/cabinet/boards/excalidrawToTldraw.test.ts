@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import "./lessonCustomColor";
 import {
   attachLegacyExcalidrawScene,
+  publishLegacyEdits,
   convertExcalidrawToTldraw,
   isExcalidrawSnapshot,
   isTldrawSnapshot,
@@ -301,8 +302,7 @@ describe("loadLegacyExcalidrawScene", () => {
           });
         },
         listen(fn: () => void, filters?: { source?: string }) {
-          expect(filters?.source).toBe("remote");
-          onRemote = fn;
+          if (filters?.source === "remote") onRemote = fn;
           return () => {};
         },
       },
@@ -316,5 +316,38 @@ describe("loadLegacyExcalidrawScene", () => {
     expect(stored.length).toBe(before);
     expect(setCamera).toHaveBeenCalledTimes(1);
     attached.dispose();
+  });
+
+  it("sends the first edit of an old shape as a full record", () => {
+    const before = { id: "shape:excalidraw-note", typeName: "shape", x: 10, y: 20 };
+    const moved = { ...before, x: 90 };
+    const other = { id: "shape:excalidraw-box", typeName: "shape", x: 1, y: 2 };
+    const fresh = { id: "shape:new", typeName: "shape", x: 0, y: 0 };
+    const movedFresh = { ...fresh, x: 5 };
+    const diff = {
+      added: {} as Record<string, unknown>,
+      updated: {
+        [before.id]: [before, moved],
+        [fresh.id]: [fresh, movedFresh],
+      } as Record<string, [unknown, unknown]>,
+      removed: {} as Record<string, unknown>,
+    };
+    const client = { unsentChanges: { nextDiff: diff } };
+    const editor = { store: { allRecords: () => [moved, other, movedFresh] } };
+    const legacyIds = new Set([before.id, other.id]);
+
+    expect(publishLegacyEdits(client, editor, legacyIds)).toBe(true);
+    expect(diff.added[before.id]).toEqual(moved);
+    expect(diff.added[other.id]).toEqual(other);
+    expect(diff.updated[before.id]).toBeUndefined();
+    expect(diff.updated[fresh.id]).toEqual([fresh, movedFresh]);
+
+    const untouched = {
+      added: {},
+      updated: { [fresh.id]: [fresh, movedFresh] },
+      removed: {},
+    };
+    expect(publishLegacyEdits({ unsentChanges: { nextDiff: untouched } }, editor, legacyIds)).toBe(false);
+    expect(untouched.updated[fresh.id]).toEqual([fresh, movedFresh]);
   });
 });

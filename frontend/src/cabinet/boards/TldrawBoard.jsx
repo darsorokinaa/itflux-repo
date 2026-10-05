@@ -17,7 +17,7 @@ const lessonSyncShapeUtils = [
   ...defaultShapeUtils.filter((Util) => Util.type !== "geo"),
   ...lessonShapeUtils,
 ];
-const lessonTldrawOptions = { selectLockedShapes: true };
+const lessonTldrawOptions = { selectLockedShapes: true, maxPages: Infinity };
 
 import { lockBoardPageScroll } from "./boardMobileShell";
 import {

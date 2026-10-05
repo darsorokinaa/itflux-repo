@@ -203,9 +203,6 @@ function LessonTop({ onStudentView }) {
               </button>
             ) : null}
           </span>
-        </div>
-
-        <div className="lesson-topbar__center">
           <LessonSheetSwitcher />
         </div>
 

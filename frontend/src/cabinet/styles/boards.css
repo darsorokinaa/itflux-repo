@@ -2889,9 +2889,9 @@ html.cb-board-editor-open body {
 .lesson-topbar {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   min-height: 46px;
   padding: 5px 8px;
   border: 1px solid #e5e8ee;
@@ -2901,47 +2901,91 @@ html.cb-board-editor-open body {
   pointer-events: auto;
 }
 
-.lesson-topbar__side,
-.lesson-topbar__center {
+.lesson-topbar__side {
   display: flex;
   align-items: center;
   gap: 5px;
   min-width: 0;
 }
 
-.lesson-topbar__center {
-  justify-content: center;
-}
-
 .lesson-sheets {
-  position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
-  min-width: 0;
-  max-width: 100%;
+  gap: 2px;
+  min-width: 72px;
+  margin-left: 2px;
+  flex: 1 1 auto;
 }
 
-.lesson-sheets__current,
+.lesson-sheets__list {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.lesson-sheets__list::-webkit-scrollbar {
+  display: none;
+}
+
+.lesson-sheets__tab,
 .lesson-sheets__add {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  height: 32px;
   border: 0;
-  border-radius: 10px;
   background: transparent;
-  color: #3f4a5a;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 650;
+  color: #687386;
   cursor: pointer;
 }
 
-.lesson-sheets__current {
-  gap: 6px;
-  max-width: 148px;
-  padding: 0 8px;
+.lesson-sheets__tab {
+  max-width: 168px;
+  height: 28px;
+  padding: 0 2px 0 2px;
+  border-radius: 8px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.lesson-sheets__list--sortable .lesson-sheets__tab {
+  cursor: grab;
+  touch-action: none;
+}
+
+.lesson-sheets__list--dragging .lesson-sheets__tab {
+  transition: transform 140ms ease;
+}
+
+.lesson-sheets__tab--dragging {
+  z-index: 2;
+  transition: none;
+  cursor: grabbing;
+  background: #fff;
+  box-shadow: 0 8px 18px rgba(31, 41, 55, 0.14);
+}
+
+.lesson-sheets__label {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 132px;
+  height: 28px;
+  margin: 0;
+  padding: 0 6px 0 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  cursor: inherit;
 }
 
 .lesson-sheets__name {
@@ -2950,44 +2994,154 @@ html.cb-board-editor-open body {
   white-space: nowrap;
 }
 
-.lesson-sheets__add {
-  height: 32px;
-  padding: 0 8px;
-  font-size: 13px;
-  white-space: nowrap;
+.lesson-sheets__tab:hover,
+.lesson-sheets__tab[aria-selected="true"] {
+  color: #243044;
 }
 
-.lesson-sheets__current:hover,
-.lesson-sheets__add:hover,
-.lesson-sheets__current[aria-expanded="true"] {
+.lesson-sheets__tab:hover {
   background: #f4f6f8;
 }
 
-.lesson-sheets__add:disabled,
-.lesson-sheets__create:disabled {
+.lesson-sheets__tab[aria-selected="true"] {
+  background: #f7f8fa;
+  box-shadow: inset 0 -2px 0 var(--cb-board-accent, #2563eb);
+}
+
+.lesson-sheets__delete {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #8b93a0;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.lesson-sheets__tab:hover .lesson-sheets__delete,
+.lesson-sheets__tab[aria-selected="true"] .lesson-sheets__delete,
+.lesson-sheets__tab:focus-within .lesson-sheets__delete {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.lesson-sheets__delete:hover {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.lesson-sheets__add {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.lesson-sheets__add:hover:not(:disabled) {
+  background: #f4f6f8;
+  color: #243044;
+}
+
+.lesson-sheets__add:disabled {
   opacity: 0.45;
   cursor: default;
 }
 
-.lesson-sheets__menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 50%;
-  z-index: var(--lesson-z-tooltip, 50);
-  transform: translateX(-50%);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  width: max-content;
-  min-width: 168px;
-  max-width: min(240px, 70vw);
-  max-height: min(280px, calc(100dvh - 120px));
-  overflow-y: auto;
-  padding: 6px;
-  border: 1px solid #e5e8ee;
-  border-radius: 14px;
+.lesson-sheets__rename {
+  flex: 0 0 auto;
+  width: 120px;
+  height: 28px;
+  margin: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  outline: 0;
   background: #fff;
-  box-shadow: 0 8px 28px rgba(31, 41, 55, 0.08), 0 1px 3px rgba(31, 41, 55, 0.05);
+  box-shadow: inset 0 0 0 1.5px var(--cb-board-accent, #2563eb);
+  color: #243044;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.lesson-sheet-confirm {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(17, 24, 39, 0.28);
+  pointer-events: auto;
+}
+
+.lesson-sheet-confirm__card {
+  width: min(420px, 100%);
+  padding: 22px 22px 18px;
+  border: 1px solid #e5e8ee;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 18px 48px rgba(31, 41, 55, 0.16);
+}
+
+.lesson-sheet-confirm__title {
+  margin: 0;
+  color: #243044;
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.lesson-sheet-confirm__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.lesson-sheet-confirm__cancel,
+.lesson-sheet-confirm__ok {
+  height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 10px;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.lesson-sheet-confirm__cancel {
+  background: transparent;
+  color: #3f4a5a;
+}
+
+.lesson-sheet-confirm__cancel:hover {
+  background: #f4f6f8;
+}
+
+.lesson-sheet-confirm__ok {
+  background: #dc2626;
+  color: #fff;
+}
+
+.lesson-sheet-confirm__ok:hover {
+  background: #b91c1c;
 }
 
 .lesson-topbar__side--end {
@@ -3045,7 +3199,7 @@ html.cb-board-editor-open body {
   gap: 1px;
   min-width: 0;
   max-width: 260px;
-  padding: 0 10px;
+  padding: 0 4px 0 8px;
   color: #303846;
   font-size: 13px;
   font-weight: 650;

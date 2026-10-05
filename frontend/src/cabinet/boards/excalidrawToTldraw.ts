@@ -694,6 +694,51 @@ export function loadLegacyExcalidrawScene(editor: LegacyEditor, scene: unknown) 
   }
 }
 
+type LegacySyncDiff = {
+  added: Record<string, TLRecord>;
+  updated: Record<string, [TLRecord, TLRecord]>;
+  removed: Record<string, TLRecord>;
+};
+
+type LegacySyncClient = {
+  store?: LegacyEditor["store"];
+  unsentChanges?: { nextDiff?: LegacySyncDiff };
+};
+
+/**
+ * Правка старой фигуры уходит патчем. Сервер такой фигуры не хранит и патч
+ * выбрасывает, а клиент откатывает сдвиг на прежнее место. Пока сцена не
+ * записана в комнату, первая правка отправляется целиком, как новая запись.
+ */
+export function publishLegacyEdits(client: LegacySyncClient | null | undefined, editor: LegacyEditor, legacyIds: Set<string>) {
+  const diff = client?.unsentChanges?.nextDiff;
+  if (!diff || !legacyIds.size) return false;
+  const updated = diff.updated || {};
+  const removed = diff.removed || {};
+  const touched = Object.keys(updated).some((id) => legacyIds.has(id))
+    || Object.keys(removed).some((id) => legacyIds.has(id));
+  if (!touched) return false;
+  if (!diff.added) diff.added = {};
+  for (const id of Object.keys(updated)) {
+    if (!legacyIds.has(id)) continue;
+    diff.added[id] = updated[id][1];
+    delete updated[id];
+  }
+  const records = editor.store?.allRecords?.() || [];
+  for (const record of records) {
+    if (!record?.id || !legacyIds.has(record.id) || diff.added[record.id] || removed[record.id]) continue;
+    diff.added[record.id] = record;
+  }
+  return true;
+}
+
+function legacySyncClient(editor: LegacyEditor): LegacySyncClient | null {
+  const client = (globalThis as { window?: { tlsync?: LegacySyncClient } }).window?.tlsync;
+  if (!client?.unsentChanges) return null;
+  if (client.store && editor.store && client.store !== editor.store) return null;
+  return client;
+}
+
 /**
  * Повторяет показ после того, как комната заново присылает документ.
  * Повтор тоже идёт как чужое изменение и не переписывает сохранённую сцену.
@@ -708,7 +753,9 @@ export function attachLegacyExcalidrawScene(editor: LegacyEditor, scene: unknown
   if (!records.length || typeof editor.store?.listen !== "function") {
     return { restored, dispose };
   }
+  const legacyIds = new Set(records.map((record) => record.id).filter(Boolean));
   let applying = false;
+  let published = false;
   const stop = editor.store.listen(() => {
     if (applying) return;
     applying = true;
@@ -718,8 +765,15 @@ export function attachLegacyExcalidrawScene(editor: LegacyEditor, scene: unknown
       applying = false;
     }
   }, { source: "remote", scope: "document" });
+  const stopUser = editor.store.listen(() => {
+    if (published || applying) return;
+    if (publishLegacyEdits(legacySyncClient(editor), editor, legacyIds)) published = true;
+  }, { source: "user", scope: "document" });
   return {
     restored,
-    dispose: typeof stop === "function" ? stop : dispose,
+    dispose: () => {
+      if (typeof stop === "function") stop();
+      if (typeof stopUser === "function") stopUser();
+    },
   };
 }

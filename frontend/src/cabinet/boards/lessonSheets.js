@@ -1,3 +1,5 @@
+import { getIndexAbove, getIndexBelow, getIndexBetween } from "@tldraw/utils";
+
 /** Листы доски: страницы текущего документа tldraw и личный последний лист. */
 
 export const SHEET_APPROACHING_RATIO = 0.9;
@@ -151,12 +153,95 @@ function rememberPage(pageId) {
   writeLastOpenedPageId(sheetSession.storage, sheetSession.userId, sheetSession.boardId, pageId);
 }
 
-export function createNextSheet(editor, now = Date.now()) {
-  if (now < createLockedUntil) return { ok: false, reason: "busy" };
+export function uniqueSheetName(name, others) {
+  const taken = new Set(others);
+  let result = name;
+  while (taken.has(result)) {
+    result = /(\d+)$/.test(result)
+      ? result.replace(/(\d+)$/, (digits) => String(Number(digits) + 1))
+      : `${result} 2`;
+  }
+  return result;
+}
+
+export function renameSheet(editor, pageId, name) {
+  if (editor.getIsReadonly()) return { ok: false, reason: "readonly" };
+  const trimmed = String(name || "").trim();
+  if (!trimmed) return { ok: false, reason: "empty" };
+  const page = editor.getPages().find((item) => item.id === pageId);
+  if (!page) return { ok: false, reason: "missing" };
+  const next = uniqueSheetName(
+    trimmed,
+    editor.getPages().filter((item) => item.id !== pageId).map((item) => item.name),
+  );
+  if (next === page.name) return { ok: true, name: next };
+  editor.updatePage({ id: pageId, name: next });
+  return { ok: true, name: next };
+}
+
+export function moveSheet(editor, pageId, toIndex) {
   if (editor.getIsReadonly()) return { ok: false, reason: "readonly" };
   const pages = editor.getPages();
-  const maxPages = editor.options?.maxPages ?? 40;
-  if (pages.length >= maxPages) return { ok: false, reason: "max-pages" };
+  const from = pages.findIndex((page) => page.id === pageId);
+  if (from < 0) return { ok: false, reason: "missing" };
+  const to = Math.max(0, Math.min(pages.length - 1, Number(toIndex)));
+  if (!Number.isInteger(to) || from === to) return { ok: true, moved: false };
+
+  const below = from > to ? pages[to - 1] : pages[to];
+  const above = from > to ? pages[to] : pages[to + 1];
+  let index;
+  if (below && !above) index = getIndexAbove(below.index);
+  else if (!below && above) index = getIndexBelow(pages[0].index);
+  else index = getIndexBetween(below.index, above.index);
+  if (!index || index === pages[from].index) return { ok: true, moved: false };
+
+  editor.markHistoryStoppingPoint?.("move-sheet");
+  editor.updatePage({ id: pageId, index });
+  return { ok: true, moved: true, pageId };
+}
+
+export function deleteSheet(editor, pageId) {
+  if (editor.getIsReadonly()) return { ok: false, reason: "readonly" };
+  const pages = editor.getPages();
+  if (pages.length <= 1) return { ok: false, reason: "last" };
+  if (!pages.some((page) => page.id === pageId)) return { ok: false, reason: "missing" };
+  editor.deletePage(pageId);
+  rememberPage(editor.getCurrentPageId());
+  return { ok: true, pageId: editor.getCurrentPageId() };
+}
+
+export function requestDeleteSheet(editor, pageId) {
+  const preview = deleteSheetPreview(editor, pageId);
+  if (!preview.ok) return preview;
+  const label = sheetLabel(preview.name);
+  return {
+    ok: false,
+    reason: "confirm",
+    pageId,
+    name: preview.name,
+    title: preview.hasShapes
+      ? `Удалить лист «${label}»? Рисунок на нём пропадёт.`
+      : `Удалить лист «${label}»?`,
+  };
+}
+
+function deleteSheetPreview(editor, pageId) {
+  if (editor.getIsReadonly()) return { ok: false, reason: "readonly" };
+  const pages = editor.getPages();
+  if (pages.length <= 1) return { ok: false, reason: "last" };
+  const page = pages.find((item) => item.id === pageId);
+  if (!page) return { ok: false, reason: "missing" };
+  const children = editor.getSortedChildIdsForParent?.(pageId);
+  const count = Array.isArray(children) ? children.length : children?.size || 0;
+  return { ok: true, name: page.name, hasShapes: count > 0 };
+}
+
+export function createNextSheet(editor, now = Date.now()) {
+  if (editor.getIsReadonly()) return { ok: false, reason: "readonly" };
+  const pages = editor.getPages();
+  const maxPages = editor.options?.maxPages ?? Infinity;
+  if (Number.isFinite(maxPages) && pages.length >= maxPages) return { ok: false, reason: "max-pages" };
+  if (now < createLockedUntil) return { ok: false, reason: "busy" };
 
   createLockedUntil = now + SHEET_CREATE_LOCK_MS;
   if (pages.length === 1 && pages[0].name === DEFAULT_PAGE_NAME) {
@@ -215,6 +300,7 @@ function noticeVisibleChanged(prev, next) {
  * До восстановления не записывает стартовую страницу поверх сохранённого выбора.
  */
 export function installLessonSheets(editor, { userId, boardId, storage }) {
+  if (editor.options) editor.options.maxPages = Infinity;
   bindLessonSheetSession({ userId, boardId, storage });
   let accept = false;
   let lastPersisted = "";

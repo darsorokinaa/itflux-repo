@@ -1,4 +1,5 @@
 /** @vitest-environment jsdom */
+import { getIndexAbove } from "@tldraw/utils";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -11,12 +12,16 @@ import {
   bindLessonSheetSession,
   bindSheetToasts,
   createNextSheet,
+  deleteSheet,
   initialSheetNotice,
+  moveSheet,
   installLessonSheets,
   nextSheetName,
   noticeKind,
   pageToRestore,
   reduceSheetNotice,
+  renameSheet,
+  requestDeleteSheet,
   requestNewSheet,
   sheetStorageKey,
 } from "./lessonSheets";
@@ -46,13 +51,19 @@ function sheetEditor({
   maxShapes = 10,
   maxPages = 40,
   readonly = false,
+  shapesByPage = {},
 }) {
   const storeListeners = [];
   const maxListeners = new Set();
   let pageId = current || pages[0]?.id || "";
+  let previousIndex = null;
   const editor = {
     options: { maxShapesPerPage: maxShapes, maxPages },
-    pages: pages.map((page) => ({ ...page })),
+    pages: pages.map((page) => {
+      const index = page.index || getIndexAbove(previousIndex);
+      previousIndex = index;
+      return { ...page, index };
+    }),
     shapes: 0,
     getIsReadonly: () => readonly,
     getPages: () => editor.pages,
@@ -65,14 +76,36 @@ function sheetEditor({
         if (listener.scope === "session") listener.cb();
       }
     },
-    updatePage({ id, name }) {
-      const page = editor.pages.find((item) => item.id === id);
-      if (page) page.name = name;
+    updatePage(partial) {
+      const page = editor.pages.find((item) => item.id === partial.id);
+      if (!page) return;
+      if (partial.name != null) page.name = partial.name;
+      if (partial.index != null) {
+        page.index = partial.index;
+        editor.pages.sort((left, right) => (left.index < right.index ? -1 : left.index > right.index ? 1 : 0));
+      }
     },
     createPage({ name }) {
       if (readonly || editor.pages.length >= maxPages) return editor;
-      editor.pages.push({ id: `page:created-${editor.pages.length + 1}`, name });
+      const last = editor.pages[editor.pages.length - 1];
+      editor.pages.push({
+        id: `page:created-${editor.pages.length + 1}`,
+        name,
+        index: getIndexAbove(last?.index),
+      });
       return editor;
+    },
+    deletePage(id) {
+      if (readonly || editor.pages.length <= 1) return editor;
+      const index = editor.pages.findIndex((page) => page.id === id);
+      if (index < 0) return editor;
+      const next = editor.pages[index - 1] || editor.pages[index + 1];
+      editor.pages.splice(index, 1);
+      if (pageId === id && next) editor.setCurrentPage(next.id);
+      return editor;
+    },
+    getSortedChildIdsForParent(id) {
+      return shapesByPage[id] || [];
     },
     store: {
       listen(cb, filters = {}) {
@@ -252,6 +285,106 @@ describe("new sheet", () => {
     expect(toasts.items.map((toast) => toast.title)).toEqual([MAX_PAGES_MESSAGE]);
   });
 
+  it("renames a sheet and keeps the name unique", () => {
+    const editor = sheetEditor({
+      pages: [
+        { id: "page:1", name: "Лист 1" },
+        { id: "page:2", name: "Лист 2" },
+      ],
+    });
+    expect(renameSheet(editor, "page:2", "  Теория  ")).toMatchObject({ ok: true, name: "Теория" });
+    expect(editor.getPages()[1].name).toBe("Теория");
+    expect(renameSheet(editor, "page:2", "Лист 1").name).toBe("Лист 2");
+    expect(editor.getPages().map((page) => page.name)).toEqual(["Лист 1", "Лист 2"]);
+    expect(renameSheet(editor, "page:2", "   ")).toMatchObject({ ok: false, reason: "empty" });
+    const locked = sheetEditor({ pages: [{ id: "page:1", name: "Лист 1" }], readonly: true });
+    expect(renameSheet(locked, "page:1", "Другое")).toMatchObject({ ok: false, reason: "readonly" });
+    expect(locked.getPages()[0].name).toBe("Лист 1");
+  });
+
+  it("deletes a sheet and keeps the last one", () => {
+    const editor = sheetEditor({
+      pages: [
+        { id: "page:1", name: "Лист 1" },
+        { id: "page:2", name: "Лист 2" },
+      ],
+      current: "page:2",
+    });
+    expect(deleteSheet(editor, "page:2")).toMatchObject({ ok: true, pageId: "page:1" });
+    expect(editor.getPages().map((page) => page.id)).toEqual(["page:1"]);
+    expect(editor.getCurrentPageId()).toBe("page:1");
+    expect(deleteSheet(editor, "page:1")).toMatchObject({ ok: false, reason: "last" });
+    expect(editor.getPages()).toHaveLength(1);
+    const locked = sheetEditor({
+      pages: [
+        { id: "page:1", name: "Лист 1" },
+        { id: "page:2", name: "Лист 2" },
+      ],
+      readonly: true,
+    });
+    expect(deleteSheet(locked, "page:2")).toMatchObject({ ok: false, reason: "readonly" });
+    expect(locked.getPages()).toHaveLength(2);
+  });
+
+  it("asks before deleting any sheet", () => {
+    const editor = sheetEditor({
+      pages: [
+        { id: "page:1", name: "Лист 1" },
+        { id: "page:2", name: "Черновик" },
+        { id: "page:3", name: "Пустой" },
+      ],
+      shapesByPage: { "page:2": ["shape:a"] },
+    });
+    expect(requestDeleteSheet(editor, "page:3")).toMatchObject({
+      ok: false,
+      reason: "confirm",
+      title: "Удалить лист «Пустой»?",
+    });
+    expect(editor.getPages()).toHaveLength(3);
+
+    const filled = requestDeleteSheet(editor, "page:2");
+    expect(filled.title).toContain("Рисунок на нём пропадёт");
+    expect(editor.getPages()).toHaveLength(3);
+    deleteSheet(editor, filled.pageId);
+    expect(editor.getPages().map((page) => page.id)).toEqual(["page:1", "page:3"]);
+  });
+
+  it("moves a sheet and keeps its name", () => {
+    const editor = sheetEditor({
+      pages: [
+        { id: "page:1", name: "Лист 1" },
+        { id: "page:2", name: "Черновик" },
+        { id: "page:3", name: "Пустой" },
+      ],
+    });
+    expect(moveSheet(editor, "page:3", 0)).toMatchObject({ ok: true, moved: true });
+    expect(editor.getPages().map((page) => page.name)).toEqual(["Пустой", "Лист 1", "Черновик"]);
+    expect(moveSheet(editor, "page:1", 1)).toMatchObject({ moved: false });
+    expect(moveSheet(editor, "page:missing", 0)).toMatchObject({ ok: false, reason: "missing" });
+
+    const locked = sheetEditor({
+      pages: [
+        { id: "page:1", name: "Лист 1" },
+        { id: "page:2", name: "Лист 2" },
+      ],
+      readonly: true,
+    });
+    expect(moveSheet(locked, "page:2", 0)).toMatchObject({ ok: false, reason: "readonly" });
+    expect(locked.getPages().map((page) => page.id)).toEqual(["page:1", "page:2"]);
+  });
+
+  it("does not cap how many sheets a board can hold", () => {
+    const editor = sheetEditor({
+      pages: [{ id: "page:1", name: "Лист 1" }],
+      maxPages: Infinity,
+    });
+    for (let index = 0; index < 45; index += 1) {
+      expect(createNextSheet(editor, 1_000_000 + index * 1000).ok).toBe(true);
+    }
+    expect(editor.getPages()).toHaveLength(46);
+    expect(editor.getPages().at(-1).name).toBe("Лист 46");
+  });
+
   it("does not create a sheet without edit rights", () => {
     const editor = sheetEditor({
       pages: [{ id: "page:1", name: "Лист 1" }],
@@ -350,6 +483,7 @@ describe("tldraw shape limit", () => {
     const toasts = toastHarness();
     const storage = memoryStorage();
     installLessonSheets(editor, { userId: 4, boardId: "board", storage });
+    expect(editor.options.maxPages).toBe(Infinity);
 
     const draw = (count, y) =>
       Array.from({ length: count }, (_, index) => ({
@@ -399,6 +533,42 @@ describe("tldraw shape limit", () => {
 
     editor.dispose();
     other.dispose();
+    container.remove();
+  });
+
+  it("creates sheets past the built-in cap of 40 and renames one", async () => {
+    const tldraw = await import("tldraw");
+    const container = document.createElement("div");
+    document.body.append(container);
+    const editor = new tldraw.Editor({
+      store: tldraw.createTLStore({ shapeUtils: tldraw.defaultShapeUtils }),
+      shapeUtils: tldraw.defaultShapeUtils,
+      bindingUtils: tldraw.defaultBindingUtils,
+      tools: [],
+      getContainer: () => container,
+    });
+    expect(editor.options.maxPages).toBe(40);
+    installLessonSheets(editor, { userId: 1, boardId: "board", storage: memoryStorage() });
+    expect(editor.options.maxPages).toBe(Infinity);
+    const start = Date.now() + 10_000;
+    for (let index = 0; index < 41; index += 1) {
+      expect(createNextSheet(editor, start + index * 1000).ok).toBe(true);
+    }
+    expect(editor.getPages()).toHaveLength(42);
+    const first = editor.getPages()[0];
+    expect(renameSheet(editor, first.id, "Теория").name).toBe("Теория");
+    expect(editor.getPage(first.id).name).toBe("Теория");
+    const [theory, second] = editor.getPages();
+    editor.setCurrentPage(second.id);
+    editor.createShapes([{ type: "geo", x: 0, y: 0, props: { w: 20, h: 20, geo: "rectangle" } }]);
+    const kept = [...editor.getPageShapeIds(second.id)];
+    const last = editor.getPages().at(-1);
+    expect(moveSheet(editor, last.id, 0).moved).toBe(true);
+    expect(editor.getPages()[0].id).toBe(last.id);
+    expect(editor.getPages().some((page) => page.id === theory.id)).toBe(true);
+    expect([...editor.getPageShapeIds(second.id)]).toEqual(kept);
+    expect(editor.getCurrentPageId()).toBe(second.id);
+    editor.dispose();
     container.remove();
   });
 });
