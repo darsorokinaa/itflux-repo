@@ -6,6 +6,7 @@ import { Tldraw, defaultShapeUtils } from "tldraw";
 import "tldraw/tldraw.css";
 
 import { installSavedCustomColors } from "./lessonBoardActions";
+import { installLessonSheets } from "./lessonSheets";
 import { keepImagesUnderEraser } from "./lessonEraser";
 import { lessonBoardComponents } from "./lessonBoardUi";
 import { LessonGeoShapeUtil } from "./lessonGeoShape";
@@ -262,7 +263,16 @@ function TldrawBoardSynced({
           color,
         });
         if (!canEdit) editor.updateInstanceState({ isReadonly: true });
-        return restoreLegacyScene(editor, sceneData);
+        const disposeSheets = installLessonSheets(editor, {
+          userId,
+          boardId,
+          storage: window.localStorage,
+        });
+        const disposeLegacy = restoreLegacyScene(editor, sceneData);
+        return () => {
+          disposeSheets();
+          disposeLegacy?.();
+        };
       }}
     />
   );

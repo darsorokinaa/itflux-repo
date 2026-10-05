@@ -1,4 +1,5 @@
 import LessonChrome from "./LessonChrome";
+import { LessonBoardToasts } from "./LessonSheetSwitcher";
 import { LessonPaperBackground } from "./LessonPaper.jsx";
 
 /** Официальные слоты tldraw. null отключает стандартную панель, не прячет её через CSS. */
@@ -12,6 +13,7 @@ export const lessonBoardComponents = {
   MenuPanel: null,
   MainMenu: null,
   PageMenu: null,
+  Toasts: LessonBoardToasts,
   HelpMenu: null,
   DebugMenu: null,
   DebugPanel: null,

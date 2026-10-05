@@ -1583,8 +1583,10 @@ export default function CabinetReviewDetailPage() {
               : "/cabinet/journal"
           }
           className="cb-review-detail__btn cb-review-detail__btn--ghost"
+          aria-label="Ошибки ученика"
         >
-          Ошибки ученика
+          <span className="rv-bottom__full">Ошибки ученика</span>
+          <span className="rv-bottom__short">Ошибки</span>
         </Link>
         {canCopyHomework || submission?.homework ? (
           <div className="cb-review-detail__more">
@@ -1676,8 +1678,10 @@ export default function CabinetReviewDetailPage() {
               className="cb-review-detail__btn cb-review-detail__btn--ghost"
               disabled={busy}
               onClick={handleReturn}
+              aria-label="Вернуть на доработку"
             >
-              Вернуть на доработку
+              <span className="rv-bottom__full">Вернуть на доработку</span>
+              <span className="rv-bottom__short">Вернуть</span>
             </button>
             <button
               type="button"

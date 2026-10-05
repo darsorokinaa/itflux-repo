@@ -62,6 +62,8 @@ vi.mock("tldraw", () => ({
   stopEventPropagation: () => {},
   useEditor: () => null,
   useValue: (_name, fn) => (typeof fn === "function" ? fn() : null),
+  useToasts: () => ({ toasts: { get: () => [] }, addToast() {}, removeToast() {} }),
+  DefaultToasts: () => null,
   useTools: () => ({}),
   useIsToolSelected: () => false,
   HighlightShapeUtil: { configure: () => class HighlightShapeUtil {} },

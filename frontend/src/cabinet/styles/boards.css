@@ -2913,6 +2913,83 @@ html.cb-board-editor-open body {
   justify-content: center;
 }
 
+.lesson-sheets {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.lesson-sheets__current,
+.lesson-sheets__add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #3f4a5a;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.lesson-sheets__current {
+  gap: 6px;
+  max-width: 148px;
+  padding: 0 8px;
+}
+
+.lesson-sheets__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lesson-sheets__add {
+  height: 32px;
+  padding: 0 8px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.lesson-sheets__current:hover,
+.lesson-sheets__add:hover,
+.lesson-sheets__current[aria-expanded="true"] {
+  background: #f4f6f8;
+}
+
+.lesson-sheets__add:disabled,
+.lesson-sheets__create:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.lesson-sheets__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  z-index: var(--lesson-z-tooltip, 50);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: max-content;
+  min-width: 168px;
+  max-width: min(240px, 70vw);
+  max-height: min(280px, calc(100dvh - 120px));
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid #e5e8ee;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 28px rgba(31, 41, 55, 0.08), 0 1px 3px rgba(31, 41, 55, 0.05);
+}
+
 .lesson-topbar__side--end {
   position: relative;
   justify-content: flex-end;

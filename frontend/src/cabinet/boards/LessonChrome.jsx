@@ -5,6 +5,7 @@ import { useEditor, useValue } from "tldraw";
 
 import LessonContextBar from "./LessonContextBar";
 import { LessonPaperControl } from "./LessonPaper.jsx";
+import LessonSheetSwitcher from "./LessonSheetSwitcher";
 import LessonRail from "./LessonToolbar";
 import { stopFollowing } from "./lessonBoardActions";
 import {
@@ -204,7 +205,9 @@ function LessonTop({ onStudentView }) {
           </span>
         </div>
 
-        <div className="lesson-topbar__center" />
+        <div className="lesson-topbar__center">
+          <LessonSheetSwitcher />
+        </div>
 
         <div className="lesson-topbar__side lesson-topbar__side--end">
           {room.inRoom ? (

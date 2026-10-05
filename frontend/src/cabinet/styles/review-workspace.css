@@ -752,6 +752,10 @@
   font-weight: 700;
 }
 
+.rv-bottom__short {
+  display: none;
+}
+
 .rv .cb-review-detail__btn--primary {
   border-color: var(--rv-blue);
   background: var(--rv-blue);
