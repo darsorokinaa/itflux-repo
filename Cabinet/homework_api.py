@@ -1765,8 +1765,10 @@ def prefetch_submissions_for_review_items(items) -> dict:
             "homework",
             "homework__student_subject",
             "student",
+            "student__user",
+            "student__user__profile",
         )
-        .prefetch_related("homework__tasks", "file_attachments")
+        .prefetch_related("homework__tasks")
     )
     return {sub.pk: sub for sub in submissions}
 

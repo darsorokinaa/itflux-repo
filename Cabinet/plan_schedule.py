@@ -295,7 +295,11 @@ def plan_items_for_enrollment(enrollment):
     cache = _plan_items_cache.get()
     if cache is not None and enrollment.pk in cache:
         return cache[enrollment.pk]
-    items = list(enrollment.plan.items.order_by("order", "id"))
+    prefetched = getattr(getattr(enrollment, "plan", None), "_prefetched_objects_cache", None)
+    if prefetched is not None and "items" in prefetched:
+        items = sorted(prefetched["items"], key=lambda item: (item.order, item.pk))
+    else:
+        items = list(enrollment.plan.items.order_by("order", "id"))
     start_order = plan_start_order_for_enrollment(enrollment, items)
     min_order = items[0].order if items else 0
     if start_order > min_order:

@@ -469,25 +469,7 @@ def list_schedule_events(*, user, date_from, date_to, include_cancelled=False):
             date_to=date_to,
             include_cancelled=include_cancelled,
         )
-        try:
-            from .plan_sync import PlanSyncService
-
-            event_rows = list(qs.order_by("starts_at"))
-            realigned = PlanSyncService.realign_enrollments_for_events(event_rows)
-            if realigned:
-                qs = _schedule_events_queryset(
-                    user=user,
-                    date_from=date_from,
-                    date_to=date_to,
-                    include_cancelled=include_cancelled,
-                )
-                event_rows = list(qs.order_by("starts_at"))
-        except Exception:
-            import logging
-            logging.getLogger("cabinet.plan_sync").exception(
-                "plan realign on schedule list failed teacher=%s", user.pk,
-            )
-            event_rows = list(qs.order_by("starts_at"))
+        event_rows = list(qs.order_by("starts_at"))
         booked_series = _self_booked_series_ids(ev.series_id for ev in event_rows)
         events = []
         for ev in event_rows:

@@ -1681,15 +1681,21 @@ class HomeworkSubmissionSerializer(serializers.ModelSerializer):
         read_only_fields = ["created_at", "updated_at"]
 
     def get_attached_file_url(self, obj):
+        if self.context.get("list_mode"):
+            return ""
         from .files_services import submission_file_url
 
         return submission_file_url(obj, for_student=False)
 
     def get_attached_file_name(self, obj):
+        if self.context.get("list_mode"):
+            return ""
         files = self.get_attached_files(obj)
         return files[0]["name"] if files else ""
 
     def get_attached_files(self, obj):
+        if self.context.get("list_mode"):
+            return []
         from .submission_files import serialize_submission_files
 
         cached = getattr(obj, "_serialized_attached_files", None)
@@ -1700,6 +1706,9 @@ class HomeworkSubmissionSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
+        if self.context.get("list_mode"):
+            # Карточка списка берёт статус и итог, без файлов и состава варианта.
+            return data
         from .homework_task_files import ensure_payload_migrated, overlay_payload_attachments
 
         ensure_payload_migrated(instance)
@@ -1760,7 +1769,7 @@ class ReviewItemSerializer(serializers.ModelSerializer):
         submission = self._submission_for(obj)
         if not submission:
             return None
-        return HomeworkSubmissionSerializer(submission).data
+        return HomeworkSubmissionSerializer(submission, context=self.context).data
 
     def get_homework_review(self, obj):
         submission = self._submission_for(obj)

@@ -173,6 +173,74 @@ class PlanSyncService:
     NEAR_END_WARN = 2
 
     @classmethod
+    def _progress_items(cls, enrollment, *, event=None):
+        """Текущий и следующий пункт для карточки календаря без SQL на каждое занятие.
+
+        Пункты плана уже подгружены в schedule_list_caches. Занятость пунктов
+        считается один раз на план и переиспользуется для всех его занятий.
+        """
+        prefetched = getattr(getattr(enrollment, "plan", None), "_prefetched_objects_cache", None)
+        if not prefetched or "items" not in prefetched:
+            return (
+                cls.get_current_item(enrollment),
+                cls.get_next_plan_item(enrollment, exclude_event=event),
+            )
+        items = sorted(prefetched["items"], key=lambda item: (item.order, item.pk))
+        current = next((item for item in items if item.status not in cls.TERMINAL_ITEM), None)
+        return current, cls._next_prefetched_plan_item(enrollment, items, exclude_event=event)
+
+    @classmethod
+    def _next_prefetched_plan_item(cls, enrollment, items, *, exclude_event=None):
+        from .plan_schedule import plan_slots_exhausted, plan_start_order_for_enrollment
+
+        if plan_slots_exhausted(enrollment, enrollment.teacher, exclude_event=exclude_event):
+            return None
+        busy_ids = set(cls._progress_busy_item_ids(enrollment))
+        if exclude_event is not None:
+            busy_ids.discard(getattr(exclude_event, "lesson_plan_item_id", None))
+        start_order = plan_start_order_for_enrollment(enrollment, items)
+        min_order = items[0].order if items else 0
+        for item in items:
+            if item.status in cls.TERMINAL_ITEM:
+                continue
+            if start_order > min_order and item.order < start_order:
+                continue
+            if item.id in busy_ids:
+                continue
+            other = item.scheduled_event_id
+            if other and (exclude_event is None or other != exclude_event.pk):
+                continue
+            return item
+        return None
+
+    @classmethod
+    def _progress_busy_item_ids(cls, enrollment):
+        cached = getattr(enrollment, "_itflux_progress_busy_ids", None)
+        if cached is not None:
+            return cached
+        from .models import ScheduleEvent
+
+        closed = (
+            ScheduleEvent.Status.CANCELLED,
+            ScheduleEvent.Status.COMPLETED,
+            ScheduleEvent.Status.DONE,
+        )
+        busy = set(
+            enrollment.plan.items.filter(scheduled_event__isnull=False)
+            .exclude(scheduled_event__status__in=closed)
+            .values_list("id", flat=True)
+        )
+        busy.update(
+            item_id
+            for item_id in ScheduleEvent.objects.filter(
+                lesson_plan_item__plan_id=enrollment.plan_id,
+            ).exclude(status__in=closed).values_list("lesson_plan_item_id", flat=True)
+            if item_id
+        )
+        enrollment._itflux_progress_busy_ids = busy
+        return busy
+
+    @classmethod
     def get_enrollment_progress(cls, enrollment, *, event=None, plan_item=None) -> dict:
         from .models import ScheduleEvent
         from .plan_schedule import events_for_enrollment, plan_items_for_enrollment
@@ -182,8 +250,7 @@ class PlanSyncService:
         completed = sum(1 for item in items if item.status == PlanItemStatus.COMPLETED)
         skipped = sum(1 for item in items if item.status == PlanItemStatus.SKIPPED)
         remaining = max(0, total - completed - skipped)
-        current = cls.get_current_item(enrollment)
-        next_item = cls.get_next_plan_item(enrollment, exclude_event=event)
+        current, next_item = cls._progress_items(enrollment, event=event)
         now = timezone.now()
         ignored_statuses = {
             ScheduleEvent.Status.CANCELLED,

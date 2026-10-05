@@ -305,6 +305,9 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
                 apply_enrollment_start_dates(
                     already, start_date=start_date, interval=date_interval,
                 )
+            else:
+                from .plan_sync import PlanSyncService
+                PlanSyncService.realign_enrollment_topics(already)
         return Response(
             StudentSubjectSerializer(subject).data,
             status=status.HTTP_201_CREATED,
@@ -410,6 +413,9 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
                 apply_enrollment_start_dates(
                     enrollment, start_date=start_date, interval=date_interval,
                 )
+        elif enrollment is not None and raw_plan not in (None, "", 0, "0"):
+            from .plan_sync import PlanSyncService
+            PlanSyncService.realign_enrollment_topics(enrollment)
         return Response(StudentSubjectSerializer(subject).data)
 
     @action(detail=True, methods=["get"], url_path="materials")
@@ -2194,7 +2200,12 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
         from .homework_api import exclude_live_meeting_review_items
 
         teacher = self.get_teacher()
-        qs = ReviewItem.objects.filter(teacher=teacher).select_related("student", "group")
+        qs = ReviewItem.objects.filter(teacher=teacher).select_related(
+            "student",
+            "student__user",
+            "student__user__profile",
+            "group",
+        )
         qs = exclude_live_meeting_review_items(qs)
         qs = qs.exclude(student__status=StudentStatus.ARCHIVED)
         params = self.request.query_params
@@ -2296,24 +2307,16 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
         return students, subjects
 
     def list(self, request, *args, **kwargs):
-        from .homework_api import (
-            prefetch_submissions_for_review_items,
-            reopen_resubmitted_review_items,
-            sync_assigned_homework_into_review_queue,
-        )
+        from .homework_api import prefetch_submissions_for_review_items
 
-        # Подтянуть выданные ДЗ без ReviewItem (авто-выдача после урока).
-        teacher = self.get_teacher()
-        sync_assigned_homework_into_review_queue(teacher)
-        reopen_resubmitted_review_items(teacher)
-
+        # Карточка проверки создаётся при выдаче и при сдаче, не при открытии списка.
         scoped_qs = self._review_qs(apply_status=False)
-        counts = {
-            "all": scoped_qs.count(),
-            "pending": scoped_qs.filter(status=ReviewStatus.PENDING).count(),
-            "checked": scoped_qs.filter(status=ReviewStatus.CHECKED).count(),
-            "returned": scoped_qs.filter(status=ReviewStatus.RETURNED).count(),
-        }
+        counts = scoped_qs.aggregate(
+            all=Count("id"),
+            pending=Count("id", filter=Q(status=ReviewStatus.PENDING)),
+            checked=Count("id", filter=Q(status=ReviewStatus.CHECKED)),
+            returned=Count("id", filter=Q(status=ReviewStatus.RETURNED)),
+        )
         items = self._sorted_review_items(list(self.filter_queryset(self.get_queryset())))
         submissions_by_id = prefetch_submissions_for_review_items(items)
         serializer = self.get_serializer(

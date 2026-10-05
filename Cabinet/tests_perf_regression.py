@@ -289,19 +289,21 @@ class PrefetchAndCatalogRegressionTests(TestCase):
             teacher=self.teacher, title="План", direction="oge", status="published",
         )
         item = LessonPlanItem.objects.create(plan=plan, order=1, title="Тема 1", topic="Тема 1")
-        LessonPlanEnrollment.objects.create(
+        enrollment = LessonPlanEnrollment.objects.create(
             teacher=self.teacher, plan=plan, student=student, status="active",
         )
-        first_with_plan, first_writes = self._count_list_event_selects(event, with_writes=True)
-        second_with_plan, second_writes = self._count_list_event_selects(event, with_writes=True)
+        listed, listed_writes = self._count_list_event_selects(event, with_writes=True)
         print(
-            "\nREALIGN LIST SELECTS "
-            f"no_plan={without_plan} first_plan={first_with_plan}/{first_writes} "
-            f"second_plan={second_with_plan}/{second_writes}"
+            "\nCALENDAR LIST SELECTS "
+            f"no_plan={without_plan} with_plan={listed}/{listed_writes}"
         )
         self.assertEqual(without_plan, 1)
-        self.assertLessEqual(first_with_plan, 2)
-        self.assertLessEqual(second_with_plan, 2)
+        self.assertEqual(listed, 1)
+        self.assertEqual(listed_writes, 0)
+        event.refresh_from_db()
+        self.assertIsNone(event.lesson_plan_item_id)
+        from Cabinet.plan_sync import PlanSyncService
+        PlanSyncService.realign_enrollment_topics(enrollment)
         event.refresh_from_db()
         self.assertEqual(event.lesson_plan_item_id, item.id)
 

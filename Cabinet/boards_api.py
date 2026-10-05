@@ -18,7 +18,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.files.base import ContentFile
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Prefetch, Q
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers, status, viewsets
@@ -962,6 +962,11 @@ class InteractiveBoardListSerializer(serializers.ModelSerializer):
         if student and student.user_id:
             return True
         # Совместная работа также при явном edit-доступе (после «Показать» на уроке и т.п.).
+        cache = getattr(obj, "_prefetched_objects_cache", None) or {}
+        if "access_records" in cache:
+            return any(
+                row.permission == InteractiveBoardAccess.EDIT for row in cache["access_records"]
+            )
         return obj.access_records.filter(permission=InteractiveBoardAccess.EDIT).exists()
 
 
@@ -1069,14 +1074,46 @@ class InteractiveBoardAccessSerializer(serializers.Serializer):
 
 
 def user_accessible_boards_qs(user: User):
-    owned = Q(owner=user)
-    explicit = Q(access_records__user=user)
-    as_student = Q(student__user=user)
-    via_group = Q(group__students__user=user)
+    """Доски пользователя без JOIN, который размножает строки и требует DISTINCT."""
+    access_exists = InteractiveBoardAccess.objects.filter(
+        board_id=OuterRef("pk"),
+        user_id=user.pk,
+    )
+    student_exists = Student.objects.filter(
+        pk=OuterRef("student_id"),
+        user_id=user.pk,
+    )
+    group_student_exists = Student.objects.filter(
+        groups=OuterRef("group_id"),
+        user_id=user.pk,
+    )
     return (
-        InteractiveBoard.objects.filter(owned | explicit | as_student | via_group)
-        .distinct()
-        .select_related("owner", "owner__profile", "group", "student", "lesson", "schedule_event")
+        InteractiveBoard.objects.filter(
+            Q(owner=user)
+            | Q(Exists(access_exists))
+            | Q(Exists(student_exists))
+            | Q(Exists(group_student_exists))
+        )
+        .select_related(
+            "owner",
+            "owner__profile",
+            "group",
+            "student",
+            "student__user",
+            "student__user__profile",
+            "lesson",
+            "schedule_event",
+        )
+    )
+
+
+def boards_list_queryset(qs):
+    """Список не читает сцену. Право редактирования ученика берётся одним prefetch."""
+    edit_access = InteractiveBoardAccess.objects.filter(
+        permission=InteractiveBoardAccess.EDIT,
+    ).only("id", "board_id", "permission")
+    return qs.defer("scene_data").prefetch_related(
+        Prefetch("access_records", queryset=edit_access),
     )
 
 
@@ -1150,6 +1187,8 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = user_accessible_boards_qs(self.request.user)
+        if self.action == "list":
+            qs = boards_list_queryset(qs)
         params = self.request.query_params
 
         # Список: архив скрыт, detail/actions — архив доступен владельцу/имеющим доступ
@@ -1786,6 +1825,8 @@ class StudentInteractiveBoardsView(APIView):
         if not profile or profile.role != Profile.Role.STUDENT:
             return Response({"detail": "Доступ только для учеников."}, status=status.HTTP_403_FORBIDDEN)
 
-        qs = user_accessible_boards_qs(request.user).filter(is_archived=False).order_by("-updated_at")
+        qs = boards_list_queryset(
+            user_accessible_boards_qs(request.user).filter(is_archived=False).order_by("-updated_at")
+        )
         data = InteractiveBoardListSerializer(qs, many=True, context={"request": request}).data
         return Response({"results": data})
