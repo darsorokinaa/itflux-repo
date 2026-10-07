@@ -74,6 +74,7 @@ import { resolveVariantTheme } from "../variantThemes/registry";
 import VariantThemeSelector from "../variantThemes/VariantThemeSelector";
 import { TravelMiniMap } from "../variantThemes/TravelMarks";
 import { assignVariantTheme } from "../variantThemes/variantThemeApi";
+import { meetingUuidFromFrame } from "../cabinet/meetingPresent";
 import { fetchCabinetSession, fetchVideoMeetingLiveAnswers, isTeacherRole } from "../utils/cabinetAuth";
 import LiveVariantAnswersTable from "../cabinet/components/LiveVariantAnswersTable";
 import "../cabinet/styles/live-variant-answers.css";
@@ -823,11 +824,15 @@ function ExamPage() {
   const isHomework = homeworkQuery.isHomework;
   const isLiveVariant = Boolean(isHomework && homeworkQuery.isLiveMeeting);
   const meetingUuid = useMemo(() => {
+    let parentPath = "";
     try {
-      return new URLSearchParams(location.search || "").get("meeting") || "";
+      if (typeof window !== "undefined" && window.parent !== window) {
+        parentPath = window.parent.location.pathname || "";
+      }
     } catch {
-      return "";
+      parentPath = "";
     }
+    return meetingUuidFromFrame(location.search, parentPath);
   }, [location.search]);
   const isEmbeddedHomework = isHomework && lessonEmbedParams.embed;
   const isCabinetHomework = isHomework && !lessonEmbedParams.embed;

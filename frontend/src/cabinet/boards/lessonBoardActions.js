@@ -644,18 +644,48 @@ export function insertTaskCard(editor, title, body) {
   editor.setEditingShape(id);
 }
 
-export async function insertBoardFile(editor, file) {
+const IMAGE_FILE = /\.(png|jpe?g|gif|webp|heic|heif|bmp|svg)$/i;
+const LOCAL_FILE_LIMIT = 8 * 1024 * 1024;
+
+export function boardFileKind(file) {
+  const type = String(file?.type || "").split(";")[0].trim().toLowerCase();
+  const name = String(file?.name || "");
+  if (type === "application/pdf" || name.toLowerCase().endsWith(".pdf")) return "pdf";
+  if (type.startsWith("image/") || IMAGE_FILE.test(name)) return "image";
+  return "file";
+}
+
+function filePoint(editor, point) {
+  if (point && Number.isFinite(point.x) && Number.isFinite(point.y)) return point;
+  return centerOf(editor);
+}
+
+export async function insertBoardFile(editor, file, point) {
+  if (!file) return "Файл не выбран";
+  let src = "";
+  let error = "";
   const upload = editor.store?.props?.assets?.upload;
-  if (typeof upload !== "function" || !file) return "Не удалось сохранить файл";
-  let stored;
-  try {
-    stored = await upload({ props: { name: file.name, mimeType: file.type || "" } }, file);
-  } catch (error) {
-    return error?.message || "Файл не удалось загрузить";
+  if (typeof upload === "function") {
+    try {
+      const stored = await upload({ props: { name: file.name, mimeType: file.type || "" } }, file);
+      src = stored?.src || "";
+      if (!src) error = "Файл не удалось загрузить";
+    } catch (err) {
+      error = err?.message || "Файл не удалось загрузить";
+    }
+  } else {
+    error = "Не удалось сохранить файл";
   }
-  if (!stored?.src) return "Файл не удалось загрузить";
+  if (!src && file.size <= LOCAL_FILE_LIMIT) {
+    try {
+      src = await blobToDataUrl(file);
+    } catch {
+      src = "";
+    }
+  }
+  if (!src) return error || "Файл не удалось загрузить";
   const name = file.name || "Файл";
-  const origin = centerOf(editor);
+  const origin = filePoint(editor, point);
   const id = placeGeo(editor, {
     x: origin.x - 140,
     y: origin.y - 36,
@@ -671,7 +701,7 @@ export async function insertBoardFile(editor, file) {
     meta: {
       lessonKind: "file",
       fileName: name,
-      fileUrl: stored.src,
+      fileUrl: src,
       fileMime: file.type || "",
     },
   });
@@ -802,9 +832,9 @@ async function storeImageAsset(editor, blob, width, height, name) {
   return assetId;
 }
 
-export async function placeImage(editor, blob, width, height, name) {
+export async function placeImage(editor, blob, width, height, name, point) {
   const assetId = await storeImageAsset(editor, blob, width, height, name);
-  const origin = centerOf(editor);
+  const origin = filePoint(editor, point);
   const fitted = fitSize(width, height, 520);
   const id = createShapeId();
   editor.createShape({
@@ -1036,11 +1066,45 @@ export async function readClipboardImage(editor) {
   return false;
 }
 
-export function fileToImage(editor, file) {
+export function fileToImage(editor, file, point) {
   const url = URL.createObjectURL(file);
   return imageSize(url)
-    .then((size) => placeImage(editor, file, size.w, size.h, file.name))
+    .then((size) => placeImage(editor, file, size.w, size.h, file.name, point))
     .finally(() => URL.revokeObjectURL(url));
+}
+
+export async function addBoardFiles(editor, files, point) {
+  const list = Array.from(files || []).filter(Boolean);
+  let notice = "";
+  for (const file of list) {
+    const kind = boardFileKind(file);
+    if (kind === "pdf") {
+      const result = await insertPdfFile(editor, file, { point });
+      if (result) notice = notice || result;
+      continue;
+    }
+    if (kind === "image") {
+      try {
+        await fileToImage(editor, file, point);
+      } catch (error) {
+        const fallback = await insertBoardFile(editor, file, point);
+        if (fallback) notice = notice || fallback || error?.message || "Изображение не удалось добавить";
+      }
+      continue;
+    }
+    const nameless = !String(file.type || "") && !/\.[a-z0-9]+$/i.test(String(file.name || ""));
+    if (nameless) {
+      try {
+        await fileToImage(editor, file, point);
+        continue;
+      } catch {
+        // Снимок с iPad иногда приходит без типа и расширения.
+      }
+    }
+    const result = await insertBoardFile(editor, file, point);
+    if (result) notice = notice || result;
+  }
+  return notice;
 }
 
 export function setImageMat(editor, color) {

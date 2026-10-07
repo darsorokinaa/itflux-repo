@@ -1,7 +1,7 @@
 import { geoShapeMigrations } from "@tldraw/tlschema";
 import { describe, expect, it } from "vitest";
 
-import { insertBoardFile, insertLinkCard, placeImage } from "./lessonBoardActions";
+import { boardFileKind, insertBoardFile, insertLinkCard, placeImage } from "./lessonBoardActions";
 import {
   LESSON_GEO_URL_MIGRATION_ID,
   clearInvalidGeoUrl,
@@ -57,6 +57,12 @@ describe("lesson geo urls", () => {
     expect(linkCard.updates).toEqual([
       expect.objectContaining({ type: "geo", props: { url: "https://example.com/work.docx" } }),
     ]);
+  });
+
+  it("recognizes a photo with an empty mime type", () => {
+    expect(boardFileKind({ name: "IMG_2048.HEIC", type: "" })).toBe("image");
+    expect(boardFileKind({ name: "lecture.pdf", type: "" })).toBe("pdf");
+    expect(boardFileKind({ name: FILE_NAME, type: "" })).toBe("file");
   });
 
   it("stores an added file so it can be downloaded", async () => {

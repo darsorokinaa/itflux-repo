@@ -308,8 +308,10 @@ function resolveMaterialOpenUrl(row, meetingUuid, presented, { forEmbed = false 
   }
   if (row?.kind === "variant") {
     const base = (presented?.kind === "variant" && presented.openUrl) || row.url;
+    // meeting нужен странице варианта, чтобы опрашивать ответы.
+    // MeetingCallDock внутри iframe не поднимает второй звонок.
     return appendLiveVariantParams(base, {
-      meetingUuid: forEmbed ? null : meetingUuid,
+      meetingUuid,
       homeworkId: presented?.kind === "variant" ? presented.homeworkId : null,
     });
   }

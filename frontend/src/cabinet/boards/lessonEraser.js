@@ -22,7 +22,28 @@ export function shouldDensifyEraserMove(event, eraserActive) {
   if (event[ERASER_REPLAY]) return false;
   if (event.pointerType === "mouse") return false;
   if (event.type && event.type !== "pointermove") return false;
-  return event.pointerType === "pen" || event.pointerType === "touch";
+  if (event.pointerType !== "pen" && event.pointerType !== "touch") return false;
+  // Apple Pencil часто шлёт buttons: 0, но pressure > 0. Наведение без нажатия не сгущаем.
+  if (event.buttons === 0 && !(Number(event.pressure) > 0)) return false;
+  return true;
+}
+
+/** Промежуточные точки штриха, если браузер не отдал coalesced-события. */
+export function eraserSamplePoints(samples, from, to, step = 6) {
+  const list = Array.isArray(samples) ? samples : [];
+  if (list.length >= 2) return list.slice(0, -1);
+  if (!from || !to) return [];
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const dist = Math.hypot(dx, dy);
+  if (!Number.isFinite(dist) || dist < step * 2) return [];
+  const count = Math.min(32, Math.floor(dist / step));
+  const points = [];
+  for (let index = 1; index < count; index += 1) {
+    const t = index / count;
+    points.push({ x: from.x + dx * t, y: from.y + dy * t });
+  }
+  return points;
 }
 
 function coalescedSamples(event) {
@@ -35,32 +56,31 @@ function coalescedSamples(event) {
   }
 }
 
-function replayPointer(target, type, event, sample) {
-  const replay = new PointerEvent(type, {
-    bubbles: true,
-    cancelable: true,
-    clientX: sample.clientX,
-    clientY: sample.clientY,
-    screenX: sample.screenX,
-    screenY: sample.screenY,
+function dispatchPointerMove(editor, event, clientX, clientY) {
+  editor.dispatch?.({
+    type: "pointer",
+    target: "canvas",
+    name: "pointer_move",
+    point: { x: clientX, y: clientY, z: event.pressure || 0.5 },
+    shiftKey: Boolean(event.shiftKey),
+    altKey: Boolean(event.altKey),
+    ctrlKey: Boolean(event.metaKey || event.ctrlKey),
+    metaKey: Boolean(event.metaKey),
+    accelKey: Boolean(event.metaKey || event.ctrlKey),
     pointerId: event.pointerId,
-    pointerType: event.pointerType || "pen",
-    buttons: type === "pointerup" ? 0 : event.buttons,
-    pressure: sample.pressure ?? event.pressure,
-    isPrimary: true,
+    button: 0,
+    isPen: event.pointerType === "pen",
   });
-  replay[ERASER_REPLAY] = true;
-  target.dispatchEvent(replay);
 }
 
-/** Safari иногда оставляет слой удалённого штриха, пока композитор не перерисует его. */
+/** Safari держит старый кадр .tl-canvas (content-visibility) после удаления штриха. */
 function flushEraserLayer(root) {
-  const layer = root.querySelector?.(".tl-shapes");
-  if (!layer) return;
-  const previous = layer.style.opacity;
-  layer.style.opacity = "0.999";
+  const canvas = root.querySelector?.(".tl-canvas") || root.querySelector?.(".tl-shapes");
+  if (!canvas) return;
+  canvas.style.transform = "translateZ(0)";
+  void canvas.offsetWidth;
   window.requestAnimationFrame(() => {
-    layer.style.opacity = previous;
+    canvas.style.transform = "";
   });
 }
 
@@ -77,38 +97,54 @@ function eraserGestureActive(editor) {
  */
 export function installCoalescedEraserInput(editor) {
   const root = editor?.getContainer?.();
-  if (!root || typeof root.addEventListener !== "function") return () => {};
+  const doc = root?.ownerDocument;
+  if (!root || !doc || typeof doc.addEventListener !== "function") return () => {};
+  let flushAfter = false;
 
   const onMove = (event) => {
     if (!shouldDensifyEraserMove(event, editor.isIn?.("eraser"))) return;
-    const samples = coalescedSamples(event);
-    if (samples.length < 2) return;
-    const target = event.target;
-    if (!target || typeof target.dispatchEvent !== "function") return;
-    for (let index = 0; index < samples.length - 1; index += 1) {
-      replayPointer(target, "pointermove", event, samples[index]);
+    try {
+      const samples = coalescedSamples(event);
+      if (samples.length >= 2) {
+        for (let index = 0; index < samples.length - 1; index += 1) {
+          dispatchPointerMove(editor, event, samples[index].clientX, samples[index].clientY);
+        }
+        return;
+      }
+      const from = editor.inputs?.getCurrentPagePoint?.();
+      const to = editor.screenToPage?.({ x: event.clientX, y: event.clientY });
+      const extras = eraserSamplePoints(samples, from, to);
+      for (const page of extras) {
+        const screen = editor.pageToScreen?.(page);
+        if (!screen) continue;
+        dispatchPointerMove(editor, event, screen.x, screen.y);
+      }
+    } catch {
+      // Исходное событие всё равно доходит до ластика.
     }
   };
 
-  const onCancel = (event) => {
-    if (!event || event.pointerType === "mouse" || event[ERASER_REPLAY]) return;
-    if (!eraserGestureActive(editor)) return;
+  const onUpCapture = (event) => {
+    flushAfter = Boolean(event && event.pointerType !== "mouse" && !event[ERASER_REPLAY] && eraserGestureActive(editor));
+  };
+
+  const onUp = () => {
+    if (!flushAfter) return;
+    flushAfter = false;
     flushEraserLayer(root);
   };
 
-  const onUp = (event) => {
-    if (!event || event.pointerType === "mouse" || event[ERASER_REPLAY]) return;
-    if (!eraserGestureActive(editor)) return;
-    flushEraserLayer(root);
-  };
-
-  root.addEventListener("pointermove", onMove, true);
-  root.addEventListener("pointercancel", onCancel, true);
-  root.addEventListener("pointerup", onUp, true);
+  doc.addEventListener("pointermove", onMove, true);
+  doc.addEventListener("pointerup", onUpCapture, true);
+  doc.addEventListener("pointercancel", onUpCapture, true);
+  doc.addEventListener("pointerup", onUp);
+  doc.addEventListener("pointercancel", onUp);
   return () => {
-    root.removeEventListener("pointermove", onMove, true);
-    root.removeEventListener("pointercancel", onCancel, true);
-    root.removeEventListener("pointerup", onUp, true);
+    doc.removeEventListener("pointermove", onMove, true);
+    doc.removeEventListener("pointerup", onUpCapture, true);
+    doc.removeEventListener("pointercancel", onUpCapture, true);
+    doc.removeEventListener("pointerup", onUp);
+    doc.removeEventListener("pointercancel", onUp);
   };
 }
 

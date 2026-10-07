@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  eraserSamplePoints,
   imageSurvivesEraser,
   keepImagesUnderEraser,
   shouldDensifyEraserMove,
@@ -10,10 +11,17 @@ import {
 describe("lesson eraser pointer", () => {
   it("densifies pen and touch while the eraser is active and leaves the mouse alone", () => {
     expect(shouldDensifyEraserMove({ type: "pointermove", pointerType: "pen" }, true)).toBe(true);
-    expect(shouldDensifyEraserMove({ type: "pointermove", pointerType: "touch" }, true)).toBe(true);
+    expect(shouldDensifyEraserMove({ type: "pointermove", pointerType: "touch", buttons: 1 }, true)).toBe(true);
+    expect(shouldDensifyEraserMove({ type: "pointermove", pointerType: "pen", buttons: 0, pressure: 0.4 }, true)).toBe(true);
+    expect(shouldDensifyEraserMove({ type: "pointermove", pointerType: "pen", buttons: 0, pressure: 0 }, true)).toBe(false);
     expect(shouldDensifyEraserMove({ type: "pointermove", pointerType: "mouse" }, true)).toBe(false);
     expect(shouldDensifyEraserMove({ type: "pointermove", pointerType: "pen" }, false)).toBe(false);
     expect(shouldDensifyEraserMove({ type: "pointerdown", pointerType: "pen" }, true)).toBe(false);
+    const sparse = eraserSamplePoints([], { x: 0, y: 0 }, { x: 30, y: 0 }, 6);
+    expect(sparse.length).toBeGreaterThan(1);
+    expect(sparse[0].x).toBeGreaterThan(0);
+    expect(sparse.at(-1).x).toBeLessThan(30);
+    expect(eraserSamplePoints([{ clientX: 1 }, { clientX: 2 }], { x: 0, y: 0 }, { x: 30, y: 0 })).toEqual([{ clientX: 1 }]);
   });
 });
 

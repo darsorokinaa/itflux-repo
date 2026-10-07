@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   catalogLessonSlugFromUrl,
+  meetingUuidFromFrame,
   isLessonWorkspaceSelfMeetingUrl,
   meetingLessonContentUrl,
   openPresentedMaterial,
@@ -12,6 +13,17 @@ import {
   workspaceMaterialFromPresented,
   workspaceMaterialIdentityKey,
 } from "./meetingPresent";
+
+describe("live variant meeting id", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+
+  it("reads meeting from the variant query or the open lesson frame", () => {
+    expect(meetingUuidFromFrame(`?meeting=${id}`, "")).toBe(id);
+    expect(meetingUuidFromFrame("", `/cabinet/meetings/${id}`)).toBe(id);
+    expect(meetingUuidFromFrame("?meeting=from-query", `/cabinet/meetings/${id}`)).toBe("from-query");
+    expect(meetingUuidFromFrame("", "/ege/math/variant/3")).toBe("");
+  });
+});
 
 describe("lesson workspace embed", () => {
   const meetingUuid = "meet-1";

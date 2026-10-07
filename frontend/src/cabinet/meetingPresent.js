@@ -68,6 +68,20 @@ export function appendMeetingParam(url, meetingUuid) {
 }
 
 /** Параметры live-варианта для учителя/ученика на SPA-странице. */
+/** meeting из query варианта или из пути родительской страницы урока. */
+export function meetingUuidFromFrame(search, parentPath = "") {
+  try {
+    const fromQuery = new URLSearchParams(String(search || "")).get("meeting") || "";
+    if (fromQuery) return fromQuery;
+  } catch {
+    /* ignore */
+  }
+  const match = String(parentPath || "").match(
+    /\/cabinet\/meetings\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i,
+  );
+  return match ? match[1] : "";
+}
+
 export function appendLiveVariantParams(url, { homeworkId, meetingUuid } = {}) {
   const raw = String(url || "").trim();
   if (!raw) return raw;

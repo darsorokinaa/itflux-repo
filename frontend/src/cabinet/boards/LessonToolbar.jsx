@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { useEditor, useTools, useValue } from "tldraw";
 
-import { LessonFlyout, useInkColor } from "./LessonMenus";
+import { LessonFlyout, endLessonFilePick, lessonFilePickActive, useInkColor } from "./LessonMenus";
 import { chooseTool } from "./lessonBoardActions";
 import { LESSON_RAIL, lessonAdaptiveRail, lessonPhoneRail, lessonRailButton, lessonToolActive } from "./lessonShell";
 
@@ -81,13 +81,18 @@ export default function LessonRail() {
         setMenu(null);
         return;
       }
-      if (event.type === "pointerdown" && !event.target.closest?.(".lesson-rail")) setMenu(null);
+      if (event.type === "pointerdown" && !event.target.closest?.(".lesson-rail")) {
+        if (lessonFilePickActive()) return;
+        setMenu(null);
+      }
     };
     document.addEventListener("pointerdown", close);
     document.addEventListener("keydown", close);
+    window.addEventListener("focus", endLessonFilePick);
     return () => {
       document.removeEventListener("pointerdown", close);
       document.removeEventListener("keydown", close);
+      window.removeEventListener("focus", endLessonFilePick);
     };
   }, [menu]);
 

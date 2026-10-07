@@ -62,6 +62,7 @@ import { setPendingFormula, setPendingGraph, setPendingTask } from "./lessonShap
 import {
   addTableColumn,
   addTableRow,
+  addBoardFiles,
   applyCustomColor,
   lessonInkChoices,
   savedCustomColors,
@@ -73,9 +74,6 @@ import {
   chooseSticker,
   chooseTextKind,
   chooseTool,
-  fileToImage,
-  insertBoardFile,
-  insertPdfFile,
   insertTable,
   insertTemplate,
   mergeTableCells,
@@ -423,36 +421,38 @@ function TableMenu() {
   );
 }
 
+export function beginLessonFilePick() {
+  document.documentElement.dataset.lessonFilePick = "1";
+}
+
+export function lessonFilePickActive() {
+  return document.documentElement.dataset.lessonFilePick === "1";
+}
+
+export function endLessonFilePick() {
+  window.setTimeout(() => {
+    delete document.documentElement.dataset.lessonFilePick;
+  }, 1200);
+}
+
 function InsertMenu() {
   const editor = useEditor();
   const tools = useTools();
   const [status, setStatus] = useState("");
-  async function onFile(event, kind) {
+  async function onFile(event) {
     const file = event.target.files?.[0];
     event.target.value = "";
+    endLessonFilePick();
     if (!file) return;
-    setStatus("");
-    if (kind === "pdf" || file.type === "application/pdf") {
-      setStatus(await insertPdfFile(editor, file));
-      return;
-    }
-    if (file.type.startsWith("image/")) {
-      try {
-        await fileToImage(editor, file);
-      } catch (error) {
-        setStatus(error?.message || "Изображение не удалось добавить");
-      }
-      return;
-    }
-    setStatus(await insertBoardFile(editor, file));
+    setStatus(await addBoardFiles(editor, [file]) || "");
   }
   return (
     <div className="lesson-flyout__body">
       <div className="lesson-icon-row" role="toolbar" aria-label="Вставить">
-        <FileIcon label="Изображение" accept="image/*" onFile={(event) => onFile(event, "image")}><Image size={18} strokeWidth={1.75} /></FileIcon>
-        <FileIcon label="PDF" accept="application/pdf" onFile={(event) => onFile(event, "pdf")}><FileText size={18} strokeWidth={1.75} /></FileIcon>
-        <FileIcon label="Файл" onFile={(event) => onFile(event, "file")}><File size={18} strokeWidth={1.75} /></FileIcon>
-        <FileIcon label="Скриншот" accept="image/*" onFile={(event) => onFile(event, "image")}><Camera size={18} strokeWidth={1.75} /></FileIcon>
+        <FileIcon label="Изображение" accept="image/*" onFile={onFile}><Image size={18} strokeWidth={1.75} /></FileIcon>
+        <FileIcon label="PDF" accept="application/pdf,.pdf" onFile={onFile}><FileText size={18} strokeWidth={1.75} /></FileIcon>
+        <FileIcon label="Файл" onFile={onFile}><File size={18} strokeWidth={1.75} /></FileIcon>
+        <FileIcon label="Скриншот" accept="image/*" onFile={onFile}><Camera size={18} strokeWidth={1.75} /></FileIcon>
         <IconButton
           label="Вставка из буфера"
           onClick={async () => {
@@ -796,9 +796,9 @@ function FileIcon({ label, accept, onFile, children }) {
       onFocus={() => setOpen(true)}
       onBlur={() => setOpen(false)}
     >
-      <label className="lesson-flyout__icon" aria-label={label}>
+      <label className="lesson-flyout__icon" aria-label={label} onPointerDown={beginLessonFilePick}>
         {children}
-        <input className="lesson-sr" type="file" accept={accept} onChange={onFile} />
+        <input type="file" accept={accept} onChange={onFile} onClick={beginLessonFilePick} onCancel={endLessonFilePick} />
       </label>
       {open ? <span className="lesson-flyout__hint">{label}</span> : null}
     </span>

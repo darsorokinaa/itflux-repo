@@ -5,10 +5,9 @@ import { useSync } from "@tldraw/sync";
 import { Tldraw, defaultShapeUtils } from "tldraw";
 import "tldraw/tldraw.css";
 
-import { disposePdfNotice, insertPdfFile, installLessonThickness, installSavedCustomColors } from "./lessonBoardActions";
+import { addBoardFiles, disposePdfNotice, installLessonThickness, installSavedCustomColors } from "./lessonBoardActions";
 import { installLessonSheets } from "./lessonSheets";
 import { installCoalescedEraserInput, keepImagesUnderEraser } from "./lessonEraser";
-import { fileLooksLikePdf } from "./boardPdf";
 import { lessonBoardComponents } from "./lessonBoardUi";
 import { LessonGeoShapeUtil } from "./lessonGeoShape";
 import { LessonNoteShapeUtil, lessonCanvasShapeUtils, lessonShapeUtils, lessonTools, lessonUiOverrides } from "./lessonShapes";
@@ -271,19 +270,10 @@ function TldrawBoardSynced({
         });
         const disposeEraserInput = installCoalescedEraserInput(editor);
         const disposeThickness = installLessonThickness(editor);
-        const previousFiles = editor.externalContentHandlers?.files;
         if (typeof editor.registerExternalContentHandler === "function") {
-          editor.registerExternalContentHandler("files", async (content) => {
-            const files = Array.isArray(content?.files) ? content.files : [];
-            const pdfs = files.filter((file) => fileLooksLikePdf(file));
-            const rest = files.filter((file) => !fileLooksLikePdf(file));
-            for (const file of pdfs) {
-              await insertPdfFile(editor, file, { point: content?.point });
-            }
-            if (rest.length && typeof previousFiles === "function") {
-              await previousFiles({ ...content, files: rest });
-            }
-          });
+          editor.registerExternalContentHandler("files", (content) => (
+            addBoardFiles(editor, content?.files, content?.point)
+          ));
         }
         const disposeLegacy = restoreLegacyScene(editor, sceneData);
         return () => {
