@@ -5,7 +5,7 @@ import { useSync } from "@tldraw/sync";
 import { Tldraw, defaultShapeUtils } from "tldraw";
 import "tldraw/tldraw.css";
 
-import { disposePdfNotice, insertPdfFile, installSavedCustomColors } from "./lessonBoardActions";
+import { disposePdfNotice, insertPdfFile, installLessonThickness, installSavedCustomColors } from "./lessonBoardActions";
 import { installLessonSheets } from "./lessonSheets";
 import { installCoalescedEraserInput, keepImagesUnderEraser } from "./lessonEraser";
 import { fileLooksLikePdf } from "./boardPdf";
@@ -270,6 +270,7 @@ function TldrawBoardSynced({
           storage: window.localStorage,
         });
         const disposeEraserInput = installCoalescedEraserInput(editor);
+        const disposeThickness = installLessonThickness(editor);
         const previousFiles = editor.externalContentHandlers?.files;
         if (typeof editor.registerExternalContentHandler === "function") {
           editor.registerExternalContentHandler("files", async (content) => {
@@ -287,6 +288,7 @@ function TldrawBoardSynced({
         const disposeLegacy = restoreLegacyScene(editor, sceneData);
         return () => {
           disposePdfNotice(editor);
+          disposeThickness();
           disposeEraserInput();
           disposeSheets();
           disposeLegacy?.();

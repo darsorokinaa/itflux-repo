@@ -27,7 +27,7 @@ import {
   DefaultSizeStyle,
   DefaultTextAlignStyle,
 } from "./lessonBoardActions";
-import { ColorDot, OpacityMark, OpacitySlider, StrokeSizePicker, BrushStroke } from "./LessonMenus";
+import { BrushStroke, ColorDot, OpacityMark, OpacitySlider, StrokeSizePicker, ThicknessSlider } from "./LessonMenus";
 import {
   LESSON_ALIGN_STEPS,
   LESSON_FONT_STEPS,
@@ -234,11 +234,14 @@ function BorderControl() {
 
 function SizeLabel({ menu, onToggle }) {
   const editor = useEditor();
-  const text = useValue("lesson-context-text-size", () => {
+  const mode = useValue("lesson-context-size-mode", () => {
     const shapes = editor.getSelectedShapes();
-    return shapes.length > 0 && shapes.every((shape) => shape.type === "text" || shape.type === "note");
+    if (shapes.length > 0 && shapes.every((shape) => shape.type === "text" || shape.type === "note")) return "text";
+    if (shapes.length > 0 && shapes.every((shape) => shape.type === "draw" || shape.type === "highlight" || shape.type === "line")) return "stroke";
+    return "shape";
   }, [editor]);
-  if (text) return <FontSizeSelect menu={menu} onToggle={onToggle} />;
+  if (mode === "text") return <FontSizeSelect menu={menu} onToggle={onToggle} />;
+  if (mode === "stroke") return <ThicknessSlider />;
   return <StrokeSizeLabel menu={menu} onToggle={onToggle} />;
 }
 

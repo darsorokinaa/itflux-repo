@@ -878,7 +878,7 @@
   right: 16px;
   bottom: auto;
   left: auto;
-  width: min(360px, calc(100vw - 32px));
+  width: min(520px, calc(100vw - 32px));
   aspect-ratio: 16 / 9;
   height: auto;
   min-width: 0;
@@ -2862,13 +2862,15 @@ body.vl-room-fullscreen .student-cabinet-nav {
   }
 }
 
-/* Доска: звонок стартует под верхней панелью урока (64px) и в минимальном размере. */
+/* Доска: звонок стартует под верхней панелью урока.
+   Узкий кадр (~280px) включает мобильную панель Jitsi по центру видео.
+   Шире 500px панель садится вниз и занимает меньше кадра. */
 .video-lesson-page--board.video-lesson-page--compact .video-lesson-content {
   top: 72px;
 }
 
 .video-lesson-page--board.video-lesson-page--compact .video-lesson-content:not(.video-lesson-content--call-collapsed):not(.video-lesson-content--call-expanded) {
-  width: 280px;
+  width: min(560px, calc(100vw - 24px));
 }
 
 /* ── Синхронный материал / совместное управление ─────────────────────────── */

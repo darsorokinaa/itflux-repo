@@ -2,11 +2,13 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 
 import {
+  bindMeetingAutoPip,
   callStayOnTopAvailable,
   closeCallStayOnTop,
   findSameOriginCallVideo,
   liveCallVideoPipAvailable,
   requestCallStayOnTop,
+  setMeetingMediaSessionActive,
   videoPipAvailable,
 } from "./callStayOnTop";
 
@@ -109,5 +111,24 @@ describe("callStayOnTop", () => {
     expect(result.mode).toBe("no-video");
     expect(requestWindow).not.toHaveBeenCalled();
     expect(liveCallVideoPipAvailable(null)).toBe(false);
+  });
+
+  it("asks the browser to keep the remote visible when the tab is left during a call", () => {
+    const onEnter = vi.fn();
+    const setActionHandler = vi.fn();
+    const setCameraActive = vi.fn();
+    const setMicrophoneActive = vi.fn();
+    vi.stubGlobal("navigator", {
+      mediaSession: { setActionHandler, setCameraActive, setMicrophoneActive },
+    });
+    setMeetingMediaSessionActive({ camera: true, microphone: true });
+    const unbind = bindMeetingAutoPip(onEnter);
+    expect(setCameraActive).toHaveBeenCalledWith(true);
+    expect(setMicrophoneActive).toHaveBeenCalledWith(true);
+    const handler = setActionHandler.mock.calls.find((call) => call[0] === "enterpictureinpicture")?.[1];
+    handler();
+    expect(onEnter).toHaveBeenCalledTimes(1);
+    unbind();
+    expect(setActionHandler).toHaveBeenCalledWith("enterpictureinpicture", null);
   });
 });

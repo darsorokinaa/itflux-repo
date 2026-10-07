@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowLeftRight,
   ArrowRight,
@@ -67,6 +67,7 @@ import {
   savedCustomColors,
   applyOpacity,
   applyStyle,
+  applyThickness,
   chooseGeo,
   chooseLink,
   chooseSticker,
@@ -92,6 +93,12 @@ import {
   LESSON_INK_COLORS,
   LESSON_LINKS,
   LESSON_SIZE_STEPS,
+  LESSON_STROKE_BASE,
+  LESSON_THICKNESS_MAX,
+  LESSON_THICKNESS_MIN,
+  clampLessonThickness,
+  getLessonThickness,
+  subscribeLessonThickness,
   LESSON_MORE,
   LESSON_SHAPES,
   LESSON_STICKER_COLORS,
@@ -180,7 +187,7 @@ function PenMenu() {
       </div>
       <div className="lesson-pen-grid">
         <ColorRow allowCustom colors={LESSON_INK_COLORS} />
-        <StrokeSizePicker />
+        <ThicknessSlider />
       </div>
       <OpacitySlider />
     </div>
@@ -666,6 +673,40 @@ export function useInkColor() {
   );
 }
 
+export function ThicknessSlider() {
+  const editor = useEditor();
+  const color = useInkColor();
+  const [value, setValue] = useState(getLessonThickness);
+  useEffect(() => subscribeLessonThickness(() => setValue(getLessonThickness())), []);
+  const selectedScale = useValue("lesson-thickness-selected", () => {
+    const shapes = editor.getSelectedShapes().filter((shape) => (
+      (shape.type === "draw" || shape.type === "highlight" || shape.type === "line")
+      && typeof shape.props?.scale === "number"
+    ));
+    if (!shapes.length) return null;
+    const scale = shapes[0].props.scale;
+    return shapes.every((shape) => shape.props.scale === scale) ? scale : null;
+  }, [editor]);
+  const shown = selectedScale == null ? value : clampLessonThickness(selectedScale * LESSON_STROKE_BASE);
+  const percent = ((shown - LESSON_THICKNESS_MIN) / (LESSON_THICKNESS_MAX - LESSON_THICKNESS_MIN)) * 100;
+  return (
+    <label className="lesson-slider">
+      <BrushStroke color={color} thickness={Math.max(1.5, shown / 12)} />
+      <input
+        type="range"
+        min={LESSON_THICKNESS_MIN}
+        max={LESSON_THICKNESS_MAX}
+        step="1"
+        value={shown}
+        aria-label="Толщина штриха"
+        style={{ "--lesson-slider": `${percent}%` }}
+        onChange={(event) => applyThickness(editor, Number(event.target.value))}
+      />
+      <span className="lesson-slider__value">{shown}</span>
+    </label>
+  );
+}
+
 export function StrokeSizePicker() {
   const editor = useEditor();
   const color = useInkColor();
@@ -674,7 +715,7 @@ export function StrokeSizePicker() {
     return shared?.type === "shared" ? shared.value : "m";
   }, [editor]);
   return (
-    <span className="lesson-size" role="group" aria-label="Толщина">
+    <span className="lesson-size" role="group" aria-label="Размер">
       {LESSON_SIZE_STEPS.map((step) => (
         <button
           key={step.id}
@@ -689,10 +730,6 @@ export function StrokeSizePicker() {
       ))}
     </span>
   );
-}
-
-export function ThicknessSlider() {
-  return <StrokeSizePicker />;
 }
 
 export function OpacityMark({ color, opacity }) {

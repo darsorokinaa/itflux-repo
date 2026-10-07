@@ -69,7 +69,7 @@ describe("lesson shell", () => {
     expect(lessonSelectionKind(["geo"], "file")).toBe("file");
     expect(lessonContextBar("file")).toEqual(["file"]);
     expect(lessonContextBar("geo")).toEqual(["color", "fill", "border", "size", "lock", "more"]);
-    expect(lessonContextBar("text")).toEqual(["font", "size", "color", "opacity", "align", "more"]);
+    expect(lessonContextBar("text")).toEqual(["font", "size", "color", "opacity", "align", "lock", "more"]);
     expect(lessonContextBar("image")).toEqual(["crop", "replace", "opacity", "lock", "more"]);
     expect(lessonContextBar("arrow")).toEqual(["color", "size", "border", "arrowhead", "lock", "more"]);
     expect(lessonContextBar("multi")).toEqual(["alignShapes", "distribute", "group", "duplicate", "lock", "more"]);
@@ -126,9 +126,11 @@ describe("lesson shell", () => {
   });
 
   it("follows the thickness slider instead of fixed sizes", () => {
-    expect(clampLessonThickness(1)).toBe(8);
+    expect(clampLessonThickness(1)).toBe(1);
     expect(clampLessonThickness(9.4)).toBe(9);
-    expect(clampLessonThickness(99)).toBe(72);
+    expect(clampLessonThickness(99)).toBe(99);
+    expect(clampLessonThickness(150)).toBe(100);
+    expect(clampLessonThickness(0)).toBe(1);
     expect(lessonThicknessLabel(16)).toBe("16");
     expect(lessonThicknessPx(16)).toBe(16);
     expect(lessonStrokeScale(1, 16)).toBeCloseTo(16 / 4.5);

@@ -201,8 +201,8 @@ export function lessonStickerResize(initial, handle, size) {
 export const LESSON_RAIL_OVERFLOW = [];
 export const LESSON_PHONE_RAIL = LESSON_RAIL.filter((item) => item.label).map((item) => item.id);
 
-export const LESSON_THICKNESS_MIN = 8;
-export const LESSON_THICKNESS_MAX = 72;
+export const LESSON_THICKNESS_MIN = 1;
+export const LESSON_THICKNESS_MAX = 100;
 export const LESSON_THICKNESS_STEP = 1;
 export const LESSON_THICKNESS_DEFAULT = 16;
 export const LESSON_STROKE_BASE = 4.5;
@@ -314,7 +314,7 @@ export function lessonToolActive(id, toolId) {
 export function lessonContextBar(kind) {
   if (kind === "file") return ["file"];
   if (kind === "geo") return ["color", "fill", "border", "size", "lock", "more"];
-  if (kind === "text") return ["font", "size", "color", "opacity", "align", "more"];
+  if (kind === "text") return ["font", "size", "color", "opacity", "align", "lock", "more"];
   if (kind === "image") return ["crop", "replace", "opacity", "lock", "more"];
   if (kind === "multi") return ["alignShapes", "distribute", "group", "duplicate", "lock", "more"];
   if (kind === "stroke") return ["color", "size", "opacity", "lock", "more"];
@@ -365,7 +365,7 @@ export function lessonPhoneRail() {
 }
 
 export function lessonContextPosition(bounds, viewport) {
-  const width = 280;
+  const width = 420;
   const bar = 44;
   const margin = 12;
   const left = Math.min(

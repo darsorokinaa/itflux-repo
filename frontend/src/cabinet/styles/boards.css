@@ -4116,6 +4116,15 @@ button.lesson-faces__dot[aria-pressed="true"] {
   width: 180px;
 }
 
+.lesson-context .lesson-slider {
+  width: 148px;
+  padding: 0 4px;
+}
+
+.lesson-context .lesson-slider input[type="range"] {
+  width: 78px;
+}
+
 .lesson-context__menu {
   display: flex;
   flex-direction: column;

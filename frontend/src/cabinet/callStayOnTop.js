@@ -39,6 +39,44 @@ export function callStayOnTopAvailable() {
   return documentPipAvailable() || videoPipAvailable();
 }
 
+/** Chrome вызывает enterpictureinpicture при уходе со вкладки, если страница в звонке. */
+export function bindMeetingAutoPip(onEnter) {
+  const session = typeof navigator !== "undefined" ? navigator.mediaSession : null;
+  if (!session || typeof session.setActionHandler !== "function" || typeof onEnter !== "function") {
+    return () => {};
+  }
+  try {
+    session.setActionHandler("enterpictureinpicture", () => {
+      onEnter();
+    });
+  } catch {
+    return () => {};
+  }
+  return () => {
+    try {
+      session.setActionHandler("enterpictureinpicture", null);
+    } catch {
+      /* ignore */
+    }
+  };
+}
+
+/** Медиа внутри чужого iframe. Без этой отметки браузер не считает вкладку урока звонком. */
+export function setMeetingMediaSessionActive({ camera = false, microphone = false } = {}) {
+  const session = typeof navigator !== "undefined" ? navigator.mediaSession : null;
+  if (!session) return;
+  try {
+    session.setCameraActive?.(Boolean(camera));
+  } catch {
+    /* ignore */
+  }
+  try {
+    session.setMicrophoneActive?.(Boolean(microphone));
+  } catch {
+    /* ignore */
+  }
+}
+
 /** True only when the live Jitsi video can actually enter Picture-in-Picture. */
 export function liveCallVideoPipAvailable(iframe) {
   return videoPipAvailable() && Boolean(findSameOriginCallVideo(iframe));

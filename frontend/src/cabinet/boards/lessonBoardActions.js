@@ -23,9 +23,9 @@ import { BOARD_PDF_INSERT_ERROR, BOARD_PDF_PAGE_GAP, stackPdfPageFrames } from "
 import {
   getLessonThickness,
   lessonCellValue,
+  lessonStrokeScale,
   LESSON_MARKER_OPACITY,
   lessonGraphPoints,
-  scaledLessonThickness,
   setLessonThickness,
 } from "./lessonShell";
 
@@ -45,19 +45,38 @@ export function applyStyle(editor, style, value) {
   });
 }
 
+const STROKE_SHAPE_TYPES = new Set(["draw", "highlight", "line"]);
+
 export function applyThickness(editor, next) {
-  const previous = getLessonThickness();
   const value = setLessonThickness(next);
-  if (value === previous) return;
-  const shapes = editor.getSelectedShapes().filter((shape) => typeof shape.props?.scale === "number");
+  if (!editor) return;
+  const scale = lessonStrokeScale(1, value);
+  const shapes = editor.getSelectedShapes().filter((shape) => (
+    STROKE_SHAPE_TYPES.has(shape.type) && typeof shape.props?.scale === "number"
+  ));
   if (!shapes.length) return;
   editor.updateShapes(
     shapes.map((shape) => ({
       id: shape.id,
       type: shape.type,
-      props: { scale: scaledLessonThickness(shape.props.scale, previous, value) },
+      props: { size: "m", scale },
     })),
   );
+}
+
+export function installLessonThickness(editor) {
+  if (!editor?.sideEffects?.registerBeforeCreateHandler) return () => {};
+  return editor.sideEffects.registerBeforeCreateHandler("shape", (shape, source) => {
+    if (source && source !== "user") return undefined;
+    if (!shape || !STROKE_SHAPE_TYPES.has(shape.type)) return undefined;
+    if (typeof shape.props?.scale !== "number") return undefined;
+    const scale = lessonStrokeScale(1, getLessonThickness());
+    if (shape.props.scale === scale && shape.props.size === "m") return undefined;
+    return {
+      ...shape,
+      props: { ...shape.props, size: "m", scale },
+    };
+  });
 }
 
 export function applyOpacity(editor, next) {

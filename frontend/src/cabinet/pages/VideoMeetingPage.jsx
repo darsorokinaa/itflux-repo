@@ -125,7 +125,10 @@ import { CALL_FRAME_ASPECT, useFloatingDrag } from "../useFloatingDrag";
 import FloatingResizeHandles from "../FloatingResizeHandles";
 import MiniCallBar from "../components/MiniCallBar";
 import {
+  bindMeetingAutoPip,
   closeCallStayOnTop,
+  requestCallStayOnTop,
+  setMeetingMediaSessionActive,
 } from "../callStayOnTop";
 import { selectSharePinTarget } from "../jitsiScreenShare";
 import {
@@ -580,10 +583,43 @@ export default function VideoMeetingPage() {
     return { iframe, participant, localId, remotes };
   }, []);
 
+  const openShareStayOnTop = useCallback(async () => {
+    const current = pipHandleRef.current;
+    if (current?.pipWindow && !current.pipWindow.closed) return current;
+    const host = callFrameRef.current;
+    if (!host) return null;
+    const iframe = apiRef.current?.getIFrame?.()
+      || containerRef.current?.querySelector?.("iframe")
+      || null;
+    const result = await requestCallStayOnTop({ host, iframe });
+    if (!result?.ok || !result.pipWindow) return result;
+    pipHandleRef.current = result;
+    setStayOnTopActive(true);
+    result.pipWindow.addEventListener?.("pagehide", () => {
+      if (pipHandleRef.current?.pipWindow === result.pipWindow) {
+        pipHandleRef.current = null;
+        setStayOnTopActive(false);
+      }
+    });
+    window.requestAnimationFrame(() => notifyJitsiContainerResize(apiRef.current));
+    return result;
+  }, []);
+
+  const closeShareStayOnTop = useCallback(async () => {
+    const current = pipHandleRef.current;
+    pipHandleRef.current = null;
+    setStayOnTopActive(false);
+    await closeCallStayOnTop({
+      pipWindow: current?.pipWindow,
+      restore: current?.restore,
+    });
+    window.requestAnimationFrame(() => notifyJitsiContainerResize(apiRef.current));
+  }, []);
+
   useEffect(() => {
     const controller = createParticipantPipController({
       onState: (snap) => {
-        setStayOnTopActive(Boolean(snap.active));
+        setStayOnTopActive((prev) => Boolean(snap.active) || prev && Boolean(pipHandleRef.current?.pipWindow && !pipHandleRef.current.pipWindow.closed));
         setCallVideoPipReady(Boolean(snap.supported));
         setPipNeedsGesture(Boolean(snap.needsGesture));
       },
@@ -595,6 +631,22 @@ export default function VideoMeetingPage() {
       controller.dispose();
     };
   }, []);
+
+  useEffect(() => {
+    if (pageState !== "live") return undefined;
+    setMeetingMediaSessionActive({ camera: true, microphone: true });
+    const unbind = bindMeetingAutoPip(() => {
+      if (!screenshareLayoutRef.current?.localSharing) {
+        void participantPipRef.current?.requestPip?.(participantPipContext());
+        return;
+      }
+      void openShareStayOnTop();
+    });
+    return () => {
+      unbind();
+      setMeetingMediaSessionActive({ camera: false, microphone: false });
+    };
+  }, [openShareStayOnTop, pageState, participantPipContext]);
 
   const disposeApi = useCallback(() => {
     programmaticDisposeRef.current = true;
@@ -1029,7 +1081,10 @@ export default function VideoMeetingPage() {
             setCallView("normal");
             setFocusCall(false);
             reportClientEvent("screen_share_started", { surface: String(snap?.displaySurface || "").slice(0, 24) });
-            void participantPipRef.current?.onScreenShareChanged(true, participantPipContext()).then((result) => {
+            void openShareStayOnTop().then((stay) => {
+              if (stay?.ok) return null;
+              return participantPipRef.current?.onScreenShareChanged(true, participantPipContext());
+            }).then((result) => {
               if (result?.reason === "unsupported") {
                 setMaterialsToast("Видео ученика можно оставить поверх комнаты");
                 window.setTimeout(() => setMaterialsToast(""), 4200);
@@ -1037,6 +1092,7 @@ export default function VideoMeetingPage() {
             });
           } else if (!localSharing && wasLocalSharing) {
             setShareMiniDismissed(false);
+            void closeShareStayOnTop();
             void participantPipRef.current?.onScreenShareChanged(false, participantPipContext());
             reportClientEvent("screen_share_stopped");
           }
