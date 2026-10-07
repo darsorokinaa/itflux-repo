@@ -1691,15 +1691,17 @@ export default function VideoMeetingPage() {
     // Пока показан вариант — держим панель материалов открытой, чтобы ответы были видны.
     setAsideOpen(true);
     let cancelled = false;
+    let seq = 0;
     const tick = async () => {
+      const my = ++seq;
       setLiveAnswersLoading(true);
       try {
         const data = await fetchVideoMeetingLiveAnswers(meetingUuid);
-        if (!cancelled) setLiveAnswers(data);
+        if (!cancelled && my === seq) setLiveAnswers(data);
       } catch {
-        /* ignore */
+        /* прежний снимок оставляем: ошибка сети не должна затирать уже показанные ответы */
       } finally {
-        if (!cancelled) setLiveAnswersLoading(false);
+        if (!cancelled && my === seq) setLiveAnswersLoading(false);
       }
     };
     void tick();
@@ -1708,7 +1710,7 @@ export default function VideoMeetingPage() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [detail?.canManage, meetingUuid, pageState, presented?.kind, presented?.homeworkId, presented?.presentedAt]);
+  }, [detail?.canManage, meetingUuid, pageState, presented?.kind, presented?.homeworkId]);
 
   useEffect(() => {
     const onPageHide = () => attendanceTracker.onPageHide();

@@ -50,6 +50,7 @@ import {
   saveHomeworkDraft,
   shouldHideHomeworkFinishButton,
   shouldShowHomeworkBottomActions,
+  shouldAutosaveLiveVariant,
   submitHomework,
   homeworkApiUserMessage,
   homeworkTaskNumberEditable,
@@ -845,6 +846,9 @@ function ExamPage() {
   const [liveAnswersLoading, setLiveAnswersLoading] = useState(false);
   /** Учитель на вкладке варианта во время урока — определяем по доступу к live-answers. */
   const [isLiveTeacherView, setIsLiveTeacherView] = useState(false);
+  const [liveViewerSettled, setLiveViewerSettled] = useState(false);
+  const liveAnswersSeqRef = useRef(0);
+  const liveAppliedStampRef = useRef("");
   const isTeacherHomeworkView =
     (isHomework && lessonEmbedParams.embed && !lessonEmbedParams.student)
     || isLiveTeacherView
@@ -1157,24 +1161,33 @@ function ExamPage() {
     if (!meetingUuid) {
       setIsLiveTeacherView(false);
       setLiveAnswers(null);
+      setLiveViewerSettled(false);
       return undefined;
     }
     let cancelled = false;
     const tick = async () => {
+      const my = ++liveAnswersSeqRef.current;
       setLiveAnswersLoading(true);
       try {
         const data = await fetchVideoMeetingLiveAnswers(meetingUuid);
-        if (cancelled) return;
+        if (cancelled || my !== liveAnswersSeqRef.current) return;
         const show = Boolean(data?.presented);
         setIsLiveTeacherView(show);
         setLiveAnswers(show ? data : null);
-      } catch {
-        if (!cancelled) {
+      } catch (err) {
+        if (cancelled || my !== liveAnswersSeqRef.current) return;
+        const status = /** @type {{ status?: number }} */ (err)?.status;
+        // 401/403 — ученик. Чужие ответы не показываем и черновик не блокируем.
+        // Сетевой сбой у учителя не сбрасывает уже полученные ответы.
+        if (status === 401 || status === 403) {
           setIsLiveTeacherView(false);
           setLiveAnswers(null);
         }
       } finally {
-        if (!cancelled) setLiveAnswersLoading(false);
+        if (!cancelled && my === liveAnswersSeqRef.current) {
+          setLiveAnswersLoading(false);
+          setLiveViewerSettled(true);
+        }
       }
     };
     void tick();
@@ -1186,7 +1199,7 @@ function ExamPage() {
   }, [meetingUuid]);
 
   useEffect(() => {
-    if (!variant?.tasks || !hwApiRaw) return;
+    if (!variant?.tasks || !hwApiRaw || isLiveTeacherView) return;
     const cab = cabinetAssignmentId || "";
     const picked = pickHomeworkFields(hwApiRaw, cab);
     const key = `${cab}|${picked.status}|${JSON.stringify(picked.result)}`;
@@ -1211,7 +1224,43 @@ function ExamPage() {
     setUserAnswers((p) => ({ ...p, ...ua }));
     setScores((p) => ({ ...p, ...sc }));
     if (ch && Object.keys(ch).length) setCheckedTasks((p) => ({ ...p, ...ch }));
-  }, [variant, hwApiRaw, cabinetAssignmentId]);
+  }, [variant, hwApiRaw, cabinetAssignmentId, isLiveTeacherView]);
+
+  // Учитель смотрит открытый вариант: поля и таблица берутся из опроса, не из снимка открытия.
+  useEffect(() => {
+    if (!isLiveTeacherView || !variant?.tasks?.length) return;
+    const students = liveAnswers?.students || [];
+    if (students.length !== 1) return;
+    const row = students[0];
+    const result = row?.result;
+    if (!result || typeof result !== "object") return;
+    const stamp = [
+      row.updatedAt || "",
+      JSON.stringify(result.by_task_id || result.byTaskId || {}),
+      JSON.stringify(result.by_number || result.byNumber || {}),
+      JSON.stringify(result.checked || {}),
+    ].join("|");
+    if (liveAppliedStampRef.current === stamp) return;
+    liveAppliedStampRef.current = stamp;
+    const m = new Map();
+    const numberCounts = new Map();
+    for (const t of variant.tasks) {
+      const nk = String(t.number);
+      numberCounts.set(nk, (numberCounts.get(nk) || 0) + 1);
+    }
+    for (const t of variant.tasks) {
+      const nk = String(t.number);
+      if ((numberCounts.get(nk) || 0) === 1) m.set(nk, t);
+    }
+    const { userAnswers: ua, scores: sc, checkedTasks: ch } = homeworkResultToUiState(
+      result,
+      m,
+      variant.tasks,
+    );
+    setUserAnswers(ua);
+    setScores(sc);
+    setCheckedTasks(ch || {});
+  }, [isLiveTeacherView, liveAnswers, variant]);
 
   useEffect(() => {
     if (!homeworkStudentMode || !hwApiRaw) return;
@@ -1819,7 +1868,20 @@ function ExamPage() {
 
   // Живой урок: в базу уходят ответы и прогресс попытки (задание, startedAt).
   useEffect(() => {
-    if (!isLiveVariant || isLiveTeacherView || !cabinetAssignmentId || !variant || homeworkFieldsLocked) {
+    const teacherSide = isLiveTeacherView || Boolean(isLiveVariant && meetingUuid && isTeacherRole(cabinetUser));
+    const studentSide = Boolean(cabinetUser) && !isTeacherRole(cabinetUser);
+    if (
+      !shouldAutosaveLiveVariant({
+        isLiveVariant,
+        teacherSide,
+        meetingUuid,
+        viewerSettled: liveViewerSettled,
+        studentSide,
+      })
+      || !cabinetAssignmentId
+      || !variant
+      || homeworkFieldsLocked
+    ) {
       return undefined;
     }
     if (!attemptHydratedRef.current) return undefined;
@@ -1867,6 +1929,9 @@ function ExamPage() {
   }, [
     isLiveVariant,
     isLiveTeacherView,
+    meetingUuid,
+    liveViewerSettled,
+    cabinetUser,
     cabinetAssignmentId,
     variant,
     checkedTasks,
@@ -3052,6 +3117,15 @@ function ExamPage() {
           >
             <div className={`exam-edu-layout${showExamEducationShell ? "" : " exam-edu-layout--single"}`}>
               <div className="exam-edu-main">
+                {isLiveTeacherView ? (
+                  <div className="live-variant-answers-sidebar live-variant-answers-sidebar--narrow no-print">
+                    <LiveVariantAnswersTable
+                      answers={liveAnswers}
+                      loading={liveAnswersLoading}
+                      compact
+                    />
+                  </div>
+                ) : null}
                 {canSelectVariantTheme && !homeworkStudentMode ? (
                   <div className="no-print">
                     <VariantThemeSelector

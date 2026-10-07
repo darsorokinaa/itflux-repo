@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  shouldAutosaveLiveVariant,
   shouldHideHomeworkFinishButton,
   shouldShowHomeworkBottomActions,
 } from "./cabinetHomework";
@@ -61,5 +62,37 @@ describe("homework submit UI visibility", () => {
         statusNorm: "submitted",
       }),
     ).toBe(false);
+  });
+});
+
+describe("shouldAutosaveLiveVariant", () => {
+  it("saves a student draft during a live lesson", () => {
+    expect(shouldAutosaveLiveVariant({
+      isLiveVariant: true,
+      teacherSide: false,
+      studentSide: true,
+      meetingUuid: "meet-1",
+      viewerSettled: true,
+    })).toBe(true);
+  });
+
+  it("does not let the teacher page overwrite the student draft", () => {
+    expect(shouldAutosaveLiveVariant({
+      isLiveVariant: true,
+      teacherSide: true,
+      studentSide: false,
+      meetingUuid: "meet-1",
+      viewerSettled: true,
+    })).toBe(false);
+  });
+
+  it("waits until the viewer is known when the lesson id is present", () => {
+    expect(shouldAutosaveLiveVariant({
+      isLiveVariant: true,
+      teacherSide: false,
+      studentSide: false,
+      meetingUuid: "meet-1",
+      viewerSettled: false,
+    })).toBe(false);
   });
 });

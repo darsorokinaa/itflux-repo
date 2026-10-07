@@ -66,12 +66,14 @@ export function applyThickness(editor, next) {
 
 export function installLessonThickness(editor) {
   if (!editor?.sideEffects?.registerBeforeCreateHandler) return () => {};
+  // beforeCreate записывает то, что вернул обработчик. undefined попадает в
+  // хранилище как пустая запись и падает на typeName.
   return editor.sideEffects.registerBeforeCreateHandler("shape", (shape, source) => {
-    if (source && source !== "user") return undefined;
-    if (!shape || !STROKE_SHAPE_TYPES.has(shape.type)) return undefined;
-    if (typeof shape.props?.scale !== "number") return undefined;
+    if (source && source !== "user") return shape;
+    if (!shape || !STROKE_SHAPE_TYPES.has(shape.type)) return shape;
+    if (typeof shape.props?.scale !== "number") return shape;
     const scale = lessonStrokeScale(1, getLessonThickness());
-    if (shape.props.scale === scale && shape.props.size === "m") return undefined;
+    if (shape.props.scale === scale && shape.props.size === "m") return shape;
     return {
       ...shape,
       props: { ...shape.props, size: "m", scale },

@@ -521,10 +521,13 @@ def live_variant_answers(*, meeting: VideoMeeting, user: User) -> dict:
         }
 
     event_students = list_event_students(meeting.schedule_event)
-    submissions = {
-        row.student_id: row
-        for row in HomeworkSubmission.objects.filter(homework=homework, student__in=event_students)
-    }
+    # При дублях берём последнюю правку, иначе опрос показывает старый черновик.
+    submissions = {}
+    for row in (
+        HomeworkSubmission.objects.filter(homework=homework, student__in=event_students)
+        .order_by("updated_at", "id")
+    ):
+        submissions[row.student_id] = row
     tasks = _variant_tasks_answer_key(variant_id)
     rows = []
     for student in event_students:

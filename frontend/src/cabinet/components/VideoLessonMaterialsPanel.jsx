@@ -342,6 +342,11 @@ export default function VideoLessonMaterialsPanel({
       ) : null}
 
       <div className="video-lesson-aside__scroll">
+        {canManage && presented?.kind === "variant" ? (
+          <section className="video-lesson-aside__section video-lesson-aside__section--live">
+            <LiveVariantAnswersTable answers={liveAnswers} loading={liveAnswersLoading} compact />
+          </section>
+        ) : null}
         {!count && canManage ? (
           <div className="vl-empty">
             <p className="vl-empty__title">Материалов пока нет</p>
@@ -409,12 +414,6 @@ export default function VideoLessonMaterialsPanel({
               onPresenceChange={onBoardPresenceChange}
             />
           </div>
-        ) : null}
-
-        {canManage && presented?.kind === "variant" ? (
-          <section className="video-lesson-aside__section video-lesson-aside__section--live">
-            <LiveVariantAnswersTable answers={liveAnswers} loading={liveAnswersLoading} compact />
-          </section>
         ) : null}
 
         {canManage && materialSession?.state ? (

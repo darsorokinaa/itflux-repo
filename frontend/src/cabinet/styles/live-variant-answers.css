@@ -15,6 +15,18 @@
   min-width: 0;
 }
 
+/* В уроке вариант открыт в узком кадре: боковая панель там скрыта правилом до 1024px. */
+.live-variant-answers-sidebar--narrow {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  .exam-page--live-teacher .live-variant-answers-sidebar--narrow {
+    display: block;
+    margin: 0 0 12px;
+  }
+}
+
 .live-variant-answers-sidebar .live-variant-answers {
   position: static;
   margin: 0;

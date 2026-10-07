@@ -687,6 +687,24 @@ export function shouldShowHomeworkBottomActions({
 }
 
 /**
+ * Живой урок: в базу пишет только ученик.
+ * Страница учителя (роль или успешный live-answers) не должна затирать черновик.
+ * Пока встреча известна, а роль ещё нет — тоже не пишем, иначе снимок с открытия
+ * варианта уходит поверх новых ответов.
+ */
+export function shouldAutosaveLiveVariant({
+  isLiveVariant = false,
+  teacherSide = false,
+  meetingUuid = "",
+  viewerSettled = false,
+  studentSide = false,
+} = {}) {
+  if (!isLiveVariant || teacherSide) return false;
+  if (meetingUuid && !viewerSettled && !studentSide) return false;
+  return true;
+}
+
+/**
  * @param {string} statusNorm
  */
 export function homeworkIsReviewed(statusNorm) {
