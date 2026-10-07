@@ -241,6 +241,15 @@ function LessonTop({ onStudentView }) {
               onStudentView(false);
             }}
           />
+          {room.inRoom ? (
+            <TopIcon
+              label={room.fullscreen ? "Окно" : "На весь экран"}
+              pressed={room.fullscreen}
+              onClick={() => postRoomAction("fullscreen")}
+            >
+              <Maximize2 size={17} strokeWidth={1.8} aria-hidden="true" />
+            </TopIcon>
+          ) : null}
           {room.canFinish ? (
             <TopIcon label="Завершить звонок" danger disabled={room.finishing} onClick={() => postRoomAction("finish")}>
               <PhoneOff size={17} strokeWidth={1.8} aria-hidden="true" />

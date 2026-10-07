@@ -467,7 +467,7 @@ export default function PresenterToolbar({
           className="ss-ann-v2-toolbar__status"
           title={geometryStatus === "waiting"
             ? "Ожидание точной геометрии демонстрации"
-            : "Геометрия Jitsi приблизительная — линии могут чуть смещаться"}
+            : "Геометрия видео приблизительная — линии могут чуть смещаться"}
         >
           {geometryStatus === "waiting" ? "…" : "✕"}
         </span>

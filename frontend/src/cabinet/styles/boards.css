@@ -2101,6 +2101,19 @@ html.cb-board-editor-open body {
   background: #f1f3f5;
 }
 
+.lesson-board__pdf-status {
+  position: absolute;
+  z-index: var(--lesson-z-toolbar, 30);
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  color: var(--cb-board-text, #1a1d23);
+  font-size: 13px;
+  font-weight: 650;
+  pointer-events: none;
+}
+
 .lesson-board .tl-rich-text :is(p, li, h1, h2, h3, h4, h5, h6) {
   font-family: inherit !important;
   font-weight: inherit;

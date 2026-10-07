@@ -330,7 +330,6 @@ export const JITSI_EXPANDED_TOOLBAR = [
   "mute-video-everyone",
   "videoquality",
   "filmstrip",
-  "fullscreen",
   "invite",
   "profile",
   "settings",
@@ -344,13 +343,30 @@ export const JITSI_EXPANDED_TOOLBAR = [
   "hangup",
 ];
 
+/** Панель видна сразу и в компактном окне: на планшете нет hover, автоскрытие прячет кнопки. */
+export const JITSI_TOOLBAR_VISIBLE = { alwaysVisible: true, initialTimeout: 0, timeout: 0 };
+
 export function jitsiCallChromeConfig(expanded) {
   return {
     toolbarButtons: expanded ? JITSI_EXPANDED_TOOLBAR : JITSI_COMPACT_TOOLBAR,
-    toolbarConfig: expanded
-      ? { alwaysVisible: true, initialTimeout: 0, timeout: 0 }
-      : { alwaysVisible: false, initialTimeout: 4000, timeout: 4000 },
+    toolbarConfig: JITSI_TOOLBAR_VISIBLE,
   };
+}
+
+/** Сообщает iframe о новом размере контейнера. Не на каждый pointermove. */
+export function notifyJitsiContainerResize(api) {
+  const session = api?.api || api;
+  try {
+    const iframe = session?.getIFrame?.();
+    iframe?.contentWindow?.dispatchEvent(new Event("resize"));
+  } catch {
+    /* чужой origin: External API слушает resize родителя */
+  }
+  try {
+    window.dispatchEvent(new Event("resize"));
+  } catch {
+    /* ignore */
+  }
 }
 
 /** Меняет панель Jitsi без переподключения. В компактном виде остаётся короткий набор. */
@@ -393,6 +409,14 @@ export function buildJitsiConfigOverwrite({
     disableModeratorIndicator: false,
     enableClosePage: false,
     toolbarButtons: JITSI_COMPACT_TOOLBAR,
+    toolbarConfig: JITSI_TOOLBAR_VISIBLE,
+    // 1:1 режим Jitsi оставляет один крупный кадр. Выключение локальной камеры
+    // переносит аватар ученика на сцену и прячет учителя в обрезанный filmstrip.
+    disable1On1Mode: true,
+    filmstrip: {
+      disabled: false,
+      disableStageFilmstrip: false,
+    },
     // 1:1 учитель–ученик почти всегда за разными NAT. P2P даёт «видим в списке,
     // но нет звука/видео». Медиа идёт через JVB.
     p2p: { enabled: false },
@@ -814,6 +838,10 @@ export function buildJitsiEmbedUrl(config) {
     "config.hideConferenceSubject=true",
     "config.hideConferenceTimer=true",
     `config.toolbarButtons=${JSON.stringify(JITSI_COMPACT_TOOLBAR)}`,
+    "config.toolbarConfig.alwaysVisible=true",
+    "config.toolbarConfig.initialTimeout=0",
+    "config.toolbarConfig.timeout=0",
+    "config.disable1On1Mode=true",
     'config.defaultLanguage="ru"',
     `config.subject=${encodeURIComponent(JSON.stringify(subject))}`,
     `config.localSubject=${encodeURIComponent(JSON.stringify(subject))}`,
@@ -899,6 +927,9 @@ function wireParticipantListeners(api, hooks) {
     api.addListener?.("videoConferenceJoined", selectMaxCamera);
     api.addListener?.("participantJoined", placeTiles);
     api.addListener?.("participantLeft", placeTiles);
+    // Mute меняет дорожку, не состав участников. Без повторной раскладки
+    // сцена остаётся на локальном аватаре и прячет remote.
+    api.addListener?.("videoMuteStatusChanged", placeTiles);
   } catch {
     /* ignore */
   }

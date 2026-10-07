@@ -11,6 +11,7 @@ import {
   packedPdfFrameName,
   pdfPageLabel,
   sniffPdfBytes,
+  stackPdfPageFrames,
   withPackedPdfMeta,
 } from "./boardPdf";
 
@@ -41,6 +42,19 @@ describe("boardPdf", () => {
     expect(pdfPageLabel(5)).toBe("5 страниц");
     expect(pdfPageLabel(21)).toBe("21 страница");
     expect(packedPdfFrameName("урок.pdf", 3)).toBe("урок.pdf · 3 страницы");
+  });
+
+  it("кладёт страницы PDF столбиком без наложения", () => {
+    const frames = stackPdfPageFrames(
+      [{ w: 200, h: 280 }, { w: 180, h: 240 }],
+      { x: 100, y: 40 },
+      28,
+    );
+    expect(frames[0]).toEqual({ x: 0, y: 40, w: 200, h: 280 });
+    expect(frames[1].x).toBe(10);
+    expect(frames[1].y).toBe(40 + 280 + 28);
+    expect(frames[1].y).toBeGreaterThan(frames[0].y + frames[0].h);
+    expect(frames[0].w / frames[0].h).toBeCloseTo(200 / 280);
   });
 
   it("читает и пишет customData.itfluxPdf", () => {

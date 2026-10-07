@@ -70,7 +70,11 @@ describe("meeting camera preference", () => {
     expect(cfg.disableSelfView).toBeUndefined();
     expect(cfg.startAudioOnly).toBeUndefined();
     expect(cfg.disableTileEnlargement).toBeUndefined();
+    expect(cfg.disable1On1Mode).toBe(true);
+    expect(cfg.filmstrip?.disabled).not.toBe(true);
     expect(cfg.filmstrip?.disableStageFilmstrip).not.toBe(true);
+    expect(cfg.toolbarConfig.alwaysVisible).toBe(true);
+    expect(cfg.toolbarConfig.initialTimeout).toBe(0);
     expect(cfg.toolbarButtons).toEqual(["microphone", "camera", "desktop", "hangup"]);
     expect(cfg.toolbarButtons).not.toContain("chat");
   });
@@ -79,7 +83,8 @@ describe("meeting camera preference", () => {
     const compact = jitsiCallChromeConfig(false);
     const expanded = jitsiCallChromeConfig(true);
     expect(compact.toolbarButtons).toEqual(["microphone", "camera", "desktop", "hangup"]);
-    expect(compact.toolbarConfig.alwaysVisible).toBe(false);
+    expect(compact.toolbarConfig.alwaysVisible).toBe(true);
+    expect(compact.toolbarConfig.initialTimeout).toBe(0);
     expect(expanded.toolbarConfig.alwaysVisible).toBe(true);
     ["chat", "raisehand", "participants-pane", "tileview", "settings", "whiteboard", "recording"].forEach((name) => {
       expect(expanded.toolbarButtons).toContain(name);
@@ -92,7 +97,7 @@ describe("meeting camera preference", () => {
     expect(commands.map((entry) => entry[0])).toEqual(["overwriteConfig", "overwriteConfig"]);
     expect(commands[0][1].toolbarButtons).toContain("chat");
     expect(commands[1][1].toolbarButtons).not.toContain("chat");
-    expect(commands[1][1].toolbarConfig.alwaysVisible).toBe(false);
+    expect(commands[1][1].toolbarConfig.alwaysVisible).toBe(true);
   });
 
   it("keeps both participants visible side by side", () => {

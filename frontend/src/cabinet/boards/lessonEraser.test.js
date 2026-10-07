@@ -1,6 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { imageSurvivesEraser, keepImagesUnderEraser, withoutImageEraseTargets } from "./lessonEraser";
+import {
+  imageSurvivesEraser,
+  keepImagesUnderEraser,
+  shouldDensifyEraserMove,
+  withoutImageEraseTargets,
+} from "./lessonEraser";
+
+describe("lesson eraser pointer", () => {
+  it("densifies pen and touch while the eraser is active and leaves the mouse alone", () => {
+    expect(shouldDensifyEraserMove({ type: "pointermove", pointerType: "pen" }, true)).toBe(true);
+    expect(shouldDensifyEraserMove({ type: "pointermove", pointerType: "touch" }, true)).toBe(true);
+    expect(shouldDensifyEraserMove({ type: "pointermove", pointerType: "mouse" }, true)).toBe(false);
+    expect(shouldDensifyEraserMove({ type: "pointermove", pointerType: "pen" }, false)).toBe(false);
+    expect(shouldDensifyEraserMove({ type: "pointerdown", pointerType: "pen" }, true)).toBe(false);
+  });
+});
 
 describe("lesson eraser keeps images", () => {
   it("drops only image ids from the erase preview", () => {

@@ -3081,7 +3081,7 @@ export default function CabinetSchedulePage() {
         );
         navigate(`/cabinet/meetings/${meetingUuid}`);
       } catch (err) {
-        showStatus(err.message || "Не удалось открыть видеокомнату Jitsi");
+        showStatus(err.message || "Не удалось открыть видеозвонок");
       } finally {
         setStartingId(null);
       }

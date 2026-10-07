@@ -784,7 +784,7 @@ export default function CreateScheduleLessonModal({
                 <label className="cb-sch-field">
                   <span>Ссылка на встречу</span>
                   <select value={meetingMode} onChange={(e) => setMeetingMode(e.target.value)}>
-                    <option value="auto">Создать автоматически (Jitsi)</option>
+                    <option value="auto">Создать автоматически</option>
                     <option value="later">Создать позже</option>
                     <option value="manual">Ввести вручную</option>
                   </select>

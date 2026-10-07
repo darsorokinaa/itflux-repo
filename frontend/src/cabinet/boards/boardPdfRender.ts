@@ -113,6 +113,7 @@ export async function renderBoardPdfPage(
   pageNumber: number,
 ): Promise<RenderedPdfPage> {
   const page = await doc.getPage(pageNumber);
+  let canvas = null;
   try {
     const base = page.getViewport({ scale: 1 });
     const scale = Math.min(
@@ -121,7 +122,7 @@ export async function renderBoardPdfPage(
       MAX_PAGE_EDGE / Math.max(1, base.height),
     );
     const viewport = page.getViewport({ scale: Math.max(0.4, scale) });
-    const canvas = document.createElement("canvas");
+    canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(viewport.width));
     canvas.height = Math.max(1, Math.round(viewport.height));
     const ctx = canvas.getContext("2d", { alpha: false });
@@ -139,6 +140,10 @@ export async function renderBoardPdfPage(
     };
   } finally {
     page.cleanup();
+    if (canvas) {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
   }
 }
 

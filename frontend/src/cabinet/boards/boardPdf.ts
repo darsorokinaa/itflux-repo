@@ -93,6 +93,27 @@ export function filesFromDataTransfer(data: DataTransfer | null | undefined): Fi
   return Array.from(data.files);
 }
 
+export const BOARD_PDF_PAGE_GAP = 28;
+
+export type PdfPageFrame = { x: number; y: number; w: number; h: number };
+
+/** Страницы PDF друг под другом, с исходным соотношением сторон и зазором. */
+export function stackPdfPageFrames(
+  pages: Array<{ w: number; h: number }>,
+  origin: { x: number; y: number },
+  gap = BOARD_PDF_PAGE_GAP,
+): PdfPageFrame[] {
+  let y = origin.y;
+  const space = Number.isFinite(gap) ? gap : BOARD_PDF_PAGE_GAP;
+  return pages.map((page) => {
+    const w = Math.max(1, page.w);
+    const h = Math.max(1, page.h);
+    const frame = { x: origin.x - w / 2, y, w, h };
+    y += h + space;
+    return frame;
+  });
+}
+
 export function pdfPageLabel(count: number): string {
   const n = Math.max(0, Math.floor(Number(count) || 0));
   const mod10 = n % 10;

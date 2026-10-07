@@ -19,6 +19,7 @@ import { loadMathJax } from "../../utils/loadMathJax";
 import { LESSON_CUSTOM_COLOR } from "./lessonCustomColor";
 import { isLessonLinkUrl } from "./lessonGeoUrl";
 import { lessonBoardAssetCanUpload } from "./lessonBoardAssetStore";
+import { BOARD_PDF_INSERT_ERROR, BOARD_PDF_PAGE_GAP, stackPdfPageFrames } from "./boardPdf";
 import {
   getLessonThickness,
   lessonCellValue,
@@ -813,32 +814,161 @@ function blobToDataUrl(blob) {
   });
 }
 
-export async function insertPdfFile(editor, file) {
-  const { openBoardPdf, renderBoardPdfPage } = await import("./boardPdfRender");
-  const opened = await openBoardPdf(file);
-  if (!opened.ok) return opened.message;
-  const origin = centerOf(editor);
-  let y = origin.y;
-  for (let page = 1; page <= opened.opened.pageCount; page += 1) {
-    const rendered = await renderBoardPdfPage(opened.opened.doc, page);
-    const fitted = fitSize(rendered.width, rendered.height, 640);
-    const assetId = await storeImageAsset(
-      editor,
-      rendered.blob,
-      rendered.width,
-      rendered.height,
-      `${file.name || "pdf"}-${page}.jpg`,
-    );
-    editor.createShape({
-      id: createShapeId(),
-      type: "image",
-      x: origin.x - fitted.w / 2,
-      y,
-      props: { assetId, w: fitted.w, h: fitted.h },
-    });
-    y += fitted.h + 24;
+const pdfInsertInflight = new Set();
+
+function pdfInsertKey(file) {
+  return `${file?.name || "pdf"}:${file?.size || 0}:${file?.lastModified || 0}`;
+}
+
+function pdfNoticeState(editor) {
+  const root = editor?.getContainer?.();
+  if (!root) return null;
+  if (!root.__itfluxPdfNotice) {
+    root.__itfluxPdfNotice = { timer: 0, generation: 0, disposed: false };
   }
-  return opened.opened.truncated ? "Показаны первые страницы PDF" : "";
+  return root.__itfluxPdfNotice;
+}
+
+/** Снимает отложенное скрытие статуса. Вызывается из cleanup onMount доски. */
+export function disposePdfNotice(editor) {
+  const state = pdfNoticeState(editor);
+  if (!state) return;
+  window.clearTimeout(state.timer);
+  state.timer = 0;
+  state.generation += 1;
+  state.disposed = true;
+}
+
+function cancelPdfNotice(editor) {
+  const state = pdfNoticeState(editor);
+  if (!state || state.disposed) return;
+  window.clearTimeout(state.timer);
+  state.timer = 0;
+  state.generation += 1;
+}
+
+function showPdfStatus(editor, text) {
+  const root = editor?.getContainer?.();
+  const state = pdfNoticeState(editor);
+  if (!root?.isConnected || state?.disposed) return () => {};
+  const existing = root.querySelector("[data-pdf-status]");
+  if (!text) {
+    existing?.remove();
+    return () => {};
+  }
+  const node = existing || document.createElement("p");
+  node.dataset.pdfStatus = "1";
+  node.className = "lesson-board__pdf-status";
+  node.textContent = text;
+  if (!existing) root.appendChild(node);
+  return () => node.remove();
+}
+
+function yieldToUi() {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, 0);
+  });
+}
+
+function clearPdfNoticeLater(editor) {
+  const root = editor?.getContainer?.();
+  const state = pdfNoticeState(editor);
+  if (!state || state.disposed || !root?.isConnected) return;
+  window.clearTimeout(state.timer);
+  const generation = state.generation + 1;
+  state.generation = generation;
+  state.timer = window.setTimeout(() => {
+    if (state.disposed || state.generation !== generation || !root.isConnected) return;
+    state.timer = 0;
+    showPdfStatus(editor, "");
+  }, 4200);
+}
+
+export async function insertPdfFile(editor, file, { point } = {}) {
+  const key = pdfInsertKey(file);
+  if (pdfInsertInflight.has(key)) return "";
+  pdfInsertInflight.add(key);
+  cancelPdfNotice(editor);
+  const clearStatus = showPdfStatus(editor, "Добавляем PDF…");
+  const { openBoardPdf, renderBoardPdfPage, closeBoardPdf } = await import("./boardPdfRender");
+  let doc = null;
+  let notice = "";
+  try {
+    const opened = await openBoardPdf(file);
+    if (!opened.ok) {
+      notice = opened.message;
+      return opened.message;
+    }
+    doc = opened.opened.doc;
+    const rendered = [];
+    for (let page = 1; page <= opened.opened.pageCount; page += 1) {
+      showPdfStatus(editor, `Добавляем PDF… ${page}/${opened.opened.pageCount}`);
+      rendered.push(await renderBoardPdfPage(doc, page));
+      await yieldToUi();
+    }
+    const origin = point
+      ? { x: point.x, y: point.y }
+      : centerOf(editor);
+    const frames = stackPdfPageFrames(
+      rendered.map((page) => fitSize(page.width, page.height, 640)),
+      origin,
+      BOARD_PDF_PAGE_GAP,
+    );
+    const prepared = [];
+    for (let index = 0; index < rendered.length; index += 1) {
+      const page = rendered[index];
+      const frame = frames[index];
+      const image = imageFile(page.blob, `${file.name || "pdf"}-${page.pageNumber}.jpg`);
+      const assetId = AssetRecordType.createId();
+      const draft = {
+        id: assetId,
+        type: "image",
+        typeName: "asset",
+        props: {
+          name: image.name,
+          src: "",
+          w: page.width,
+          h: page.height,
+          mimeType: image.type || "image/jpeg",
+          isAnimated: false,
+        },
+        meta: {},
+      };
+      const src = await persistedImageSrc(editor, draft, image);
+      prepared.push({
+        asset: { ...draft, props: { ...draft.props, src } },
+        shape: {
+          id: createShapeId(),
+          type: "image",
+          x: frame.x,
+          y: frame.y,
+          props: { assetId, w: frame.w, h: frame.h },
+        },
+      });
+      await yieldToUi();
+    }
+    if (prepared.length) {
+      editor.run(() => {
+        editor.createAssets(prepared.map((item) => item.asset));
+        editor.createShapes(prepared.map((item) => item.shape));
+        editor.select(...prepared.map((item) => item.shape.id));
+      });
+    }
+    notice = opened.opened.truncated ? "Показаны первые страницы PDF" : "";
+    return notice;
+  } catch {
+    notice = BOARD_PDF_INSERT_ERROR;
+    return notice;
+  } finally {
+    pdfInsertInflight.delete(key);
+    await closeBoardPdf(doc);
+    if (notice) {
+      showPdfStatus(editor, notice);
+      clearPdfNoticeLater(editor);
+    } else {
+      clearStatus();
+    }
+  }
 }
 
 export async function replaceSelectedImage(editor, file) {

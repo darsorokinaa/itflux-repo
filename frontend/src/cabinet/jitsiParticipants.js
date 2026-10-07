@@ -357,7 +357,7 @@ export function attachConferencePresence(api, {
     });
     if (event?.roomName && diagnostics.roomName && !jitsiRoomsMatch(diagnostics.roomName, event.roomName)) {
       onMediaWarning?.(
-        "Комната Jitsi не совпадает с каноническим roomName урока. Обновите страницу.",
+        "Комната видеозвонка не совпадает с комнатой урока. Обновите страницу.",
       );
     }
     applySubject();

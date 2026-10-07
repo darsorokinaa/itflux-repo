@@ -28,6 +28,7 @@ import {
   createJitsiMeetSession,
   getMeetingCameraEnabled,
   getMeetingMicEnabled,
+  notifyJitsiContainerResize,
   resolveJitsiDisplayName,
   setMeetingCameraEnabled,
   setMeetingMicEnabled,
@@ -40,6 +41,12 @@ import {
 } from "../jitsiCallState";
 import { closeConnectionCheck } from "../connectionCheck/openConnectionCheck";
 import { abortJitsiConnectionProbe } from "../connectionCheck/jitsiProbe";
+import {
+  currentFullscreenElement,
+  exitDocumentFullscreen,
+  fullscreenNeedsFallback,
+  requestNodeFullscreen,
+} from "../callFullscreen";
 import { stopAllConnectionCheckStreams } from "../connectionCheck/mediaCleanup";
 import { clearPrimedMedia } from "../connectionCheck/mediaDevices";
 import ConfirmActionModal from "../components/ConfirmActionModal";
@@ -468,8 +475,10 @@ export default function VideoMeetingPage() {
   const [materialsToast, setMaterialsToast] = useState("");
   const [mobilePane, setMobilePane] = useState("call"); // call | materials
   const [roomFullscreen, setRoomFullscreen] = useState(false);
+  const [callFullscreenFallback, setCallFullscreenFallback] = useState(false);
   const [boardFrameEpoch, setBoardFrameEpoch] = useState(0);
   const pageRootRef = useRef(null);
+  const callFrameRef = useRef(null);
   const boardFrameRef = useRef(null);
   const boardSrcCacheRef = useRef({ url: "", src: "" });
   const boardChromeActionsRef = useRef({});
@@ -756,7 +765,7 @@ export default function VideoMeetingPage() {
           ? (
             config.domain && !String(config.domain).includes("meet.jit.si")
               ? `На ${config.domain} нет JWT: нажмите «Я организатор» или включите JITSI_AUTH_MODE=jwt на сервере — иначе урок не начнётся.`
-              : "На meet.jit.si нажмите «Я организатор» и войдите в аккаунт Jitsi — иначе урок не начнётся."
+              : "На meet.jit.si нажмите «Я организатор» и войдите в аккаунт организатора — иначе урок не начнётся."
           )
           : "",
       );
@@ -888,6 +897,8 @@ export default function VideoMeetingPage() {
           jitsiAuthRetryRef.current = 0;
           setJoinState("joined");
           conferencePresenceRef.current.joined = true;
+          applyConferenceHint();
+          window.dispatchEvent(new Event("resize"));
           resumeControllerRef.current?.succeed?.();
           callStateRef.current?.transition(CALL_STATES.joined, "videoConferenceJoined");
           reconnectPolicyRef.current?.markSuccess();
@@ -938,6 +949,8 @@ export default function VideoMeetingPage() {
         onBecameModerator: showModeratorToast,
         onMediaWarning: (msg) => setMediaWarning(msg || ""),
         onConnectionHint: (msg) => {
+          const presence = conferencePresenceRef.current;
+          if (presence.joined && !presence.reconnecting && !presence.mediaFailed) return;
           setConnectionHint(msg || "");
         },
         onConnectionState: (next, why) => {
@@ -1064,6 +1077,8 @@ export default function VideoMeetingPage() {
       }
       apiRef.current = wrapped;
       screenShareApiRef.current = wrapped.screenShare || null;
+      applyConferenceHint();
+      notifyJitsiContainerResize(wrapped);
       claimMeetingCall(meetingUuid, callOwnerIdRef.current);
       setJoinState(wrapped.mode === "external-api" ? "joined" : "embedded");
       try {
@@ -3138,8 +3153,28 @@ export default function VideoMeetingPage() {
 
   useEffect(() => {
     // Сообщаем Jitsi о смене размеров контейнера без пересоздания сессии.
-    window.dispatchEvent(new Event("resize"));
-  }, [asideOpen, workspaceOpen, mobilePane, callView]);
+    notifyJitsiContainerResize(apiRef.current);
+  }, [asideOpen, workspaceOpen, mobilePane, callView, roomFullscreen, callFullscreenFallback]);
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return undefined;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        notifyJitsiContainerResize(apiRef.current);
+      });
+    });
+    observer.observe(node);
+    const onOrientation = () => notifyJitsiContainerResize(apiRef.current);
+    window.addEventListener("orientationchange", onOrientation);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener("orientationchange", onOrientation);
+    };
+  }, [showJitsi]);
 
   useEffect(() => {
     applyJitsiCallChrome(apiRef.current, {
@@ -3148,51 +3183,81 @@ export default function VideoMeetingPage() {
   }, [compactCall, callView, joinState]);
 
   const toggleRoomFullscreen = useCallback(async () => {
-    const root = pageRootRef.current;
-    const useCssFallback = () => {
-      setRoomFullscreen((prev) => {
-        const next = !prev;
-        document.body.classList.toggle("vl-room-fullscreen", next);
-        return next;
-      });
-      window.setTimeout(() => window.dispatchEvent(new Event("resize")), 80);
+    const frame = callFrameRef.current;
+    const active = currentFullscreenElement();
+    const syncLayout = () => {
+      window.requestAnimationFrame(() => notifyJitsiContainerResize(apiRef.current));
     };
-    try {
-      if (!document.fullscreenElement && root?.requestFullscreen) {
-        await root.requestFullscreen();
-        setRoomFullscreen(true);
-        document.body.classList.add("vl-room-fullscreen");
-        window.setTimeout(() => window.dispatchEvent(new Event("resize")), 80);
-        return;
+    if (active) {
+      try {
+        await exitDocumentFullscreen();
+      } catch {
+        /* браузер уже вышел */
       }
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
-        setRoomFullscreen(false);
-        document.body.classList.remove("vl-room-fullscreen");
-        window.setTimeout(() => window.dispatchEvent(new Event("resize")), 80);
-        return;
-      }
-    } catch {
-      /* iOS / denied — CSS fallback */
+      setCallFullscreenFallback(false);
+      document.body.classList.remove("vl-room-fullscreen");
+      setRoomFullscreen(false);
+      syncLayout();
+      return;
     }
-    useCssFallback();
-  }, []);
+    if (callFullscreenFallback) {
+      setCallFullscreenFallback(false);
+      document.body.classList.remove("vl-room-fullscreen");
+      setRoomFullscreen(false);
+      syncLayout();
+      return;
+    }
+    try {
+      await requestNodeFullscreen(frame);
+      setCallFullscreenFallback(false);
+      document.body.classList.remove("vl-room-fullscreen");
+      setRoomFullscreen(true);
+      syncLayout();
+    } catch (error) {
+      if (!fullscreenNeedsFallback(error)) return;
+      setCallFullscreenFallback(true);
+      document.body.classList.add("vl-room-fullscreen");
+      setRoomFullscreen(true);
+      syncLayout();
+    }
+  }, [callFullscreenFallback]);
 
   useEffect(() => {
     const onFs = () => {
-      const active = Boolean(document.fullscreenElement);
-      setRoomFullscreen(active || document.body.classList.contains("vl-room-fullscreen"));
+      const active = currentFullscreenElement();
+      const frame = callFrameRef.current;
+      const ours = Boolean(active && frame && (active === frame || frame.contains(active)));
       if (!active) {
-        // Не снимаем CSS-fallback класс здесь — им управляет toggle.
+        setCallFullscreenFallback(false);
+        document.body.classList.remove("vl-room-fullscreen");
+        setRoomFullscreen(false);
+      } else if (ours) {
+        setCallFullscreenFallback(false);
+        setRoomFullscreen(true);
       }
-      window.dispatchEvent(new Event("resize"));
+      notifyJitsiContainerResize(apiRef.current);
     };
     document.addEventListener("fullscreenchange", onFs);
+    document.addEventListener("webkitfullscreenchange", onFs);
     return () => {
       document.removeEventListener("fullscreenchange", onFs);
+      document.removeEventListener("webkitfullscreenchange", onFs);
       document.body.classList.remove("vl-room-fullscreen");
     };
   }, []);
+
+  useEffect(() => {
+    if (!callFullscreenFallback) return undefined;
+    const onKey = (event) => {
+      if (event.key !== "Escape") return;
+      setCallFullscreenFallback(false);
+      document.body.classList.remove("vl-room-fullscreen");
+      setRoomFullscreen(false);
+      notifyJitsiContainerResize(apiRef.current);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [callFullscreenFallback]);
 
   const resumeUi = classifyResumeUi(
     resumeState,
@@ -3310,7 +3375,6 @@ export default function VideoMeetingPage() {
         shareMiniCall ? "video-lesson-page--share-mini" : "",
         liveVariantAnswers ? "video-lesson-page--live-answers" : "",
         mobilePane === "materials" && showJitsi ? "video-lesson-page--mobile-materials" : "",
-        roomFullscreen ? "is-css-fullscreen" : "",
         boardChromeOpen ? "video-lesson-page--board" : "",
       ].filter(Boolean).join(" ")}
     >
@@ -3482,7 +3546,10 @@ export default function VideoMeetingPage() {
         ) : null}
 
         <main
-          ref={compactCall ? compactCallRef : undefined}
+          ref={(node) => {
+            callFrameRef.current = node;
+            if (compactCall && compactCallRef) compactCallRef.current = node;
+          }}
           className={[
             "video-lesson-content",
             compactCallDragging || compactCallResizing ? "video-lesson-content--dragging" : "",
@@ -3490,6 +3557,7 @@ export default function VideoMeetingPage() {
             compactCall && callView === "expanded" ? "video-lesson-content--call-expanded" : "",
             compactCall ? "video-lesson-content--resizable" : "",
             minimizedShowsVideo ? "video-lesson-content--call-sized" : "",
+            callFullscreenFallback ? "is-call-fullscreen-fallback" : "",
           ].filter(Boolean).join(" ")}
           data-participant-video-mode={participantVideoMode}
           data-screen-share-active={screenShareActive ? "true" : "false"}
@@ -3728,9 +3796,7 @@ export default function VideoMeetingPage() {
               startedAt={meeting?.actualStartedAt || ""}
               remoteAudioMuted={pipParticipant?.audioMuted ?? callRoster.remotes?.[0]?.audioMuted}
               stageCameraOff={
-                callRoster.remotes?.length
-                  ? (pipParticipant?.videoMuted ?? callRoster.remotes?.[0]?.videoMuted) === true
-                  : callRoster.local?.videoMuted === true
+                !callRoster.remotes?.length && callRoster.local?.videoMuted === true
               }
               onMinimize={() => setCallView("minimized")}
               onShow={() => setCallView("normal")}
@@ -3749,7 +3815,18 @@ export default function VideoMeetingPage() {
             className="video-lesson-jitsi-host"
             hidden={!showJitsi || (compactCall && callView === "minimized" && !minimizedShowsVideo)}
           >
-            {connectionHint && connectionHint !== "Ждём ученика" && connectionHint !== "Ждём учителя" ? (
+            {connectionHint
+              && connectionHint !== "Ждём ученика"
+              && connectionHint !== "Ждём учителя"
+              && !(
+                (joinState === "joined" || joinState === "embedded")
+                && (
+                  connectionHint === "Подключаем видеозвонок…"
+                  || connectionHint === "Подключение к комнате…"
+                  || connectionHint === "Подключение к конференции…"
+                  || connectionHint === "Подключение занимает больше времени…"
+                )
+              ) ? (
               <div className="video-lesson-media-warning video-lesson-media-warning--info" role="status">
                 <span>{connectionHint}</span>
                 {callReconnectNeeded ? (
