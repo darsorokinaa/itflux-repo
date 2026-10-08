@@ -1,5 +1,6 @@
 /* Кнопка Timeweb — левее сезонной темы, чтобы не наезжала на FAB оформления. */
 html.cb-ai-embed-on {
+  --cb-ai-embed-size: 56px;
   --cb-ai-embed-right: calc(16px + 52px + 12px);
   --cb-ai-embed-bottom: 20px;
 }

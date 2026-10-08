@@ -742,6 +742,34 @@
   margin-left: auto;
 }
 
+.rv-bottom .cb-review-detail__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  text-align: center;
+  text-decoration: none;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.rv-bottom a.cb-review-detail__btn {
+  display: inline-grid;
+  place-items: center;
+  height: 42px;
+  min-height: 42px;
+  padding: 0 18px;
+  text-align: center;
+  line-height: 1;
+}
+
+.rv-bottom a.cb-review-detail__btn > span {
+  justify-self: center;
+  align-self: center;
+  text-align: center;
+  line-height: 1;
+}
+
 .rv-progress {
   color: #7d8ea7;
   font-size: 13px;

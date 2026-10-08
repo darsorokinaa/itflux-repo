@@ -719,11 +719,17 @@ html.cb-board-editor-open .seasonal-decor-layer--chrome {
   font-weight: 500;
 }
 
-/* В кабинете — чуть левее и ниже других FAB (расписание и т.п.) */
+/* В кабинете — чуть левее других FAB (расписание и т.п.) */
 .seasonal-appearance-fab-dock--cabinet {
   right: 16px;
   bottom: 20px;
   z-index: 1080;
+}
+
+/* Над значком чат-бота, а не под ним. */
+html.cb-ai-embed-on .seasonal-appearance-fab-dock,
+html.cb-ai-embed-on .seasonal-appearance-fab-dock--cabinet {
+  bottom: calc(var(--cb-ai-embed-bottom, 20px) + var(--cb-ai-embed-size, 56px) + 12px);
 }
 
 /* Не перекрывать FAB расписания: сдвиг влево, когда он на странице */

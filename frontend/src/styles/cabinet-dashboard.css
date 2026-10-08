@@ -18827,6 +18827,9 @@ select.cb-lesson-card__about-input.is-empty {
   }
 
   .rv-bottom .cb-review-detail__btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     flex: 0 1 auto;
     width: auto;
     min-width: 0;
@@ -18835,7 +18838,17 @@ select.cb-lesson-card__about-input.is-empty {
     padding: 0 10px;
     border-radius: 10px;
     font-size: 0.8rem;
+    line-height: 1;
+    text-align: center;
     white-space: nowrap;
+  }
+
+  .rv-bottom a.cb-review-detail__btn {
+    display: inline-grid;
+    place-items: center;
+    height: 36px;
+    min-height: 36px;
+    padding: 0 10px;
   }
 
   .rv-bottom .cb-review-detail__more {
