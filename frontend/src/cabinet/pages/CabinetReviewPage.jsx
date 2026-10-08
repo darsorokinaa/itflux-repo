@@ -331,6 +331,7 @@ export default function CabinetReviewPage() {
   const [error, setError] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteError, setDeleteError] = useState("");
   const [copyTarget, setCopyTarget] = useState(null);
 
   const setFilterValue = useCallback((patch) => {
@@ -394,21 +395,31 @@ export default function CabinetReviewPage() {
     };
   }, [load]);
 
+  const requestDelete = useCallback((item) => {
+    setDeleteError("");
+    setDeleteTarget(item);
+  }, []);
+
   const confirmDelete = useCallback(async () => {
     const item = deleteTarget;
     if (!item?.homeworkId || !item.canDeleteHomework) return;
     setDeletingId(item.id);
+    setDeleteError("");
     try {
       await deleteHomework(item.homeworkId);
       setWorks((prev) => prev.filter((w) => w.id !== item.id && w.homeworkId !== item.homeworkId));
       setUnsubmitted((prev) => prev.filter((w) => w.homeworkId !== item.homeworkId));
       setDeleteTarget(null);
+      window.dispatchEvent(new Event("cabinet:nav-counts-refresh"));
+      load({ soft: true });
     } catch (err) {
-      setError(err.message || "Не удалось удалить домашнее задание");
+      const message = err.message || "Не удалось удалить домашнее задание";
+      setDeleteError(message);
+      setError(message);
     } finally {
       setDeletingId(null);
     }
-  }, [deleteTarget]);
+  }, [deleteTarget, load]);
 
   const selectedStudent = studentOptions.find((opt) => String(opt.id) === String(studentScope));
   const studentName = selectedStudent?.label || "";
@@ -610,7 +621,7 @@ export default function CabinetReviewPage() {
                   items={submittedWorks}
                   deletingId={deletingId}
                   onOpen={openItem}
-                  onDeleteRequest={setDeleteTarget}
+                  onDeleteRequest={requestDelete}
                   onCopyRequest={setCopyTarget}
                 />
               ) : (
@@ -638,7 +649,7 @@ export default function CabinetReviewPage() {
             items={unsubmitted}
             deletingId={deletingId}
             onOpen={openItem}
-            onDeleteRequest={setDeleteTarget}
+            onDeleteRequest={requestDelete}
             onCopyRequest={setCopyTarget}
           />
         )
@@ -647,7 +658,7 @@ export default function CabinetReviewPage() {
           groups={studentGrouped}
           deletingId={deletingId}
           onOpen={openItem}
-          onDeleteRequest={setDeleteTarget}
+          onDeleteRequest={requestDelete}
           onCopyRequest={setCopyTarget}
           emptyTitle={emptyCopy.title}
           emptyText={emptyCopy.text}
@@ -657,7 +668,7 @@ export default function CabinetReviewPage() {
           groups={groupGrouped}
           deletingId={deletingId}
           onOpen={openItem}
-          onDeleteRequest={setDeleteTarget}
+          onDeleteRequest={requestDelete}
           onCopyRequest={setCopyTarget}
           emptyTitle="Нет работ по группам"
           emptyText="Работы, привязанные к группе, появятся здесь."
@@ -673,7 +684,7 @@ export default function CabinetReviewPage() {
           items={tabItems}
           deletingId={deletingId}
           onOpen={openItem}
-          onDeleteRequest={setDeleteTarget}
+          onDeleteRequest={requestDelete}
           onCopyRequest={setCopyTarget}
         />
       )}
@@ -683,7 +694,10 @@ export default function CabinetReviewPage() {
         title="Удалить домашнее задание?"
         text={
           deleteTarget
-            ? `Удалить домашнее задание «${deleteTarget.title}»? Это действие нельзя отменить. Работа ученика тоже будет удалена.`
+            ? [
+              `Удалить домашнее задание «${deleteTarget.title}»? Это действие нельзя отменить. Работа ученика тоже будет удалена.`,
+              deleteError,
+            ].filter(Boolean).join(" ")
             : ""
         }
         confirmLabel="Удалить"

@@ -424,7 +424,7 @@ class PersonalHomeworkDeleteGuardTests(TestCase):
         self.assertEqual(response.status_code, 204, getattr(response, "content", b""))
         self.assertFalse(Homework.objects.filter(pk=homework.pk).exists())
 
-    def test_draft_file_and_attempt_block_delete(self):
+    def test_unchecked_draft_with_file_and_attempt_can_be_deleted(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
 
         from Cabinet.models import HomeworkSubmissionAttachment, HomeworkSubmissionAttempt
@@ -449,16 +449,13 @@ class PersonalHomeworkDeleteGuardTests(TestCase):
             answer_text="первая попытка",
         )
         response = self.client.delete(f"/api/cabinet/homework/{homework.id}/")
-        self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(response.json()["code"], "personal_work")
-        submission.refresh_from_db()
-        self.assertEqual(submission.answer_text, "мой черновик")
-        self.assertEqual(submission.result_payload["answers"]["1"], "4")
-        self.assertEqual(submission.file_attachments.get().original_name, "scan.png")
-        self.assertEqual(submission.attempts.get().answer_text, "первая попытка")
-        self.assertTrue(Homework.objects.filter(pk=homework.pk).exists())
+        self.assertEqual(response.status_code, 204, getattr(response, "content", b""))
+        self.assertFalse(Homework.objects.filter(pk=homework.pk).exists())
+        self.assertFalse(HomeworkSubmission.objects.filter(pk=submission.pk).exists())
+        self.assertFalse(HomeworkSubmissionAttachment.objects.filter(submission_id=submission.pk).exists())
+        self.assertFalse(HomeworkSubmissionAttempt.objects.filter(submission_id=submission.pk).exists())
 
-    def test_submitted_unchecked_work_cannot_be_deleted(self):
+    def test_submitted_unchecked_work_can_be_deleted(self):
         homework = self._homework("Уже сдано")
         submission = HomeworkSubmission.objects.create(
             homework=homework,
@@ -468,10 +465,26 @@ class PersonalHomeworkDeleteGuardTests(TestCase):
             answer_text="готовый ответ",
             teacher_comment="",
         )
+        review_id = ReviewItem.objects.get(source_type="homework", source_id=submission.pk).pk
+        response = self.client.delete(f"/api/cabinet/homework/{homework.id}/")
+        self.assertEqual(response.status_code, 204, getattr(response, "content", b""))
+        self.assertFalse(Homework.objects.filter(pk=homework.pk).exists())
+        self.assertFalse(HomeworkSubmission.objects.filter(pk=submission.pk).exists())
+        self.assertFalse(ReviewItem.objects.filter(pk=review_id).exists())
+
+    def test_checked_homework_cannot_be_deleted(self):
+        homework = self._homework("Уже проверено")
+        submission = HomeworkSubmission.objects.create(
+            homework=homework,
+            student=self.student,
+            status="checked",
+            submitted_at=timezone.now(),
+            answer_text="готовый ответ",
+            teacher_comment="Верно",
+        )
         response = self.client.delete(f"/api/cabinet/homework/{homework.id}/")
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(response.json()["code"], "personal_work")
         submission.refresh_from_db()
         self.assertEqual(submission.answer_text, "готовый ответ")
-        self.assertIsNotNone(submission.submitted_at)
-        self.assertTrue(ReviewItem.objects.filter(source_type="homework", source_id=submission.pk).exists())
+        self.assertEqual(submission.teacher_comment, "Верно")
+        self.assertTrue(Homework.objects.filter(pk=homework.pk).exists())

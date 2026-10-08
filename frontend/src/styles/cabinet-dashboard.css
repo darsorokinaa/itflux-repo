@@ -18809,7 +18809,7 @@ select.cb-lesson-card__about-input.is-empty {
     align-items: center;
     gap: 6px;
     margin: 0;
-    padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+    padding: 8px 68px calc(8px + env(safe-area-inset-bottom, 0px)) 10px;
   }
 
   .cb-review-detail__footer.rv-bottom .rv-progress,

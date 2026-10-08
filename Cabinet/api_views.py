@@ -3297,7 +3297,7 @@ class HomeworkDetailView(TeacherScopedMixin, APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        from .homework_api import homework_has_personal_work, shared_homework_has_personal_work
+        from .homework_api import shared_homework_has_personal_work
 
         if shared_homework_has_personal_work(homework):
             return Response(
@@ -3308,17 +3308,6 @@ class HomeworkDetailView(TeacherScopedMixin, APIView):
                         "требует отдельной записи назначения."
                     ),
                     "code": "group_personal_work",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if homework_has_personal_work(homework):
-            return Response(
-                {
-                    "detail": (
-                        "Нельзя удалить домашнее задание: у ученика уже есть ответ, "
-                        "файл или история попыток."
-                    ),
-                    "code": "personal_work",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )

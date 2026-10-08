@@ -727,7 +727,8 @@
   justify-content: space-between;
   gap: 12px;
   margin: 8px -8px 0;
-  padding: 14px 8px 14px 72px;
+  /* Слева — кнопка поддержки, справа — кнопка оформления. */
+  padding: 14px 84px 14px 72px;
   border-top: 1px solid var(--rv-line);
   background: #fff;
 }
