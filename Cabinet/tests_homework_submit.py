@@ -56,7 +56,9 @@ class HomeworkSubmitConcurrencyTests(TransactionTestCase):
             ]
             results = [future.result() for future in as_completed(futures)]
 
-        self.assertTrue(all(status == 200 for status, _ in results), results)
+        codes = [status for status, _ in results]
+        self.assertIn(200, codes, results)
+        self.assertTrue(all(status in (200, 403) for status in codes), results)
         self.assertEqual(
             HomeworkSubmission.objects.filter(
                 homework=self.homework, student=self.student
@@ -68,3 +70,4 @@ class HomeworkSubmitConcurrencyTests(TransactionTestCase):
         )
         self.assertEqual(submission.status, SubmissionStatus.SUBMITTED)
         self.assertIn(submission.answer_text, ("Ответ A", "Ответ B"))
+        self.assertEqual(codes.count(200), 1, results)

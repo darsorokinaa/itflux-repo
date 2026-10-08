@@ -505,6 +505,15 @@ def update_issued_homework(
             "Ученик уже начал выполнять это домашнее задание. "
             "Изменение состава заданий может повлиять на его ответы и результаты.",
         )
+    from .homework_api import homework_is_shared_group, submission_is_handed_in
+
+    shared_group = homework_is_shared_group(homework)
+    if shared_group and tasks_composition_change:
+        if any(submission_is_handed_in(row) for row in homework.submissions.all()):
+            raise ValueError(
+                "Нельзя изменить состав заданий общей групповой работы: "
+                "часть учеников уже сдала её. Их ответы, файлы и оценки не изменяются."
+            )
 
     changed_fields: list[str] = []
     tasks_added_meta: list[dict] = []
@@ -718,6 +727,8 @@ def update_issued_homework(
     # Ответы: архивируем исключённые задания, пересчитываем баллы при необходимости
     score_recomputed = False
     for submission in homework.submissions.select_for_update().all():
+        if shared_group and submission_is_handed_in(submission):
+            continue
         dirty = False
         if removed_task_ids:
             if _archive_removed_task_answers(submission, removed_task_ids):

@@ -2044,8 +2044,11 @@ def sync_previous_homework_status_from_submission(submission) -> None:
     if homework is None or student is None:
         return
     status = infer_previous_homework_status(homework, student)
-    LessonJournal.objects.filter(previous_homework_id=homework.id).filter(
-        Q(student_id=student.id) | Q(group__students=student)
+    # Статус прошлого ДЗ на групповом журнале — одно поле на всех.
+    # Проверка одного ученика не должна переписывать его для остальных.
+    LessonJournal.objects.filter(
+        previous_homework_id=homework.id,
+        student_id=student.id,
     ).update(previous_homework_status=status, updated_at=timezone.now())
 
 

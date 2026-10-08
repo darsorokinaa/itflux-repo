@@ -22,7 +22,11 @@ import {
   formatDueDate,
 } from "../StudentSectionUi";
 import { usePageTitle } from "../../hooks/usePageTitle";
-import { studentHomeworkStatus } from "../studentAssignmentCards";
+import {
+  STUDENT_PHASE_LABEL,
+  studentAssignmentPhase,
+  studentTeacherRemark,
+} from "../studentAssignmentCards";
 import AttachmentPreviewModal, {
   isAttachmentPreviewable,
   openAttachmentPreferPreview,
@@ -42,18 +46,6 @@ function isInternalVariantHref(href) {
 
 function looksLikePdf(title) {
   return /\.pdf$/i.test((title || "").trim());
-}
-
-function getBadgeProps(status, statusLabel, variantSubmitted) {
-  if (status === "checked") {
-    return { status: "checked", label: statusLabel || "Проверено" };
-  }
-  // variantSubmitted = реальная сдача (submitted_at), не черновик ответов.
-  if (status === "submitted" || variantSubmitted) {
-    return { status: "reviewing", label: "На проверке" };
-  }
-  if (status === "new") return { status: "new", label: "Новое" };
-  return { status, label: statusLabel };
 }
 
 function getTaskMeta(task) {
@@ -272,11 +264,12 @@ export default function StudentAssignmentDetailPage() {
   const variantOnly = hasVariant && !(item?.tasks || []).some(
     (task) => !task.is_variant && task.task_type !== "interactive",
   );
-  const variantSubmitted = Boolean(item?.variant_submitted);
+  const phase = item ? studentAssignmentPhase(item) : "";
+  const remark = item ? studentTeacherRemark(item) : null;
 
   const badge = useMemo(
-    () => (item ? getBadgeProps(studentHomeworkStatus(item), item.status_label, variantSubmitted) : null),
-    [item, variantSubmitted],
+    () => (phase ? { status: phase, label: STUDENT_PHASE_LABEL[phase] } : null),
+    [phase],
   );
 
   const missingAttachment = fileUploadFailed && item?.status === "submitted";
@@ -316,11 +309,11 @@ export default function StudentAssignmentDetailPage() {
 
   const answerSummary = useMemo(() => {
     if (!item) return "";
-    if (variantSubmitted) return "вариант отправлен";
-    if (item.answer_text?.trim() || item.attached_file_url || (item.attached_files || []).length) return "отправлен";
-    if (["submitted", "checked"].includes(item.status)) return "отправлен";
-    return "не отправлен";
-  }, [item, variantSubmitted]);
+    if (phase === "not_submitted" || phase === "overdue") return "не отправлен";
+    if (phase === "needs_fix") return "нужно исправить";
+    if (item.has_variant && item.variant_submitted && phase === "reviewing") return "вариант отправлен";
+    return "отправлен";
+  }, [item, phase]);
 
   const handleSubmit = async () => {
     if (missingAttachment && !attachedFiles.length) {
@@ -423,18 +416,22 @@ export default function StudentAssignmentDetailPage() {
   const commentFiles = homeworkTeacherCommentAttachments(item?.result);
   const draftHint = isDirty
     ? "Есть несохранённые изменения"
-    : canEditAnswer
-      ? "Черновик не сохранён"
-      : isChecked
-        ? "Работа проверена"
-        : "Ответ отправлен";
-  const summaryNote = isChecked
-    ? (item.teacher_comment?.trim()
-      ? item.teacher_comment
-      : "Учитель проверил работу. Результаты — в блоке ниже.")
-    : canEditAnswer
-      ? "Добавьте текст или файлы, затем отправьте работу преподавателю."
-      : "Ответ отправлен преподавателю. Результаты появятся после проверки.";
+    : phase === "needs_fix"
+      ? "Можно изменить ответ и отправить снова"
+      : canEditAnswer
+        ? "Черновик не сохранён"
+        : isChecked
+          ? "Работа проверена"
+          : "Ответ отправлен";
+  const summaryNote = remark?.kind === "conflict"
+    ? remark.text
+    : phase === "checked"
+      ? (remark?.text || "Учитель проверил работу. Результаты — в блоке ниже.")
+      : phase === "needs_fix"
+        ? "Исправьте работу и отправьте её снова."
+        : phase === "reviewing"
+          ? "Ответ отправлен преподавателю. Результаты появятся после проверки."
+          : "Добавьте текст или файлы, затем отправьте работу преподавателю.";
 
   return (
     <StudentPageShell className="st-hw-page st-hw-page--redesign">
@@ -597,11 +594,13 @@ export default function StudentAssignmentDetailPage() {
             <section className="st-hw-card st-hw-card--variant-info">
               <h2 className="st-hw-card__title">Решение варианта</h2>
               <p className="st-hw-card__text">
-                {isChecked
+                {phase === "checked"
                   ? "Работа проверена. Ниже — баллы, комментарии и результаты по заданиям."
-                  : variantSubmitted
-                    ? "Вариант отправлен на проверку. Результаты появятся после проверки учителем."
-                    : "Нажмите «Решить», выполните задания и на странице варианта нажмите «Отправить работу»."}
+                  : phase === "needs_fix"
+                    ? "Преподаватель вернул работу. Исправьте решение и отправьте вариант снова."
+                    : phase === "reviewing"
+                      ? "Вариант отправлен на проверку. Результаты появятся после проверки учителем."
+                      : "Нажмите «Решить», выполните задания и на странице варианта нажмите «Отправить работу»."}
               </p>
             </section>
           ) : null}
@@ -617,7 +616,7 @@ export default function StudentAssignmentDetailPage() {
               {homeworkReview ? (
                 <HomeworkReviewResults
                   review={homeworkReview}
-                  teacherComment={item.teacher_comment}
+                  teacherComment={remark?.kind === "final" ? remark.text : ""}
                   className="st-hw-review"
                 />
               ) : null}
@@ -641,10 +640,12 @@ export default function StudentAssignmentDetailPage() {
                       <div><span>Не решено</span><strong>{manualStats.unsolved ?? "—"}</strong></div>
                     </div>
                   ) : null}
-                  {item.teacher_comment?.trim() || commentFiles.length ? (
+                  {remark?.kind === "conflict" ? (
+                    <p className="st-hw-empty">{remark.text}</p>
+                  ) : remark?.kind === "final" || commentFiles.length ? (
                     <div className="st-hw-teacher-comment">
                       <span className="st-hw-teacher-comment__label">Комментарий учителя</span>
-                      {item.teacher_comment?.trim() ? <p>{item.teacher_comment}</p> : null}
+                      {remark?.kind === "final" ? <p>{remark.text}</p> : null}
                       <FileLinks files={commentFiles} />
                     </div>
                   ) : (
@@ -653,6 +654,20 @@ export default function StudentAssignmentDetailPage() {
                 </section>
               ) : null}
             </div>
+          ) : null}
+
+          {remark && remark.kind !== "final" ? (
+            <section className="st-hw-card" aria-label="Замечание преподавателя">
+              <h2 className="st-hw-card__title">
+                {remark.kind === "history"
+                  ? "Замечание к предыдущей попытке"
+                  : "Замечание преподавателя"}
+              </h2>
+              <p className="st-hw-card__text">{remark.text}</p>
+              {remark.kind === "current" ? (
+                <p className="st-hw-card__text">Исправьте ответ и отправьте работу снова.</p>
+              ) : null}
+            </section>
           ) : null}
 
           {!variantOnly ? (

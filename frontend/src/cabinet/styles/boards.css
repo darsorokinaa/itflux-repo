@@ -2124,6 +2124,13 @@ html.cb-board-editor-open body {
   content-visibility: visible;
 }
 
+/* Глобальный `svg, canvas { max-width: 100% }` сжимает штрих и оставляет обрезки. */
+.lesson-board .tl-canvas svg,
+.lesson-board .tl-canvas canvas {
+  max-width: none;
+  max-height: none;
+}
+
 .lesson-board .tl-container {
   --tl-color-background: #f1f3f5;
   --tl-color-panel: var(--cb-board-surface, #ffffff);

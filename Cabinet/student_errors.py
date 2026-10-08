@@ -9,10 +9,11 @@ from django.db import transaction
 from django.db.models import Prefetch
 from django.utils import timezone
 
-from .choices import HomeworkStatus, HomeworkTaskType, ReviewSourceType
+from .choices import HomeworkStatus, HomeworkTaskType
 from .homework_api import (
     build_homework_review_context,
     ensure_homework_in_review_queue,
+    homework_review_index,
 )
 from .homework_from_review import (
     HomeworkFromReviewError,
@@ -344,14 +345,12 @@ def collect_student_errors(
         .order_by("-submitted_at", "-id")
     )
 
-    submission_ids = [s.id for s in submissions]
+    review_index = homework_review_index(teacher.id, submissions)
     review_by_submission = {
-        r.source_id: r.id
-        for r in ReviewItem.objects.filter(
-            teacher=teacher,
-            source_type=ReviewSourceType.HOMEWORK,
-            source_id__in=submission_ids,
-        ).only("id", "source_id")
+        source_id: info["review_id"] for source_id, info in review_index.items()
+    }
+    remarks_by_submission = {
+        source_id: info["remark"] for source_id, info in review_index.items()
     }
 
     # key: (subject, level, task_id) → row (newest first wins)
@@ -432,6 +431,14 @@ def collect_student_errors(
                 variant_id=variant_id,
                 variant_path=variant_path,
             )
+            remark = remarks_by_submission.get(submission.id) or {}
+            if remark.get("text") and not remark.get("conflict"):
+                enriched["teacher_comment"] = remark["text"]
+            if remark.get("conflict"):
+                enriched["review_comment_conflict"] = True
+                official = (submission.teacher_comment or "").strip()
+                if official:
+                    enriched["teacher_comment"] = official
             # Эталон в таблице — Task.answer. Если он совпадает с ответом ученика,
             # не держим строку в журнале ошибок из‑за stale checked=false.
             if enriched.get("status") == "incorrect":

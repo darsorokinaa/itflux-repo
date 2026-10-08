@@ -3,13 +3,13 @@
 import { formatDayLabelInZone } from "../timezones";
 
 export const STUDENT_HW_STATUS_LABELS = {
-  new: "Не начато",
-  in_progress: "В процессе",
-  submitted: "Отправлено",
+  new: "Не сдано",
+  in_progress: "Не сдано",
+  submitted: "На проверке",
   reviewing: "На проверке",
   checked: "Проверено",
   overdue: "Просрочено",
-  needs_fix: "Требуется исправление",
+  needs_fix: "На доработке",
   completed: "Проверено",
 };
 

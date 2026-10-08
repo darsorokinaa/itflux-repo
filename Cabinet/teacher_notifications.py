@@ -318,7 +318,7 @@ def notify_teacher_unpaid_lesson(*, teacher: User, student: Student, when_label:
 
 def send_homework_review_digests(*, window_minutes: int) -> int:
     """Aggregate pending review notifications into one push per teacher."""
-    from .models import ReviewItem
+    from .homework_api import count_new_homework_reviews
 
     now = timezone.now()
     since = now - timedelta(minutes=window_minutes + 2)
@@ -343,12 +343,7 @@ def send_homework_review_digests(*, window_minutes: int) -> int:
         if recent_digest:
             continue
 
-        count = ReviewItem.objects.filter(
-            teacher=teacher,
-            status="pending",
-            created_at__gte=since,
-            source_type="homework",
-        ).count()
+        count = count_new_homework_reviews(teacher, since)
         if count <= 0:
             continue
         title = "Новые работы на проверку" if count == 1 else f"{count} новых работ ожидают проверки"

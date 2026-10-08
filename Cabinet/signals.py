@@ -47,7 +47,7 @@ def sync_billing_account_on_student_status(sender, instance, created, **kwargs):
 
 @receiver(post_save, sender=HomeworkSubmission)
 def ensure_review_item_for_submission(sender, instance, created, **kwargs):
-    # Только после реальной сдачи. Выдача через «Задать ДЗ» ставит в очередь отдельно.
+    # Карточка появляется только после фактической сдачи, не в момент выдачи.
     from .homework_api import _ensure_review_item
 
     _ensure_review_item(instance)

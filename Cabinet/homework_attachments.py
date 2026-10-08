@@ -322,6 +322,15 @@ def delete_homework_attachment(homework: Homework, teacher, attachment_id) -> di
 
     if homework_is_checked_or_completed(homework):
         raise HomeworkAttachmentError(HOMEWORK_ACCEPTED_EDIT_ERROR, code="homework_accepted")
+    from .homework_api import homework_is_shared_group, submission_is_handed_in
+
+    if homework_is_shared_group(homework) and any(
+        submission_is_handed_in(row) for row in homework.submissions.all()
+    ):
+        raise HomeworkAttachmentError(
+            "Нельзя удалить вложение общей групповой работы: часть учеников уже сдала её.",
+            code="group_submissions_exist",
+        )
 
     relation = (
         CabinetFileRelation.objects.select_related("file", "material")

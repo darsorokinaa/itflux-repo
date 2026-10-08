@@ -141,17 +141,12 @@ def backfill_unsubmitted_homework_with_answers(*, dry_run: bool = False) -> dict
                     submission.save(update_fields=["submitted_at", "updated_at"])
                 stats["submitted_at_set"] += 1
 
-                _item, created = ReviewItem.objects.get_or_create(
-                    teacher_id=homework.teacher_id,
-                    source_type="homework",
-                    source_id=submission.pk,
-                    defaults={
-                        "student_id": submission.student_id,
-                        "group_id": homework.group_id,
-                        "title": f"{homework.title} — {submission.student}",
-                        "status": review_status,
-                        "priority": "normal",
-                    },
+                from .homework_api import ensure_single_homework_review_item
+
+                _item, created = ensure_single_homework_review_item(
+                    submission,
+                    initial_status=review_status,
+                    reopen=False,
                 )
                 if created:
                     stats["review_created"] += 1

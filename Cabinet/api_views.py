@@ -2323,18 +2323,73 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
         subjects.sort(key=lambda row: row["label"].lower())
         return students, subjects
 
-    def list(self, request, *args, **kwargs):
-        from .homework_api import prefetch_submissions_for_review_items
+    def _homework_was_submitted(self, item) -> bool:
+        if item.source_type != "homework":
+            return True
+        submission = (
+            HomeworkSubmission.objects.filter(pk=item.source_id)
+            .only("id", "submitted_at")
+            .first()
+        )
+        return bool(submission and submission.submitted_at)
 
-        # Карточка проверки создаётся при выдаче и при сдаче, не при открытии списка.
-        scoped_qs = self._review_qs(apply_status=False)
+    def _reject_unsubmitted(self, item):
+        if self._homework_was_submitted(item):
+            return None
+        return Response(
+            {
+                "detail": "Нельзя завершить проверку, пока ученик не сдал работу.",
+                "code": "not_submitted",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    def list(self, request, *args, **kwargs):
+        from .homework_api import (
+            dedupe_homework_review_items,
+            list_unsubmitted_homework,
+            prefetch_submissions_for_review_items,
+            review_items_ready_to_check,
+        )
+
+        # В очереди одна актуальная карточка на фактически сданную работу.
+        # Несданные задания сюда не входят и карточек проверки не создают.
+        scoped_qs = dedupe_homework_review_items(
+            review_items_ready_to_check(self._review_qs(apply_status=False))
+        )
         counts = scoped_qs.aggregate(
             all=Count("id"),
             pending=Count("id", filter=Q(status=ReviewStatus.PENDING)),
             checked=Count("id", filter=Q(status=ReviewStatus.CHECKED)),
             returned=Count("id", filter=Q(status=ReviewStatus.RETURNED)),
         )
-        items = self._sorted_review_items(list(self.filter_queryset(self.get_queryset())))
+        teacher = self.get_teacher()
+        params = request.query_params
+        ok_student, student_filter = self._owned_pk(
+            params.get("student") or params.get("student_id"),
+            Student.objects.filter(teacher=teacher),
+        )
+        ok_subject, subject_filter = self._owned_pk(
+            params.get("subject") or params.get("student_subject"),
+            StudentSubject.objects.filter(student__teacher=teacher),
+        )
+        if ok_student and ok_subject:
+            unsubmitted = list_unsubmitted_homework(
+                teacher,
+                student_id=student_filter,
+                subject_id=subject_filter,
+                query=(params.get("q") or params.get("search") or "").strip(),
+            )
+        else:
+            unsubmitted = []
+        counts["unsubmitted"] = len(unsubmitted)
+        items = self._sorted_review_items(
+            list(
+                dedupe_homework_review_items(
+                    review_items_ready_to_check(self.filter_queryset(self.get_queryset()))
+                )
+            )
+        )
         submissions_by_id = prefetch_submissions_for_review_items(items)
         serializer = self.get_serializer(
             items,
@@ -2346,9 +2401,18 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
             },
         )
         students, subjects = self._review_filter_options()
+        seen_students = {row["id"] for row in students}
+        for row in unsubmitted:
+            sid = row["student_id"]
+            if sid in seen_students:
+                continue
+            seen_students.add(sid)
+            students.append({"id": sid, "label": row["student_name"]})
+        students.sort(key=lambda row: row["label"].lower())
         return Response({
             "results": serializer.data,
             "counts": counts,
+            "unsubmitted": unsubmitted,
             "students": students,
             "subjects": subjects,
         })
@@ -2357,14 +2421,17 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
         return self._review_qs(apply_status=True)
 
     def get_object(self):
-        from .homework_api import reopen_review_item_if_resubmitted
+        from .homework_api import canonical_homework_review_item, reopen_review_item_if_resubmitted
 
-        item = super().get_object()
+        item = canonical_homework_review_item(super().get_object())
         return reopen_review_item_if_resubmitted(item)
 
     @action(detail=True, methods=["post"], url_path="check")
     def check(self, request, pk=None):
         item = self.get_object()
+        rejected = self._reject_unsubmitted(item)
+        if rejected is not None:
+            return rejected
         item.status = ReviewStatus.CHECKED
         item.checked_at = timezone.now()
         item.teacher_comment = request.data.get("teacher_comment", item.teacher_comment)
@@ -2395,6 +2462,9 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
     @action(detail=True, methods=["post"], url_path="return")
     def return_work(self, request, pk=None):
         item = self.get_object()
+        rejected = self._reject_unsubmitted(item)
+        if rejected is not None:
+            return rejected
         item.status = ReviewStatus.RETURNED
         item.checked_at = timezone.now()
         item.teacher_comment = request.data.get("teacher_comment", item.teacher_comment)
@@ -2747,7 +2817,14 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
             # Сводка успеваемости подтянет актуальный статус и без записи в журнал.
             pass
         homework = submission.homework
-        if homework is not None:
+        # У общей групповой работы статус строки — это состояние выдачи, а не
+        # проверка одного ученика. Иначе «проверено» или возврат одного
+        # переписывает карточку для остальных.
+        from .homework_api import homework_is_shared_group
+
+        if homework is not None and not homework_is_shared_group(homework):
+            if homework.student_id and submission.student_id not in (None, homework.student_id):
+                return
             new_hw_status = HomeworkStatus.CHECKED if checked else HomeworkStatus.ASSIGNED
             if homework.status != new_hw_status and homework.status not in (
                 HomeworkStatus.ARCHIVED,
@@ -3029,11 +3106,7 @@ class NavCountsView(TeacherScopedMixin, APIView):
     """Лёгкие счётчики для пунктов меню кабинета учителя."""
 
     def get(self, request):
-        from .homework_api import (
-            exclude_live_meeting_review_items,
-            reopen_resubmitted_review_items,
-            review_items_ready_to_check,
-        )
+        from .homework_api import pending_ready_review_items, reopen_resubmitted_review_items
 
         teacher = self.get_teacher()
         reopen_resubmitted_review_items(teacher)
@@ -3041,14 +3114,7 @@ class NavCountsView(TeacherScopedMixin, APIView):
             teacher=teacher,
             status=StudentStatus.ACTIVE,
         ).count()
-        reviews_count = review_items_ready_to_check(
-            exclude_live_meeting_review_items(
-                ReviewItem.objects.filter(
-                    teacher=teacher,
-                    status=ReviewStatus.PENDING,
-                )
-            )
-        ).count()
+        reviews_count = pending_ready_review_items(teacher).count()
         return Response({
             "students_count": students_count,
             "reviews_count": reviews_count,
@@ -3068,7 +3134,7 @@ class ActivationMetricsView(APIView):
 
 class ReportsOverviewView(TeacherScopedMixin, APIView):
     def get(self, request):
-        from .homework_api import exclude_live_meeting_review_items, review_items_ready_to_check
+        from .homework_api import pending_ready_review_items
 
         teacher = request.user
         return Response({
@@ -3079,11 +3145,7 @@ class ReportsOverviewView(TeacherScopedMixin, APIView):
             "lessons_total": Lesson.objects.filter(teacher=teacher).count(),
             "homework_assigned": Homework.objects.filter(teacher=teacher, status="assigned").count(),
             "homework_completed": Homework.objects.filter(teacher=teacher, status="completed").count(),
-            "pending_reviews": review_items_ready_to_check(
-                exclude_live_meeting_review_items(
-                    ReviewItem.objects.filter(teacher=teacher, status=ReviewStatus.PENDING)
-                )
-            ).count(),
+            "pending_reviews": pending_ready_review_items(teacher).count(),
         })
 
 
@@ -3233,6 +3295,32 @@ class HomeworkDetailView(TeacherScopedMixin, APIView):
             return Response(
                 {"detail": "Нет доступа к этому домашнему заданию."},
                 status=status.HTTP_403_FORBIDDEN,
+            )
+
+        from .homework_api import homework_has_personal_work, shared_homework_has_personal_work
+
+        if shared_homework_has_personal_work(homework):
+            return Response(
+                {
+                    "detail": (
+                        "Нельзя удалить общую групповую работу: у учеников уже есть "
+                        "свои ответы, файлы или проверка. Отмена выдачи одному ученику "
+                        "требует отдельной записи назначения."
+                    ),
+                    "code": "group_personal_work",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if homework_has_personal_work(homework):
+            return Response(
+                {
+                    "detail": (
+                        "Нельзя удалить домашнее задание: у ученика уже есть ответ, "
+                        "файл или история попыток."
+                    ),
+                    "code": "personal_work",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         # Проверенное и принятое ДЗ удалять нельзя.

@@ -156,15 +156,28 @@ class ReviewFiltersAndSummaryTests(TestCase):
         if submission_status == SubmissionStatus.CHECKED:
             homework.status = HomeworkStatus.CHECKED
             homework.save(update_fields=["status", "updated_at"])
-        return ReviewItem.objects.create(
-            teacher=self.teacher,
-            student=student,
-            source_type="homework",
-            source_id=submission.pk,
-            title=f"{homework.title} — {student.full_name}",
-            status=status,
-            checked_at=timezone.now() if status == ReviewStatus.CHECKED else None,
+        item = (
+            ReviewItem.objects.filter(
+                teacher=self.teacher,
+                source_type="homework",
+                source_id=submission.pk,
+            )
+            .order_by("id")
+            .first()
         )
+        if item is None:
+            item = ReviewItem(
+                teacher=self.teacher,
+                student=student,
+                source_type="homework",
+                source_id=submission.pk,
+                title=f"{homework.title} — {student.full_name}",
+            )
+        item.status = status
+        item.teacher_comment = comment
+        item.checked_at = timezone.now() if status == ReviewStatus.CHECKED else None
+        item.save()
+        return item
 
     def test_teacher_sees_own_students_in_filter_options(self):
         response = self.client.get("/api/cabinet/review/")

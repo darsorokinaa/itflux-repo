@@ -2328,9 +2328,8 @@ def _with_dashboard_event_relations(qs):
 def build_dashboard_payload(teacher, request=None):
     from .availability_models import TeacherBooking
     from .homework_api import (
-        exclude_live_meeting_review_items,
+        pending_ready_review_items,
         prefetch_submissions_for_review_items,
-        review_items_ready_to_check,
     )
     from .plan_schedule import AUTO_MATERIALS_PLAN_DESCRIPTION
 
@@ -2343,14 +2342,7 @@ def build_dashboard_payload(teacher, request=None):
         teacher=teacher,
         status=StudentStatus.ACTIVE,
     )
-    pending_reviews = review_items_ready_to_check(
-        exclude_live_meeting_review_items(
-            ReviewItem.objects.filter(
-                teacher=teacher,
-                status=ReviewStatus.PENDING,
-            )
-        )
-    )
+    pending_reviews = pending_ready_review_items(teacher)
     # Как в списке планов: служебные «Материалы: …» не считаем черновиками.
     drafts_count = (
         Lesson.objects.filter(teacher=teacher, status="draft").count()

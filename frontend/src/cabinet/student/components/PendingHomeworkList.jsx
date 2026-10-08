@@ -3,7 +3,12 @@ import {
   StudentStatusBadge,
   formatDueDate,
 } from "../StudentSectionUi";
-import { getStudentAssignmentPath, studentHomeworkStatus, studentResultBlock } from "../studentAssignmentCards";
+import {
+  getStudentAssignmentPath,
+  studentHomeworkStatus,
+  studentResultBlock,
+  studentTeacherRemark,
+} from "../studentAssignmentCards";
 import {
   studentHwActionLabel,
   studentHwStatusLabel,
@@ -18,7 +23,10 @@ export function PendingHomeworkCard({ item, showTeacher = false }) {
   const actionLabel = studentHwActionLabel(status);
   const isOverdue = status === "overdue";
   const result = studentResultBlock(item);
-  const comment = commentPreview(item.result_summary?.teacher_comment_preview || item.teacher_comment);
+  const remark = studentTeacherRemark(item);
+  const comment = remark?.kind === "current" || remark?.kind === "final"
+    ? commentPreview(remark.text)
+    : "";
 
   let progressText = "";
   if (result) {
@@ -27,7 +35,9 @@ export function PendingHomeworkCard({ item, showTeacher = false }) {
   } else if (status === "submitted" || status === "reviewing") {
     progressText = "Ожидает проверки преподавателем";
   } else if (status === "needs_fix") {
-    progressText = "Учитель оставил замечания";
+    progressText = remark?.kind === "conflict"
+      ? remark.text
+      : "Нужно исправить работу";
   } else if (item.items_count > 0 && item.result_percent == null) {
     progressText = `Выполнено ${item.items_done ?? 0} из ${item.items_count} заданий`;
   } else if (item.progress_percent > 0 && status === "in_progress") {
@@ -70,7 +80,7 @@ export function PendingHomeworkCard({ item, showTeacher = false }) {
             <span>{progressText}</span>
           </div>
         ) : null}
-        {comment && (status === "checked" || status === "needs_fix") ? (
+        {comment ? (
           <p className="st-hw-card__comment">{comment}</p>
         ) : null}
       </div>

@@ -9,12 +9,14 @@ import { addBoardFiles, disposePdfNotice, installLessonThickness, installSavedCu
 import { installLessonSheets } from "./lessonSheets";
 import { installCoalescedEraserInput, keepImagesUnderEraser } from "./lessonEraser";
 import { lessonBoardComponents } from "./lessonBoardUi";
+import { LessonDrawShapeUtil } from "./lessonDrawShape";
 import { LessonGeoShapeUtil } from "./lessonGeoShape";
 import { LessonNoteShapeUtil, lessonCanvasShapeUtils, lessonShapeUtils, lessonTools, lessonUiOverrides } from "./lessonShapes";
 
 const lessonSyncShapeUtils = [
   LessonGeoShapeUtil,
-  ...defaultShapeUtils.filter((Util) => Util.type !== "geo"),
+  LessonDrawShapeUtil,
+  ...defaultShapeUtils.filter((Util) => Util.type !== "geo" && Util.type !== "draw"),
   ...lessonShapeUtils,
 ];
 const lessonTldrawOptions = { selectLockedShapes: true, maxPages: Infinity };
@@ -249,7 +251,7 @@ function TldrawBoardSynced({
       store={sync.store}
       licenseKey={licenseKey}
       options={lessonTldrawOptions}
-      shapeUtils={[LessonGeoShapeUtil, LessonNoteShapeUtil, ...lessonCanvasShapeUtils]}
+      shapeUtils={[LessonGeoShapeUtil, LessonNoteShapeUtil, LessonDrawShapeUtil, ...lessonCanvasShapeUtils]}
       tools={lessonTools}
       overrides={lessonUiOverrides}
       components={lessonBoardComponents}

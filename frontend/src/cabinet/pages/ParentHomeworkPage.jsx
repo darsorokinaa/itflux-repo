@@ -10,11 +10,18 @@ import {
 } from "../student/StudentSectionUi";
 import { isHomeworkOverdue } from "../homeworkDueAt";
 
+const HANDED_IN = ["submitted", "checked", "needs_fix", "returned", "needs_revision"];
+
 const BUCKETS = [
-  { id: "todo", label: "Нужно выполнить", match: (h) => ["not_submitted", "new", "in_progress", "overdue"].includes(h.status) || isHomeworkOverdue(h) },
+  {
+    id: "todo",
+    label: "Нужно выполнить",
+    match: (h) => ["not_submitted", "new", "in_progress", "overdue"].includes(h.status)
+      || (isHomeworkOverdue(h) && !HANDED_IN.includes(h.status)),
+  },
   { id: "review", label: "На проверке", match: (h) => h.status === "submitted" },
   { id: "done", label: "Проверено", match: (h) => h.status === "checked" },
-  { id: "fix", label: "На доработке", match: (h) => ["returned", "needs_revision"].includes(h.status) },
+  { id: "fix", label: "На доработке", match: (h) => ["needs_fix", "returned", "needs_revision"].includes(h.status) },
 ];
 
 export default function ParentHomeworkPage() {
@@ -94,7 +101,15 @@ export default function ParentHomeworkPage() {
                     {hw.attempt_count ? ` · попыток: ${hw.attempt_count}` : ""}
                   </p>
                   {isHomeworkOverdue(hw) ? <StudentStatusBadge status="overdue" label="Просрочено" /> : null}
-                  {hw.teacher_comment ? <p className="st-muted">{hw.teacher_comment}</p> : null}
+                  {hw.review_comment_conflict ? (
+                    <p className="st-muted">Замечания по проверке различаются. Уточните у преподавателя, какой комментарий учитывать.</p>
+                  ) : null}
+                  {!hw.review_comment_conflict && hw.teacher_comment && ["needs_fix", "returned", "needs_revision", "checked"].includes(hw.status) ? (
+                    <p className="st-muted">{hw.teacher_comment}</p>
+                  ) : null}
+                  {!hw.review_comment_conflict && hw.status === "submitted" && hw.teacher_comment ? (
+                    <p className="st-muted">Замечание к предыдущей попытке: {hw.teacher_comment}</p>
+                  ) : null}
                   {(hw.attempts || []).length > 1 ? (
                     <details>
                       <summary>История попыток ({hw.attempts.length})</summary>

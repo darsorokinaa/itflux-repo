@@ -118,12 +118,18 @@ def _homework_qs(students):
 
     student_ids, groups = _student_ids_and_groups(students)
     return (
-        Homework.objects.filter(Q(student_id__in=student_ids) | Q(group__in=groups))
+        Homework.objects.filter(
+            Q(student_id__in=student_ids)
+            | Q(group__in=groups)
+            # Свою сдачу ученик видит и после выхода из группы.
+            | Q(student__isnull=True, submissions__student_id__in=student_ids)
+        )
         .exclude(status=HomeworkStatus.DRAFT)
         # Вариант с видеоурока — не домашнее задание ученика
         .exclude(description__contains=LIVE_MEETING_HOMEWORK_MARKER)
         .select_related("lesson", "teacher", "teacher__profile", "student_subject")
         .prefetch_related("tasks")
+        .distinct()
     )
 
 
@@ -861,6 +867,9 @@ def _homework_student_status(homework, student, submission=None):
             return "submitted", "Сдано", submission
     if homework.due_at and homework.due_at < now:
         return "overdue", "Просрочено", submission
+    # Статус общей выдачи не является статусом этого ученика.
+    if not homework.student_id and homework.group_id:
+        return "new", "Новый", submission
     if homework.status == HomeworkStatus.ASSIGNED:
         return "new", "Новый", submission
     return "in_progress", "В работе", submission
@@ -1537,14 +1546,12 @@ class StudentAssignmentDetailView(StudentScopedView):
             .first()
         )
         from .homework_api import (
-            cleanup_duplicate_homework_tasks,
             homework_has_variant_task,
             homework_instruction_text,
             issue_homework_token,
             serialize_homework_tasks,
         )
 
-        cleanup_duplicate_homework_tasks(hw)
         token = issue_homework_token(homework_id=hw.id, student_user_id=request.user.id)
         tasks = serialize_homework_tasks(hw, homework_id=hw.id, token=token)
         from .homework_attachments import list_homework_attachments
@@ -1554,6 +1561,20 @@ class StudentAssignmentDetailView(StudentScopedView):
         attached_name = attached_files[0]["name"] if attached_files else ""
         attachments = list_homework_attachments(hw, for_student=True)
         card = _serialize_assignment_card(hw, students)
+        teacher_comment = (submission.teacher_comment or "") if submission else ""
+        if submission is not None:
+            from .homework_api import homework_review_index
+
+            remark = (
+                homework_review_index(hw.teacher_id, [submission]).get(submission.pk) or {}
+            ).get("remark") or {}
+            if remark.get("text") and not remark.get("conflict"):
+                teacher_comment = remark["text"]
+            if remark.get("conflict"):
+                card["review_comment_conflict"] = True
+                official = (submission.teacher_comment or "").strip()
+                if official:
+                    teacher_comment = official
         card.update({
             "description": homework_instruction_text(hw),
             "tasks": tasks,
@@ -1564,7 +1585,7 @@ class StudentAssignmentDetailView(StudentScopedView):
             "attached_file_url": attached_files[0]["url"] if attached_files else "",
             "attached_file_name": attached_name,
             "attached_files": attached_files,
-            "teacher_comment": submission.teacher_comment if submission else "",
+            "teacher_comment": teacher_comment,
             "mistakes": [],
             # Черновик (есть result_payload) ≠ сдача. Учитель видит работу только после submitted_at.
             "variant_submitted": bool(submission and submission.submitted_at),

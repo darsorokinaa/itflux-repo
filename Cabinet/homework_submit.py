@@ -90,9 +90,10 @@ def submit_homework_for_student(
     Source of truth для сдачи.
 
     - CHECKED: нельзя менять.
+    - SUBMITTED + тот же контент: идемпотентный успех, тело не трогаем.
+    - SUBMITTED без файлов + те же ответы и новые файлы: дослать только файлы.
+    - SUBMITTED + другой текст или результат: отказ, сданная работа остаётся.
     - RETURNED / NEEDS_REVISION: снимок попытки, затем новая сдача.
-    - SUBMITTED + тот же контент: идемпотентный успех.
-    - SUBMITTED + новый контент: обновляет ту же строку (retry не теряет тело).
     - Черновик: первая сдача.
     """
     from .homework_api import (
@@ -126,14 +127,14 @@ def submit_homework_for_student(
         and not submission_has_files(submission)
     )
 
-    if is_open_submit and has_new_files and submission_has_files(submission):
-        raise HomeworkSubmitError(
-            "Работа уже отправлена на проверку.",
-            code="already_submitted",
-            status=403,
-        )
-
-    if is_open_submit and same_content and not can_append_first_files:
+    appending_first_files = is_open_submit and can_append_first_files and same_content
+    if is_open_submit and not appending_first_files:
+        if not same_content or has_new_files:
+            raise HomeworkSubmitError(
+                "Работа уже отправлена на проверку.",
+                code="already_submitted",
+                status=403,
+            )
         review_item = _ensure_review_item(submission)
         return HomeworkSubmitResult(
             submission=submission,

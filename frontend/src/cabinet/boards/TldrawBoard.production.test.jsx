@@ -36,6 +36,9 @@ vi.mock("tldraw", () => ({
   GeoShapeUtil: class GeoShapeUtil {
     static type = "geo";
   },
+  DrawShapeUtil: class DrawShapeUtil {
+    static type = "draw";
+  },
   defaultShapeUtils: [],
 }));
 

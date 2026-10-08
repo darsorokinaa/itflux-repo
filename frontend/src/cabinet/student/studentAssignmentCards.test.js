@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { getStudentAssignmentPath, mapStudentAssignmentToHwCard, studentHomeworkStatus } from "./studentAssignmentCards";
+import {
+  getStudentAssignmentPath,
+  mapStudentAssignmentToHwCard,
+  studentAssignmentPhase,
+  studentHomeworkStatus,
+  studentTeacherRemark,
+  STUDENT_PHASE_LABEL,
+} from "./studentAssignmentCards";
 
 describe("getStudentAssignmentPath", () => {
   it("opens student interactives by assignment id, not interactive id", () => {
@@ -30,5 +37,65 @@ describe("getStudentAssignmentPath", () => {
     expect(card.deadlineLabel).not.toMatch(/просроч/i);
     expect(card.deadlineTone).not.toBe("overdue");
     expect(card.deadlineLabel).toMatch(/До /);
+  });
+});
+
+describe("student assignment phase", () => {
+  const returned = {
+    status: "needs_fix",
+    status_label: "Нужно исправить",
+    variant_submitted: true,
+    submitted_at: "2026-10-02T12:00:00+03:00",
+    teacher_comment: "Покажите ход решения",
+    title: "Дроби",
+    type_label: "Домашнее задание",
+  };
+
+  it("shows a returned work as needs fix even when submitted_at is set", () => {
+    expect(studentAssignmentPhase(returned)).toBe("needs_fix");
+    expect(STUDENT_PHASE_LABEL.needs_fix).toBe("На доработке");
+    const card = mapStudentAssignmentToHwCard(returned);
+    expect(card.deadlineLabel).toBe("На доработке");
+    expect(card.commentPreview).toBe("Покажите ход решения");
+  });
+
+  it("does not let variant_submitted override the returned status", () => {
+    expect(studentAssignmentPhase({
+      ...returned,
+      variant_submitted: true,
+    })).toBe("needs_fix");
+    expect(studentAssignmentPhase({
+      status: "submitted",
+      variant_submitted: true,
+    })).toBe("reviewing");
+    expect(studentAssignmentPhase({ status: "new", variant_submitted: false })).toBe("not_submitted");
+    expect(studentAssignmentPhase({ status: "overdue" })).toBe("overdue");
+    expect(studentAssignmentPhase({ status: "checked", variant_submitted: true })).toBe("checked");
+  });
+
+  it("shows the teacher remark on a returned work and keeps it as history after resubmit", () => {
+    expect(studentTeacherRemark(returned)).toEqual({
+      kind: "current",
+      text: "Покажите ход решения",
+    });
+    const resubmitted = { ...returned, status: "submitted", status_label: "Сдано" };
+    expect(studentAssignmentPhase(resubmitted)).toBe("reviewing");
+    expect(studentTeacherRemark(resubmitted)).toEqual({
+      kind: "history",
+      text: "Покажите ход решения",
+    });
+    expect(mapStudentAssignmentToHwCard(resubmitted).deadlineLabel).toBe("На проверке");
+    expect(mapStudentAssignmentToHwCard(resubmitted).commentPreview).toBe("");
+  });
+
+  it("does not show a comment when review cards disagree", () => {
+    const conflict = {
+      ...returned,
+      review_comment_conflict: true,
+      teacher_comment: "Произвольный комментарий",
+    };
+    expect(studentTeacherRemark(conflict).kind).toBe("conflict");
+    expect(studentTeacherRemark(conflict).text).not.toContain("Произвольный комментарий");
+    expect(mapStudentAssignmentToHwCard(conflict).commentPreview).toBe("");
   });
 });

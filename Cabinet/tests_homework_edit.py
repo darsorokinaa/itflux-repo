@@ -390,3 +390,88 @@ class HomeworkEditApiTests(TestCase):
         self.assertIn("warnings", data)
         self.assertTrue(data.get("can_edit"))
         self.assertFalse(data["warnings"].get("is_checked_or_completed"))
+
+
+class PersonalHomeworkDeleteGuardTests(TestCase):
+    def setUp(self):
+        self.teacher = User.objects.create_user(username="del_hw_teacher", password="pass")
+        self.teacher.profile.role = Profile.Role.TEACHER
+        self.teacher.profile.save()
+        self.student_user = User.objects.create_user(username="del_hw_student", password="pass")
+        self.student_user.profile.role = Profile.Role.STUDENT
+        self.student_user.profile.save()
+        self.student = Student.objects.create(
+            teacher=self.teacher,
+            user=self.student_user,
+            first_name="Катя",
+            last_name="Ученица",
+            status="active",
+        )
+        self.client = APIClient()
+        self.client.force_login(self.teacher)
+
+    def _homework(self, title):
+        return Homework.objects.create(
+            teacher=self.teacher,
+            student=self.student,
+            title=title,
+            status="assigned",
+        )
+
+    def test_unused_homework_can_be_deleted(self):
+        homework = self._homework("Пустая выдача")
+        response = self.client.delete(f"/api/cabinet/homework/{homework.id}/")
+        self.assertEqual(response.status_code, 204, getattr(response, "content", b""))
+        self.assertFalse(Homework.objects.filter(pk=homework.pk).exists())
+
+    def test_draft_file_and_attempt_block_delete(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        from Cabinet.models import HomeworkSubmissionAttachment, HomeworkSubmissionAttempt
+
+        homework = self._homework("С черновиком")
+        submission = HomeworkSubmission.objects.create(
+            homework=homework,
+            student=self.student,
+            status="submitted",
+            answer_text="мой черновик",
+            result_payload={"answers": {"1": "4"}},
+        )
+        HomeworkSubmissionAttachment.objects.create(
+            submission=submission,
+            file=SimpleUploadedFile("scan.png", b"png", content_type="image/png"),
+            original_name="scan.png",
+        )
+        HomeworkSubmissionAttempt.objects.create(
+            submission=submission,
+            attempt_number=1,
+            status="submitted",
+            answer_text="первая попытка",
+        )
+        response = self.client.delete(f"/api/cabinet/homework/{homework.id}/")
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(response.json()["code"], "personal_work")
+        submission.refresh_from_db()
+        self.assertEqual(submission.answer_text, "мой черновик")
+        self.assertEqual(submission.result_payload["answers"]["1"], "4")
+        self.assertEqual(submission.file_attachments.get().original_name, "scan.png")
+        self.assertEqual(submission.attempts.get().answer_text, "первая попытка")
+        self.assertTrue(Homework.objects.filter(pk=homework.pk).exists())
+
+    def test_submitted_unchecked_work_cannot_be_deleted(self):
+        homework = self._homework("Уже сдано")
+        submission = HomeworkSubmission.objects.create(
+            homework=homework,
+            student=self.student,
+            status="submitted",
+            submitted_at=timezone.now(),
+            answer_text="готовый ответ",
+            teacher_comment="",
+        )
+        response = self.client.delete(f"/api/cabinet/homework/{homework.id}/")
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(response.json()["code"], "personal_work")
+        submission.refresh_from_db()
+        self.assertEqual(submission.answer_text, "готовый ответ")
+        self.assertIsNotNone(submission.submitted_at)
+        self.assertTrue(ReviewItem.objects.filter(source_type="homework", source_id=submission.pk).exists())

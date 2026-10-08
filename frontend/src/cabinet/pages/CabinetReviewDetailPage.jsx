@@ -1331,6 +1331,9 @@ export default function CabinetReviewDetailPage() {
                 <div className="cb-review-detail__hw-task-main">
                   <strong>{task.title || "Задание"}</strong>
                   <span>{homeworkTaskMeta(task)}</span>
+                  {task.task_type === "text" && task.description ? (
+                    <span>{task.description}</span>
+                  ) : null}
                 </div>
                 {task.open_url || task.file_url ? (
                   <a

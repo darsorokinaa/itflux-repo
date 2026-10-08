@@ -124,7 +124,16 @@ class HomeworkFromReviewTests(TestCase):
         new_hw = Homework.objects.get(pk=data["homework_id"])
         self.assertEqual(new_hw.student_id, self.student.id)
         self.assertTrue(new_hw.created_from_review)
-        self.assertEqual(new_hw.source_review_item_id, self.review.id)
+        # Сдача с submitted_at уже создаёт карточку сигналом, setUp добавляет вторую.
+        # Контракт очереди: действие по любому дублю идёт в каноническую карточку
+        # той же сдачи. Историческая строка остаётся, исходная сдача не переписывается.
+        from Cabinet.homework_api import canonical_homework_review_item
+
+        canonical = canonical_homework_review_item(self.review)
+        self.assertNotEqual(canonical.id, self.review.id)
+        self.assertEqual(new_hw.source_review_item_id, canonical.id)
+        self.assertEqual(canonical.source_id, self.submission.id)
+        self.assertTrue(ReviewItem.objects.filter(pk=self.review.id).exists())
         self.assertEqual(new_hw.source_homework_id, self.homework.id)
         self.assertEqual(new_hw.status, HomeworkStatus.ASSIGNED)
         notify_mock.assert_called_once()

@@ -298,13 +298,9 @@ def _as_int(value) -> int:
 
 
 def _pending_reviews(teacher):
-    from .homework_api import exclude_live_meeting_review_items, review_items_ready_to_check
+    from .homework_api import pending_ready_review_items
 
-    return review_items_ready_to_check(
-        exclude_live_meeting_review_items(
-            ReviewItem.objects.filter(teacher=teacher, status=ReviewStatus.PENDING)
-        )
-    )
+    return pending_ready_review_items(teacher)
 
 
 def _counts_in_period(name, day, today, week_start, month_start, prev_week_start) -> bool:
@@ -782,12 +778,14 @@ def build_engagement(teacher, *, now=None) -> dict:
         ).values_list("source_id", "checked_at")
     )
     checked_today = 0
+    counted_homeworks = {"today": set(), "week": set(), "month": set(), "prev": set()}
     for source_id, checked_at in checked_rows:
         checked_day = _local_date(checked_at)
         if not checked_day:
             continue
         active_days.add(checked_day)
-        if checked_day == today:
+        if checked_day == today and source_id not in counted_homeworks["today"]:
+            counted_homeworks["today"].add(source_id)
             checked_today += 1
         for name, start in (
             ("week", week_start),
@@ -798,6 +796,9 @@ def build_engagement(teacher, *, now=None) -> dict:
                 continue
             if name != "prev" and checked_day < start:
                 continue
+            if source_id in counted_homeworks[name]:
+                continue
+            counted_homeworks[name].add(source_id)
             buckets[name]["homeworks"] += 1
 
     interactive_rows = list(

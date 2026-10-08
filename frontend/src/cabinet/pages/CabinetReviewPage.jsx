@@ -17,6 +17,7 @@ import {
   formatResultPercent,
   formatSubmittedAtLabel,
 } from "../homeworkResultSummary";
+import { classifyReviewItem, mapUnsubmittedWork, reviewQueues, reviewTabCounts } from "../reviewUnsubmitted";
 
 const FILTERS = [
   { id: "inbox", label: "На проверке" },
@@ -94,25 +95,15 @@ function mapReviewItem(item) {
     .slice(0, 2)
     .toUpperCase();
   const overdue = isReviewOverdue(item);
-  const awaitingSubmission = item.status === "pending" && !item.homework_submission?.submitted_at;
-  const submittedForReview = item.status === "pending" && !awaitingSubmission;
+  const submittedForReview = item.status === "pending" && Boolean(item.homework_submission?.submitted_at);
   const studentId = item.student ?? item.homework_submission?.student ?? null;
   const groupId = item.group ?? null;
   const groupTitle = (item.group_title || "").trim();
   const summary = item.result_summary || null;
 
-  const filter = ["all"];
-  if (item.status === "pending") {
-    if (awaitingSubmission) filter.push("assigned");
-    else filter.push("new");
-    filter.push("inbox");
-  } else if (item.status === "returned") {
-    filter.push("done");
-    filter.push("returned");
-  } else {
-    filter.push("done");
-  }
-  if (overdue) filter.push("overdue");
+  const classified = classifyReviewItem(item, { overdue });
+  const filter = classified.filter;
+  const awaitingSubmission = classified.awaitingSubmission;
   const level = (item.homework_review?.level || "").toLowerCase();
   if (level.includes("oge") || level === "огэ") filter.push("oge");
   if (level.includes("ege") || level === "егэ") filter.push("ege");
@@ -135,10 +126,10 @@ function mapReviewItem(item) {
       result = { countsLabel, percentage };
     }
   } else if (item.status === "returned") {
-    deadlineLabel = "Возвращено";
+    deadlineLabel = "На доработке";
     deadlineTone = "overdue";
     actionLabel = "Открыть работу";
-    metaLine = "Нужна доработка";
+    metaLine = "Нужно исправить работу";
   } else if (awaitingSubmission) {
     deadlineLabel = "Не сдано";
     deadlineTone = "info";
@@ -331,6 +322,7 @@ export default function CabinetReviewPage() {
   const searchQuery = searchParams.get("q") || "";
   const [searchDraft, setSearchDraft] = useState(searchQuery);
   const [works, setWorks] = useState([]);
+  const [unsubmitted, setUnsubmitted] = useState([]);
   const [studentOptions, setStudentOptions] = useState([]);
   const [subjectOptions, setSubjectOptions] = useState([]);
   const [counts, setCounts] = useState({ all: 0, pending: 0, checked: 0, returned: 0 });
@@ -367,7 +359,12 @@ export default function CabinetReviewPage() {
         subject: subjectScope || undefined,
         q: searchQuery || undefined,
       });
-      setWorks(normalizeCabinetList(data).map(mapReviewItem));
+      setWorks(
+        normalizeCabinetList(data)
+          .map(mapReviewItem)
+          .filter((item) => !item.awaitingSubmission),
+      );
+      setUnsubmitted((Array.isArray(data?.unsubmitted) ? data.unsubmitted : []).map(mapUnsubmittedWork));
       setCounts(data?.counts || { all: 0, pending: 0, checked: 0, returned: 0 });
       setStudentOptions(Array.isArray(data?.students) ? data.students : []);
       setSubjectOptions(Array.isArray(data?.subjects) ? data.subjects : []);
@@ -403,7 +400,8 @@ export default function CabinetReviewPage() {
     setDeletingId(item.id);
     try {
       await deleteHomework(item.homeworkId);
-      setWorks((prev) => prev.filter((w) => w.id !== item.id));
+      setWorks((prev) => prev.filter((w) => w.id !== item.id && w.homeworkId !== item.homeworkId));
+      setUnsubmitted((prev) => prev.filter((w) => w.homeworkId !== item.homeworkId));
       setDeleteTarget(null);
     } catch (err) {
       setError(err.message || "Не удалось удалить домашнее задание");
@@ -415,34 +413,38 @@ export default function CabinetReviewPage() {
   const selectedStudent = studentOptions.find((opt) => String(opt.id) === String(studentScope));
   const studentName = selectedStudent?.label || "";
 
-  const chipFilters = useMemo(() => ([
-    { id: "all", label: "Все", count: counts.all },
-    { id: "inbox", label: "На проверке", count: counts.pending },
-    { id: "done", label: "Проверено", count: counts.checked },
-    ...FILTERS.filter((f) => !["all", "inbox", "done"].includes(f.id)),
-  ]), [counts]);
+  const queues = useMemo(
+    () => reviewQueues(works, unsubmitted),
+    [works, unsubmitted],
+  );
+  const tabCounts = useMemo(
+    () => reviewTabCounts(works, unsubmitted, counts),
+    [works, unsubmitted, counts],
+  );
 
-  const submittedWorks = useMemo(
-    () => works.filter((w) => w.filter.includes("new")),
-    [works],
-  );
-  const awaitingWorks = useMemo(
-    () => works.filter((w) => w.filter.includes("assigned")),
-    [works],
-  );
+  const chipFilters = useMemo(() => ([
+    { id: "all", label: "Все", count: tabCounts.all },
+    { id: "inbox", label: "На проверке", count: tabCounts.pending },
+    { id: "missing", label: "Не сдано", count: tabCounts.unsubmitted },
+    { id: "returned", label: "На доработке", count: tabCounts.returned },
+    { id: "done", label: "Проверено", count: tabCounts.checked },
+    { id: "overdue", label: "Просроченные", count: tabCounts.overdue },
+    ...FILTERS.filter((f) => !["all", "inbox", "done", "overdue"].includes(f.id)),
+  ]), [tabCounts]);
+  const submittedWorks = queues.toReview;
 
   const groupOptions = useMemo(() => {
     const map = new Map();
-    works.forEach((w) => {
+    [...works, ...unsubmitted].forEach((w) => {
       if (!w.filter.includes("groups")) return;
       const key = w.groupId || `title:${w.groupTitle}`;
       if (!map.has(key)) map.set(key, { id: key, label: w.groupTitle });
     });
     return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, "ru"));
-  }, [works]);
+  }, [works, unsubmitted]);
 
   const studentGrouped = useMemo(() => {
-    let list = works.filter((w) => w.filter.includes("students"));
+    let list = [...works, ...unsubmitted].filter((w) => w.filter.includes("students"));
     if (studentScope !== "all") {
       list = list.filter((w) => w.studentId === String(studentScope));
     }
@@ -451,10 +453,10 @@ export default function CabinetReviewPage() {
       (w) => w.studentId || `name:${w.studentName}`,
       (w) => w.studentName,
     );
-  }, [works, studentScope]);
+  }, [works, unsubmitted, studentScope]);
 
   const groupGrouped = useMemo(() => {
-    let list = works.filter((w) => w.filter.includes("groups"));
+    let list = [...works, ...unsubmitted].filter((w) => w.filter.includes("groups"));
     if (groupScope !== "all") {
       list = list.filter((w) => (w.groupId || `title:${w.groupTitle}`) === groupScope);
     }
@@ -463,14 +465,21 @@ export default function CabinetReviewPage() {
       (w) => w.groupId || `title:${w.groupTitle}`,
       (w) => w.groupTitle,
     );
-  }, [works, groupScope]);
+  }, [works, unsubmitted, groupScope]);
 
   const tabItems = useMemo(() => {
-    if (filter === "inbox" || filter === "students" || filter === "groups") return [];
+    if (filter === "inbox" || filter === "students" || filter === "groups" || filter === "missing") return [];
+    if (filter === "overdue") return queues.overdue;
     return works.filter((w) => w.filter.includes(filter) || filter === "all");
-  }, [works, filter]);
+  }, [works, filter, queues.overdue]);
 
   const openItem = useCallback((item) => {
+    if (item.kind === "unsubmitted" && item.openPath) {
+      navigate(item.openPath, {
+        state: { from: `${location.pathname}${location.search}` },
+      });
+      return;
+    }
     navigate(`/cabinet/review/${item.id}`, {
       state: { from: `${location.pathname}${location.search}` },
     });
@@ -501,7 +510,7 @@ export default function CabinetReviewPage() {
     };
   }, [works.length, studentName, searchQuery, subjectScope, filter]);
 
-  const inboxEmpty = submittedWorks.length === 0 && awaitingWorks.length === 0;
+  const inboxEmpty = submittedWorks.length === 0;
   const showSkeleton = loading || (refreshing && works.length === 0);
 
   return (
@@ -613,24 +622,25 @@ export default function CabinetReviewPage() {
               )}
             </section>
 
-            <section className="cb-review-inbox__section" aria-labelledby="review-awaiting-heading">
-              <div className="cb-review-inbox__head">
-                <h2 id="review-awaiting-heading" className="cb-review-inbox__title">Ожидают сдачи</h2>
-                <span className="cb-review-inbox__count">{awaitingWorks.length}</span>
-              </div>
-              {awaitingWorks.length ? (
-                <ReviewWorksGrid
-                  items={awaitingWorks}
-                  deletingId={deletingId}
-                  onOpen={openItem}
-                  onDeleteRequest={setDeleteTarget}
-                  onCopyRequest={setCopyTarget}
-                />
-              ) : (
-                <p className="cb-review-inbox__empty">Нет выданных заданий без ответа</p>
-              )}
-            </section>
           </div>
+        )
+      ) : filter === "missing" ? (
+        unsubmitted.length === 0 ? (
+          <CabinetEmptyState
+            icon="check"
+            title="Нет не сданных заданий"
+            text={studentName
+              ? `У «${studentName}» нет выданных работ без сдачи.`
+              : "Все выданные задания уже сданы или ещё не назначены."}
+          />
+        ) : (
+          <ReviewWorksGrid
+            items={unsubmitted}
+            deletingId={deletingId}
+            onOpen={openItem}
+            onDeleteRequest={setDeleteTarget}
+            onCopyRequest={setCopyTarget}
+          />
         )
       ) : filter === "students" ? (
         <ReviewGroupedSections

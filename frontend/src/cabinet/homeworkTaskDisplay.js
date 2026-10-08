@@ -48,11 +48,12 @@ function attachmentKeys(attachments) {
 
 export function isHomeworkInstructionTask(task, description) {
   if (!task || task.is_variant || task.task_type !== "text") return false;
-  const desc = (task.description || "").trim();
   const title = (task.title || "").trim().toLowerCase();
+  if (!INSTRUCTION_TITLES.has(title)) return false;
+  const desc = (task.description || "").trim();
   const hw = (description || "").trim();
-  if (hw && desc === hw) return true;
-  return INSTRUCTION_TITLES.has(title);
+  if (hw && desc && desc !== hw) return false;
+  return true;
 }
 
 export function taskDuplicatesAttachment(task, attachments) {
@@ -76,12 +77,13 @@ export function taskDuplicatesAttachment(task, attachments) {
 }
 
 export function visibleHomeworkResourceTasks(tasks, { description = "", attachments = [] } = {}) {
+  const seenIds = new Set();
   return (tasks || []).filter((task) => {
+    const id = task?.id;
+    if (id != null && seenIds.has(id)) return false;
     if (isHomeworkInstructionTask(task, description)) return false;
     if (taskDuplicatesAttachment(task, attachments)) return false;
-    if (task.task_type === "text" && !task.is_variant && !resolveTaskHref(task)) {
-      return false;
-    }
+    if (id != null) seenIds.add(id);
     return true;
   });
 }
@@ -97,6 +99,7 @@ export function extraHomeworkText(tasks, description) {
   };
   add(description);
   for (const task of tasks || []) {
+    if (!isHomeworkInstructionTask(task, description)) continue;
     if (task.is_variant || task.task_type !== "text") continue;
     if (resolveTaskHref(task)) continue;
     add(task.description);

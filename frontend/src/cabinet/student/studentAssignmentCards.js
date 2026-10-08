@@ -46,6 +46,43 @@ export function studentHomeworkStatus(item) {
   return status;
 }
 
+export const STUDENT_PHASE_LABEL = {
+  not_submitted: "Не сдано",
+  reviewing: "На проверке",
+  needs_fix: "На доработке",
+  checked: "Проверено",
+  overdue: "Просрочено",
+};
+
+/** Статус карточки ученика берётся из поля status, а не из submitted_at. */
+export function studentAssignmentPhase(item) {
+  const status = studentHomeworkStatus(item || {});
+  if (status === "checked" || status === "completed") return "checked";
+  if (status === "needs_fix") return "needs_fix";
+  if (status === "submitted" || status === "reviewing") return "reviewing";
+  if (status === "overdue") return "overdue";
+  return "not_submitted";
+}
+
+export function studentTeacherRemark(item) {
+  if (!item) return null;
+  if (item.review_comment_conflict) {
+    return {
+      kind: "conflict",
+      text: "Замечания по проверке различаются. Уточните у преподавателя, какой комментарий учитывать.",
+    };
+  }
+  const text = String(
+    item.teacher_comment || item.result_summary?.teacher_comment_preview || "",
+  ).trim();
+  if (!text) return null;
+  const phase = studentAssignmentPhase(item);
+  if (phase === "needs_fix") return { kind: "current", text };
+  if (phase === "checked") return { kind: "final", text };
+  if (phase === "reviewing") return { kind: "history", text };
+  return null;
+}
+
 export function getStudentAssignmentPath(item) {
   if (item.kind === "interactive") {
     return `/cabinet/student/interactives/${item.interactive_assignment_id || item.id}/play`;
@@ -78,11 +115,12 @@ export function mapStudentAssignmentToHwCard(item) {
   let metaLine = "";
   let comment = "";
 
+  const remark = studentTeacherRemark(item);
   if (status === "needs_fix") {
-    deadlineLabel = "Нужна доработка";
+    deadlineLabel = "На доработке";
     deadlineTone = "overdue";
-    metaLine = "Учитель оставил замечания";
-    comment = commentPreview(item.result_summary?.teacher_comment_preview || item.teacher_comment);
+    metaLine = "Нужно исправить работу";
+    comment = remark?.kind === "current" ? commentPreview(remark.text) : "";
   } else if (item.due_at && !["checked", "completed", "submitted", "reviewing"].includes(status)) {
     const dueTime = formatStudentTime(item.due_at);
     deadlineLabel = isDueToday(item.due_at)
@@ -99,13 +137,13 @@ export function mapStudentAssignmentToHwCard(item) {
       metaLine = item.due_at ? `Сдать до ${formatStudentDate(item.due_at)}` : "";
     }
   } else if (status === "submitted" || status === "reviewing") {
-    deadlineLabel = "Сдано";
+    deadlineLabel = "На проверке";
     deadlineTone = "review";
     metaLine = "Ожидает проверки преподавателем";
   } else if (status === "checked" || status === "completed") {
-    deadlineLabel = item.status_label || "Проверено";
+    deadlineLabel = "Проверено";
     deadlineTone = "completed";
-    comment = commentPreview(item.result_summary?.teacher_comment_preview || item.teacher_comment);
+    comment = remark?.kind === "final" ? commentPreview(remark.text) : "";
   }
 
   const descriptionParts = [];

@@ -30,6 +30,7 @@ from .submission_files import submission_has_files
 from .upload_validation import UploadValidationError, validate_uploaded_file
 
 logger = logging.getLogger(__name__)
+_logged_review_comment_conflicts: set[tuple] = set()
 
 VARIANT_URL_RE = re.compile(r"/variant/(\d+)", re.I)
 VARIANT_PATH_RE = re.compile(
@@ -160,16 +161,500 @@ def exclude_live_meeting_review_items(qs):
 
 
 def review_items_ready_to_check(qs):
-    """Оставить только работы, которые ученик реально сдал (есть submitted_at)."""
-    from django.db.models import Q
-
+    """
+    В очереди «на проверке» только работы с фактической сдачей.
+    Уже проверенные и возвращённые карточки остаются в истории,
+    даже если у старой сдачи не заполнен submitted_at.
+    """
     from .models import HomeworkSubmission
 
     submitted_ids = HomeworkSubmission.objects.filter(submitted_at__isnull=False).values("pk")
-    filtered = qs.filter(
-        Q(source_type="homework", source_id__in=submitted_ids) | ~Q(source_type="homework")
+    return qs.filter(
+        Q(source_type="homework", source_id__in=submitted_ids)
+        | Q(
+            source_type="homework",
+            status__in=(ReviewStatus.CHECKED, ReviewStatus.RETURNED),
+        )
+        | ~Q(source_type="homework")
     )
-    return filtered
+
+
+def _review_item_field(item, name):
+    if isinstance(item, dict):
+        return item.get(name)
+    return getattr(item, name)
+
+
+def _review_rank_key(item, submission_status):
+    """
+    Одна актуальная карточка на сдачу.
+    При уже существующих дублях выбираем ту, что соответствует статусу сдачи
+    и хранит комментарий. Остальные строки не удаляем.
+    """
+    status = _review_item_field(item, "status")
+    comment = str(_review_item_field(item, "teacher_comment") or "").strip()
+    pk = _review_item_field(item, "id")
+    if pk is None:
+        pk = _review_item_field(item, "pk")
+    commented = bool(comment)
+    checked_at = _review_item_field(item, "checked_at")
+    if checked_at is None:
+        checked_rank = (1, 0)
+    else:
+        checked_rank = (0, -checked_at.timestamp())
+    if submission_status == SubmissionStatus.CHECKED:
+        if status == ReviewStatus.CHECKED and commented:
+            bucket = 0
+        elif status == ReviewStatus.CHECKED:
+            bucket = 1
+        else:
+            bucket = 2
+    elif submission_status in (SubmissionStatus.RETURNED, SubmissionStatus.NEEDS_REVISION):
+        if status == ReviewStatus.RETURNED and commented:
+            bucket = 0
+        elif status == ReviewStatus.RETURNED:
+            bucket = 1
+        else:
+            bucket = 2
+    elif submission_status == SubmissionStatus.SUBMITTED:
+        if status == ReviewStatus.PENDING and commented:
+            bucket = 0
+        elif status == ReviewStatus.RETURNED and commented:
+            bucket = 1
+        elif status == ReviewStatus.PENDING:
+            bucket = 2
+        elif status == ReviewStatus.RETURNED:
+            bucket = 3
+        else:
+            bucket = 4
+    else:
+        bucket = 0 if status == ReviewStatus.PENDING else 1
+    # Время проверки важнее id. Id только различает карточки с одинаковым смыслом.
+    return (bucket, 0 if commented else 1, checked_rank, pk or 0)
+
+
+def _returned_card_to_reopen(items):
+    """Карточка возврата, которую повторная сдача должна открыть снова."""
+    returned = [row for row in items if _review_item_field(row, "status") == ReviewStatus.RETURNED]
+    if not returned:
+        return None
+    return min(returned, key=lambda row: _review_rank_key(row, SubmissionStatus.RETURNED))
+
+
+def _reopen_returned_sibling(items, submission):
+    if (
+        submission is None
+        or submission.status != SubmissionStatus.SUBMITTED
+        or not submission.submitted_at
+    ):
+        return items
+    target = _returned_card_to_reopen(items)
+    if target is None:
+        return items
+    reopened = reopen_review_item_if_resubmitted(target, submission)
+    return [reopened if row.pk == reopened.pk else row for row in items]
+
+
+def canonical_homework_review_item(item):
+    """Карточка, с которой работают очередь, проверка и повторная сдача."""
+    from .models import ReviewItem
+
+    if item is None or item.source_type != "homework":
+        return item
+    siblings = list(
+        ReviewItem.objects.filter(
+            teacher_id=item.teacher_id,
+            source_type="homework",
+            source_id=item.source_id,
+        )
+    )
+    if not siblings:
+        return item
+    submission = HomeworkSubmission.objects.filter(pk=item.source_id).first()
+    siblings = _reopen_returned_sibling(siblings, submission)
+    if len(siblings) == 1:
+        return siblings[0]
+    submission_status = submission.status if submission is not None else None
+    return min(siblings, key=lambda row: _review_rank_key(row, submission_status))
+
+
+def homework_review_comment_conflict(items) -> dict | None:
+    """
+    Разные непустые комментарии на карточках одной сдачи.
+    Ничего не перезаписывает: конфликт остаётся в исходных строках.
+    """
+    grouped: dict[str, list[int]] = {}
+    teacher_id = None
+    source_id = None
+    for item in items or []:
+        text = str(_review_item_field(item, "teacher_comment") or "").strip()
+        if not text:
+            continue
+        teacher_id = teacher_id or _review_item_field(item, "teacher_id")
+        source_id = source_id if source_id is not None else _review_item_field(item, "source_id")
+        pk = _review_item_field(item, "id") or _review_item_field(item, "pk")
+        grouped.setdefault(text, []).append(pk)
+    if len(grouped) <= 1:
+        return None
+    payload = {
+        "teacher_id": teacher_id,
+        "source_id": source_id,
+        "review_ids": [pk for ids in grouped.values() for pk in ids if pk is not None],
+        "distinct_comments": len(grouped),
+    }
+    marker = (
+        payload["teacher_id"],
+        payload["source_id"],
+        tuple(sorted(pk for pk in payload["review_ids"] if pk is not None)),
+    )
+    if marker not in _logged_review_comment_conflicts:
+        _logged_review_comment_conflicts.add(marker)
+        logger.warning(
+            "homework.review_comment_conflict teacher_id=%s source_id=%s review_ids=%s distinct_comments=%s",
+            payload["teacher_id"],
+            payload["source_id"],
+            payload["review_ids"],
+            payload["distinct_comments"],
+        )
+    return payload
+
+
+def resolve_homework_teacher_remark(submission, reviews) -> dict:
+    """
+    Текст для ученика без записи в карточки.
+    Официальный комментарий сдачи важнее. Единственный комментарий на карточке
+    можно показать, если у сдачи его нет. Несколько разных текстов — конфликт.
+    """
+    official = str(getattr(submission, "teacher_comment", "") or "").strip()
+    conflict = homework_review_comment_conflict(reviews)
+    if official:
+        return {"text": official, "conflict": conflict}
+    texts = []
+    for item in reviews or []:
+        text = str(_review_item_field(item, "teacher_comment") or "").strip()
+        if text and text not in texts:
+            texts.append(text)
+    if len(texts) == 1:
+        return {"text": texts[0], "conflict": None}
+    return {"text": "", "conflict": conflict}
+
+
+def dedupe_homework_review_items(qs):
+    """
+    В списке и счётчиках одна карточка на сдачу и преподавателя.
+    Лишние ReviewItem остаются в базе вместе с комментариями.
+    """
+    from .models import ReviewItem
+
+    rows = list(qs.filter(source_type="homework").values("id", "teacher_id", "source_id"))
+    if not rows:
+        return qs
+    pairs = {(row["teacher_id"], row["source_id"]) for row in rows}
+    source_ids = {source_id for _teacher_id, source_id in pairs}
+    teacher_ids = {teacher_id for teacher_id, _source_id in pairs}
+    siblings = list(
+        ReviewItem.objects.filter(
+            teacher_id__in=teacher_ids,
+            source_type="homework",
+            source_id__in=source_ids,
+        ).values("id", "teacher_id", "source_id", "status", "teacher_comment", "checked_at")
+    )
+    statuses = dict(
+        HomeworkSubmission.objects.filter(pk__in=source_ids).values_list("pk", "status")
+    )
+    grouped = {}
+    for row in siblings:
+        key = (row["teacher_id"], row["source_id"])
+        if key in pairs:
+            grouped.setdefault(key, []).append(row)
+    keep_ids = []
+    for group in grouped.values():
+        if len(group) > 1:
+            homework_review_comment_conflict(group)
+        keep_ids.append(
+            min(group, key=lambda row: _review_rank_key(row, statuses.get(row["source_id"])))["id"]
+        )
+    return qs.filter(Q(id__in=keep_ids) | ~Q(source_type="homework"))
+
+
+def pending_ready_review_items(teacher):
+    """Одна ожидающая карточка на сданную работу: очередь, меню, сводка и отчёты."""
+    from .choices import StudentStatus
+    from .models import ReviewItem
+
+    return dedupe_homework_review_items(
+        review_items_ready_to_check(
+            exclude_live_meeting_review_items(
+                ReviewItem.objects.filter(
+                    teacher=teacher,
+                    status=ReviewStatus.PENDING,
+                ).exclude(student__status=StudentStatus.ARCHIVED)
+            )
+        )
+    )
+
+
+def homework_is_shared_group(homework) -> bool:
+    """Одна запись Homework на всю группу: у неё нет личного ученика."""
+    return bool(
+        homework is not None
+        and not getattr(homework, "student_id", None)
+        and getattr(homework, "group_id", None)
+    )
+
+
+def submission_is_handed_in(submission) -> bool:
+    """Сдача, возврат или проверка. Черновик без submitted_at сюда не входит."""
+    if submission is None:
+        return False
+    if submission.status in (
+        SubmissionStatus.CHECKED,
+        SubmissionStatus.RETURNED,
+        SubmissionStatus.NEEDS_REVISION,
+    ):
+        return True
+    return bool(submission.submitted_at)
+
+
+def homework_has_personal_work(homework) -> bool:
+    """Черновик, ответ, файл, оценка или история попыток. Пустая выдача сюда не входит."""
+    if homework is None:
+        return False
+    submissions = list(homework.submissions.all())
+    if not submissions:
+        return False
+    from .models import (
+        HomeworkAttachment,
+        HomeworkSubmissionAttachment,
+        HomeworkSubmissionAttempt,
+        ReviewItem,
+    )
+
+    ids = [row.id for row in submissions]
+    if ReviewItem.objects.filter(source_type="homework", source_id__in=ids).exists():
+        return True
+    if HomeworkSubmissionAttempt.objects.filter(submission_id__in=ids).exists():
+        return True
+    if HomeworkSubmissionAttachment.objects.filter(submission_id__in=ids).exists():
+        return True
+    if HomeworkAttachment.objects.filter(submission_id__in=ids, is_deleted=False).exists():
+        return True
+    for submission in submissions:
+        if submission_is_handed_in(submission) or _submission_has_draft(submission):
+            return True
+        if submission.score is not None or str(submission.teacher_comment or "").strip():
+            return True
+        try:
+            if submission.attached_file and submission.attached_file.name:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def shared_homework_has_personal_work(homework) -> bool:
+    """Есть ли у кого-то из группы свой черновик, сдача, оценка или история."""
+    if not homework_is_shared_group(homework):
+        return False
+    return homework_has_personal_work(homework)
+
+
+def _submission_blocks_unsubmitted_list(submission) -> bool:
+    """Сдача, возврат и проверка — это уже не вкладка «Не сдано»."""
+    if submission is None:
+        return False
+    if submission.status in (
+        SubmissionStatus.CHECKED,
+        SubmissionStatus.RETURNED,
+        SubmissionStatus.NEEDS_REVISION,
+    ):
+        return True
+    return bool(submission.submitted_at)
+
+
+def _submission_has_draft(submission) -> bool:
+    if submission is None:
+        return False
+    if str(submission.answer_text or "").strip():
+        return True
+    payload = submission.result_payload if isinstance(submission.result_payload, dict) else {}
+    if payload:
+        return True
+    try:
+        if submission.attached_file and submission.attached_file.name:
+            return True
+    except Exception:
+        return False
+    cached = getattr(submission, "_prefetched_objects_cache", None) or {}
+    if "file_attachments" in cached:
+        return bool(cached["file_attachments"])
+    return False
+
+
+def _unsubmitted_recipients(homework, teacher, student_id):
+    from .choices import StudentStatus
+
+    if homework.student_id:
+        student = homework.student
+        if student is None or student.status == StudentStatus.ARCHIVED:
+            return []
+        if student.teacher_id != getattr(teacher, "id", teacher):
+            return []
+        if student_id and student.id != student_id:
+            return []
+        return [student]
+    if not homework.group_id or homework.group is None:
+        return []
+    members = []
+    for student in homework.group.students.all():
+        if student.status == StudentStatus.ARCHIVED:
+            continue
+        if student.teacher_id != getattr(teacher, "id", teacher):
+            continue
+        if student_id and student.id != student_id:
+            continue
+        members.append(student)
+    return members
+
+
+def list_unsubmitted_homework(
+    teacher,
+    *,
+    student_id=None,
+    subject_id=None,
+    query="",
+) -> list[dict]:
+    """
+    Выданные и ещё не сданные работы: по одной строке на ученика.
+    Пустые сдачи и карточки проверки здесь не создаются.
+    """
+    from django.db.models import Prefetch
+
+    from .choices import HomeworkStatus, StudentStatus
+    from .models import Homework, HomeworkSubmission, Student
+
+    text = (query or "").strip()
+    qs = Homework.objects.filter(teacher=teacher).exclude(
+        status__in=(HomeworkStatus.DRAFT, HomeworkStatus.ARCHIVED),
+    ).exclude(
+        description__contains=LIVE_MEETING_HOMEWORK_MARKER,
+    )
+    if subject_id:
+        qs = qs.filter(student_subject_id=subject_id)
+    if student_id:
+        qs = qs.filter(
+            Q(student_id=student_id)
+            | Q(student__isnull=True, group__students__id=student_id, group__students__status=StudentStatus.ACTIVE)
+            | Q(student__isnull=True, group__students__id=student_id, group__students__status=StudentStatus.PAUSED)
+        )
+    if text:
+        qs = qs.filter(
+            Q(title__icontains=text)
+            | Q(student__first_name__icontains=text)
+            | Q(student__last_name__icontains=text)
+            | Q(group__students__first_name__icontains=text)
+            | Q(group__students__last_name__icontains=text)
+        )
+    homework_ids = list(dict.fromkeys(qs.values_list("id", flat=True)))
+    if not homework_ids:
+        return []
+    homeworks = list(
+        Homework.objects.filter(id__in=homework_ids)
+        .select_related("student", "group", "student_subject")
+        .prefetch_related(
+            Prefetch(
+                "group__students",
+                queryset=Student.objects.exclude(status=StudentStatus.ARCHIVED).order_by("id"),
+            ),
+            Prefetch(
+                "submissions",
+                queryset=HomeworkSubmission.objects.prefetch_related("file_attachments").order_by("id"),
+            ),
+        )
+        .order_by("-created_at", "-id")
+    )
+    needle = text.lower()
+    now = timezone.now()
+    rows = []
+    for homework in homeworks:
+        title_matches = not needle or needle in (homework.title or "").lower()
+        submissions = {}
+        for submission in homework.submissions.all():
+            current = submissions.get(submission.student_id)
+            if current is None or submission.id > current.id:
+                submissions[submission.student_id] = submission
+        subject_label = ""
+        level = ""
+        if homework.student_subject_id and homework.student_subject:
+            subject_label = homework.student_subject.display_label
+            level = homework.student_subject.direction or homework.student_subject.level or ""
+        for student in _unsubmitted_recipients(homework, teacher, student_id):
+            name = f"{student.first_name} {student.last_name}".strip()
+            if needle and not title_matches and needle not in name.lower():
+                continue
+            submission = submissions.get(student.id)
+            if _submission_blocks_unsubmitted_list(submission):
+                continue
+            draft = _submission_has_draft(submission)
+            overdue = bool(homework.due_at and homework.due_at < now)
+            rows.append({
+                "id": f"hw-{homework.id}-student-{student.id}",
+                "kind": "unsubmitted",
+                "homework_id": homework.id,
+                "student_id": student.id,
+                "student_name": name or f"Ученик {student.id}",
+                "title": homework.title,
+                "issued_at": homework.created_at.isoformat() if homework.created_at else None,
+                "due_at": homework.due_at.isoformat() if homework.due_at else None,
+                "status": "draft" if draft else "not_submitted",
+                "status_label": "Черновик" if draft else "Не сдано",
+                "is_overdue": overdue,
+                "group_id": homework.group_id,
+                "group_title": homework.group.title if homework.group_id and homework.group else "",
+                "subject_label": subject_label,
+                "level": level,
+                "open_path": f"/cabinet/homework/{homework.id}/edit",
+            })
+    return rows
+
+
+def count_new_homework_reviews(teacher, since) -> int:
+    """Новые работы в уведомлении: одна логическая сдача, не каждая карточка-дубль."""
+    qs = pending_ready_review_items(teacher).filter(source_type="homework")
+    if since is not None:
+        qs = qs.filter(created_at__gte=since)
+    return qs.count()
+
+
+def homework_review_index(teacher_id, submissions) -> dict:
+    """Актуальная карточка и замечание ученика для каждой сдачи."""
+    from .models import ReviewItem
+
+    submissions = [row for row in submissions or [] if row is not None and row.pk]
+    source_ids = [row.pk for row in submissions]
+    if teacher_id is None or not source_ids:
+        return {}
+    rows = list(
+        ReviewItem.objects.filter(
+            teacher_id=teacher_id,
+            source_type="homework",
+            source_id__in=source_ids,
+        ).values("id", "teacher_id", "source_id", "status", "teacher_comment", "checked_at")
+    )
+    grouped: dict[int, list] = {}
+    for row in rows:
+        grouped.setdefault(row["source_id"], []).append(row)
+    by_id = {row.pk: row for row in submissions}
+    index = {}
+    for source_id, group in grouped.items():
+        submission = by_id.get(source_id)
+        status = submission.status if submission is not None else None
+        chosen = min(group, key=lambda row: _review_rank_key(row, status))
+        index[source_id] = {
+            "review_id": chosen["id"],
+            "remark": resolve_homework_teacher_remark(submission, group),
+        }
+    return index
 
 
 def explain_homework_missing_from_teacher_queue(submission: HomeworkSubmission) -> str:
@@ -198,64 +683,60 @@ def explain_homework_missing_from_teacher_queue(submission: HomeworkSubmission) 
 
 def ensure_homework_in_review_queue(homework: Homework, student: Student):
     """
-    Показать выданное ДЗ в разделе «Проверка» сразу после назначения.
-    Live-варианты с урока сюда не попадают.
+    Карточка проверки появляется только после фактической сдачи.
+    Выдача ДЗ сама по себе очередь не пополняет. Live-варианты сюда не попадают.
+    Уже существующую карточку не пересоздаём и статус не сбрасываем.
     """
-    from .models import ReviewItem
-
     if homework is None or student is None:
         return None
     if is_live_meeting_homework(homework):
         return None
 
-    submission = _get_or_create_submission(homework, student)
-    item, _ = ReviewItem.objects.get_or_create(
-        teacher=homework.teacher,
-        source_type="homework",
-        source_id=submission.pk,
-        defaults={
-            "student": student,
-            "group": homework.group,
-            "title": f"{homework.title} — {student.full_name}",
-            "status": "pending",
-            "priority": "normal",
-        },
+    submission = (
+        HomeworkSubmission.objects.filter(
+            homework=homework,
+            student=student,
+            submitted_at__isnull=False,
+        )
+        .order_by("-submitted_at", "-id")
+        .first()
     )
+    if submission is None:
+        return None
+
+    item, _created = ensure_single_homework_review_item(submission)
     return item
 
 
 def sync_assigned_homework_into_review_queue(teacher) -> int:
     """
-    Догнать уже выданные ДЗ, у которых ещё нет ReviewItem
-    (например, авто-выдача после урока до фикса).
+    Догнать уже сданные работы, у которых ещё нет карточки проверки.
+    Несозданные сдачи и работы без submitted_at не трогает.
     """
-    from .choices import HomeworkStatus, StudentStatus
-    from .models import ReviewItem
+    from .choices import StudentStatus
 
     if teacher is None:
         return 0
 
-    qs = (
-        Homework.objects.filter(teacher=teacher, status=HomeworkStatus.ASSIGNED)
-        .filter(student__isnull=False)
+    submissions = (
+        HomeworkSubmission.objects.filter(
+            homework__teacher=teacher,
+            submitted_at__isnull=False,
+            student__isnull=False,
+        )
         .exclude(student__status=StudentStatus.ARCHIVED)
-        .select_related("student", "group")
-        .order_by("-id")[:300]
+        .select_related("homework", "student")
+        .order_by("-submitted_at", "-id")[:300]
     )
 
     created = 0
-    for homework in qs:
+    for submission in submissions:
+        homework = submission.homework
         if is_live_meeting_homework(homework):
             continue
         try:
-            submission = _get_or_create_submission(homework, homework.student)
-            if ReviewItem.objects.filter(
-                teacher=teacher,
-                source_type="homework",
-                source_id=submission.pk,
-            ).exists():
-                continue
-            if ensure_homework_in_review_queue(homework, homework.student) is not None:
+            _item, was_created = ensure_single_homework_review_item(submission)
+            if was_created:
                 created += 1
         except Exception:
             logger.exception(
@@ -452,8 +933,50 @@ def _webhook_ok(request) -> bool:
     return got == expected
 
 
-def _resolve_access(request, homework_id: int):
-    homework = Homework.objects.filter(pk=homework_id).select_related("teacher").first()
+def _student_only_write_denied():
+    return Response(
+        {
+            "detail": "Сохранять и отправлять ответы может только ученик.",
+            "code": "student_only",
+        },
+        status=status.HTTP_403_FORBIDDEN,
+    )
+
+
+def _token_student_user_id(payload: dict | None) -> int | None:
+    if not payload:
+        return None
+    raw = payload.get("student_user_id") or payload.get("studentUserId")
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _caller_is_this_student(request, student: Student, token_payload: dict | None = None) -> bool:
+    """Писать ответы может сам ученик: его сессия или его токен без чужой сессии."""
+    if student is None:
+        return False
+    user = getattr(request, "user", None)
+    if user is not None and getattr(user, "is_authenticated", False):
+        profile = getattr(user, "profile", None)
+        if getattr(profile, "role", None) != Profile.Role.STUDENT:
+            return False
+        return Student.objects.filter(pk=student.pk, user=user).exists()
+    token_user_id = _token_student_user_id(token_payload)
+    return bool(student.user_id and token_user_id == int(student.user_id))
+
+
+def _reject_student_answer_write(request, homework: Homework, student: Student, token_payload=None):
+    if not _caller_is_this_student(request, student, token_payload):
+        return _student_only_write_denied()
+    if homework.student_id and student.pk != homework.student_id:
+        return _student_only_write_denied()
+    return None
+
+
+def _resolve_access(request, homework_id: int, *, write: bool = False):
+    homework = Homework.objects.filter(pk=homework_id).select_related("teacher", "student").first()
     if not homework:
         return None, None, Response({"detail": "Задание не найдено."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -473,12 +996,20 @@ def _resolve_access(request, homework_id: int):
             student = homework.student
         if not student:
             return None, None, Response({"detail": "Ученик не найден."}, status=status.HTTP_403_FORBIDDEN)
+        if write:
+            denied = _reject_student_answer_write(request, homework, student, payload)
+            if denied is not None:
+                return None, None, denied
         return homework, student, None
 
     if _webhook_ok(request):
         student = homework.student
         if not student:
             return None, None, Response({"detail": "Ученик не указан."}, status=status.HTTP_403_FORBIDDEN)
+        if write:
+            denied = _reject_student_answer_write(request, homework, student, None)
+            if denied is not None:
+                return None, None, denied
         return homework, student, None
 
     user = request.user
@@ -496,13 +1027,25 @@ def _resolve_access(request, homework_id: int):
         # Live-вариант с урока специально исключён из очереди ДЗ, но ученик
         # на занятии должен сохранять ответы по показанному заданию.
         if is_live_meeting_homework(homework):
+            if write:
+                denied = _reject_student_answer_write(request, homework, student, None)
+                if denied is not None:
+                    return None, None, denied
             return homework, student, None
         if not _homework_qs(students).filter(pk=homework_id).exists():
             return None, None, Response({"detail": "Нет доступа к заданию."}, status=status.HTTP_403_FORBIDDEN)
+        if write:
+            denied = _reject_student_answer_write(request, homework, student, None)
+            if denied is not None:
+                return None, None, denied
         return homework, student, None
 
     if profile and profile.role == Profile.Role.TEACHER and homework.teacher_id == user.id:
+        if write:
+            return None, None, _student_only_write_denied()
         student = homework.student or Student.objects.filter(teacher=user).first()
+        if not student:
+            return None, None, Response({"detail": "Ученик не найден."}, status=status.HTTP_403_FORBIDDEN)
         return homework, student, None
 
     return None, None, Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
@@ -924,29 +1467,70 @@ def _parse_result_body(request):
     return None
 
 
-def _ensure_review_item(submission: HomeworkSubmission):
+def ensure_single_homework_review_item(
+    submission: HomeworkSubmission,
+    *,
+    initial_status: str | None = None,
+    reopen: bool = True,
+) -> tuple:
+    """
+    Ровно одна новая карточка на сдачу. Создание сериализуется блокировкой сдачи.
+    Если карточки уже есть, в том числе дубли, новая не создаётся и старые не удаляются.
+    """
     from .models import ReviewItem
 
-    if submission.status != SubmissionStatus.SUBMITTED:
-        return None
-    if not submission.submitted_at:
-        return None
-    if is_live_meeting_homework(submission.homework):
-        return None
-    item, created = ReviewItem.objects.get_or_create(
-        teacher=submission.homework.teacher,
-        source_type="homework",
-        source_id=submission.pk,
-        defaults={
-            "student": submission.student,
-            "group": submission.homework.group,
-            "title": f"{submission.homework.title} — {submission.student.full_name}",
-            "status": ReviewStatus.PENDING,
-            "priority": "normal",
-        },
-    )
-    if not created:
-        reopen_review_item_if_resubmitted(item, submission=submission)
+    if submission is None or not submission.submitted_at:
+        return None, False
+    homework = submission.homework
+    if homework is None or homework.teacher_id is None or is_live_meeting_homework(homework):
+        return None, False
+    if initial_status is None and submission.status != SubmissionStatus.SUBMITTED:
+        return None, False
+
+    with transaction.atomic():
+        locked = (
+            HomeworkSubmission.objects.select_for_update()
+            .select_related("student", "homework")
+            .filter(pk=submission.pk)
+            .first()
+        )
+        if locked is None or not locked.submitted_at:
+            return None, False
+        homework = locked.homework
+        if homework is None or homework.teacher_id is None or is_live_meeting_homework(homework):
+            return None, False
+        items = list(
+            ReviewItem.objects.select_for_update()
+            .filter(
+                teacher_id=homework.teacher_id,
+                source_type="homework",
+                source_id=locked.pk,
+            )
+            .order_by("id")
+        )
+        if items:
+            if reopen:
+                items = _reopen_returned_sibling(items, locked)
+            item = min(items, key=lambda row: _review_rank_key(row, locked.status))
+            return item, False
+
+        student = locked.student
+        student_name = student.full_name if student is not None else ""
+        item = ReviewItem.objects.create(
+            teacher_id=homework.teacher_id,
+            student_id=locked.student_id,
+            group_id=homework.group_id,
+            source_type="homework",
+            source_id=locked.pk,
+            title=f"{homework.title} — {student_name}",
+            status=initial_status or ReviewStatus.PENDING,
+            priority="normal",
+        )
+        return item, True
+
+
+def _ensure_review_item(submission: HomeworkSubmission):
+    item, _created = ensure_single_homework_review_item(submission)
     return item
 
 
@@ -981,25 +1565,41 @@ def reopen_resubmitted_review_items(teacher) -> int:
 
     if teacher is None:
         return 0
-    returned = ReviewItem.objects.filter(
+    returned_source_ids = list(
+        ReviewItem.objects.filter(
+            teacher=teacher,
+            source_type="homework",
+            status=ReviewStatus.RETURNED,
+        ).values_list("source_id", flat=True)[:500]
+    )
+    if not returned_source_ids:
+        return 0
+    submissions = {
+        row.pk: row
+        for row in HomeworkSubmission.objects.filter(
+            pk__in=returned_source_ids,
+            status=SubmissionStatus.SUBMITTED,
+            submitted_at__isnull=False,
+        )
+    }
+    if not submissions:
+        return 0
+    grouped = {}
+    for item in ReviewItem.objects.filter(
         teacher=teacher,
         source_type="homework",
-        status=ReviewStatus.RETURNED,
-    )
-    source_ids = list(returned.values_list("source_id", flat=True)[:500])
-    if not source_ids:
-        return 0
-    resubmitted_ids = HomeworkSubmission.objects.filter(
-        pk__in=source_ids,
-        status=SubmissionStatus.SUBMITTED,
-        submitted_at__isnull=False,
-    ).values_list("pk", flat=True)
-    if not resubmitted_ids:
-        return 0
-    return returned.filter(source_id__in=list(resubmitted_ids)).update(
-        status=ReviewStatus.PENDING,
-        checked_at=None,
-    )
+        source_id__in=list(submissions),
+    ):
+        grouped.setdefault(item.source_id, []).append(item)
+    updated = 0
+    for source_id, group in grouped.items():
+        submission = submissions[source_id]
+        target = _returned_card_to_reopen(group)
+        if target is None:
+            continue
+        reopen_review_item_if_resubmitted(target, submission)
+        updated += 1
+    return updated
 
 
 def _notify_homework_submitted(submission: HomeworkSubmission, review_item=None, *, is_resubmit=False):
@@ -1065,8 +1665,8 @@ def _notify_homework_submitted(submission: HomeworkSubmission, review_item=None,
 class HomeworkAssignmentBaseView(APIView):
     permission_classes = [AllowAny]
 
-    def resolve(self, request, homework_id: int):
-        return _resolve_access(request, homework_id)
+    def resolve(self, request, homework_id: int, *, write: bool = False):
+        return _resolve_access(request, homework_id, write=write)
 
 
 class HomeworkAssignmentDetailView(HomeworkAssignmentBaseView):
@@ -1084,7 +1684,7 @@ class HomeworkAssignmentDetailView(HomeworkAssignmentBaseView):
 
 class HomeworkAssignmentSaveDraftView(HomeworkAssignmentBaseView):
     def post(self, request, homework_id: int):
-        homework, student, err = self.resolve(request, homework_id)
+        homework, student, err = self.resolve(request, homework_id, write=True)
         if err:
             return err
         result = _parse_result_body(request)
@@ -1147,7 +1747,7 @@ class HomeworkAssignmentUploadAnswerView(HomeworkAssignmentBaseView):
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request, homework_id: int):
-        homework, student, err = self.resolve(request, homework_id)
+        homework, student, err = self.resolve(request, homework_id, write=True)
         if err:
             return err
 
@@ -1218,7 +1818,7 @@ class HomeworkAssignmentUploadAnswerView(HomeworkAssignmentBaseView):
         })
 
     def delete(self, request, homework_id: int):
-        homework, student, err = self.resolve(request, homework_id)
+        homework, student, err = self.resolve(request, homework_id, write=True)
         if err:
             return err
 
@@ -1255,7 +1855,7 @@ class HomeworkAssignmentUploadAnswerView(HomeworkAssignmentBaseView):
 
 class HomeworkAssignmentSubmitView(HomeworkAssignmentBaseView):
     def post(self, request, homework_id: int):
-        homework, student, err = self.resolve(request, homework_id)
+        homework, student, err = self.resolve(request, homework_id, write=True)
         if err:
             return err
         result = _parse_result_body(request)
@@ -1529,17 +2129,19 @@ def homework_instruction_text(homework: Homework) -> str:
 
 
 def _is_instruction_text_task(task: HomeworkTask, homework_description: str) -> bool:
-    """Текстовая задача, дублирующая инструкцию ДЗ — её не показывают как вложение."""
+    """Служебная текстовая строка инструкции, а не отдельное задание."""
     if getattr(task, "task_type", "") != "text":
         return False
     if task_is_variant(task):
         return False
+    title = (task.title or "").strip().lower()
+    if title not in INSTRUCTION_TASK_TITLES:
+        return False
     desc = (task.description or "").strip()
-    title = (task.title or "").strip()
     hw_desc = (homework_description or "").strip()
-    if hw_desc and desc == hw_desc:
-        return True
-    return title.lower() in INSTRUCTION_TASK_TITLES
+    if hw_desc and desc and desc != hw_desc:
+        return False
+    return True
 
 
 def _norm_key(value) -> str:
@@ -1602,33 +2204,22 @@ def _task_duplicates_attachment(row: dict, attachment_keys: set[str]) -> bool:
     return False
 
 
-def _task_dedupe_key(serialized: dict) -> tuple:
-    variant_id = serialized.get("variant_id")
-    if variant_id:
-        return ("variant", variant_id)
-    title = (serialized.get("title") or "").strip().lower()
-    resource = (
-        serialized.get("open_url")
-        or serialized.get("file_url")
-        or serialized.get("description")
-        or ""
-    ).strip().lower()
-    return ("resource", title, resource)
-
-
 def serialize_homework_tasks(
     homework: Homework,
     *,
     homework_id: int,
     token: str | None = None,
 ) -> list[dict]:
+    """Каждая строка HomeworkTask — отдельное задание. Совпадение текста его не скрывает."""
     from .homework_attachments import list_homework_attachments
 
     homework_description = homework_instruction_text(homework)
     attachment_keys = _attachment_dedupe_keys(list_homework_attachments(homework))
-    seen = set()
     items = []
+    seen_ids = set()
     for task in homework.tasks.filter(is_active=True).order_by("order", "id"):
+        if task.id in seen_ids:
+            continue
         if _is_instruction_text_task(task, homework_description):
             continue
         row = serialize_student_task(
@@ -1639,27 +2230,14 @@ def serialize_homework_tasks(
         )
         if _task_duplicates_attachment(row, attachment_keys):
             continue
-        key = _task_dedupe_key(row)
-        if key in seen:
-            continue
-        seen.add(key)
+        seen_ids.add(task.id)
         items.append(row)
     return items
 
 
 def cleanup_duplicate_homework_tasks(homework: Homework) -> int:
-    """Удалить дубли задач с одинаковым названием/ссылкой (legacy)."""
-    keep_ids = []
-    seen = set()
-    for task in homework.tasks.filter(is_active=True).order_by("order", "id"):
-        row = serialize_student_task(task, homework=homework, homework_id=homework.id)
-        key = _task_dedupe_key(row)
-        if key in seen:
-            continue
-        seen.add(key)
-        keep_ids.append(task.id)
-    deleted, _ = homework.tasks.filter(is_active=True).exclude(id__in=keep_ids).delete()
-    return deleted
+    """Одинаковые название и текст не удаляют задания. Чтение карточки тоже ничего не стирает."""
+    return 0
 
 
 def build_homework_review_context(homework: Homework) -> dict:
@@ -1886,6 +2464,13 @@ def add_tasks_to_homework(
 
     if homework_is_checked_or_completed(homework):
         raise ValueError("Нельзя добавить задание: работа уже проверена и принята")
+    if homework_is_shared_group(homework) and any(
+        submission_is_handed_in(row) for row in homework.submissions.all()
+    ):
+        raise ValueError(
+            "Нельзя добавить задание в общую групповую работу: "
+            "часть учеников уже сдала её."
+        )
 
     material_ids = [int(pk) for pk in (material_ids or []) if pk]
     interactive_ids = [int(pk) for pk in (interactive_ids or []) if pk]
