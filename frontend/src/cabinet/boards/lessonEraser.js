@@ -16,6 +16,34 @@ export function imageSurvivesEraser(shape, source, erasing) {
 
 const ERASER_REPLAY = "__itfluxEraserReplay";
 
+/**
+ * tldraw 5.5.1 читает getCoalescedEvents в useCanvasEvents только если
+ * `!tlenv.isIos`. isIos — это iPad/iPhone в userAgent. На таком UA
+ * промежуточные точки Draw/Highlight отбрасываются, хотя у инструмента
+ * useCoalescedEvents = true. Ластик useCoalescedEvents не включает никогда.
+ * Предсказанные точки (getPredictedEvents) в геометрию не пишем.
+ */
+export function tldrawSkipsCoalescedEvents(userAgent) {
+  const agent = String(userAgent || "");
+  return /iPad/i.test(agent) || /iPhone/i.test(agent);
+}
+
+/** Чужой pointerId не сгущаем: ладонь не должна провести хорду от пера. */
+export function sameActivePointer(activeId, pointerId) {
+  return activeId == null || activeId === pointerId;
+}
+
+/** Промежуточные coalesced только у пера, пока Draw/Highlight и tldraw их пропускает. */
+export function shouldFillIosPenDraw(event, toolId, iosSkipsCoalesced) {
+  if (!iosSkipsCoalesced || !event) return false;
+  if (event[ERASER_REPLAY]) return false;
+  if (event.pointerType !== "pen") return false;
+  if (event.type && event.type !== "pointermove") return false;
+  if (toolId !== "draw" && toolId !== "highlight") return false;
+  if (event.buttons === 0 && !(Number(event.pressure) > 0)) return false;
+  return true;
+}
+
 /** Мышь не трогаем. Сгущаем только pen/touch, пока выбран штатный ластик. */
 export function shouldDensifyEraserMove(event, eraserActive) {
   if (!eraserActive || !event) return false;
@@ -56,12 +84,13 @@ function coalescedSamples(event) {
   }
 }
 
-function dispatchPointerMove(editor, event, clientX, clientY) {
+function dispatchPointerMove(editor, event, clientX, clientY, pressure) {
+  const z = pressure === undefined ? (event.pressure || 0.5) : pressure;
   editor.dispatch?.({
     type: "pointer",
     target: "canvas",
     name: "pointer_move",
-    point: { x: clientX, y: clientY, z: event.pressure || 0.5 },
+    point: { x: clientX, y: clientY, z },
     shiftKey: Boolean(event.shiftKey),
     altKey: Boolean(event.altKey),
     ctrlKey: Boolean(event.metaKey || event.ctrlKey),
@@ -73,19 +102,16 @@ function dispatchPointerMove(editor, event, clientX, clientY) {
   });
 }
 
-/** Safari держит старый кадр .tl-canvas (content-visibility) после удаления штриха. */
-function flushEraserLayer(root) {
-  const canvas = root.querySelector?.(".tl-canvas") || root.querySelector?.(".tl-shapes");
-  if (!canvas) return;
-  canvas.style.transform = "translateZ(0)";
-  void canvas.offsetWidth;
-  window.requestAnimationFrame(() => {
-    canvas.style.transform = "";
-  });
-}
-
-function eraserGestureActive(editor) {
-  return Boolean(editor?.isIn?.("eraser.pointing") || editor?.isIn?.("eraser.erasing"));
+/** Все coalesced, кроме последней: её доставит сам tldraw тем же pointermove. */
+function dispatchCoalescedPrefix(editor, event) {
+  const samples = coalescedSamples(event);
+  if (samples.length < 2) return false;
+  for (let index = 0; index < samples.length - 1; index += 1) {
+    const sample = samples[index];
+    const pressure = typeof sample.pressure === "number" ? sample.pressure : undefined;
+    dispatchPointerMove(editor, event, sample.clientX, sample.clientY, pressure);
+  }
+  return true;
 }
 
 /**
@@ -99,52 +125,64 @@ export function installCoalescedEraserInput(editor) {
   const root = editor?.getContainer?.();
   const doc = root?.ownerDocument;
   if (!root || !doc || typeof doc.addEventListener !== "function") return () => {};
-  let flushAfter = false;
+  const iosSkipsCoalesced = tldrawSkipsCoalescedEvents(
+    typeof navigator === "undefined" ? "" : navigator.userAgent,
+  );
+  let activePointerId = null;
+
+  const releasePointer = (event) => {
+    if (!sameActivePointer(activePointerId, event?.pointerId)) return;
+    if (activePointerId == null) return;
+    if (event.pointerId !== activePointerId) return;
+    activePointerId = null;
+  };
 
   const onMove = (event) => {
-    if (!shouldDensifyEraserMove(event, editor.isIn?.("eraser"))) return;
-    try {
-      const samples = coalescedSamples(event);
-      if (samples.length >= 2) {
-        for (let index = 0; index < samples.length - 1; index += 1) {
-          dispatchPointerMove(editor, event, samples[index].clientX, samples[index].clientY);
+    const eraserWants = shouldDensifyEraserMove(event, Boolean(editor.isIn?.("eraser")));
+    const drawWants = !eraserWants && shouldFillIosPenDraw(
+      event,
+      editor.getCurrentToolId?.(),
+      iosSkipsCoalesced,
+    );
+    if (!eraserWants && !drawWants) return;
+    if (activePointerId != null && event.pointerId !== activePointerId) {
+      // Ладонь не перехватывает перо. Смена id не диспатчится: иначе хорда
+      // соединит последнюю точку пальца с пером.
+      if (event.pointerType !== "pen") return;
+      activePointerId = event.pointerId;
+      return;
+    }
+    activePointerId = event.pointerId;
+    if (eraserWants) {
+      try {
+        if (dispatchCoalescedPrefix(editor, event)) return;
+        const from = editor.inputs?.getCurrentPagePoint?.();
+        const to = editor.screenToPage?.({ x: event.clientX, y: event.clientY });
+        const extras = eraserSamplePoints(coalescedSamples(event), from, to);
+        for (const page of extras) {
+          const screen = editor.pageToScreen?.(page);
+          if (!screen) continue;
+          dispatchPointerMove(editor, event, screen.x, screen.y);
         }
-        return;
+      } catch {
+        // Исходное событие всё равно доходит до ластика.
       }
-      const from = editor.inputs?.getCurrentPagePoint?.();
-      const to = editor.screenToPage?.({ x: event.clientX, y: event.clientY });
-      const extras = eraserSamplePoints(samples, from, to);
-      for (const page of extras) {
-        const screen = editor.pageToScreen?.(page);
-        if (!screen) continue;
-        dispatchPointerMove(editor, event, screen.x, screen.y);
-      }
+      return;
+    }
+    try {
+      dispatchCoalescedPrefix(editor, event);
     } catch {
-      // Исходное событие всё равно доходит до ластика.
+      // Штатный pointermove tldraw всё равно обработает.
     }
   };
 
-  const onUpCapture = (event) => {
-    flushAfter = Boolean(event && event.pointerType !== "mouse" && !event[ERASER_REPLAY] && eraserGestureActive(editor));
-  };
-
-  const onUp = () => {
-    if (!flushAfter) return;
-    flushAfter = false;
-    flushEraserLayer(root);
-  };
-
   doc.addEventListener("pointermove", onMove, true);
-  doc.addEventListener("pointerup", onUpCapture, true);
-  doc.addEventListener("pointercancel", onUpCapture, true);
-  doc.addEventListener("pointerup", onUp);
-  doc.addEventListener("pointercancel", onUp);
+  doc.addEventListener("pointerup", releasePointer, true);
+  doc.addEventListener("pointercancel", releasePointer, true);
   return () => {
     doc.removeEventListener("pointermove", onMove, true);
-    doc.removeEventListener("pointerup", onUpCapture, true);
-    doc.removeEventListener("pointercancel", onUpCapture, true);
-    doc.removeEventListener("pointerup", onUp);
-    doc.removeEventListener("pointercancel", onUp);
+    doc.removeEventListener("pointerup", releasePointer, true);
+    doc.removeEventListener("pointercancel", releasePointer, true);
   };
 }
 

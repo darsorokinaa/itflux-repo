@@ -6,6 +6,7 @@ import ConfirmActionModal from "../components/ConfirmActionModal";
 import CabinetFloatingMenu from "../components/CabinetFloatingMenu";
 import CabinetModal from "../components/CabinetModal";
 import PlanExcelImportModal from "../components/PlanExcelImportModal";
+import PlanExcelExportDialog from "../components/PlanExcelExportDialog";
 import PlanEditorPreviewModal from "../components/PlanEditorPreviewModal";
 import CreateScheduleLessonModal from "../components/CreateScheduleLessonModal";
 import PlanItemResourcesPicker from "../components/PlanItemResourcesPicker";
@@ -76,7 +77,10 @@ import {
 import { useAutoSave } from "../hooks/useAutoSave";
 import { usePageTitle } from "../hooks/usePageTitle";
 import {
-  PLAN_DATE_INTERVALS,
+  PLAN_INTERVAL_SELECT_OPTIONS,
+  canonicalInterval,
+  intervalChoice,
+  intervalToken,
   WEEKDAY_OPTIONS,
   applyPlanDates,
   calendarDateKey,
@@ -216,6 +220,7 @@ export default function CabinetLessonPlanEditorPage() {
   const [excelPreview, setExcelPreview] = useState(null);
   const [excelImporting, setExcelImporting] = useState(false);
   const [excelPreviewLoading, setExcelPreviewLoading] = useState(false);
+  const [excelSetup, setExcelSetup] = useState(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const excelFileRef = useRef(null);
   const excelFileHoldRef = useRef(null);
@@ -384,7 +389,24 @@ export default function CabinetLessonPlanEditorPage() {
         if (data.items?.length) {
           const mapped = data.items.map((item) => mapApiItemResponseToSession(item));
           setSessions(mapped);
-          setDateInterval(inferPlanDateInterval(mapped));
+          const frequency = data.schedule?.frequency;
+          setDateInterval(frequency && frequency !== "manual" ? canonicalInterval(frequency) : inferPlanDateInterval(mapped));
+          const slots = Array.isArray(data.schedule?.weekday_slots) ? data.schedule.weekday_slots : [];
+          if (slots.length) {
+            const days = [];
+            const times = {};
+            slots.forEach((slot) => {
+              const day = Number(slot?.weekday);
+              if (!Number.isInteger(day) || day < 0 || day > 6 || days.includes(day)) return;
+              days.push(day);
+              times[day] = {
+                start: slot.start_time || "16:00",
+                duration: Number(slot.duration_minutes) || 60,
+              };
+            });
+            setWeekdays(days);
+            setWeekdayTimes((prev) => ({ ...prev, ...times }));
+          }
           setExpandedIndex(0);
         } else {
           setSessions([clonePlanSession(EMPTY_PLAN_SESSION)]);
@@ -1056,24 +1078,29 @@ export default function CabinetLessonPlanEditorPage() {
     });
   }, [dateInterval]);
 
-  const excelSettings = useCallback(() => ({
+  const excelSettings = useCallback((override = {}) => ({
     title: title.trim(),
     subject,
     direction: type,
     grade,
-    start_date: calendarDateKey(sessionsRef.current[0]?.scheduledDate),
-    interval: dateInterval,
-  }), [dateInterval, grade, subject, title, type]);
+    start_date: override.start_date || calendarDateKey(sessionsRef.current[0]?.scheduledDate),
+    interval: override.interval || dateInterval,
+    schedule_mode: override.schedule_mode || "",
+    weekdays: override.weekdays || weekdays,
+    step_n: override.step_n || "",
+    start_time: override.start_time || "",
+    duration_minutes: override.duration_minutes || "",
+  }), [dateInterval, grade, subject, title, type, weekdays]);
 
-  const handleDownloadExcelTemplate = useCallback(async () => {
+  const handleDownloadExcelTemplate = useCallback(async (override = {}) => {
     try {
-      await downloadLessonPlanExcelTemplate(excelSettings());
+      await downloadLessonPlanExcelTemplate(excelSettings(override));
     } catch (err) {
       showToast(err?.message || "Не удалось скачать шаблон.");
     }
   }, [excelSettings, showToast]);
 
-  const handleExportExcel = useCallback(async () => {
+  const handleExportExcel = useCallback(async (override = {}) => {
     const current = sessionsRef.current;
     const persistable = current.filter((session) => sessionHasPersistableContent(session));
     const items = persistable.map((session, index) => {
@@ -1093,22 +1120,28 @@ export default function CabinetLessonPlanEditorPage() {
         teacher_comment: session.comment,
         scheduled_date: scheduled,
         date_source: scheduled ? (manual ? "manual" : "automatic") : "",
+        import_key: session.importKey || "",
+        updated_at: session.updatedAt || "",
       };
     });
     try {
-      await exportLessonPlanExcelDraft({ ...excelSettings(), items });
+      await exportLessonPlanExcelDraft({ ...excelSettings(override), items });
     } catch (err) {
       showToast(err?.message || "Не удалось экспортировать план.");
     }
   }, [dateInterval, excelSettings, showToast]);
 
-  const buildExcelForm = useCallback((file, mode) => {
+  const buildExcelForm = useCallback((file, mode, options = {}) => {
     const form = new FormData();
     form.append("file", file);
     if (mode) form.append("mode", mode);
     const settings = excelSettings();
     if (settings.start_date) form.append("start_date", settings.start_date);
     if (settings.interval) form.append("interval", settings.interval);
+    if (options.confirmDeletes) form.append("confirm_deletes", "1");
+    if (options.excludeRows?.length) form.append("exclude_rows", options.excludeRows.join(","));
+    if (options.acceptConflicts?.length) form.append("accept_conflicts", options.acceptConflicts.join(","));
+    if (options.moveEventRows?.length) form.append("move_event_rows", options.moveEventRows.join(","));
     const planKey = savedPlanKey();
     if (planKey) form.append("plan_id", planKey);
     return form;
@@ -1128,13 +1161,27 @@ export default function CabinetLessonPlanEditorPage() {
     }
     setExcelPreviewLoading(true);
     try {
-      const preview = await previewLessonPlanExcel(buildExcelForm(file, "replace_all"));
+      const preview = await previewLessonPlanExcel(buildExcelForm(file, "sync"));
       excelFileHoldRef.current = file;
       setExcelPreview(preview);
     } catch (err) {
       excelFileHoldRef.current = null;
       setExcelPreview(null);
       showToast(err?.message || "Не удалось прочитать Excel.");
+    } finally {
+      setExcelPreviewLoading(false);
+    }
+  }, [buildExcelForm, showToast]);
+
+  const handleExcelSelection = useCallback(async (options) => {
+    const file = excelFileHoldRef.current;
+    if (!file) return;
+    setExcelPreviewLoading(true);
+    try {
+      const preview = await previewLessonPlanExcel(buildExcelForm(file, "sync", options));
+      setExcelPreview(preview);
+    } catch (err) {
+      showToast(err?.message || "Не удалось обновить предпросмотр.");
     } finally {
       setExcelPreviewLoading(false);
     }
@@ -1154,7 +1201,7 @@ export default function CabinetLessonPlanEditorPage() {
     }
   }, [buildExcelForm, showToast]);
 
-  const handleConfirmExcelImport = useCallback(async (mode) => {
+  const handleConfirmExcelImport = useCallback(async (mode, options = {}) => {
     const file = excelFileHoldRef.current;
     if (!file) return;
     if (!title.trim()) {
@@ -1164,7 +1211,8 @@ export default function CabinetLessonPlanEditorPage() {
     setExcelImporting(true);
     try {
       const planKey = await ensurePlanId();
-      const result = await importLessonPlanExcel(planKey, buildExcelForm(file, mode));
+      const result = await importLessonPlanExcel(planKey, buildExcelForm(file, mode, options));
+      const schedule = result?.schedule;
       const items = result?.plan?.items;
       if (Array.isArray(items)) {
         const dateById = Object.fromEntries(
@@ -1183,12 +1231,17 @@ export default function CabinetLessonPlanEditorPage() {
       if (importedPlan?.subject) setSubject(importedPlan.subject);
       if (importedPlan?.direction) setType(importedPlan.direction);
       if (importedPlan?.grade != null) setGrade(importedPlan.grade || "");
+      if (Array.isArray(schedule?.weekdays)) setWeekdays(schedule.weekdays);
+      if (schedule?.interval && schedule.interval !== "manual") setDateInterval(schedule.interval);
       const appliedMode = result?.summary?.mode || mode;
-      const added = result?.summary?.created ?? 0;
+      const added = result?.summary?.created ?? result?.summary?.added ?? 0;
       const updated = result?.summary?.updated ?? 0;
+      const removed = result?.summary?.deleted ?? 0;
       const skipped = result?.summary?.skipped ?? 0;
       let message = "План импортирован.";
-      if (appliedMode === "replace_all") {
+      if (appliedMode === "sync") {
+        message = `Импорт применён: обновлено ${updated}, добавлено ${added}, удалено ${removed}.`;
+      } else if (appliedMode === "replace_all") {
         const count = Array.isArray(items) ? items.length : added;
         message = `План обновлён целиком: ${count} уроков из Excel.`;
       } else if (appliedMode === "insert") {
@@ -1196,6 +1249,8 @@ export default function CabinetLessonPlanEditorPage() {
       } else if (appliedMode === "replace_dates") {
         message = `Заменено уроков: ${updated}.`;
       }
+      const eventNotes = (result?.summary?.event_moves || []).map((row) => row.detail).filter(Boolean);
+      if (eventNotes.length) message = `${message} ${eventNotes.join(" ")}`;
       if (skipped) message = `${message} ${skipped} пустых строк пропущены.`;
       showToast(message);
       setExcelPreview(null);
@@ -1278,7 +1333,11 @@ export default function CabinetLessonPlanEditorPage() {
       commitSessions(sessionsRef.current.map((session, index) => {
         const remote = savedByKey.get(sessionListKey(session, index));
         if (!remote) return session;
-        return keepLocalSessionWithRemoteId(session, { id: remote.id });
+        return {
+          ...keepLocalSessionWithRemoteId(session, { id: remote.id }),
+          updatedAt: remote.updated_at || session.updatedAt || "",
+          importKey: remote.import_key || session.importKey || "",
+        };
       }));
       if (savedItemIds.length > 1) {
         await reorderLessonPlanItems(savedItemIds.map((id, order) => ({ id, order: order + 1 })));
@@ -1365,7 +1424,11 @@ export default function CabinetLessonPlanEditorPage() {
       commitSessions(sessionsRef.current.map((session, index) => {
         const remote = savedByKey.get(sessionListKey(session, index));
         if (!remote) return session;
-        return keepLocalSessionWithRemoteId(session, { id: remote.id });
+        return {
+          ...keepLocalSessionWithRemoteId(session, { id: remote.id }),
+          updatedAt: remote.updated_at || session.updatedAt || "",
+          importKey: remote.import_key || session.importKey || "",
+        };
       }));
       setAutoSavedAt(Date.now());
       if (String(planId) !== String(savedPlanId)) {
@@ -1522,7 +1585,16 @@ export default function CabinetLessonPlanEditorPage() {
         onClick={() => {
           if (!canExportExcel) return;
           closeExcelMenus();
-          void handleExportExcel();
+          const firstDay = weekdays[0];
+          const slot = firstDay != null ? weekdayTimes[firstDay] : null;
+          setExcelSetup({
+            kind: "plan",
+            startDate: calendarDateKey(sessionsRef.current[0]?.scheduledDate),
+            interval: dateInterval,
+            weekdays,
+            startTime: slot?.start || "16:00",
+            duration: slot?.duration || 60,
+          });
         }}
       >
         <span>↓ Экспортировать текущий план</span>
@@ -1535,7 +1607,16 @@ export default function CabinetLessonPlanEditorPage() {
         className="cb-pe-menu__item cb-pe-menu__item--stack"
         onClick={() => {
           closeExcelMenus();
-          void handleDownloadExcelTemplate();
+          const firstDay = weekdays[0];
+          const slot = firstDay != null ? weekdayTimes[firstDay] : null;
+          setExcelSetup({
+            kind: "template",
+            startDate: calendarDateKey(sessionsRef.current[0]?.scheduledDate),
+            interval: dateInterval,
+            weekdays,
+            startTime: slot?.start || "16:00",
+            duration: slot?.duration || 60,
+          });
         }}
       >
         <span>▤ Скачать шаблон</span>
@@ -1850,16 +1931,37 @@ export default function CabinetLessonPlanEditorPage() {
             <label className="cb-pe-field">
               <span>Как часто</span>
               <select
-                value={dateInterval}
-                onChange={(e) => handleDateIntervalChange(e.target.value)}
+                value={intervalChoice(dateInterval).select}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  const step = next === "every_n_days" ? 1 : 2;
+                  handleDateIntervalChange(
+                    next === "every_n_weeks" || next === "every_n_days"
+                      ? intervalToken(next, intervalChoice(dateInterval).step || step)
+                      : next,
+                  );
+                }}
                 aria-label="Как часто"
               >
-                {PLAN_DATE_INTERVALS.map((item) => (
+                {PLAN_INTERVAL_SELECT_OPTIONS.map((item) => (
                   <option key={item.id} value={item.id}>{item.label}</option>
                 ))}
               </select>
               <small className="cb-pe-field__hint">Используется для автоматического расчёта дат уроков.</small>
             </label>
+            {intervalChoice(dateInterval).select.startsWith("every_n") ? (
+              <label className="cb-pe-field">
+                <span>Интервал N</span>
+                <input
+                  type="number"
+                  min="1"
+                  max={intervalChoice(dateInterval).select === "every_n_days" ? 366 : 52}
+                  value={intervalChoice(dateInterval).step}
+                  aria-label="Интервал N"
+                  onChange={(event) => handleDateIntervalChange(intervalToken(intervalChoice(dateInterval).select, event.target.value))}
+                />
+              </label>
+            ) : null}
           </div>
           {dateInterval === "weekdays" ? (
             <div className="cb-pe-weekdays-block">
@@ -2096,6 +2198,22 @@ export default function CabinetLessonPlanEditorPage() {
         />
       ) : null}
 
+      <PlanExcelExportDialog
+        open={Boolean(excelSetup)}
+        kind={excelSetup?.kind}
+        initial={excelSetup}
+        onClose={() => setExcelSetup(null)}
+        onConfirm={(settings) => {
+          const setup = excelSetup;
+          setExcelSetup(null);
+          if (setup?.kind === "template") {
+            void handleDownloadExcelTemplate(settings);
+          } else {
+            void handleExportExcel(settings);
+          }
+        }}
+      />
+
       <input
         ref={excelFileRef}
         type="file"
@@ -2115,6 +2233,7 @@ export default function CabinetLessonPlanEditorPage() {
             excelFileHoldRef.current = null;
           }}
           onModeChange={handleExcelModeChange}
+          onSelectionChange={handleExcelSelection}
           onConfirm={handleConfirmExcelImport}
         />
       ) : null}

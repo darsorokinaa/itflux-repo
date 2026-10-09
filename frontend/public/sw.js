@@ -76,9 +76,30 @@ self.addEventListener("activate", (event) => {
 
 // Только переходы по страницам: всегда свежий HTML (ярлык на рабочем столе).
 // API, скрипты и картинки не перехватываем — иначе снова закэшируется кабинет.
+function isFileDownloadNavigation(url) {
+  // iOS не открывает файл, если service worker перехватывает переход
+  // (target=_blank / новая вкладка) и сам отвечает на скачивание.
+  let path = "";
+  try {
+    path = decodeURIComponent(new URL(url).pathname || "");
+  } catch {
+    return false;
+  }
+  if (path.startsWith("/media/") || path.includes("/media/")) return true;
+  if (path.includes("/attached-files/") || /\/attached-file\/?$/.test(path)) return true;
+  if (/\/homework\/attachments\/[^/]+\/file\/?$/.test(path)) return true;
+  if (/\/files\/(?:shared\/)?[^/]+\/(?:download|preview)\/?$/.test(path)) return true;
+  if (/\/materials\/\d+\/(?:file|preview)\/?$/.test(path)) return true;
+  if (path.includes("/lesson/attachment/")) return true;
+  return false;
+}
+
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   if (request.mode !== "navigate") {
+    return;
+  }
+  if (isFileDownloadNavigation(request.url)) {
     return;
   }
   const now = Date.now();

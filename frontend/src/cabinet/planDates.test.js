@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canonicalInterval,
   applyPlanDates,
   calendarDaysBetween,
   compressPlanDatesAfterRemove,
@@ -13,6 +14,20 @@ import {
 } from "./planDates";
 
 describe("planDates", () => {
+  it("keeps every N weeks and days as their own step", () => {
+    expect(canonicalInterval("every_3_weeks")).toBe("every_3_weeks");
+    expect(generatePlanDates("2026-10-12", 3, "every_3_weeks")).toEqual([
+      "2026-10-12",
+      "2026-11-02",
+      "2026-11-23",
+    ]);
+    expect(generatePlanDates("2026-10-12", 3, "every_10_days")).toEqual([
+      "2026-10-12",
+      "2026-10-22",
+      "2026-11-01",
+    ]);
+  });
+
   it("builds Monday and Wednesday dates for several months", () => {
     const dates = generatePlanDates("2026-10-05", 8, "weekdays", [0, 2]);
     expect(dates).toEqual([

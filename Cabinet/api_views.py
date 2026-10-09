@@ -7,7 +7,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import APIException, ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
@@ -1267,6 +1267,33 @@ def _copy_lesson_plan(source, teacher):
         return new_plan
 
 
+def _excel_token_list(value):
+    if value in (None, ""):
+        return []
+    if isinstance(value, (list, tuple)):
+        parts = value
+    else:
+        parts = str(value).replace(";", ",").split(",")
+    return [str(part).strip() for part in parts if str(part).strip()]
+
+
+def _excel_int_list(value):
+    return [int(part) for part in _excel_token_list(value) if part.isdigit()]
+
+
+def _excel_exclude_spec(value):
+    rows = []
+    deletes = []
+    for text in _excel_token_list(value):
+        if text.lower().startswith("delete:"):
+            tail = text.split(":", 1)[1].strip()
+            if tail.isdigit():
+                deletes.append(int(tail))
+        elif text.isdigit():
+            rows.append(int(text))
+    return rows, deletes
+
+
 class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
     def _plan_items_prefetch(self):
         """Список планов считает прогресс и не читает материалы пунктов."""
@@ -1544,14 +1571,23 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         grade = (data.get("grade") or query.get("grade") or (plan.grade if plan else "") or "").strip()
         start_date = data.get("start_date") or query.get("start_date") or ""
         interval = data.get("interval") or query.get("interval") or "weekly"
+        schedule_mode = data.get("schedule_mode") or query.get("schedule_mode") or ""
+        weekdays = data.get("weekdays") if isinstance(data, dict) and "weekdays" in data else query.get("weekdays")
+        if isinstance(weekdays, str):
+            weekdays = [part for part in weekdays.replace(";", ",").split(",") if part != ""]
         return {
-            "plan_id": plan.pk if plan else "",
+            "plan_id": plan.pk if plan else data.get("plan_id") or "",
             "title": title,
             "subject": subject,
             "direction": direction,
             "grade": grade,
             "start_date": start_date,
             "interval": interval,
+            "schedule_mode": schedule_mode,
+            "weekdays": weekdays or [],
+            "step_n": data.get("step_n") or query.get("step_n") or "",
+            "start_time": data.get("start_time") or query.get("start_time") or "",
+            "duration_minutes": data.get("duration_minutes") or query.get("duration_minutes") or "",
         }
 
     @action(detail=False, methods=["get"], url_path="excel-template")
@@ -1616,13 +1652,23 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
                 plan = self.get_queryset().filter(pk=plan_id).first()
                 if plan and not can_edit_lesson_plan(self.get_teacher(), plan):
                     plan = None
-            existing = list(plan.items.all()) if plan else []
+            existing = list(
+                plan.items.select_related("scheduled_event")
+                .prefetch_related("schedule_events_linked", "homeworks__submissions")
+                .order_by("order", "id")
+            ) if plan else []
+            exclude_rows, exclude_deletes = _excel_exclude_spec(request.data.get("exclude_rows"))
             preview = parse_plan_workbook(
                 data,
                 existing_items=existing,
                 start_date=request.data.get("start_date"),
                 interval=request.data.get("interval") or "weekly",
-                mode=request.data.get("mode") or "replace_all",
+                mode=request.data.get("mode") or "sync",
+                confirm_deletes=str(request.data.get("confirm_deletes") or "").lower() in {"1", "true", "yes", "on"},
+                exclude_rows=exclude_rows,
+                exclude_deletes=exclude_deletes,
+                accept_conflicts=_excel_int_list(request.data.get("accept_conflicts")),
+                move_event_rows=_excel_int_list(request.data.get("move_event_rows")),
             )
             return Response(preview)
         except PlanExcelError as exc:
@@ -1647,12 +1693,22 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
             return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
         try:
             data = read_uploaded_bytes(request.FILES.get("file"))
+            exclude_rows, exclude_deletes = _excel_exclude_spec(request.data.get("exclude_rows"))
             preview = parse_plan_workbook(
                 data,
-                existing_items=list(plan.items.all()),
+                existing_items=list(
+                    plan.items.select_related("scheduled_event")
+                    .prefetch_related("schedule_events_linked", "homeworks__submissions")
+                    .order_by("order", "id")
+                ),
                 start_date=request.data.get("start_date"),
                 interval=request.data.get("interval") or "weekly",
-                mode=request.data.get("mode") or "replace_all",
+                mode=request.data.get("mode") or "sync",
+                confirm_deletes=str(request.data.get("confirm_deletes") or "").lower() in {"1", "true", "yes", "on"},
+                exclude_rows=exclude_rows,
+                exclude_deletes=exclude_deletes,
+                accept_conflicts=_excel_int_list(request.data.get("accept_conflicts")),
+                move_event_rows=_excel_int_list(request.data.get("move_event_rows")),
             )
             if request.data.get("dry_run") in ("1", "true", "True", True):
                 return Response(preview)
@@ -1677,6 +1733,7 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
             "item_dates": summary.get("item_dates") or [],
             "preview": preview.get("summary"),
             "plan": LessonPlanDetailSerializer(plan).data,
+            "schedule": preview.get("settings") or {},
         })
 
     @action(detail=True, methods=["post"], url_path="items")
@@ -2904,6 +2961,11 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
                 homework_has_variant_task,
                 store_variant_scoring,
             )
+            from .homework_task_files import ensure_payload_migrated, overlay_payload_attachments
+
+            ensure_payload_migrated(submission)
+            payload = overlay_payload_attachments(submission, payload)
+            changed_payload = True
 
             has_variant = homework_has_variant_task(submission.homework)
             has_attempt_basis = any(
@@ -2914,8 +2976,6 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
             # Пересчёт — только если учитель изменил балл и у попытки уже есть снимок.
             should_rescore = bool(has_variant and scores_changed and has_attempt_basis)
             if changed_payload or should_rescore:
-                from .homework_task_files import overlay_payload_attachments
-
                 previous_snapshot = previous.get("tasks_snapshot")
                 previous_grading = previous.get("grading_snapshot")
                 payload = overlay_payload_attachments(submission, payload)
@@ -2935,12 +2995,23 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
             seen = set()
             update_fields = [f for f in update_fields if not (f in seen or seen.add(f))]
             submission.save(update_fields=update_fields)
-        try:
+            from .homework_notebooks import publish_teacher_notebooks
+
+            publish_teacher_notebooks(submission, item.teacher)
             from .homework_attempts import snapshot_on_review
 
-            snapshot_on_review(submission, checked=checked)
-        except Exception:
-            pass
+            try:
+                snapshot_on_review(submission, checked=checked)
+            except Exception:
+                import logging
+                logging.getLogger("cabinet.homework").exception(
+                    "review snapshot failed submission=%s", submission.pk
+                )
+                failure = APIException(
+                    "Проверка не сохранена: не удалось записать историю попытки. Повторите действие."
+                )
+                failure.status_code = 503
+                raise failure
         try:
             from .journal_service import sync_previous_homework_status_from_submission
 
@@ -3578,7 +3649,7 @@ class HomeworkSubmissionAttachedFileView(TeacherScopedMixin, APIView):
         if not submission.attached_file:
             return Response({"error": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
         name = submission.attached_file.name.split("/")[-1] or "file"
-        return filefield_download_response(submission.attached_file, name)
+        return filefield_download_response(submission.attached_file, name, request=request)
 
 
 class HomeworkSubmissionExtraAttachedFileView(TeacherScopedMixin, APIView):
@@ -3597,7 +3668,7 @@ class HomeworkSubmissionExtraAttachedFileView(TeacherScopedMixin, APIView):
         if not attachment.file:
             return Response({"error": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
         name = attachment.original_name or attachment.file.name.split("/")[-1] or "file"
-        return filefield_download_response(attachment.file, name)
+        return filefield_download_response(attachment.file, name, request=request)
 
 
 class DirectMaterialAssignView(TeacherScopedMixin, APIView):

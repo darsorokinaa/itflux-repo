@@ -974,6 +974,91 @@ def cancel_event(event, *, changed_by, notify=True, plan_cancel_action=None, rea
         return locked
 
 
+class ScheduleDeleteError(ValueError):
+    """Занятие нельзя убрать из календаря."""
+
+
+def inactive_deletable_statuses():
+    """Отменённые и пропущенные занятия можно убрать из календаря насовсем."""
+    return (
+        ScheduleEvent.Status.CANCELLED,
+        ScheduleEvent.Status.SKIPPED,
+    )
+
+
+def inactive_events_for_delete(event, scope):
+    """Отменённые и пропущенные занятия в выбранной области серии."""
+    scope = normalize_series_scope(scope)
+    inactive = inactive_deletable_statuses()
+    if event.status not in inactive:
+        return ScheduleEvent.objects.none()
+    if scope == "single":
+        return ScheduleEvent.objects.filter(pk=event.pk)
+    if event.series_id:
+        qs = ScheduleEvent.objects.filter(series_id=event.series_id, status__in=inactive)
+    else:
+        qs = ScheduleEvent.objects.filter(
+            owner_id=event.owner_id,
+            title=event.title,
+            series_id__isnull=True,
+            status__in=inactive,
+        )
+        if event.student_id:
+            qs = qs.filter(student_id=event.student_id)
+        elif event.group_id:
+            qs = qs.filter(group_id=event.group_id)
+    if scope == "following":
+        qs = qs.filter(starts_at__gte=event.starts_at)
+    return qs.order_by("starts_at", "pk")
+
+
+def delete_inactive_events_with_scope(event, *, changed_by, scope=None):
+    """Убирает уже отменённые или пропущенные занятия. Обычная отмена их не удаляет."""
+    from django.db.models.deletion import ProtectedError
+
+    from .plan_sync import PlanSyncService
+
+    if event.pk:
+        event.refresh_from_db()
+    targets = list(inactive_events_for_delete(event, scope))
+    if not targets:
+        raise ScheduleDeleteError("Удалить из расписания можно только отменённое или пропущенное занятие.")
+
+    deleted = 0
+    series_dates = {}
+    with transaction.atomic():
+        for target in targets:
+            locked = (
+                ScheduleEvent.objects.select_for_update(of=("self",))
+                .select_related("series")
+                .filter(pk=target.pk)
+                .first()
+            )
+            if locked is None or locked.status not in inactive_deletable_statuses():
+                continue
+            if locked.series_id and locked.starts_at:
+                local_date = locked.starts_at.astimezone(_event_timezone(locked)).date().isoformat()
+                series_dates.setdefault(locked.series_id, set()).add(local_date)
+            PlanSyncService.on_event_deleted(locked)
+            try:
+                locked.delete()
+            except ProtectedError as exc:
+                raise ScheduleDeleteError(
+                    "Это занятие связано с записями, которые нельзя удалить вместе с ним."
+                ) from exc
+            deleted += 1
+        for series_id, dates in series_dates.items():
+            series = ScheduleEventSeries.objects.select_for_update().filter(pk=series_id).first()
+            if series is None:
+                continue
+            current = [str(item)[:10] for item in (series.excluded_dates or []) if str(item or "").strip()]
+            merged = list(dict.fromkeys([*current, *sorted(dates)]))
+            if merged != current:
+                series.excluded_dates = merged
+                series.save(update_fields=["excluded_dates", "updated_at"])
+    return deleted
+
+
 def cancel_event_with_scope(event, *, changed_by, scope=None, notify=True, plan_cancel_action=None, reason=""):
     """scope: single | following | series (None = single)."""
     scope = scope or "single"

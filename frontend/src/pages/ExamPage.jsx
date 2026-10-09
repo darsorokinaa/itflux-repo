@@ -71,6 +71,12 @@ import {
   normalizeHomeworkAttachment,
   removeHomeworkAttachment,
 } from "../cabinet/homeworkAttachmentState";
+import AttachmentPreviewModal, {
+  attachmentOpenClick,
+  isAppFileUrl,
+  prefersInPlaceFileOpen,
+  withFileIntent,
+} from "../cabinet/components/AttachmentPreviewModal";
 import { VariantThemeRoot } from "../variantThemes/VariantThemeRoot";
 import { resolveVariantTheme } from "../variantThemes/registry";
 import VariantThemeSelector from "../variantThemes/VariantThemeSelector";
@@ -214,6 +220,7 @@ function LessonSolutionUpload({
   const [deletingKeys, setDeletingKeys] = useState(() => new Set());
   const [notebookBusy, setNotebookBusy] = useState(false);
   const [openNotebook, setOpenNotebook] = useState(null);
+  const [filePreview, setFilePreview] = useState(null);
 
   const pendingItemsRef = useRef([]);
   pendingItemsRef.current = pendingItems;
@@ -552,6 +559,10 @@ function LessonSolutionUpload({
               const isAudio = /\.(mp3|wav|ogg|aac|flac|m4a)$/i.test(p.filename || p.url || "");
               const itemKey = homeworkAttachmentKey(p);
               const deleting = deletingKeys.has(itemKey);
+              const file = { ...p, url: src };
+              const openHref = isAppFileUrl(src) ? (withFileIntent(src, "inline") || src) : src;
+              const inPlace = prefersInPlaceFileOpen() && isAppFileUrl(src);
+              const linkAttrs = inPlace ? {} : { target: "_blank", rel: "noreferrer" };
               return (
                 <figure key={itemKey} className="lesson-solution-preview-fig">
                   {canDeleteAttachment ? (
@@ -567,7 +578,12 @@ function LessonSolutionUpload({
                     </button>
                   ) : null}
                   {p.isImage || isHomeworkAttachmentImage(p) ? (
-                    <a href={src} target="_blank" rel="noreferrer" className="lesson-solution-preview-link">
+                    <a
+                      href={openHref}
+                      {...linkAttrs}
+                      className="lesson-solution-preview-link"
+                      onClick={attachmentOpenClick(file, setFilePreview)}
+                    >
                       <img src={src} alt="" className="lesson-solution-thumb" />
                     </a>
                   ) : isAudio ? (
@@ -577,7 +593,12 @@ function LessonSolutionUpload({
                       </audio>
                     </div>
                   ) : (
-                    <a href={src} target="_blank" rel="noreferrer" className="lesson-solution-file-item">
+                    <a
+                      href={openHref}
+                      {...linkAttrs}
+                      className="lesson-solution-file-item"
+                      onClick={attachmentOpenClick(file, setFilePreview)}
+                    >
                       <span className="lesson-solution-file-item__icon" aria-hidden="true">📎</span>
                       <span className="lesson-solution-file-item__name">{p.filename || "Файл"}</span>
                     </a>
@@ -592,6 +613,9 @@ function LessonSolutionUpload({
         </div>
       ) : null}
     </div>
+    {filePreview ? (
+      <AttachmentPreviewModal file={filePreview} onClose={() => setFilePreview(null)} />
+    ) : null}
     {openNotebook ? (
       <HomeworkNotebookEditor
         notebookId={openNotebook.id}
@@ -849,6 +873,7 @@ function ExamPage() {
   const [isLiveTeacherView, setIsLiveTeacherView] = useState(false);
   const [liveViewerSettled, setLiveViewerSettled] = useState(false);
   const liveAnswersSeqRef = useRef(0);
+  const themeAssignSeqRef = useRef(0);
   const liveAppliedStampRef = useRef("");
   const isTeacherHomeworkView =
     (isHomework && lessonEmbedParams.embed && !lessonEmbedParams.student)
@@ -1529,6 +1554,9 @@ function ExamPage() {
     const handler = (e) => {
       const img = e.target.closest("img");
       if (!img) return;
+      if (img.closest(".lesson-solution-upload, .task-files, .hw-review-files, .att-preview, .rv-stage, .st-hw-attachments, .cb-hw-attachments, .cb-review-detail__attachments")) {
+        return;
+      }
       const container = img.closest(".task-text, .all-tasks-item__html, .correct-answer-content, .part2-answer-content, .task-content, .exam-page-container");
       if (!container) return;
       e.preventDefault();
@@ -2466,6 +2494,10 @@ function ExamPage() {
       options: VARIANT_PDF_OPTIONS,
       partInstructions: variant.part_instructions,
       coverParagraphs: variant.cover_paragraphs,
+      sheetBackground: {
+        landscape: variant.theme?.sheet_background_image_url || "",
+        portrait: variant.theme?.sheet_background_image_vertical_url || "",
+      },
     });
   };
 
@@ -3200,15 +3232,35 @@ function ExamPage() {
                       compact
                       showHint
                       value={variant?.theme_id ?? variant?.theme?.id ?? null}
-                      onChange={(themeId) => {
+                      onChange={(themeId, theme) => {
+                        const seq = ++themeAssignSeqRef.current;
+                        const previousThemeId = variant?.theme_id ?? variant?.theme?.id ?? null;
+                        const previousTheme = variant?.theme ?? null;
+                        setVariant((prev) => {
+                          if (!prev) return prev;
+                          if (themeId == null) return { ...prev, theme_id: null, theme: null };
+                          return {
+                            ...prev,
+                            theme_id: themeId,
+                            theme: theme || prev.theme,
+                          };
+                        });
                         assignVariantTheme({
                           level,
                           subject,
                           variantId: variant.id,
                           themeId,
                         }).then((data) => {
+                          if (seq !== themeAssignSeqRef.current) return;
                           if (data) setVariant(data);
-                        }).catch(() => {});
+                        }).catch(() => {
+                          if (seq !== themeAssignSeqRef.current) return;
+                          setVariant((prev) => (
+                            prev
+                              ? { ...prev, theme_id: previousThemeId, theme: previousTheme }
+                              : prev
+                          ));
+                        });
                       }}
                     />
                   </div>

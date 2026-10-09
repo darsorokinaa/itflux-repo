@@ -151,10 +151,13 @@ export async function submitHomeworkNotebook(notebookId) {
   return parseJson(res);
 }
 
-export async function fetchPublishedNotebook(submissionId, taskId) {
+export async function fetchPublishedNotebook(submissionId, taskId, revisionId) {
   await ensureCsrfCookie();
+  const params = new URLSearchParams();
+  if (revisionId) params.set("revision", String(revisionId));
+  const query = params.toString();
   const res = await fetch(
-    `/api/homework/submissions/${submissionId}/tasks/${encodeURIComponent(taskId)}/published-notebook/`,
+    `/api/homework/submissions/${submissionId}/tasks/${encodeURIComponent(taskId)}/published-notebook/${query ? `?${query}` : ""}`,
     { credentials: "include", headers: csrfHeaders() },
   );
   return parseJson(res);

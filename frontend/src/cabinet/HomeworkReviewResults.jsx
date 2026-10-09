@@ -1,7 +1,11 @@
 import { useState } from "react";
 import AttachmentPreviewModal, {
+  attachmentOpenClick,
+  isAppFileUrl,
   isAttachmentPreviewable,
   openAttachmentPreferPreview,
+  prefersInPlaceFileOpen,
+  withFileIntent,
 } from "./components/AttachmentPreviewModal";
 import MathContent from "../components/MathContent";
 import {
@@ -84,9 +88,17 @@ export function FileLinks({ files, label, emptyLabel }) {
               </li>
             );
           }
+          const openHref = isAppFileUrl(normalizedUrl)
+            ? (withFileIntent(normalizedUrl, "inline") || normalizedUrl)
+            : normalizedUrl;
+          const inPlace = prefersInPlaceFileOpen() && isAppFileUrl(normalizedUrl);
           return (
             <li key={homeworkAttachmentKey(file)}>
-              <a href={normalizedUrl} target="_blank" rel="noreferrer">
+              <a
+                href={openHref}
+                {...(inPlace ? {} : { target: "_blank", rel: "noreferrer" })}
+                onClick={attachmentOpenClick(previewFile, setPreview)}
+              >
                 {file.filename || "Файл"}
               </a>
             </li>

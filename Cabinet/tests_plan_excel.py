@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from io import BytesIO
 from unittest.mock import patch
 
@@ -11,9 +11,13 @@ from openpyxl.utils.datetime import to_excel
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.test import APIClient
 
-from Cabinet.choices import PlanStatus
-from Cabinet.models import LessonPlan, LessonPlanItem, Profile
+from django.utils import timezone
+
+from Cabinet.choices import PlanItemStatus, PlanStatus
+from Cabinet.journal_models import LessonJournal
+from Cabinet.models import Homework, HomeworkSubmission, LessonPlan, LessonPlanItem, Profile, ScheduleEvent, Student
 from Cabinet.plan_dates import generate_plan_dates
+from Cabinet.plan_excel_schedule import MODE_WEEKDAYS, MODE_WEEKLY, formula_prev_anchor, formula_schedule, sequence_plan
 from Cabinet.plan_excel import (
     COLUMNS,
     REQUIRED_HEADERS,
@@ -61,44 +65,38 @@ class PlanExcelHelperTests(TestCase):
             [],
         )
         wb = load_workbook(BytesIO(content))
-        self.assertIn(SHEET_LESSONS, wb.sheetnames)
-        self.assertIn(SHEET_INSTRUCTIONS, wb.sheetnames)
+        self.assertEqual(wb.sheetnames[0], SHEET_INSTRUCTIONS)
+        self.assertEqual(wb.sheetnames[1], SHEET_LESSONS)
         self.assertIn(SHEET_SETTINGS, wb.sheetnames)
         self.assertEqual(wb["_meta"]["B1"].value, TEMPLATE_VERSION)
         headers = [cell.value for cell in wb[SHEET_LESSONS][1]]
         for name in REQUIRED_HEADERS:
             self.assertIn(name, headers)
+        self.assertIn("Дата по расписанию", headers)
+        self.assertIn("Дата вручную", headers)
         ws = wb[SHEET_LESSONS]
         self.assertEqual(ws.freeze_panes, "A2")
         self.assertTrue(ws.tables)
-        self.assertTrue(ws.protection.sheet)
-        self.assertIn(ws.protection.password, (None, ""))
-        self.assertTrue(ws.protection.insertRows)
-        self.assertFalse(ws.protection.insertColumns)
+        self.assertFalse(ws.protection.sheet)
         id_col = next(index for index, col in enumerate(COLUMNS, start=1) if col["key"] == "item_id")
         self.assertTrue(ws.column_dimensions[get_column_letter(id_col)].hidden)
-        for index, col in enumerate(COLUMNS, start=1):
-            self.assertTrue(ws.cell(1, index).protection.locked)
-            if col["hidden"]:
-                self.assertTrue(ws.column_dimensions[get_column_letter(index)].hidden)
-            if not col["locked"]:
-                self.assertFalse(ws.cell(2, index).protection.locked)
+        self.assertTrue(str(ws.cell(2, _col("schedule_date")).value).startswith("="))
+        self.assertTrue(str(ws.cell(3, _col("schedule_date")).value).startswith("="))
         settings = wb[SHEET_SETTINGS]
         self.assertTrue(settings.protection.sheet)
         self.assertIn(settings.protection.password, (None, ""))
-        self.assertEqual(settings["A1"].value, "НАСТРОЙКИ ПЛАНА")
-        self.assertTrue(settings["A4"].protection.locked)
+        self.assertEqual(settings["A1"].value, "Настройки расписания")
+        self.assertEqual(settings["A4"].value, "Предмет")
         self.assertFalse(settings["B4"].protection.locked)
-        self.assertFalse(settings["B5"].protection.locked)
-        self.assertFalse(settings["B8"].protection.locked)
+        self.assertEqual(settings["A14"].value, "Понедельник")
+        self.assertFalse(settings["B14"].protection.locked)
         instruction = str(wb[SHEET_INSTRUCTIONS]["A1"].value)
         self.assertIn("План занятий", instruction)
         joined = "\n".join(str(cell.value or "") for row in wb[SHEET_INSTRUCTIONS].iter_rows(max_col=5) for cell in row)
-        self.assertIn("Для чего нужен файл", joined)
-        self.assertIn("Обновить план целиком", joined)
-        self.assertIn("Добавить уроки", joined)
-        self.assertIn("Заменить уроки по датам", joined)
-        self.assertIn("Пошаговая загрузка", joined)
+        self.assertIn("Назначение файла", joined)
+        self.assertIn("Учебные дни", joined)
+        self.assertIn("Импорт обратно", joined)
+        self.assertIn("отмен", joined.lower())
 
 
 class PlanExcelApiTests(TestCase):
@@ -131,7 +129,8 @@ class PlanExcelApiTests(TestCase):
             resp["Content-Type"],
         )
         wb = load_workbook(BytesIO(resp.content))
-        self.assertIn("Уроки", wb.sheetnames)
+        self.assertEqual(wb.sheetnames[0], "Инструкция")
+        self.assertIn("План занятий", wb.sheetnames)
 
     def test_import_ten_lessons_roundtrip(self):
         items = [
@@ -216,7 +215,9 @@ class PlanExcelApiTests(TestCase):
         wb.save(buf)
         preview = parse_plan_workbook(buf.getvalue())
         self.assertTrue(preview["can_import"])
-        self.assertTrue(any("Лишние столбцы" in item for item in preview["warnings"]))
+        warning_text = " ".join(preview["warnings"])
+        self.assertIn("Мои заметки", warning_text)
+        self.assertNotIn("Опора даты", warning_text)
 
     def test_empty_rows_are_skipped(self):
         items = [
@@ -567,8 +568,8 @@ class PlanExcelAcceptanceTests(TestCase):
             date(2026, 9, 11),
             date(2026, 9, 18),
             date(2026, 10, 2),
-            date(2026, 10, 2),
             date(2026, 10, 9),
+            date(2026, 10, 16),
         ])
         sources = {row["id"]: row["date_source"] for row in resp.json()["item_dates"]}
         items = list(self.plan.items.order_by("order"))
@@ -678,3 +679,529 @@ class PlanExcelAcceptanceTests(TestCase):
         self.assertEqual(titles[0], "Урок 001")
         self.assertEqual(titles[-1], "Урок 150")
         self.assertEqual(len(titles), 150)
+
+
+class PlanExcelScheduleTests(TestCase):
+    def test_monday_thursday_sequence_and_first_date_shift(self):
+        dates = [
+            row["effective"]
+            for row in sequence_plan(5, date(2026, 10, 12), MODE_WEEKDAYS, [0, 3], 1, [None] * 5, [False] * 5, [None] * 5)
+        ]
+        self.assertEqual(dates, [
+            date(2026, 10, 12),
+            date(2026, 10, 15),
+            date(2026, 10, 19),
+            date(2026, 10, 22),
+            date(2026, 10, 26),
+        ])
+        shifted = [
+            row["effective"]
+            for row in sequence_plan(4, date(2026, 10, 15), MODE_WEEKDAYS, [0, 3], 1, [None] * 4, [False] * 4, [None] * 5)
+        ]
+        self.assertEqual(shifted, [date(2026, 10, 15), date(2026, 10, 19), date(2026, 10, 22), date(2026, 10, 26)])
+
+    def test_off_weekday_start_warning_is_shown_once(self):
+        content = build_plan_workbook(
+            {"start_date": "2026-10-13", "schedule_mode": "weekdays", "weekdays": [0, 3]},
+            [{"title": "Первое", "topic": "Курс"}],
+        )
+        preview = parse_plan_workbook(content, mode="sync")
+        matches = [text for text in preview["warnings"] if "не совпадает с учебным днём" in text]
+        self.assertEqual(matches, [
+            "Первая дата 13.10.2026 не совпадает с учебным днём. "
+            "Ближайшая подходящая: 15.10.2026. Выбранная дата сохранена.",
+        ])
+        self.assertEqual(preview["rows"][0]["item"]["scheduled_date"], "2026-10-13")
+
+    def test_manual_date_continues_sequence_without_reordering_topics(self):
+        manuals = [None, None, date(2026, 10, 16), None]
+        rows = sequence_plan(4, date(2026, 10, 12), MODE_WEEKDAYS, [0, 3], 1, manuals, [False] * 4, [None] * 4)
+        self.assertEqual([row["effective"] for row in rows], [
+            date(2026, 10, 12),
+            date(2026, 10, 15),
+            date(2026, 10, 16),
+            date(2026, 10, 19),
+        ])
+        self.assertEqual(rows[2]["source"], "manual")
+        self.assertEqual(rows[3]["source"], "automatic")
+
+    def test_weekday_counts_month_year_and_leap_day(self):
+        for count, days in ((1, [0]), (2, [0, 3]), (3, [1, 2, 4]), (5, [0, 1, 2, 3, 4]), (7, list(range(7)))):
+            rows = sequence_plan(6, date(2026, 10, 12), MODE_WEEKDAYS, days, 1, [None] * 6, [False] * 6, [None] * 6)
+            produced = [row["effective"] for row in rows]
+            self.assertEqual(len(produced), 6)
+            self.assertEqual(len(set(produced)), 6)
+            self.assertEqual(produced, sorted(produced))
+            self.assertTrue(all(day.weekday() in days or index == 0 for index, day in enumerate(produced)))
+            self.assertEqual(count, len(days))
+        year = sequence_plan(3, date(2026, 12, 28), MODE_WEEKLY, [0], 1, [None] * 3, [False] * 3, [None] * 3)
+        self.assertEqual([row["effective"] for row in year], [date(2026, 12, 28), date(2027, 1, 4), date(2027, 1, 11)])
+        leap = sequence_plan(3, date(2024, 2, 28), "Каждый день", [], 1, [None] * 3, [False] * 3, [None] * 3)
+        self.assertEqual([row["effective"] for row in leap], [date(2024, 2, 28), date(2024, 2, 29), date(2024, 3, 1)])
+
+    def test_schedule_formula_survives_row_insert_and_delete(self):
+        formula = formula_schedule(6, "T", "H", "I", "J", "F")
+        self.assertIn("INDEX(T:T,ROW())", formula)
+        self.assertIn("DATE(2000,1,1)", formula)
+        self.assertNotIn("T5", formula)
+        previous = formula_prev_anchor("R")
+        self.assertIn("INDEX(R:R,ROW()-1)", previous)
+        self.assertIn("DATE(2000,1,1)", previous)
+        self.assertNotIn("R5", previous)
+        content = build_plan_workbook(
+            {"start_date": "2026-10-12", "schedule_mode": "weekdays", "weekdays": [0, 3]},
+            [{"title": "Один", "topic": "Курс"}, {"title": "Два", "topic": "Курс"}],
+        )
+        wb = load_workbook(BytesIO(content))
+        ws = wb[SHEET_LESSONS]
+        anchor = get_column_letter(_col("date_anchor"))
+        prev = get_column_letter(_col("prev_anchor"))
+        original = ws.cell(4, _col("schedule_date")).value
+        self.assertIn(f"INDEX({prev}:{prev},ROW())", original)
+        self.assertIn("DATE(2000,1,1)", original)
+        self.assertNotIn(f"{anchor}3", original)
+        self.assertIn("DATE(2000,1,1)", ws.cell(4, _col("prev_anchor")).value)
+        self.assertTrue(ws.column_dimensions[prev].hidden)
+        table = ws.tables["PlanLessons"]
+        calculated = {
+            column.name: column.calculatedColumnFormula.attr_text
+            for column in table.tableColumns
+            if column.calculatedColumnFormula is not None
+        }
+        self.assertIn("Дата по расписанию", calculated)
+        self.assertIn("Прошлая опора", calculated)
+        self.assertNotIn("ID урока", calculated)
+        self.assertNotIn("Код строки", calculated)
+        styled = {str(range_) for range_ in ws.conditional_formatting._cf_rules}
+        self.assertTrue(any("F2:F" in str(range_) for range_ in styled))
+        self.assertTrue(any("G2:G" in str(range_) for range_ in styled))
+        self.assertTrue(any("E2:E" in str(range_) for range_ in styled))
+        ws.delete_rows(3)
+        shifted = ws.cell(3, _col("schedule_date")).value
+        self.assertIn("INDEX(", shifted)
+        self.assertNotIn("#REF!", str(shifted))
+        self.assertNotIn("#REF!", str(ws.cell(3, _col("prev_anchor")).value))
+
+
+class PlanExcelSyncTests(PlanExcelAcceptanceTests):
+    def _sync_file(self, items, **settings):
+        payload = {"start_date": "2026-10-12", "schedule_mode": "weekdays", "weekdays": [0, 3], "interval": "weekdays"}
+        payload.update(settings)
+        return build_plan_workbook(payload, items)
+
+    def test_sync_updates_adds_and_deletes_without_duplicating_ids(self):
+        items = []
+        for number in range(1, 21):
+            items.append(LessonPlanItem.objects.create(
+                plan=self.plan,
+                order=number,
+                title=f"Тема {number}",
+                topic="Курс",
+                homework_description="ДЗ",
+                scheduled_date=date(2026, 10, 12),
+            ))
+        exported = [
+            {
+                "id": item.pk,
+                "title": item.title,
+                "topic": item.topic,
+                "homework_description": item.homework_description,
+                "scheduled_date": item.scheduled_date,
+                "date_source": "automatic",
+                "order": item.order,
+            }
+            for item in items
+        ]
+        exported[0]["title"] = "Введение"
+        exported[0]["date_source"] = "manual"
+        exported[0]["scheduled_date"] = date(2026, 10, 16)
+        exported[1]["homework_description"] = "Повторить параграф"
+        del exported[2]
+        del exported[2]
+        exported.extend([
+            {"title": "Новое 1", "topic": "Курс", "date_source": "automatic"},
+            {"title": "Новое 2", "topic": "Курс", "date_source": "automatic"},
+            {"title": "Новое 3", "topic": "Курс", "date_source": "automatic"},
+        ])
+        removed = {items[2].pk, items[3].pk}
+        kept = items[0].pk
+        content = self._sync_file(exported)
+        preview = self._preview(content, plan=self.plan, mode="sync").json()
+        self.assertTrue(preview["can_import"], preview)
+        self.assertGreaterEqual(preview["summary"]["updated"], 1)
+        self.assertEqual(preview["summary"]["added"], 3)
+        self.assertEqual(preview["summary"]["deleted"], 2)
+        self.assertGreaterEqual(preview["summary"]["dates_changed"], 1)
+        held = self._import_flags(content, confirm_deletes=False)
+        self.assertEqual(held.status_code, 200, held.content)
+        self.assertEqual(LessonPlanItem.objects.filter(pk__in=removed).count(), 2)
+        resp = self._import_flags(content, confirm_deletes=True)
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertFalse(LessonPlanItem.objects.filter(pk__in=removed).exists())
+        kept_item = LessonPlanItem.objects.get(pk=kept)
+        self.assertEqual(kept_item.title, "Введение")
+        self.assertEqual(kept_item.scheduled_date, date(2026, 10, 16))
+        self.assertEqual(self.plan.items.filter(title__startswith="Новое").count(), 3)
+        fresh = []
+        for item in self.plan.items.order_by("order", "id"):
+            fresh.append({
+                "id": item.pk,
+                "title": item.title,
+                "topic": item.topic,
+                "homework_description": item.homework_description,
+                "scheduled_date": item.scheduled_date,
+                "date_source": "manual" if item.pk == kept else "automatic",
+                "order": item.order,
+            })
+        again = self._import_flags(self._sync_file(fresh), confirm_deletes=True)
+        self.assertEqual(again.status_code, 200, again.content)
+        self.assertEqual(again.json()["summary"]["created"], 0)
+        self.assertEqual(again.json()["summary"]["deleted"], 0)
+        self.assertEqual(again.json()["summary"]["updated"], 0)
+
+    def test_corrupt_and_duplicate_ids_are_not_guessed(self):
+        item = LessonPlanItem.objects.create(plan=self.plan, order=1, title="Свой", topic="Тема", scheduled_date=date(2026, 10, 12))
+        content = self._sync_file([
+            {"id": "abc", "title": "Порча", "topic": "Тема"},
+            {"id": item.pk, "title": "Первая копия", "topic": "Тема"},
+            {"id": item.pk, "title": "Вторая копия", "topic": "Тема"},
+        ])
+        preview = self._preview(content, plan=self.plan, mode="sync").json()
+        self.assertTrue(preview["can_import"])
+        self.assertGreaterEqual(preview["summary"]["attention"], 2)
+        self.assertEqual(preview["summary"]["deleted"], 0)
+        resp = self._import_flags(content, confirm_deletes=True)
+        self.assertEqual(resp.status_code, 200, resp.content)
+        item.refresh_from_db()
+        self.assertEqual(item.title, "Свой")
+        self.assertFalse(self.plan.items.filter(title="Порча").exists())
+
+    def test_conducted_lesson_keeps_event_date_and_is_not_deleted(self):
+        item = LessonPlanItem.objects.create(
+            plan=self.plan,
+            order=1,
+            title="Проведённый",
+            topic="Тема",
+            status=PlanItemStatus.COMPLETED,
+            scheduled_date=date(2026, 10, 12),
+        )
+        start = timezone.now()
+        event = ScheduleEvent.objects.create(
+            owner=self.teacher,
+            title="Урок",
+            topic="Тема",
+            starts_at=start,
+            ends_at=start + timedelta(minutes=60),
+            event_type=ScheduleEvent.EventType.INDIVIDUAL_LESSON,
+            status=ScheduleEvent.Status.COMPLETED,
+            lesson_plan_item=item,
+        )
+        item.scheduled_event = event
+        item.save(update_fields=["scheduled_event"])
+        content = self._sync_file([
+            {"title": "Другое занятие", "topic": "Тема", "date_source": "automatic"},
+        ])
+        preview = self._preview(content, plan=self.plan, mode="sync").json()
+        self.assertTrue(any(row["status"] == "retain" for row in preview["rows"]))
+        resp = self._import_flags(content, confirm_deletes=True)
+        self.assertEqual(resp.status_code, 200, resp.content)
+        item.refresh_from_db()
+        event.refresh_from_db()
+        self.assertEqual(item.title, "Проведённый")
+        self.assertEqual(item.status, PlanItemStatus.COMPLETED)
+        self.assertEqual(event.starts_at, start)
+        self.assertEqual(event.lesson_plan_item_id, item.pk)
+        self.assertTrue(self.plan.items.filter(title="Другое занятие").exists())
+
+    def test_reimport_of_new_rows_without_server_id_does_not_duplicate(self):
+        content = self._sync_file([
+            {"title": "Новое занятие", "topic": "Курс", "homework_description": "ДЗ"},
+            {"title": "Ещё одно", "topic": "Курс"},
+        ])
+        first = self._import_flags(content, confirm_deletes=True)
+        self.assertEqual(first.status_code, 200, first.content)
+        self.assertEqual(first.json()["summary"]["created"], 2)
+        self.assertEqual(self.plan.items.count(), 2)
+        again = self._import_flags(content, confirm_deletes=True)
+        self.assertEqual(again.status_code, 200, again.content)
+        self.assertEqual(again.json()["summary"]["created"], 0)
+        self.assertEqual(again.json()["summary"]["deleted"], 0)
+        self.assertEqual(self.plan.items.count(), 2)
+        titles = set(self.plan.items.values_list("title", flat=True))
+        self.assertEqual(titles, {"Новое занятие", "Ещё одно"})
+
+    def test_reimport_without_row_key_matches_identical_content(self):
+        content = self._sync_file([{"title": "Без кода", "topic": "Курс"}])
+        content = _patch_workbook(content, lambda wb: wb[SHEET_LESSONS].cell(2, _col("row_key"), None))
+        first = self._import_flags(content, confirm_deletes=True)
+        self.assertEqual(first.status_code, 200, first.content)
+        self.assertEqual(self.plan.items.count(), 1)
+        again = self._import_flags(content, confirm_deletes=True)
+        self.assertEqual(again.status_code, 200, again.content)
+        self.assertEqual(again.json()["summary"]["created"], 0)
+        self.assertEqual(again.json()["summary"]["deleted"], 0)
+        self.assertEqual(self.plan.items.count(), 1)
+
+    def test_site_edit_after_download_is_not_overwritten_until_chosen(self):
+        item = LessonPlanItem.objects.create(
+            plan=self.plan, order=1, title="Из файла", topic="Курс", scheduled_date=date(2026, 10, 12),
+        )
+        stamp = item.updated_at
+        content = self._sync_file([{
+            "id": item.pk,
+            "title": "Из файла",
+            "topic": "Курс",
+            "scheduled_date": item.scheduled_date,
+            "date_source": "automatic",
+            "updated_at": stamp,
+        }])
+        item.title = "На сайте"
+        item.save(update_fields=["title", "updated_at"])
+        preview = self._preview(content, plan=self.plan, mode="sync").json()
+        conflict = next(row for row in preview["rows"] if row.get("status") == "conflict")
+        self.assertTrue(any(diff["field"] == "title" for diff in conflict["diffs"]))
+        held = self._import_flags(content, confirm_deletes=True)
+        self.assertEqual(held.status_code, 200, held.content)
+        item.refresh_from_db()
+        self.assertEqual(item.title, "На сайте")
+        taken = self._import_flags(content, confirm_deletes=True, extra={"accept_conflicts": "2"})
+        self.assertEqual(taken.status_code, 200, taken.content)
+        item.refresh_from_db()
+        self.assertEqual(item.title, "Из файла")
+
+    def test_teacher_can_skip_one_update_and_one_delete(self):
+        first = LessonPlanItem.objects.create(plan=self.plan, order=1, title="Первый", topic="Курс", scheduled_date=date(2026, 10, 12))
+        second = LessonPlanItem.objects.create(plan=self.plan, order=2, title="Второй", topic="Курс", scheduled_date=date(2026, 10, 15))
+        third = LessonPlanItem.objects.create(plan=self.plan, order=3, title="Третий", topic="Курс", scheduled_date=date(2026, 10, 19))
+        content = self._sync_file([
+            {"id": first.pk, "title": "Первый изменён", "topic": "Курс", "date_source": "automatic", "updated_at": first.updated_at},
+            {"id": second.pk, "title": "Второй изменён", "topic": "Курс", "date_source": "automatic", "updated_at": second.updated_at},
+        ])
+        resp = self._import_flags(content, confirm_deletes=True, extra={"exclude_rows": f"2,delete:{third.pk}"})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.title, "Первый")
+        self.assertEqual(second.title, "Второй изменён")
+        self.assertTrue(LessonPlanItem.objects.filter(pk=third.pk).exists())
+
+    def test_calendar_event_moves_only_when_requested(self):
+        item = LessonPlanItem.objects.create(
+            plan=self.plan, order=1, title="Урок", topic="Курс", scheduled_date=date(2026, 10, 12),
+        )
+        start = timezone.make_aware(datetime(2026, 10, 12, 12, 0))
+        event = ScheduleEvent.objects.create(
+            owner=self.teacher,
+            title="Урок",
+            topic="Курс",
+            starts_at=start,
+            ends_at=start + timedelta(minutes=60),
+            event_type=ScheduleEvent.EventType.INDIVIDUAL_LESSON,
+            status=ScheduleEvent.Status.PLANNED,
+            lesson_plan_item=item,
+        )
+        item.scheduled_event = event
+        item.save(update_fields=["scheduled_event"])
+        item.refresh_from_db()
+        content = self._sync_file([{
+            "id": item.pk,
+            "title": "Урок",
+            "topic": "Курс",
+            "scheduled_date": date(2026, 10, 16),
+            "date_source": "manual",
+            "updated_at": item.updated_at,
+        }])
+        held = self._import_flags(content)
+        self.assertEqual(held.status_code, 200, held.content)
+        item.refresh_from_db()
+        event.refresh_from_db()
+        self.assertEqual(item.scheduled_date, date(2026, 10, 16))
+        self.assertEqual(event.starts_at, start)
+        moved_file = self._sync_file([{
+            "id": item.pk,
+            "title": "Урок",
+            "topic": "Курс",
+            "scheduled_date": date(2026, 10, 19),
+            "date_source": "manual",
+            "updated_at": item.updated_at,
+        }])
+        moved = self._import_flags(moved_file, extra={"move_event_rows": "2"})
+        self.assertEqual(moved.status_code, 200, moved.content)
+        event.refresh_from_db()
+        self.assertEqual(timezone.localtime(event.starts_at).date(), date(2026, 10, 19))
+        self.assertEqual(timezone.localtime(event.starts_at).hour, timezone.localtime(start).hour)
+        self.assertTrue(moved.json()["summary"]["event_moves"][0]["moved"])
+
+    def test_duplicate_row_key_is_not_applied_until_teacher_creates_new(self):
+        item = LessonPlanItem.objects.create(
+            plan=self.plan, title="Урок", topic="Курс", order=1,
+            scheduled_date=date(2026, 10, 12), import_key="same-key",
+        )
+        other = LessonPlanItem.objects.create(
+            plan=self.plan, title="Соседнее", topic="Курс", order=2,
+            scheduled_date=date(2026, 10, 15), import_key="other-key",
+        )
+        content = self._sync_file([
+            {"row_key": "same-key", "title": "Первая копия", "topic": "Курс", "scheduled_date": date(2026, 10, 12), "date_source": "manual"},
+            {"row_key": "same-key", "title": "Вторая копия", "topic": "Курс", "scheduled_date": date(2026, 10, 15), "date_source": "manual"},
+        ])
+        preview = self._preview(content, mode="sync")
+        self.assertEqual(preview.status_code, 200, preview.content)
+        body = preview.json()
+        self.assertTrue(any(row.get("allow_create") for row in body["rows"]))
+        warning_text = " ".join(body.get("warnings") or [])
+        self.assertIn("повторяющиеся коды", warning_text)
+        self.assertNotIn("неясным ID", warning_text)
+        self.assertEqual(body["summary"]["deleted"], 0)
+        held = self._import_flags(content)
+        self.assertEqual(held.status_code, 200, held.content)
+        item.refresh_from_db()
+        other.refresh_from_db()
+        self.assertEqual(item.title, "Урок")
+        self.assertEqual(other.title, "Соседнее")
+        self.assertEqual(self.plan.items.count(), 2)
+        created = self._import_flags(content, extra={"accept_conflicts": "3"})
+        self.assertEqual(created.status_code, 200, created.content)
+        self.assertEqual(self.plan.items.count(), 3)
+        item.refresh_from_db()
+        other.refresh_from_db()
+        self.assertEqual(item.title, "Урок")
+        self.assertEqual(other.title, "Соседнее")
+        self.assertFalse(self.plan.items.exclude(pk=item.pk).filter(import_key="same-key").exists())
+
+    def test_duplicate_stored_key_does_not_merge_lessons(self):
+        first = LessonPlanItem.objects.create(
+            plan=self.plan, title="Первое", topic="Курс", order=1,
+            scheduled_date=date(2026, 10, 12), import_key="shared",
+        )
+        second = LessonPlanItem.objects.create(
+            plan=self.plan, title="Второе", topic="Курс", order=2,
+            scheduled_date=date(2026, 10, 15), import_key="shared",
+        )
+        content = self._sync_file([{
+            "row_key": "shared", "title": "Объединённое", "topic": "Курс",
+            "scheduled_date": date(2026, 10, 12), "date_source": "manual",
+        }])
+        response = self._import_flags(content, confirm_deletes=True)
+        self.assertEqual(response.status_code, 200, response.content)
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.title, "Первое")
+        self.assertEqual(second.title, "Второе")
+        self.assertEqual(self.plan.items.count(), 2)
+
+    def test_identical_keyless_rows_are_not_created(self):
+        content = self._sync_file([
+            {"title": "Практика", "topic": "Курс", "scheduled_date": date(2026, 10, 12), "date_source": "manual", "manual_date": date(2026, 10, 12)},
+            {"title": "Практика", "topic": "Курс", "scheduled_date": date(2026, 10, 12), "date_source": "manual", "manual_date": date(2026, 10, 12)},
+        ])
+
+        def clear_keys(wb):
+            ws = wb[SHEET_LESSONS]
+            header = {cell.value: cell.column for cell in ws[1]}
+            for row_idx in (2, 3):
+                ws.cell(row_idx, header["Код строки"]).value = None
+
+        content = _patch_workbook(content, clear_keys)
+        preview = self._preview(content, mode="sync")
+        self.assertEqual(preview.status_code, 200, preview.content)
+        self.assertTrue(all(row.get("allow_create") and row.get("status") == "ambiguous" for row in preview.json()["rows"]))
+        response = self._import_flags(content)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(self.plan.items.count(), 0)
+
+    def test_identical_lessons_with_different_keys_stay_separate(self):
+        first = LessonPlanItem.objects.create(
+            plan=self.plan, title="Практика", topic="Курс", order=1,
+            scheduled_date=date(2026, 10, 12), import_key="key-a",
+        )
+        second = LessonPlanItem.objects.create(
+            plan=self.plan, title="Практика", topic="Курс", order=2,
+            scheduled_date=date(2026, 10, 15), import_key="key-b",
+        )
+        content = self._sync_file([
+            {"id": first.pk, "row_key": "key-a", "title": "Практика", "topic": "Курс", "scheduled_date": date(2026, 10, 12), "date_source": "manual", "updated_at": first.updated_at},
+            {"id": second.pk, "row_key": "key-b", "title": "Практика", "topic": "Курс", "scheduled_date": date(2026, 10, 15), "date_source": "manual", "updated_at": second.updated_at},
+        ])
+        response = self._import_flags(content)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(self.plan.items.count(), 2)
+        self.assertTrue(self.plan.items.filter(pk=first.pk, import_key="key-a").exists())
+        self.assertTrue(self.plan.items.filter(pk=second.pk, import_key="key-b").exists())
+
+    def test_import_keeps_homework_journal_and_status(self):
+        item = LessonPlanItem.objects.create(
+            plan=self.plan, title="Урок", topic="Старая тема", order=1, status=PlanItemStatus.COMPLETED,
+            scheduled_date=date(2026, 10, 12), import_key="keep-me",
+        )
+        start = timezone.make_aware(datetime(2026, 10, 12, 10, 0))
+        event = ScheduleEvent.objects.create(
+            owner=self.teacher, title="Урок", event_type=ScheduleEvent.EventType.INDIVIDUAL_LESSON,
+            starts_at=start, ends_at=start + timedelta(hours=1), lesson_plan_item=item, status=ScheduleEvent.Status.DONE,
+        )
+        item.scheduled_event = event
+        item.save(update_fields=["scheduled_event"])
+        student = Student.objects.create(teacher=self.teacher, first_name="Анна")
+        homework = Homework.objects.create(teacher=self.teacher, title="Задача", lesson_plan_item=item)
+        submission = HomeworkSubmission.objects.create(homework=homework, student=student, score=4)
+        journal = LessonJournal.objects.get(schedule_event=event)
+        content = self._sync_file([{
+            "id": item.pk, "row_key": "keep-me", "title": "Урок", "topic": "Новая тема",
+            "scheduled_date": date(2026, 10, 12), "date_source": "manual", "updated_at": item.updated_at,
+        }])
+        response = self._import_flags(content)
+        self.assertEqual(response.status_code, 200, response.content)
+        item.refresh_from_db()
+        event.refresh_from_db()
+        homework.refresh_from_db()
+        submission.refresh_from_db()
+        self.assertEqual(item.status, PlanItemStatus.COMPLETED)
+        self.assertEqual(item.topic, "Новая тема")
+        self.assertEqual(item.scheduled_event_id, event.pk)
+        self.assertEqual(homework.lesson_plan_item_id, item.pk)
+        self.assertEqual(submission.score, 4)
+        self.assertTrue(LessonJournal.objects.filter(pk=journal.pk, schedule_event=event).exists())
+        self.assertEqual(event.starts_at, start)
+
+    def test_blocked_calendar_move_explains_plan_date_only(self):
+        item = LessonPlanItem.objects.create(
+            plan=self.plan, title="Урок", topic="Курс", order=1,
+            scheduled_date=date(2026, 10, 12), import_key="move-me",
+        )
+        start = timezone.make_aware(datetime(2026, 10, 12, 10, 0))
+        event = ScheduleEvent.objects.create(
+            owner=self.teacher, title="Урок", event_type=ScheduleEvent.EventType.INDIVIDUAL_LESSON,
+            starts_at=start, ends_at=start + timedelta(hours=1), lesson_plan_item=item,
+        )
+        item.scheduled_event = event
+        item.save(update_fields=["scheduled_event"])
+        busy = timezone.make_aware(datetime(2026, 10, 19, 10, 0))
+        ScheduleEvent.objects.create(
+            owner=self.teacher, title="Другое", event_type=ScheduleEvent.EventType.INDIVIDUAL_LESSON,
+            starts_at=busy, ends_at=busy + timedelta(hours=1),
+        )
+        content = self._sync_file([{
+            "id": item.pk, "title": "Урок", "topic": "Курс",
+            "scheduled_date": date(2026, 10, 19), "date_source": "manual", "updated_at": item.updated_at,
+        }])
+        response = self._import_flags(content, extra={"move_event_rows": "2"})
+        self.assertEqual(response.status_code, 200, response.content)
+        item.refresh_from_db()
+        event.refresh_from_db()
+        self.assertEqual(item.scheduled_date, date(2026, 10, 19))
+        self.assertEqual(event.starts_at, start)
+        detail = response.json()["summary"]["event_moves"][0]["detail"]
+        self.assertIn("только плановая дата", detail)
+        self.assertIn("12.10.2026", detail)
+
+    def _import_flags(self, content, *, confirm_deletes=False, extra=None):
+        payload = {"file": self._xlsx(content), "mode": "sync"}
+        if confirm_deletes:
+            payload["confirm_deletes"] = "1"
+        if extra:
+            payload.update(extra)
+        return self.client.post(
+            f"/api/cabinet/lesson-plans/{self.plan.pk}/import-excel/",
+            payload,
+            format="multipart",
+        )

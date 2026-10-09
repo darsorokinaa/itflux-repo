@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { fetchAvailableVariantThemes } from "./variantThemeApi";
 import { TravelMiniMap } from "./TravelMarks";
 import "./variant-themes.css";
@@ -19,6 +19,13 @@ function persistHintDismissed() {
   } catch {
     /* ignore */
   }
+}
+
+function sameThemeId(left, right) {
+  if (left == null || right == null || left === "") return false;
+  const a = Number(left);
+  const b = Number(right);
+  return Number.isFinite(a) && a === b;
 }
 
 function ThemeCardPreview({ theme }) {
@@ -43,6 +50,7 @@ export default function VariantThemeSelector({
   compact = false,
   showHint = false,
 }) {
+  const radioName = useId();
   const [themes, setThemes] = useState([]);
   const [canSelect, setCanSelect] = useState(false);
   const [mode, setMode] = useState(value ? "thematic" : "classic");
@@ -80,10 +88,10 @@ export default function VariantThemeSelector({
 
   if (!canSelect) return null;
 
-  const selectedId = value == null ? null : Number(value);
-  const pickTheme = (themeId) => {
+  const selectedId = value == null || value === "" ? null : Number(value);
+  const pickTheme = (themeId, theme = null) => {
     dismissHint();
-    onChange?.(themeId);
+    onChange?.(themeId, theme);
   };
 
   return (
@@ -96,12 +104,12 @@ export default function VariantThemeSelector({
           <label className={`variant-theme-selector__pill${mode === "classic" ? " is-active" : ""}`}>
             <input
               type="radio"
-              name="variant-theme-mode"
+              name={radioName}
               checked={mode === "classic"}
               disabled={disabled}
               onChange={() => {
                 setMode("classic");
-                pickTheme(null);
+                pickTheme(null, null);
               }}
             />
             Классическое
@@ -109,12 +117,12 @@ export default function VariantThemeSelector({
           <label className={`variant-theme-selector__pill${mode === "thematic" ? " is-active" : ""}`}>
             <input
               type="radio"
-              name="variant-theme-mode"
+              name={radioName}
               checked={mode === "thematic"}
               disabled={disabled}
               onChange={() => {
                 setMode("thematic");
-                if (!selectedId && themes[0]) pickTheme(themes[0].id);
+                if (!Number.isFinite(selectedId) && themes[0]) pickTheme(themes[0].id, themes[0]);
                 else dismissHint();
               }}
             />
@@ -142,8 +150,12 @@ export default function VariantThemeSelector({
             <button
               key={theme.id}
               type="button"
-              className={`variant-theme-selector__card${selectedId === theme.id ? " is-selected" : ""}`}
-              onClick={() => pickTheme(theme.id)}
+              className={`variant-theme-selector__card${sameThemeId(selectedId, theme.id) ? " is-selected" : ""}`}
+              aria-pressed={sameThemeId(selectedId, theme.id)}
+              onClick={(event) => {
+                event.stopPropagation();
+                pickTheme(theme.id, theme);
+              }}
               disabled={disabled}
             >
               <ThemeCardPreview theme={theme} />

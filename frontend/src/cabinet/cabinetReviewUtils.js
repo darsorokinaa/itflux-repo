@@ -138,6 +138,33 @@ export function homeworkTeacherCommentAttachments(result) {
   return normalizeHomeworkAttachmentList(list);
 }
 
+/** Все опубликованные вложения учителя: к комментарию и к заданиям. */
+export function homeworkAllTeacherFiles(result) {
+  if (!result || typeof result !== "object") return [];
+  const collected = [...homeworkTeacherCommentAttachments(result)];
+  const grouped = result.task_attachments?.tasks;
+  if (grouped && typeof grouped === "object") {
+    Object.values(grouped).forEach((bucket) => {
+      const files = bucket?.teacher;
+      if (Array.isArray(files)) collected.push(...files);
+    });
+  }
+  const byId = result.teacher_attachments_by_task_id || result.teacherAttachmentsByTaskId || {};
+  if (byId && typeof byId === "object") {
+    Object.values(byId).forEach((files) => {
+      if (Array.isArray(files)) collected.push(...files);
+    });
+  }
+  const normalized = normalizeHomeworkAttachmentList(collected);
+  const seen = new Set();
+  return normalized.filter((file) => {
+    const key = String(file.id || file.url || "");
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export function homeworkTeacherAttachments(result, taskId, taskNumber, tasks) {
   if (!result || typeof result !== "object") return [];
   const grouped = result.task_attachments;

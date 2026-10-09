@@ -10,7 +10,7 @@ import {
   planSubjectsMatch,
   targetDirectionSlug,
 } from "../lessonPlansData";
-import { PLAN_DATE_INTERVALS } from "../planDates";
+import { PLAN_INTERVAL_SELECT_OPTIONS, intervalChoice, intervalToken } from "../planDates";
 import {
   enrollLessonPlan,
   fetchLessonPlans,
@@ -281,12 +281,35 @@ export default function PlanAttachModal({
             </label>
             <label className="cb-pe-field">
               <span>Как часто</span>
-              <select value={dateInterval} onChange={(e) => setDateInterval(e.target.value)}>
-                {PLAN_DATE_INTERVALS.map((item) => (
+              <select
+                value={intervalChoice(dateInterval).select}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  const step = next === "every_n_days" ? 1 : 2;
+                  setDateInterval(
+                    next === "every_n_weeks" || next === "every_n_days"
+                      ? intervalToken(next, intervalChoice(dateInterval).step || step)
+                      : next,
+                  );
+                }}
+              >
+                {PLAN_INTERVAL_SELECT_OPTIONS.map((item) => (
                   <option key={item.id} value={item.id}>{item.label}</option>
                 ))}
               </select>
             </label>
+            {intervalChoice(dateInterval).select.startsWith("every_n") ? (
+              <label className="cb-pe-field">
+                <span>Интервал N</span>
+                <input
+                  type="number"
+                  min="1"
+                  max={intervalChoice(dateInterval).select === "every_n_days" ? 366 : 52}
+                  value={intervalChoice(dateInterval).step}
+                  onChange={(event) => setDateInterval(intervalToken(intervalChoice(dateInterval).select, event.target.value))}
+                />
+              </label>
+            ) : null}
             <p className="cb-pe-dates__hint">
               Если указать дату, остальные занятия плана расставятся автоматически. Потом даты можно поправить в плане.
             </p>

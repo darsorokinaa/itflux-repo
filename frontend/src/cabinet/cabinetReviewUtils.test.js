@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildStudentHomeworkReviewRows,
   hasOfficialTaskAnswer,
+  homeworkAllTeacherFiles,
   homeworkTaskAnswer,
   resolvePart1Verdict,
 } from "./cabinetReviewUtils";
@@ -184,5 +185,22 @@ describe("duplicate bank numbers (тетрадь из одного типа за
     );
     expect(payload.by_task_id).toEqual({ "204": "13123" });
     expect(payload.by_number).toEqual({});
+  });
+});
+
+describe("homeworkAllTeacherFiles", () => {
+  it("keeps comment files and per-task files without duplicates", () => {
+    const files = homeworkAllTeacherFiles({
+      task_attachments: {
+        comment: [{ id: "c", url: "/api/homework/attachments/c/file/", filename: "voice.mp3" }],
+        tasks: {
+          "20": { teacher: [{ id: "p", url: "/api/homework/attachments/p/file/", filename: "scan.pdf" }] },
+        },
+      },
+      teacher_attachments_by_task_id: {
+        "20": [{ id: "p", url: "/api/homework/attachments/p/file/", filename: "scan.pdf" }],
+      },
+    });
+    expect(files.map((file) => file.filename)).toEqual(["voice.mp3", "scan.pdf"]);
   });
 });

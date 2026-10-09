@@ -51,8 +51,12 @@ import ConfirmActionModal from "../components/ConfirmActionModal";
 import HomeworkCopyModal from "../components/HomeworkCopyModal";
 import PlanItemResourcesPicker from "../components/PlanItemResourcesPicker";
 import AttachmentPreviewModal, {
+  attachmentOpenClick,
+  isAppFileUrl,
   isAttachmentPreviewable,
   openAttachmentPreferPreview,
+  prefersInPlaceFileOpen,
+  withFileIntent,
 } from "../components/AttachmentPreviewModal";
 import HomeworkReviewSummary, {
   buildHomeworkReviewFromVariant,
@@ -69,6 +73,7 @@ import {
   removeHomeworkAttachment,
 } from "../homeworkAttachmentState";
 import HomeworkNotebookEditor from "../notebook/HomeworkNotebookEditor";
+import { publishAfterReady, trackFeedbackUpload } from "../notebook/notebookPublishGate";
 import { deleteHomeworkAttachment, openHomeworkNotebook } from "../notebook/notebookApi";
 
 const HW_TASK_TYPE_RU = {
@@ -240,7 +245,12 @@ function AttachmentList({ attachments, emptyLabel = "Файлы не прикр�
                   )}
                 </button>
               ) : (
-                <a href={file.url} target="_blank" rel="noreferrer" className="cb-review-detail__file-link">
+                <a
+                  href={isAppFileUrl(file.url) ? (withFileIntent(file.url, "inline") || file.url) : file.url}
+                  {...(prefersInPlaceFileOpen() && isAppFileUrl(file.url) ? {} : { target: "_blank", rel: "noreferrer" })}
+                  className="cb-review-detail__file-link"
+                  onClick={attachmentOpenClick(file, setPreview)}
+                >
                   {label}
                 </a>
               )}
@@ -295,7 +305,7 @@ function ReviewFeedbackUpload({
       fd.append("file", file, file.name || "file");
     });
     try {
-      const data = await uploadReviewFeedback(reviewId, fd);
+      const data = await trackFeedbackUpload(uploadReviewFeedback(reviewId, fd));
       const uploaded = Array.isArray(data.attachments) && data.attachments.length
         ? data.attachments
         : (data.url ? [{
@@ -466,6 +476,7 @@ function ReviewWorkspace({
   reviewTaskTotal,
   assignment,
 }) {
+  const [stagePreview, setStagePreview] = useState(null);
   const tasks = useMemo(() => {
     const live = [
       ...part1Tasks.map((task) => ({ ...task, part: 1 })),
@@ -694,7 +705,13 @@ function ReviewWorkspace({
             </div>
             {images.length ? (
               <div className="rv-stage">
-                <img src={images[0].url} alt={images[0].filename || images[0].name || "Решение ученика"} />
+                <a
+                  href={isAppFileUrl(images[0].url) ? (withFileIntent(images[0].url, "inline") || images[0].url) : images[0].url}
+                  {...(prefersInPlaceFileOpen() && isAppFileUrl(images[0].url) ? {} : { target: "_blank", rel: "noreferrer" })}
+                  onClick={attachmentOpenClick(images[0], setStagePreview)}
+                >
+                  <img src={images[0].url} alt={images[0].filename || images[0].name || "Решение ученика"} />
+                </a>
               </div>
             ) : null}
             <p className="rv-label">Ответ ученика</p>
@@ -817,6 +834,9 @@ function ReviewWorkspace({
           ) : null}
         </aside>
       </div>
+      {stagePreview ? (
+        <AttachmentPreviewModal file={stagePreview} onClose={() => setStagePreview(null)} />
+      ) : null}
     </>
   );
 }
@@ -1064,7 +1084,9 @@ export default function CabinetReviewDetailPage() {
     setBusy(true);
     setError(null);
     try {
-      const updated = await checkReviewItem(reviewId, buildPayload());
+      const updated = await publishAfterReady({
+        publish: () => checkReviewItem(reviewId, buildPayload()),
+      });
       setReview(updated);
       window.dispatchEvent(new Event("cabinet:nav-counts-refresh"));
       if (stay) {
@@ -1085,7 +1107,9 @@ export default function CabinetReviewDetailPage() {
     setBusy(true);
     setError(null);
     try {
-      const updated = await returnReviewItem(reviewId, buildPayload());
+      const updated = await publishAfterReady({
+        publish: () => returnReviewItem(reviewId, buildPayload()),
+      });
       setReview(updated);
       window.dispatchEvent(new Event("cabinet:nav-counts-refresh"));
       navigate(reviewListPath);

@@ -44,6 +44,52 @@ def ensure_filename_extension(name: str, extension: str) -> str:
     return name
 
 
+_UNSAFE_INLINE_TYPES = frozenset({
+    "text/html",
+    "application/xhtml+xml",
+    "image/svg+xml",
+    "text/javascript",
+    "application/javascript",
+    "application/x-javascript",
+})
+
+
+def resolved_mime(content_type: str = "", filename: str = "") -> str:
+    """MIME из заголовка файла, а если его нет — по расширению имени."""
+    import mimetypes
+
+    mime = (content_type or "").split(";")[0].strip().lower()
+    if mime and mime != "application/octet-stream":
+        return mime
+    guessed, _encoding = mimetypes.guess_type(filename or "")
+    return (guessed or mime or "application/octet-stream").lower()
+
+
+def is_browser_previewable(content_type: str = "", filename: str = "") -> bool:
+    """Картинка, PDF, видео, аудио и текст. HTML/SVG/JS не отдаём inline."""
+    mime = resolved_mime(content_type, filename)
+    if mime in _UNSAFE_INLINE_TYPES:
+        return False
+    if mime == "application/pdf":
+        return True
+    return mime.startswith(("image/", "video/", "audio/", "text/"))
+
+
+def wants_inline_preview(request, content_type: str = "", filename: str = "") -> bool:
+    """inline для просмотра в браузере. ?download=1 всегда скачивает."""
+    params = getattr(request, "query_params", None) if request is not None else None
+    if params is None and request is not None:
+        params = request.GET
+    if params is not None and str(params.get("download") or "") == "1":
+        return False
+    mime = resolved_mime(content_type, filename)
+    if mime in _UNSAFE_INLINE_TYPES:
+        return False
+    if params is not None and str(params.get("inline") or "") == "1":
+        return True
+    return is_browser_previewable(content_type, filename)
+
+
 def content_disposition(filename: str, *, inline: bool = False) -> str:
     """RFC 5987: filename для ASCII + filename* для кириллицы и прочих символов."""
     from urllib.parse import quote

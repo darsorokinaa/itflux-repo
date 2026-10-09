@@ -135,10 +135,15 @@ export default function TaskFileAttachment({ href, name }) {
     );
   }
 
+  const inPlace = typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia("(max-width: 900px)").matches;
+  const linkTarget = inPlace ? {} : { target: "_blank", rel: "noreferrer" };
+
   if (IMAGE_EXTENSIONS.includes(ext)) {
     return (
       <div className="task-files task-files--image">
-        <a className="task-attachment-image-link" href={normalizedHref} target="_blank" rel="noreferrer">
+        <a className="task-attachment-image-link" href={normalizedHref} {...linkTarget}>
           <img className="task-attachment-image teacher-task-img" src={normalizedHref} alt={displayName} />
         </a>
       </div>
@@ -149,7 +154,7 @@ export default function TaskFileAttachment({ href, name }) {
 
   return (
     <div className="task-files">
-      <a className="file-attachment" href={normalizedHref} target="_blank" rel="noreferrer" download>
+      <a className="file-attachment" href={normalizedHref} {...linkTarget}>
         <div className="file-icon">{FILE_DOC_SVG}</div>
         <div className="file-info">
           <span className="file-name">{displayName}</span>

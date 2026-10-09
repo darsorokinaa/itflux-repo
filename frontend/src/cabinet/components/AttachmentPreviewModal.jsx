@@ -56,22 +56,97 @@ export function isAttachmentPreviewable(file) {
   return Boolean(attachmentPreviewKind(file) && resolveAttachmentPreviewSrc(file));
 }
 
+/** Наши файлы, а не внешняя ссылка. Им нельзя открываться через target=_blank на iOS. */
+export function isAppFileUrl(url) {
+  const raw = String(url || "");
+  return (
+    raw.includes("/attached-file")
+    || raw.includes("/homework/attachments/")
+    || /\/files\/(?:shared\/)?[^/?#]+\/(?:download|preview)\/?(?:\?|#|$)/.test(raw)
+    || /\/materials\/\d+\/(?:file|preview)\/?(?:\?|#|$)/.test(raw)
+    || raw.includes("/media/")
+    || raw.includes("/lesson/attachment/")
+  );
+}
+
+export function prefersInPlaceFileOpen() {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+  return window.matchMedia("(max-width: 900px)").matches;
+}
+
+/** inline — браузер показывает файл; download — отдаёт как вложение. */
+export function withFileIntent(url, intent) {
+  const raw = String(url || "").trim();
+  if (!raw || !isAppFileUrl(raw) || raw.startsWith("blob:") || raw.startsWith("data:")) return raw;
+  try {
+    const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
+    const parsed = new URL(raw, base);
+    if (intent === "download") {
+      parsed.searchParams.delete("inline");
+      parsed.searchParams.set("download", "1");
+    } else {
+      parsed.searchParams.delete("download");
+      parsed.searchParams.set("inline", "1");
+    }
+    const sameApp = typeof window !== "undefined" && parsed.origin === window.location.origin;
+    const localDev = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(parsed.origin);
+    if ((/^https?:\/\//i.test(raw) && !localDev && !sameApp)) return parsed.toString();
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return raw;
+  }
+}
+
+function presentFile(file) {
+  const openSrc = resolveAttachmentOpenSrc(file);
+  const previewSrc = resolveAttachmentPreviewSrc(file) || openSrc;
+  return {
+    ...file,
+    url: withFileIntent(openSrc, "inline") || openSrc,
+    preview_url: withFileIntent(previewSrc, "inline") || previewSrc,
+  };
+}
+
 export function openAttachmentPreferPreview(file, setPreview) {
   if (!file) return;
-  if (isAttachmentPreviewable(file) && typeof setPreview === "function") {
-    setPreview(file);
+  const kind = attachmentPreviewKind(file);
+  const href = withFileIntent(resolveAttachmentOpenSrc(file), "inline") || resolveAttachmentOpenSrc(file);
+  const mobile = prefersInPlaceFileOpen();
+  const showSheet = kind === "image" || kind === "video" || (!mobile && isAttachmentPreviewable(file));
+  if (showSheet && typeof setPreview === "function") {
+    setPreview(presentFile(file));
     return;
   }
-  const href = resolveAttachmentOpenSrc(file);
   if (!href || typeof window === "undefined") return;
+  if (mobile && isAppFileUrl(href)) {
+    window.location.assign(href);
+    return;
+  }
   window.open(href, "_blank", "noopener,noreferrer");
+}
+
+/** Клик по ссылке: картинку и видео оставляем в окне, остальное на телефоне — обычный переход. */
+export function attachmentOpenClick(file, setPreview) {
+  return (event) => {
+    if (!event || event.defaultPrevented) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button) return;
+    const kind = attachmentPreviewKind(file);
+    const mobile = prefersInPlaceFileOpen();
+    const showSheet = kind === "image" || kind === "video" || (!mobile && isAttachmentPreviewable(file));
+    if (!showSheet || typeof setPreview !== "function") return;
+    event.preventDefault();
+    openAttachmentPreferPreview(file, setPreview);
+  };
 }
 
 export default function AttachmentPreviewModal({ file, onClose }) {
   const kind = attachmentPreviewKind(file);
   const src = resolveAttachmentPreviewSrc(file);
   const openHref = resolveAttachmentOpenSrc(file) || src;
+  const inlineHref = withFileIntent(openHref, "inline") || openHref;
+  const downloadHref = withFileIntent(openHref, "download") || openHref;
   const title = fileLabel(file);
+  const inPlace = prefersInPlaceFileOpen();
 
   useEffect(() => {
     if (!file) return undefined;
@@ -91,13 +166,21 @@ export default function AttachmentPreviewModal({ file, onClose }) {
       wide
       footer={(
         <>
-          {openHref ? (
-            <a className="cb-btn cb-btn--outline" href={openHref} target="_blank" rel="noreferrer">
+          {inlineHref ? (
+            <a
+              className="cb-btn cb-btn--outline"
+              href={inlineHref}
+              {...(inPlace ? {} : { target: "_blank", rel: "noreferrer" })}
+            >
               Открыть снаружи
             </a>
           ) : null}
-          {openHref ? (
-            <a className="cb-btn cb-btn--outline" href={openHref} download>
+          {downloadHref ? (
+            <a
+              className="cb-btn cb-btn--outline"
+              href={downloadHref}
+              {...(inPlace ? {} : { target: "_blank", rel: "noreferrer" })}
+            >
               Скачать
             </a>
           ) : null}
@@ -112,15 +195,22 @@ export default function AttachmentPreviewModal({ file, onClose }) {
           <img src={src} alt={title} />
         ) : null}
         {kind === "pdf" ? (
-          <object className="att-preview__pdf" data={src} type="application/pdf" title={title}>
-            <iframe src={src} title={title} />
+          inPlace ? (
             <p className="att-preview__empty">
-              Предпросмотр PDF недоступен в этом браузере.{" "}
-              {openHref ? (
-                <a href={openHref} target="_blank" rel="noreferrer">Открыть файл</a>
-              ) : null}
+              На телефоне PDF открывается отдельным экраном.{" "}
+              {inlineHref ? <a href={inlineHref}>Открыть PDF</a> : null}
             </p>
-          </object>
+          ) : (
+            <object className="att-preview__pdf" data={src} type="application/pdf" title={title}>
+              <iframe src={src} title={title} />
+              <p className="att-preview__empty">
+                Предпросмотр PDF недоступен в этом браузере.{" "}
+                {inlineHref ? (
+                  <a href={inlineHref} target="_blank" rel="noreferrer">Открыть файл</a>
+                ) : null}
+              </p>
+            </object>
+          )
         ) : null}
         {kind === "video" ? (
           <video src={src} controls playsInline preload="metadata" />

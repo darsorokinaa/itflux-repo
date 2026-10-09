@@ -936,6 +936,13 @@ video {
     overscroll-behavior: contain;
   }
 
+  /* min-height: 0 у тела модалки схлопывает превью файла в ноль на телефоне. */
+  .cb-modal:has(.att-preview) .cb-modal__body {
+    flex: 1 1 auto;
+    min-height: min(46vh, 420px);
+    overflow: auto;
+  }
+
   .cb-modal__body > .cb-modal-form {
     display: flex;
     flex-direction: column;

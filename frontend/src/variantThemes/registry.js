@@ -54,10 +54,10 @@ export function resolveVariantTheme(payload) {
   const slug = String(payload.slug || "").trim().toLowerCase();
   const rawLayout = String(payload.layout_type || payload.layoutType || "").trim().toLowerCase();
   const entry = variantThemeRegistry[slug] || variantThemeRegistry[rawLayout] || null;
-  const layoutType = entry?.layout || rawLayout;
-  const implemented = IMPLEMENTED_VARIANT_THEME_LAYOUTS.includes(layoutType);
-  if (!implemented) {
-    return CLASSIC_VARIANT_THEME;
+  let layoutType = entry?.layout || rawLayout;
+  if (!IMPLEMENTED_VARIANT_THEME_LAYOUTS.includes(layoutType)) {
+    // Карточки и игровой макет ещё без своей сетки, но цвет, фон и подписи этой темы остаются.
+    layoutType = "classic";
   }
 
   const config = payload.config && typeof payload.config === "object" ? payload.config : {};

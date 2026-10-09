@@ -1402,12 +1402,22 @@ def api_schedule_delete(request, event_id):
     if not event:
         return JsonResponse({"ok": False, "error": "Урок не найден."}, status=404)
 
-    from .schedule_service import cancel_event_with_scope
+    from .schedule_service import ScheduleDeleteError, cancel_event_with_scope, delete_inactive_events_with_scope
 
     data = _load_json_body(request) or {}
     scope = data.get("scope") or request.GET.get("scope")
     notify = data.get("notify_participants", True)
     plan_cancel_action = (data.get("plan_cancel_action") or data.get("planOnCancel") or "").strip() or None
+    if data.get("purge"):
+        try:
+            deleted = delete_inactive_events_with_scope(
+                event,
+                changed_by=request.user,
+                scope=scope,
+            )
+        except ScheduleDeleteError as exc:
+            return JsonResponse({"ok": False, "error": str(exc)}, status=400)
+        return JsonResponse({"ok": True, "deleted": deleted})
 
     cancel_event_with_scope(
         event,

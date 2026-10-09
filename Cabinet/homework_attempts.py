@@ -45,12 +45,19 @@ def snapshot_submission_attempt(
     if not has_content:
         return None
 
+    payload = deepcopy(submission.result_payload or {})
+    from .homework_notebooks import student_published_notebooks
+
+    notebooks = student_published_notebooks(submission)
+    if notebooks:
+        payload["published_notebooks"] = notebooks
+
     attempt = HomeworkSubmissionAttempt.objects.create(
         submission=submission,
         attempt_number=next_attempt_number(submission),
         status=submission.status or SubmissionStatus.SUBMITTED,
         score=submission.score,
-        result_payload=deepcopy(submission.result_payload or {}),
+        result_payload=payload,
         answer_text=submission.answer_text or "",
         teacher_comment=submission.teacher_comment or "",
         submitted_at=submission.submitted_at,
@@ -79,8 +86,40 @@ def snapshot_on_review(submission: HomeworkSubmission, *, checked: bool) -> Home
     return snapshot_submission_attempt(
         submission,
         is_final=checked,
-        checked_at=timezone.now() if checked else None,
+        checked_at=timezone.now(),
     )
+
+
+def serialize_student_review_history(submission: HomeworkSubmission) -> list[dict]:
+    """История опубликованных проверок без эталонов и черновиков."""
+    from .homework_task_files import PUBLISHED_REVIEW_STATUSES
+
+    rows = []
+    for attempt in submission.attempts.all().order_by("attempt_number", "id"):
+        payload = attempt.result_payload if isinstance(attempt.result_payload, dict) else {}
+        comment = (attempt.teacher_comment or "").strip()
+        notebooks = payload.get("published_notebooks") if isinstance(payload.get("published_notebooks"), list) else []
+        notebooks = [item for item in notebooks if isinstance(item, dict) and item.get("task_id")]
+        raw_comments = payload.get("comments_by_task_id") if isinstance(payload.get("comments_by_task_id"), dict) else {}
+        comments = {
+            str(key): str(value).strip()
+            for key, value in raw_comments.items()
+            if str(value).strip()
+        }
+        if attempt.status not in PUBLISHED_REVIEW_STATUSES and not comment and not notebooks and not comments:
+            continue
+        rows.append(
+            {
+                "attempt_number": attempt.attempt_number,
+                "status": attempt.status or SubmissionStatus.SUBMITTED,
+                "teacher_comment": comment,
+                "checked_at": attempt.checked_at.isoformat() if attempt.checked_at else None,
+                "score": float(attempt.score) if attempt.score is not None else None,
+                "comments_by_task_id": comments,
+                "published_notebooks": notebooks,
+            }
+        )
+    return rows
 
 
 def serialize_attempts(submission: HomeworkSubmission) -> list[dict]:

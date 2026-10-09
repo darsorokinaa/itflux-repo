@@ -4,6 +4,7 @@ import {
   mapStudentAssignmentToHwCard,
   studentAssignmentPhase,
   studentHomeworkStatus,
+  studentShowsPublishedReview,
   studentTeacherRemark,
   STUDENT_PHASE_LABEL,
 } from "./studentAssignmentCards";
@@ -97,5 +98,17 @@ describe("student assignment phase", () => {
     expect(studentTeacherRemark(conflict).kind).toBe("conflict");
     expect(studentTeacherRemark(conflict).text).not.toContain("Произвольный комментарий");
     expect(mapStudentAssignmentToHwCard(conflict).commentPreview).toBe("");
+  });
+
+  it("shows a published review after check, return, and a later resubmit", () => {
+    expect(studentShowsPublishedReview({ status: "checked", teacher_comment: "Зачтено" })).toBe(true);
+    expect(studentShowsPublishedReview({ status: "needs_fix", teacher_comment: "Исправьте" })).toBe(true);
+    expect(studentShowsPublishedReview({
+      status: "submitted",
+      teacher_comment: "Исправьте чертеж",
+      published_notebooks: [{ task_id: "A", revision_id: "rev-1" }],
+    })).toBe(true);
+    expect(studentShowsPublishedReview({ status: "submitted", teacher_comment: "" })).toBe(false);
+    expect(studentShowsPublishedReview({ status: "new" })).toBe(false);
   });
 });

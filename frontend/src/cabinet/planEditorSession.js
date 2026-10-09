@@ -62,6 +62,8 @@ export function mapPlanItemToEditorSession(item) {
       .map(mapApiInteractiveAttachment),
     scheduledDate: calendarDateKey(item.scheduled_date || item.scheduledDate) || "",
     dateSource: item.date_source || item.dateSource || "",
+    importKey: item.import_key || item.importKey || "",
+    updatedAt: item.updated_at || item.updatedAt || "",
   };
 }
 

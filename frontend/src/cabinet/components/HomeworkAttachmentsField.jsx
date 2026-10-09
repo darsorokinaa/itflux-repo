@@ -5,6 +5,12 @@ import {
   uploadHomeworkAttachments,
 } from "../../utils/cabinetAuth";
 import CabinetIcon from "../CabinetIcons";
+import AttachmentPreviewModal, {
+  attachmentOpenClick,
+  isAppFileUrl,
+  prefersInPlaceFileOpen,
+  withFileIntent,
+} from "./AttachmentPreviewModal";
 
 function formatSize(bytes) {
   const n = Number(bytes) || 0;
@@ -49,6 +55,7 @@ export default function HomeworkAttachmentsField({
   const [error, setError] = useState("");
   const [fileErrors, setFileErrors] = useState([]);
   const [busyIds, setBusyIds] = useState({});
+  const [filePreview, setFilePreview] = useState(null);
 
   const isRemote = Boolean(homeworkId);
 
@@ -247,10 +254,10 @@ export default function HomeworkAttachmentsField({
                 {image && preview ? (
                   <a
                     className="cb-hw-attachments__thumb"
-                    href={openUrl || preview}
-                    target="_blank"
-                    rel="noreferrer"
+                    href={item.pending ? preview : (isAppFileUrl(openUrl) ? (withFileIntent(openUrl, "inline") || openUrl) : (openUrl || preview))}
+                    {...(!item.pending && prefersInPlaceFileOpen() && isAppFileUrl(openUrl) ? {} : { target: "_blank", rel: "noreferrer" })}
                     title={item.name}
+                    onClick={item.pending ? undefined : attachmentOpenClick(item, setFilePreview)}
                   >
                     <img src={preview} alt={item.name || "Изображение"} />
                   </a>
@@ -272,9 +279,9 @@ export default function HomeworkAttachmentsField({
                   {openUrl && !item.pending ? (
                     <a
                       className="cb-btn cb-btn--outline cb-btn--sm"
-                      href={openUrl}
-                      target="_blank"
-                      rel="noreferrer"
+                      href={isAppFileUrl(openUrl) ? (withFileIntent(openUrl, "inline") || openUrl) : openUrl}
+                      {...(prefersInPlaceFileOpen() && isAppFileUrl(openUrl) ? {} : { target: "_blank", rel: "noreferrer" })}
+                      onClick={attachmentOpenClick(item, setFilePreview)}
                     >
                       Открыть
                     </a>
@@ -300,6 +307,9 @@ export default function HomeworkAttachmentsField({
         </ul>
       ) : !loading ? (
         <p className="cabinet-auth-muted">Файлы пока не прикреплены</p>
+      ) : null}
+      {filePreview ? (
+        <AttachmentPreviewModal file={filePreview} onClose={() => setFilePreview(null)} />
       ) : null}
     </div>
   );

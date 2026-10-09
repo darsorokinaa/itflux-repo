@@ -814,7 +814,18 @@ export function updateScheduleEventMaterials(eventId, payload = {}) {
   });
 }
 
-export function deleteScheduleEvent(eventId, { scope, notifyParticipants = true, expectedUpdatedAt = "" } = {}) {
+export function deleteScheduleEvent(eventId, { scope, notifyParticipants = true, expectedUpdatedAt = "", purge = false } = {}) {
+  if (purge) {
+    return cabinetFetch(`/schedule/events/${encodeURIComponent(eventId)}/delete/`, {
+      method: "DELETE",
+      body: JSON.stringify({
+        purge: true,
+        scope: scope || "single",
+        notify_participants: false,
+        ...(expectedUpdatedAt ? { expected_updated_at: expectedUpdatedAt } : {}),
+      }),
+    });
+  }
   if (scope) {
     return updateScheduleEvent(eventId, {
       status: "cancelled",

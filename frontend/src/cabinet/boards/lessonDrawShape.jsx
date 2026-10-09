@@ -1,4 +1,5 @@
-/* Одна линия штриха: залитый контур tldraw на поворотах оставляет петли и крючки. */
+/* Осевая линия, не залитый контур tldraw: svgInk на острых поворотах оставляет петли и крючки. */
+/* Сглаживание — квадратичные Безье с опорой на самих точках, без выноса контролов за штрих. */
 /* eslint-disable react-refresh/only-export-components */
 import { SVGContainer } from "@tldraw/editor";
 import { b64Vecs } from "@tldraw/tlschema";
@@ -31,7 +32,66 @@ export function lessonDrawPoints(segments, scaleX = 1, scaleY = 1) {
   return points;
 }
 
-/** Только отрезки. Квадратичные команды контура дают выбросы мимо точек. */
+function pointText(point) {
+  return `${coord(point.x)} ${coord(point.y)}`;
+}
+
+function midpoint(a, b) {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
+
+/**
+ * Открытый штрих: концы на первой и последней точке, повороты скруглены.
+ * Контрол квадратичной команды — сама точка выборки, конец сегмента — середина
+ * ребра. Кривая лежит в выпуклой оболочке выборки и не вылетает за вершину,
+ * в отличие от кубических команд залитого контура.
+ */
+function openSmoothPath(points) {
+  let d = `M ${pointText(points[0])} L ${pointText(midpoint(points[0], points[1]))}`;
+  for (let index = 1; index < points.length - 1; index += 1) {
+    d += ` Q ${pointText(points[index])} ${pointText(midpoint(points[index], points[index + 1]))}`;
+  }
+  d += ` L ${pointText(points[points.length - 1])}`;
+  return d;
+}
+
+/** Замкнутый штрих без хорды через первую и последнюю точку. */
+function closedSmoothPath(points) {
+  const count = points.length;
+  let d = `M ${pointText(midpoint(points[count - 1], points[0]))}`;
+  for (let index = 0; index < count; index += 1) {
+    const next = points[(index + 1) % count];
+    d += ` Q ${pointText(points[index])} ${pointText(midpoint(points[index], next))}`;
+  }
+  return `${d} Z`;
+}
+
+/** Повтор первой точки в конце замкнутого штриха даёт второй заход в вершину. */
+function withoutClosingDuplicate(points) {
+  if (!points || points.length < 3) return points || [];
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (first.x === last.x && first.y === last.y) return points.slice(0, -1);
+  return points;
+}
+
+/** Прежняя ломаная: мышь, палец и сегмент «прямая» (Shift). */
+function linePath(points, closed = false) {
+  if (!points?.length) return "";
+  const first = points[0];
+  if (points.length === 1) {
+    const x = coord(first.x);
+    const y = coord(first.y);
+    return `M ${x} ${y} L ${x} ${y}`;
+  }
+  let d = `M ${pointText(first)}`;
+  for (let index = 1; index < points.length; index += 1) {
+    d += ` L ${pointText(points[index])}`;
+  }
+  if (closed && points.length > 2) d += " Z";
+  return d;
+}
+
 export function lessonDrawPath(points, closed = false) {
   if (!points?.length) return "";
   const first = points[0];
@@ -40,12 +100,26 @@ export function lessonDrawPath(points, closed = false) {
     const y = coord(first.y);
     return `M ${x} ${y} L ${x} ${y}`;
   }
-  let d = `M ${coord(first.x)} ${coord(first.y)}`;
-  for (let index = 1; index < points.length; index += 1) {
-    d += ` L ${coord(points[index].x)} ${coord(points[index].y)}`;
+  if (points.length === 2) {
+    return `M ${pointText(first)} L ${pointText(points[1])}`;
   }
-  if (closed && points.length > 2) d += " Z";
-  return d;
+  if (!closed) return openSmoothPath(points);
+  const loop = withoutClosingDuplicate(points);
+  if (loop.length < 3) return linePath(loop, false);
+  return closedSmoothPath(loop);
+}
+
+/**
+ * Перо с свободными сегментами сглаживается. Мышь, палец и прямая по Shift
+ * остаются ломаной: один и тот же разбор segments даёт один и тот же путь
+ * на экране, в экспорте и у второго участника.
+ */
+export function lessonDrawShapePath(segments, scaleX, scaleY, closed, isPen) {
+  const list = Array.isArray(segments) ? segments : [];
+  const points = lessonDrawPoints(list, scaleX, scaleY);
+  const hasStraight = list.some((segment) => segment?.type === "straight");
+  if (!isPen || hasStraight) return linePath(points, closed && points.length > 2);
+  return lessonDrawPath(points, closed);
 }
 
 export function lessonDrawStrokeWidth(baseStrokeWidth, scale) {
@@ -74,7 +148,13 @@ function displayValues(util, shape, colorMode) {
 function LessonDrawMark({ shape, dv }) {
   const points = lessonDrawPoints(shape.props.segments, shape.props.scaleX, shape.props.scaleY);
   const closed = Boolean(shape.props.isClosed && points.length > 2);
-  const d = lessonDrawPath(points, closed);
+  const d = lessonDrawShapePath(
+    shape.props.segments,
+    shape.props.scaleX,
+    shape.props.scaleY,
+    closed,
+    Boolean(shape.props.isPen),
+  );
   if (!d) return null;
   const strokeWidth = lessonDrawStrokeWidth(dv.strokeWidth, shape.props.scale);
   const showStroke = shape.props.dash !== "none";

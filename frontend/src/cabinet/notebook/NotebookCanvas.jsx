@@ -81,6 +81,7 @@ export default function NotebookCanvas({
   selectedIds,
   onSelectIds,
   onObjectsCommit,
+  liveCommitRef,
   spacePan = false,
   readOnly = false,
   editingText,
@@ -524,13 +525,8 @@ export default function NotebookCanvas({
     }
   };
 
-  const pointerUp = (event) => {
-    const session = sessionRef.current;
-    if (!session || session.pointerId !== event.pointerId) return;
-    sessionRef.current = null;
-    const canvas = canvasRef.current;
-    const point = clientToPage(event, canvas, page);
-    if (session.mode === "pan") return;
+  const commitSession = (session, point) => {
+    if (!session || session.mode === "pan") return;
     if (session.mode === "erase") {
       if (session.removed?.size) commitObjects(objectsRef.current, "DELETE_ANNOTATION");
       return;
@@ -555,9 +551,7 @@ export default function NotebookCanvas({
     let created = null;
     const id = crypto.randomUUID?.() || `ann-${Date.now()}`;
     if (session.tool === TOOL.PEN || session.tool === TOOL.MARKER) {
-      const last = pagePointFromEvent(event, canvas, page, { clamp: session.pointerType !== "pen" });
-      last.pressure = pressureOf(event, session.points[session.points.length - 1]?.pressure ?? 0.5);
-      maybePushPoint(session.points, last, session.pointerType === "pen" ? 0.18 : 0.7);
+      if (point) maybePushPoint(session.points, point, session.pointerType === "pen" ? 0.18 : 0.7);
       const refine = session.pointerType === "pen" ? 0 : Math.max(0, Number(smoothing) || 0);
       const points = refine ? smoothStroke(session.points, refine) : session.points;
       if (points.length < 2) {
@@ -579,8 +573,9 @@ export default function NotebookCanvas({
         updatedAt: new Date().toISOString(),
       };
     } else if (session.tool === TOOL.LINE || session.tool === TOOL.ARROW) {
-      const end = constrainLine(session.start, point, session.shift);
-      created = {
+      const end = point ? constrainLine(session.start, point, session.shift) : null;
+      const draft = draftRef.current;
+      created = end ? {
         id,
         type: session.tool,
         pageId: page.id,
@@ -594,9 +589,17 @@ export default function NotebookCanvas({
         width: strokeWidth,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-      };
+      } : (draft ? {
+        ...draft,
+        id,
+        pageId: page.id,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } : null);
     } else if (session.tool === TOOL.RECT || session.tool === TOOL.ELLIPSE) {
-      created = { ...draftRef.current, id, pageId: page.id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      created = draftRef.current
+        ? { ...draftRef.current, id, pageId: page.id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+        : null;
       if (!created || Math.abs(created.w || created.rx || 0) < 2) created = null;
     }
     draftRef.current = null;
@@ -606,6 +609,42 @@ export default function NotebookCanvas({
       commitObjects(objectsRef.current, "ADD_ANNOTATION");
     } else schedulePaint();
   };
+
+  const pointerUp = (event) => {
+    const session = sessionRef.current;
+    if (!session || session.pointerId !== event.pointerId) return;
+    sessionRef.current = null;
+    const canvas = canvasRef.current;
+    if (session.mode === "draw" && (session.tool === TOOL.PEN || session.tool === TOOL.MARKER)) {
+      const last = pagePointFromEvent(event, canvas, page, { clamp: session.pointerType !== "pen" });
+      last.pressure = pressureOf(event, session.points[session.points.length - 1]?.pressure ?? 0.5);
+      commitSession(session, last);
+      return;
+    }
+    commitSession(session, clientToPage(event, canvas, page));
+  };
+
+  const commitLiveInput = () => {
+    if (textDraftRef.current || editingTextRef.current) finishText(true);
+    const session = sessionRef.current;
+    if (!session) return;
+    sessionRef.current = null;
+    try {
+      canvasRef.current?.releasePointerCapture?.(session.pointerId);
+    } catch {
+      /* The pointer can already be inactive. */
+    }
+    commitSession(session, null);
+  };
+  const commitLiveHolder = useRef(null);
+  commitLiveHolder.current = commitLiveInput;
+  useEffect(() => {
+    if (!liveCommitRef) return undefined;
+    liveCommitRef.current = () => commitLiveHolder.current?.();
+    return () => {
+      liveCommitRef.current = null;
+    };
+  }, [liveCommitRef]);
 
   const onDoubleClick = (event) => {
     if (readOnly) return;

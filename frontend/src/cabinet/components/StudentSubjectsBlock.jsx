@@ -12,7 +12,7 @@ import {
 import { STUDENT_DIRECTION_OPTIONS } from "../cabinetMappers";
 import { trackActivationIntent } from "../activationAnalytics";
 import { mapApiPlan, planCanBeAttached, planSubjectsMatch } from "../lessonPlansData";
-import { PLAN_DATE_INTERVALS, formatPlanDateLabel } from "../planDates";
+import { PLAN_INTERVAL_SELECT_OPTIONS, canonicalInterval, formatPlanDateLabel, intervalChoice, intervalToken } from "../planDates";
 
 const EMPTY_FORM = {
   subject: "inf",
@@ -92,9 +92,7 @@ export default function StudentSubjectsBlock({ studentId, onChanged }) {
       level: item.level || "",
       plan_id: item.plan_enrollment?.plan_id ? String(item.plan_enrollment.plan_id) : "",
       start_date: item.plan_enrollment?.start_date || "",
-      date_interval: PLAN_DATE_INTERVALS.some((interval) => interval.id === item.plan_enrollment?.frequency)
-        ? item.plan_enrollment.frequency
-        : "weekly",
+      date_interval: canonicalInterval(item.plan_enrollment?.frequency),
     });
     setEditor({ mode: "edit", item });
   };
@@ -335,14 +333,35 @@ export default function StudentSubjectsBlock({ studentId, onChanged }) {
                 <label className="cb-field">
                   <span>Как часто</span>
                   <select
-                    value={form.date_interval}
-                    onChange={(e) => setField("date_interval", e.target.value)}
+                    value={intervalChoice(form.date_interval).select}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      const step = next === "every_n_days" ? 1 : 2;
+                      setField(
+                        "date_interval",
+                        next === "every_n_weeks" || next === "every_n_days"
+                          ? intervalToken(next, intervalChoice(form.date_interval).step || step)
+                          : next,
+                      );
+                    }}
                   >
-                    {PLAN_DATE_INTERVALS.map((item) => (
+                    {PLAN_INTERVAL_SELECT_OPTIONS.map((item) => (
                       <option key={item.id} value={item.id}>{item.label}</option>
                     ))}
                   </select>
                 </label>
+                {intervalChoice(form.date_interval).select.startsWith("every_n") ? (
+                  <label className="cb-field">
+                    <span>Интервал N</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max={intervalChoice(form.date_interval).select === "every_n_days" ? 366 : 52}
+                      value={intervalChoice(form.date_interval).step}
+                      onChange={(e) => setField("date_interval", intervalToken(intervalChoice(form.date_interval).select, e.target.value))}
+                    />
+                  </label>
+                ) : null}
               </>
             ) : null}
             <div className="cb-field cb-field--wide cb-modal-form__actions-main">

@@ -652,6 +652,7 @@ def homework_review_index(teacher_id, submissions) -> dict:
         chosen = min(group, key=lambda row: _review_rank_key(row, status))
         index[source_id] = {
             "review_id": chosen["id"],
+            "checked_at": chosen.get("checked_at"),
             "remark": resolve_homework_teacher_remark(submission, group),
         }
     return index
@@ -1044,7 +1045,12 @@ def recompute_variant_checked(result: dict | None, variant_id: int | None, *, su
     return updated
 
 
-def serialize_assignment_payload(*, homework: Homework, submission: HomeworkSubmission | None) -> dict:
+def serialize_assignment_payload(
+    *,
+    homework: Homework,
+    submission: HomeworkSubmission | None,
+    for_student: bool = False,
+) -> dict:
     variant_id = None
     for task in homework.tasks.filter(is_active=True):
         vid = extract_variant_id(task.description)
@@ -1054,10 +1060,16 @@ def serialize_assignment_payload(*, homework: Homework, submission: HomeworkSubm
 
     result = submission.result_payload if submission and submission.result_payload else None
     if submission is not None:
-        from .homework_task_files import ensure_payload_migrated, overlay_payload_attachments
+        from .homework_task_files import (
+            ensure_payload_migrated,
+            overlay_payload_attachments,
+            visible_teacher_result,
+        )
 
         ensure_payload_migrated(submission)
         result = overlay_payload_attachments(submission, result)
+        if for_student:
+            result = visible_teacher_result(submission, result)
     score = float(submission.score) if submission and submission.score is not None else None
     if score is None and result:
         computed = compute_score_percent(result)
@@ -1080,6 +1092,21 @@ def serialize_assignment_payload(*, homework: Homework, submission: HomeworkSubm
         "answer_text": submission.answer_text if submission else "",
         "has_attached_file": submission_has_files(submission),
     }
+
+
+def assignment_payload_response(request, homework: Homework, submission: HomeworkSubmission | None):
+    profile = getattr(getattr(request, "user", None), "profile", None)
+    user = getattr(request, "user", None)
+    for_student = not (
+        getattr(user, "is_authenticated", False)
+        and getattr(profile, "role", None) == Profile.Role.TEACHER
+        and homework.teacher_id == getattr(user, "id", None)
+    )
+    return serialize_assignment_payload(
+        homework=homework,
+        submission=submission,
+        for_student=for_student,
+    )
 
 
 def _token_from_request(request) -> str:
@@ -1855,7 +1882,7 @@ class HomeworkAssignmentDetailView(HomeworkAssignmentBaseView):
             .order_by("-submitted_at", "-id")
             .first()
         )
-        return Response(serialize_assignment_payload(homework=homework, submission=submission))
+        return Response(assignment_payload_response(request, homework, submission))
 
 
 class HomeworkAssignmentSaveDraftView(HomeworkAssignmentBaseView):
@@ -2160,7 +2187,7 @@ class HomeworkAssignmentFetchByTokenView(APIView):
             .order_by("-submitted_at", "-id")
             .first()
         )
-        return Response(serialize_assignment_payload(homework=homework, submission=submission))
+        return Response(assignment_payload_response(request, homework, submission))
 
 
 def is_http_url(value: str) -> bool:

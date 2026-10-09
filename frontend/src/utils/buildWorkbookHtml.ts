@@ -79,6 +79,8 @@ export type WorkbookMeta = {
   partInstructions?: Record<string, string> | null;
   /** Абзацы инструкции с обложки из TaskPreview без части. */
   coverParagraphs?: string[] | null;
+  /** Фон печатного листа из темы: альбомный и книжный. */
+  sheetBackground?: { landscape?: string | null; portrait?: string | null } | null;
 };
 
 export type VariantPdfTask = {
@@ -140,6 +142,8 @@ export type ExamTemplateDocument = {
   coverAnswerNote?: string;
   coverToolsNote?: string;
   showAnswerExample?: boolean;
+  /** Фон страницы: landscape — разворот A4, portrait — одна страница A4. */
+  sheetBackground?: { landscape: string; portrait: string };
   options: {
     layout: "spread";
     includeCover: boolean;
@@ -212,6 +216,23 @@ function siteOrigin(): string {
     return window.location.origin;
   }
   return "";
+}
+
+function sheetBackgroundPayload(
+  meta: WorkbookMeta
+): { landscape: string; portrait: string } | undefined {
+  const landscape = safeSheetUrl(absoluteUrl(String(meta.sheetBackground?.landscape || "")));
+  const portrait = safeSheetUrl(absoluteUrl(String(meta.sheetBackground?.portrait || "")));
+  if (!landscape && !portrait) return undefined;
+  return { landscape, portrait };
+}
+
+function safeSheetUrl(value: string): string {
+  const href = value.trim();
+  if (!href || href.length > 2000) return "";
+  if (!/^(?:https?:\/\/|\/)/i.test(href)) return "";
+  if (/[\s<>"'()\\]|javascript:|data:/i.test(href)) return "";
+  return href;
 }
 
 function absoluteUrl(src: string): string {
@@ -383,7 +404,17 @@ function replacePre(el: Element): void {
   el.replaceWith(paragraph);
 }
 
-function sanitizeTaskHtml(raw: string, subject?: string, level?: string): { html: string; figure?: ExamTemplateFigure } {
+function isInformaticsTaskOne(subject: string | undefined, taskNumber: number | null | undefined): boolean {
+  const code = String(subject || "").toLowerCase();
+  return (code === "inf" || code === "informatics") && Number(taskNumber) === 1;
+}
+
+function sanitizeTaskHtml(
+  raw: string,
+  subject?: string,
+  level?: string,
+  taskNumber?: number | null
+): { html: string; figure?: ExamTemplateFigure } {
   const prepared = prepareTaskSource(raw, subject, level);
   if (typeof document === "undefined") {
     return { html: dollarToKatex(prepared) };
@@ -425,6 +456,15 @@ function sanitizeTaskHtml(raw: string, subject?: string, level?: string): { html
       !inTable &&
       parent.querySelectorAll("img, svg").length === 1 &&
       (parentText === "" || parentText === alt);
+    const roadGraph =
+      img.classList.contains("ege-inf-1-graph-img") || Boolean(img.closest(".ege-inf-1-graph"));
+    // Задание 1: схема дорог остаётся в условии и печатается крупно, как файл в базе.
+    if (isInformaticsTaskOne(subject, taskNumber) && (roadGraph || onlyImage)) {
+      img.removeAttribute("width");
+      img.removeAttribute("height");
+      img.classList.add("illustration");
+      continue;
+    }
     if (onlyImage && !figure && parent) {
       figure = {
         src,
@@ -474,7 +514,7 @@ function buildTemplateTask(
   subject?: string,
   level?: string
 ): ExamTemplateTask {
-  const body = sanitizeTaskHtml(task.text || "", subject, level);
+  const body = sanitizeTaskHtml(task.text || "", subject, level, task.task_number);
   const html = body.html;
   const materials = taskMaterials(task);
   const answer = dollarToKatex(plainText(task.answer || "", subject, level));
@@ -491,6 +531,7 @@ function buildTemplateTask(
 export function buildExamTemplateDocument(tasks: WorkbookTask[], meta: WorkbookMeta): ExamTemplateDocument {
   const exam = meta.mode === "variant";
   const mode = exam ? "exam" : "worksheet";
+  const sheetBackground = sheetBackgroundPayload(meta);
   const options = normalizeOptions(meta.options);
   const source = orderedTasks(Array.isArray(tasks) ? tasks : [], meta, exam);
   const numbers = documentNumbers(source, exam);
@@ -519,6 +560,7 @@ export function buildExamTemplateDocument(tasks: WorkbookTask[], meta: WorkbookM
     footer: TEMPLATE_FOOTER,
     watermark: exam ? "" : TEMPLATE_WATERMARK,
     ...(mode === "worksheet" ? { worksheetInstructions: worksheetIntro(source) } : variantCopy(meta)),
+    ...(sheetBackground ? { sheetBackground } : {}),
     options: {
       layout: "spread",
       includeCover: exam,

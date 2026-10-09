@@ -1216,6 +1216,13 @@ class LessonPlanItem(models.Model):
     scheduled_date = models.DateField("Запланированная дата", null=True, blank=True)
     completed_at = models.DateTimeField("Завершено", null=True, blank=True)
     teacher_comment = models.TextField("Комментарий учителя", blank=True)
+    import_key = models.CharField(
+        "Ключ импорта",
+        max_length=80,
+        blank=True,
+        db_index=True,
+        help_text="Скрытый код строки Excel. Повторная загрузка того же файла узнаёт новое занятие и не создаёт копию.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

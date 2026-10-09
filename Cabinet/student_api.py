@@ -1563,12 +1563,19 @@ class StudentAssignmentDetailView(StudentScopedView):
         attachments = list_homework_attachments(hw, for_student=True)
         card = _serialize_assignment_card(hw, students)
         teacher_comment = (submission.teacher_comment or "") if submission else ""
+        review_checked_at = None
         if submission is not None:
             from .homework_api import homework_review_index
 
-            remark = (
-                homework_review_index(hw.teacher_id, [submission]).get(submission.pk) or {}
-            ).get("remark") or {}
+            review_row = homework_review_index(hw.teacher_id, [submission]).get(submission.pk) or {}
+            remark = review_row.get("remark") or {}
+            checked_at = review_row.get("checked_at")
+            if checked_at is not None and submission.status in (
+                SubmissionStatus.CHECKED,
+                SubmissionStatus.RETURNED,
+                SubmissionStatus.NEEDS_REVISION,
+            ):
+                review_checked_at = checked_at.isoformat()
             if remark.get("text") and not remark.get("conflict"):
                 teacher_comment = remark["text"]
             if remark.get("conflict"):
@@ -1576,6 +1583,36 @@ class StudentAssignmentDetailView(StudentScopedView):
                 official = (submission.teacher_comment or "").strip()
                 if official:
                     teacher_comment = official
+        published_review = bool(
+            submission and submission.status in (
+                SubmissionStatus.CHECKED,
+                SubmissionStatus.RETURNED,
+                SubmissionStatus.NEEDS_REVISION,
+            )
+        )
+        student_result = None
+        published_notebooks = []
+        review_history = []
+        if submission is not None:
+            from .homework_attempts import serialize_student_review_history
+            from .homework_notebooks import student_published_notebooks
+            from .homework_task_files import (
+                ensure_payload_migrated,
+                overlay_payload_attachments,
+                submission_has_published_review,
+                visible_teacher_result,
+            )
+
+            review_history = serialize_student_review_history(submission)
+            if review_checked_at is None and review_history:
+                review_checked_at = review_history[-1].get("checked_at")
+            published_notebooks = student_published_notebooks(submission)
+            # После повторной сдачи статус снова submitted, но прошлая публикация
+            # (комментарий, файлы) остаётся. visible_teacher_result не подмешивает черновик.
+            if published_review or submission_has_published_review(submission):
+                ensure_payload_migrated(submission)
+                overlaid = overlay_payload_attachments(submission, submission.result_payload)
+                student_result = redact_student_result(visible_teacher_result(submission, overlaid))
         card.update({
             "description": homework_instruction_text(hw),
             "tasks": tasks,
@@ -1587,14 +1624,14 @@ class StudentAssignmentDetailView(StudentScopedView):
             "attached_file_name": attached_name,
             "attached_files": attached_files,
             "teacher_comment": teacher_comment,
+            "submission_id": submission.pk if submission else None,
+            "review_checked_at": review_checked_at,
+            "published_notebooks": published_notebooks,
+            "review_history": review_history,
             "mistakes": [],
             # Черновик (есть result_payload) ≠ сдача. Учитель видит работу только после submitted_at.
             "variant_submitted": bool(submission and submission.submitted_at),
-            "result": (
-                redact_student_result(submission.result_payload)
-                if submission and submission.status == SubmissionStatus.CHECKED
-                else None
-            ),
+            "result": student_result,
         })
         return Response(card)
 
@@ -1681,7 +1718,7 @@ class StudentAssignmentAttachedFileView(StudentScopedView):
         if not submission or not submission.attached_file:
             return Response({"error": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
         name = submission.attached_file.name.split("/")[-1] or "file"
-        return filefield_download_response(submission.attached_file, name)
+        return filefield_download_response(submission.attached_file, name, request=request)
 
 
 class StudentAssignmentExtraAttachedFileView(StudentScopedView):
@@ -1710,7 +1747,7 @@ class StudentAssignmentExtraAttachedFileView(StudentScopedView):
         if not attachment or not attachment.file:
             return Response({"error": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
         name = attachment.original_name or attachment.file.name.split("/")[-1] or "file"
-        return filefield_download_response(attachment.file, name)
+        return filefield_download_response(attachment.file, name, request=request)
 
 
 class StudentInteractivesView(StudentScopedView):

@@ -25,6 +25,7 @@ from Cabinet.schedule_service import (
     check_conflicts,
     create_series,
     create_single_event,
+    delete_inactive_events_with_scope,
     move_event_with_scope,
 )
 from Cabinet.schedule_events import schedule_event_to_json
@@ -175,6 +176,114 @@ class ScheduleServiceTests(TestCase):
         cancel_event_with_scope(events[0], changed_by=self.teacher, scope="series", notify=False)
         cancelled = ScheduleEvent.objects.filter(series=series, status=ScheduleEvent.Status.CANCELLED).count()
         self.assertEqual(cancelled, len(events))
+
+    def test_purge_cancelled_event_stays_gone(self):
+        import json
+
+        event = create_single_event(
+            teacher=self.teacher,
+            data={
+                "title": "Отменённый урок",
+                "starts_at": self.starts,
+                "ends_at": self.ends,
+                "event_type": "individual_lesson",
+                "notify_participants": False,
+            },
+            student_ids=[self.student.pk],
+            notify=False,
+        )
+        plan = LessonPlan.objects.create(
+            teacher=self.teacher,
+            title="План удаления",
+            direction="oge",
+            status="active",
+        )
+        item = LessonPlanItem.objects.create(
+            plan=plan,
+            order=1,
+            title="Дроби",
+            topic="Дроби",
+            scheduled_event=event,
+        )
+        event.lesson_plan_item = item
+        event.save(update_fields=["lesson_plan_item"])
+        cancel_event_with_scope(event, changed_by=self.teacher, notify=False)
+
+        self.client.force_login(self.teacher)
+        deleted = self.client.delete(
+            f"/api/cabinet/schedule/events/local-{event.pk}/delete/",
+            data=json.dumps({"purge": True, "scope": "single"}),
+            content_type="application/json",
+        )
+        self.assertEqual(deleted.status_code, 200, deleted.content)
+        self.assertFalse(ScheduleEvent.objects.filter(pk=event.pk).exists())
+        item.refresh_from_db()
+        self.assertEqual(item.topic, "Дроби")
+        self.assertIsNone(item.scheduled_event_id)
+
+        day = self.starts.date()
+        listed = self.client.get("/api/cabinet/schedule/events/", {
+            "from": (day - timedelta(days=1)).isoformat(),
+            "to": (day + timedelta(days=1)).isoformat(),
+            "include_cancelled": "1",
+        })
+        self.assertEqual(listed.status_code, 200, listed.content)
+        ids = [str(row.get("id")) for row in listed.json().get("events") or []]
+        self.assertFalse(any(str(event.pk) in event_id for event_id in ids))
+
+    def test_purge_refuses_planned_lesson(self):
+        import json
+
+        event = create_single_event(
+            teacher=self.teacher,
+            data={
+                "title": "Живой урок",
+                "starts_at": self.starts,
+                "ends_at": self.ends,
+                "notify_participants": False,
+            },
+            notify=False,
+        )
+        self.client.force_login(self.teacher)
+        response = self.client.delete(
+            f"/api/cabinet/schedule/events/local-{event.pk}/delete/",
+            data=json.dumps({"purge": True}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        event.refresh_from_db()
+        self.assertEqual(event.status, ScheduleEvent.Status.PLANNED)
+
+    def test_purge_series_removes_cancelled_and_keeps_planned(self):
+        series, events = create_series(
+            teacher=self.teacher,
+            series_data={
+                "title": "Серия с отменой",
+                "event_type": "group_lesson",
+                "timezone": "Europe/Moscow",
+                "start_date": self.starts.date(),
+                "start_time": self.starts.time(),
+                "end_time": self.ends.time(),
+                "recurrence_type": "weekly",
+                "recurrence_count": 3,
+                "notify_participants": False,
+            },
+            group_id=self.group.pk,
+            notify=False,
+        )
+        cancelled = events[0]
+        cancelled_start = cancelled.starts_at
+        cancel_event_with_scope(cancelled, changed_by=self.teacher, scope="single", notify=False)
+        delete_inactive_events_with_scope(cancelled, changed_by=self.teacher, scope="series")
+        self.assertFalse(ScheduleEvent.objects.filter(pk=cancelled.pk).exists())
+        self.assertEqual(
+            ScheduleEvent.objects.filter(series=series, status=ScheduleEvent.Status.PLANNED).count(),
+            len(events) - 1,
+        )
+        series.refresh_from_db()
+        self.assertTrue(series.excluded_dates)
+        generate_events_for_series(series, cancelled_start.date(), cancelled_start.date())
+        self.assertFalse(ScheduleEvent.objects.filter(series=series, starts_at=cancelled_start).exists())
 
     def test_cancel_series_sends_single_notification_per_recipient(self):
         student_user = User.objects.create_user(username="stu_cancel_series", password="pass")
@@ -1910,6 +2019,7 @@ class HomeworkSubmissionApiTests(TestCase):
         download = client.get(f"/api/cabinet/student/assignments/{hw.pk}/attached-file/")
         self.assertEqual(download.status_code, 200, getattr(download, "content", b"")[:200])
         self.assertEqual(b"".join(download.streaming_content), b"pdf-content")
+        self.assertIn("inline", download["Content-Disposition"])
 
     def test_student_submit_file_survives_zero_quota(self):
         """Сдача файла не должна зависеть от квоты «Мои файлы»."""
@@ -1949,6 +2059,7 @@ class HomeworkSubmissionApiTests(TestCase):
         )
         self.assertEqual(teacher_dl.status_code, 200)
         self.assertEqual(b"".join(teacher_dl.streaming_content), b"pdf-content")
+        self.assertIn("inline", teacher_dl["Content-Disposition"])
 
     def test_student_can_append_missing_file_after_submit(self):
         from django.core.files.uploadedfile import SimpleUploadedFile

@@ -30,6 +30,16 @@ from .upload_validation import UploadValidationError, validate_uploaded_file
 logger = logging.getLogger(__name__)
 
 COMMENT_TASK_KEY = HomeworkAttachment.COMMENT_TASK_KEY
+PUBLISHED_REVIEW_STATUSES = (
+    SubmissionStatus.CHECKED,
+    SubmissionStatus.RETURNED,
+    SubmissionStatus.NEEDS_REVISION,
+)
+TEACHER_REVIEW_TEXT_KEYS = (
+    "teacher_comment",
+    "review_comment",
+    "comments_by_task_id",
+)
 ATTACHMENT_PAYLOAD_KEYS = (
     "attachments_by_task_id",
     "attachments_by_number",
@@ -267,6 +277,172 @@ def sync_payload_attachment_maps(submission: HomeworkSubmission) -> dict:
     payload["task_attachments"] = grouped_task_attachments(submission)
     submission.result_payload = payload
     return payload
+
+
+def submission_has_published_review(submission: HomeworkSubmission | None) -> bool:
+    """Проверка уже была опубликована: текущий статус или прошлая попытка."""
+    if submission is None:
+        return False
+    if submission.status in PUBLISHED_REVIEW_STATUSES:
+        return True
+    if str(getattr(submission, "teacher_comment", "") or "").strip():
+        return True
+    from .models import HomeworkSubmissionAttempt
+
+    return HomeworkSubmissionAttempt.objects.filter(
+        submission=submission,
+        status__in=PUBLISHED_REVIEW_STATUSES,
+    ).exists()
+
+
+def teacher_attachment_is_published(submission: HomeworkSubmission | None, created_at) -> bool:
+    """
+    Файл учителя виден ученику после публикации проверки.
+    Пока работа снова на проверке, новые вложения остаются черновиком,
+    а файлы прошлой публикации сохраняются.
+    """
+    if submission is None:
+        return False
+    if submission.status in PUBLISHED_REVIEW_STATUSES:
+        return True
+    if submission.status != SubmissionStatus.SUBMITTED or not submission_has_published_review(submission):
+        return False
+    submitted_at = getattr(submission, "submitted_at", None)
+    if created_at is None or submitted_at is None:
+        return False
+    return created_at <= submitted_at
+
+
+def viewer_is_submission_teacher(user, submission: HomeworkSubmission | None) -> bool:
+    if not user or not getattr(user, "is_authenticated", False) or submission is None:
+        return False
+    homework = getattr(submission, "homework", None)
+    if homework is not None and homework.teacher_id == getattr(user, "id", None):
+        return True
+    return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
+
+
+def viewer_may_read_attachment(user, attachment: HomeworkAttachment) -> bool:
+    if attachment is None or not user_can_view_submission(user, attachment.submission):
+        return False
+    if attachment.owner_role != HomeworkAttachmentOwnerRole.TEACHER:
+        return True
+    if viewer_is_submission_teacher(user, attachment.submission):
+        return True
+    return teacher_attachment_is_published(attachment.submission, attachment.created_at)
+
+
+def _published_teacher_ids(submission: HomeworkSubmission) -> set[str]:
+    return {
+        str(row.id)
+        for row in _active_qs(submission).filter(owner_role=HomeworkAttachmentOwnerRole.TEACHER)
+        if teacher_attachment_is_published(submission, row.created_at)
+    }
+
+
+def _keep_visible_files(items, visible_ids: set[str]) -> list:
+    kept = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("owner_role") == HomeworkAttachmentOwnerRole.TEACHER and str(item.get("id") or "") not in visible_ids:
+            continue
+        kept.append(item)
+    return kept
+
+
+def filter_grouped_attachments_for_viewer(user, submission: HomeworkSubmission, grouped: dict) -> dict:
+    if viewer_is_submission_teacher(user, submission):
+        return grouped
+    visible_ids = _published_teacher_ids(submission)
+    tasks = {}
+    for key, bucket in (grouped.get("tasks") or {}).items():
+        if not isinstance(bucket, dict):
+            continue
+        tasks[key] = {
+            "student": list(bucket.get("student") or []),
+            "teacher": _keep_visible_files(bucket.get("teacher") or [], visible_ids),
+        }
+    return {
+        "tasks": tasks,
+        "comment": _keep_visible_files(grouped.get("comment") or [], visible_ids),
+    }
+
+
+def _latest_published_attempt(submission: HomeworkSubmission):
+    from .models import HomeworkSubmissionAttempt
+
+    return (
+        HomeworkSubmissionAttempt.objects.filter(
+            submission=submission,
+            status__in=PUBLISHED_REVIEW_STATUSES,
+        )
+        .order_by("-attempt_number", "-id")
+        .first()
+    )
+
+
+def visible_teacher_result(submission: HomeworkSubmission | None, payload: dict | None) -> dict:
+    """Ученику — опубликованные замечания. Черновик следующей проверки не подмешивается."""
+    data = dict(payload or {})
+    if submission is None or submission.status in PUBLISHED_REVIEW_STATUSES:
+        return data
+    attempt = _latest_published_attempt(submission) if submission_has_published_review(submission) else None
+    frozen = attempt.result_payload if attempt is not None and isinstance(attempt.result_payload, dict) else {}
+    if not frozen:
+        return _strip_teacher_review(data)
+    return _use_frozen_teacher_review(data, frozen)
+
+
+def _strip_teacher_review(data: dict) -> dict:
+    for key in TEACHER_REVIEW_TEXT_KEYS:
+        data.pop(key, None)
+    data.pop("teacher_attachments_by_task_id", None)
+    data.pop("teacher_attachments_by_number", None)
+    data.pop("teacher_comment_attachments", None)
+    grouped = data.get("task_attachments")
+    if isinstance(grouped, dict):
+        tasks = {}
+        for key, bucket in (grouped.get("tasks") or {}).items():
+            if isinstance(bucket, dict):
+                tasks[key] = {"student": list(bucket.get("student") or []), "teacher": []}
+        data["task_attachments"] = {"tasks": tasks, "comment": []}
+    return data
+
+
+def _use_frozen_teacher_review(live: dict, frozen: dict) -> dict:
+    data = dict(live)
+    for key in TEACHER_REVIEW_TEXT_KEYS:
+        if frozen.get(key):
+            data[key] = frozen[key]
+        else:
+            data.pop(key, None)
+    for key in (
+        "teacher_attachments_by_task_id",
+        "teacher_attachments_by_number",
+        "teacher_comment_attachments",
+    ):
+        if frozen.get(key):
+            data[key] = frozen[key]
+        else:
+            data.pop(key, None)
+    live_grouped = live.get("task_attachments") if isinstance(live.get("task_attachments"), dict) else {}
+    frozen_grouped = frozen.get("task_attachments") if isinstance(frozen.get("task_attachments"), dict) else {}
+    live_tasks = live_grouped.get("tasks") if isinstance(live_grouped.get("tasks"), dict) else {}
+    frozen_tasks = frozen_grouped.get("tasks") if isinstance(frozen_grouped.get("tasks"), dict) else {}
+    tasks = {}
+    for key in set(live_tasks) | set(frozen_tasks):
+        live_bucket = live_tasks.get(key) if isinstance(live_tasks.get(key), dict) else {}
+        frozen_bucket = frozen_tasks.get(key) if isinstance(frozen_tasks.get(key), dict) else {}
+        tasks[key] = {
+            "student": list(live_bucket.get("student") or []),
+            "teacher": list(frozen_bucket.get("teacher") or []),
+        }
+    data["task_attachments"] = {
+        "tasks": tasks,
+        "comment": list(frozen_grouped.get("comment") or []),
+    }
+    return data
 
 
 def user_can_view_submission(user, submission: HomeworkSubmission) -> bool:
@@ -740,27 +916,24 @@ def find_attachment_for_delete(
 
 
 def file_response_for_attachment(attachment: HomeworkAttachment, *, inline: bool = False):
-    from .submission_files import filefield_download_response
+    from .files_storage import resolved_mime
 
     name = attachment.original_filename or "file"
+    content_type = resolved_mime(attachment.mime_type or "", name)
     if attachment.file:
         try:
             fh = attachment.file.open("rb")
         except Exception:
             return Response({"error": "Файл недоступен."}, status=status.HTTP_404_NOT_FOUND)
-        import mimetypes
-
-        content_type = attachment.mime_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
         response = FileResponse(fh, content_type=content_type)
         response["Content-Disposition"] = content_disposition(name, inline=inline)
+        response["Cache-Control"] = "private, no-store"
         return response
     if attachment.storage_path and default_storage.exists(attachment.storage_path):
         fh = default_storage.open(attachment.storage_path, "rb")
-        import mimetypes
-
-        content_type = attachment.mime_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
         response = FileResponse(fh, content_type=content_type)
         response["Content-Disposition"] = content_disposition(name, inline=inline)
+        response["Cache-Control"] = "private, no-store"
         return response
     return Response({"error": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -786,7 +959,11 @@ class HomeworkSubmissionAttachmentsView(APIView):
         if err:
             return err
         ensure_payload_migrated(submission)
-        grouped = grouped_task_attachments(submission)
+        grouped = filter_grouped_attachments_for_viewer(
+            request.user,
+            submission,
+            grouped_task_attachments(submission),
+        )
         return Response(grouped)
 
 
@@ -861,7 +1038,7 @@ class HomeworkAttachmentDetailView(APIView):
             .filter(pk=attachment_id, is_deleted=False)
             .first()
         )
-        if not attachment or not user_can_view_submission(request.user, attachment.submission):
+        if not attachment or not viewer_may_read_attachment(request.user, attachment):
             return Response({"detail": "Нет доступа."}, status=status.HTTP_404_NOT_FOUND)
         return Response(serialize_homework_task_attachment(attachment))
 
@@ -909,7 +1086,7 @@ class HomeworkAttachmentFileView(APIView):
         if not attachment:
             return Response({"error": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
         user = request.user
-        allowed = user_can_view_submission(user, attachment.submission)
+        allowed = viewer_may_read_attachment(user, attachment)
         if not allowed:
             from .homework_api import _token_from_request, decode_homework_token
 
@@ -917,10 +1094,16 @@ class HomeworkAttachmentFileView(APIView):
             if token:
                 payload = decode_homework_token(token)
                 student_user_id = (payload or {}).get("student_user_id") or (payload or {}).get("studentUserId")
-                if student_user_id and int(student_user_id) == int(attachment.submission.student.user_id or 0):
-                    allowed = True
+                owner_id = int(attachment.submission.student.user_id or 0)
+                if student_user_id and int(student_user_id) == owner_id:
+                    allowed = (
+                        attachment.owner_role != HomeworkAttachmentOwnerRole.TEACHER
+                        or teacher_attachment_is_published(attachment.submission, attachment.created_at)
+                    )
         if not allowed:
             return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
-        mime = (attachment.mime_type or "").lower()
-        inline = mime.startswith("image/") or mime == "application/pdf" or request.query_params.get("inline") == "1"
+        from .files_storage import wants_inline_preview
+
+        name = attachment.original_filename or "file"
+        inline = wants_inline_preview(request, attachment.mime_type or "", name)
         return file_response_for_attachment(attachment, inline=inline)

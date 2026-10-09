@@ -444,11 +444,28 @@ function applyMoveEvents(events, event, targetDate, newStartTime, scope) {
   });
 }
 
+function isInactiveLesson(event) {
+  return event?.status === "cancelled" || event?.status === "skipped";
+}
+
 function applyRemoveEvents(events, event, scope) {
   if (scope === "single" || !isRecurring(event)) {
     return events.filter((ev) => ev.id !== event.id);
   }
   return events.filter((ev) => !matchesSeriesScope(ev, event, scope));
+}
+
+function applyRemoveInactiveEvents(events, event, scope) {
+  const removedIds = new Set();
+  const kept = events.filter((ev) => {
+    const remove = scope === "single" || !isRecurring(event)
+      ? ev.id === event.id
+      : matchesSeriesScope(ev, event, scope) && isInactiveLesson(ev);
+    if (remove) removedIds.add(String(ev.id));
+    return !remove;
+  });
+  if (!removedIds.size) return kept;
+  return kept.filter((ev) => !removedIds.has(String(ev.parentEventId || "")));
 }
 
 function applyCancelEvents(events, event, scope) {
@@ -1116,6 +1133,7 @@ function ScheduleToolbar({
   onCloseBooking,
   showInactiveLessons,
   onToggleInactiveLessons,
+  inactiveLessonCount = 0,
 }) {
   const views = VIEWS;
   const paintTip = !bookingAllowed
@@ -1197,7 +1215,13 @@ function ScheduleToolbar({
             aria-pressed={showInactiveLessons}
             onClick={onToggleInactiveLessons}
           >
-            <span>{showInactiveLessons ? "Скрыть отменённые" : "Показать отменённые"}</span>
+            <span>
+              {showInactiveLessons
+                ? "Скрыть отменённые"
+                : inactiveLessonCount
+                  ? `Показать отменённые (${inactiveLessonCount})`
+                  : "Показать отменённые"}
+            </span>
           </button>
         </div>
 
@@ -2180,6 +2204,7 @@ function ConfirmActionModal({ action, onClose, onConfirm, saving = false }) {
   const planTopic = event.planItem?.topic || event.planItem?.title || event.topic || "";
 
   const noun = isNonLessonCalendarEvent(event) ? "событие" : "занятие";
+  const inactiveDelete = type === "delete" && isInactiveLesson(event);
   const copy = {
     move: {
       title: `Перенести ${noun}`,
@@ -2226,6 +2251,12 @@ function ConfirmActionModal({ action, onClose, onConfirm, saving = false }) {
       danger: false,
     },
   }[type];
+
+  if (inactiveDelete && copy) {
+    copy.text = `Удалить отменённое «${event.title}» (${formatEventWhen(event)}) из расписания?`;
+    copy.following = "Это и последующие отменённые";
+    copy.entire = "Все отменённые в серии";
+  }
 
   const confirm = (scope) => {
     if (saving) return;
@@ -2284,6 +2315,11 @@ function ConfirmActionModal({ action, onClose, onConfirm, saving = false }) {
         ) : null}
         {recurring ? (
           <p className="cb-sch-confirm__hint">Занятие входит в повторяющуюся серию ({event.recurrence === "weekly" ? "еженедельно" : "по расписанию"}).</p>
+        ) : null}
+        {inactiveDelete ? (
+          <p className="cb-sch-confirm__hint">
+            Занятие пропадёт из календаря. Тема и материалы в плане обучения сохраняются.
+          </p>
         ) : null}
         {type === "cancel" ? (
           <p className="cb-sch-confirm__hint">
@@ -2587,7 +2623,7 @@ export default function CabinetSchedulePage() {
     all: true,
     yandex: true,
   });
-  const [showInactiveLessons, setShowInactiveLessons] = useState(true);
+  const [showInactiveLessons, setShowInactiveLessons] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [prepareMaterialsPrompt, setPrepareMaterialsPrompt] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -3370,10 +3406,15 @@ export default function CabinetSchedulePage() {
 
   const filteredEvents = useMemo(
     () => calendarEvents.filter((ev) => {
-      if (!showInactiveLessons && (ev.status === "cancelled" || ev.status === "skipped")) return false;
+      if (!showInactiveLessons && isInactiveLesson(ev)) return false;
       return matchesFilters(ev, calendars);
     }),
     [calendarEvents, calendars, showInactiveLessons],
+  );
+
+  const inactiveLessonCount = useMemo(
+    () => calendarEvents.filter((ev) => isInactiveLesson(ev) && matchesFilters(ev, calendars)).length,
+    [calendarEvents, calendars],
   );
 
   const openCreateLesson = useCallback((draft = {}) => {
@@ -3786,15 +3827,25 @@ export default function CabinetSchedulePage() {
         setEvents(refreshed);
         showStatus("Длительность обновлена.");
       } else if (type === "delete") {
-        if (local) {
+        if (local && isInactiveLesson(event)) {
           await deleteScheduleEvent(event.id, {
             scope: apiScope,
-            notifyParticipants: true,
+            purge: true,
             expectedUpdatedAt: expectedUpdatedAtForWrite(event, action.conflict),
           });
+          setEvents((prev) => applyRemoveInactiveEvents(prev, event, scope));
+          showStatus(scope === "entire" ? "Отменённые занятия серии удалены" : scope === "following" ? "Отменённые занятия удалены" : "Занятие удалено из расписания");
+        } else {
+          if (local) {
+            await deleteScheduleEvent(event.id, {
+              scope: apiScope,
+              notifyParticipants: true,
+              expectedUpdatedAt: expectedUpdatedAtForWrite(event, action.conflict),
+            });
+          }
+          setEvents((prev) => applyRemoveEvents(prev, event, scope).filter((ev) => String(ev.parentEventId) !== String(event.id)));
+          showStatus(scope === "entire" ? "Вся серия удалена" : scope === "following" ? "Серия удалена" : "Событие удалено");
         }
-        setEvents((prev) => applyRemoveEvents(prev, event, scope).filter((ev) => String(ev.parentEventId) !== String(event.id)));
-        showStatus(scope === "entire" ? "Вся серия удалена" : scope === "following" ? "Серия удалена" : "Событие удалено");
         setSelectedEvent(null);
       } else if (type === "cancel") {
         if (local) {
@@ -3912,6 +3963,7 @@ export default function CabinetSchedulePage() {
         }}
         showInactiveLessons={showInactiveLessons}
         onToggleInactiveLessons={() => setShowInactiveLessons((value) => !value)}
+        inactiveLessonCount={inactiveLessonCount}
         onCloseBooking={async () => {
           const data = await publishTeacherBookingLink({ is_active: false });
           setBookingLink({

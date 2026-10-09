@@ -1532,6 +1532,77 @@ body.cb-pe-dragging * {
   background: #fef2f2;
 }
 
-.cb-pe-excel__row--warning {
+.cb-pe-excel__row--warning,
+.cb-pe-excel__row--retain,
+.cb-pe-excel__row--delete,
+.cb-pe-excel__row--conflict,
+.cb-pe-excel__row--excluded {
   background: #fffbeb;
+}
+
+.cb-pe-excel__choice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 9rem;
+}
+
+.cb-pe-excel__choice label {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.cb-pe-excel__row--ambiguous {
+  background: #f8fafc;
+}
+
+.cb-excel-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cb-excel-setup__lead,
+.cb-excel-setup__note {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.cb-excel-setup__label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.cb-excel-setup__days,
+.cb-excel-setup__time {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cb-excel-setup__day {
+  min-width: 40px;
+  padding: 6px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.cb-excel-setup__day.is-on {
+  border-color: #2563eb;
+  color: #1d4ed8;
+}
+
+.cb-excel-setup__time .cb-pe-field {
+  min-width: 140px;
 }

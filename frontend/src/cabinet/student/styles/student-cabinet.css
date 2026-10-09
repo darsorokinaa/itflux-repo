@@ -4670,6 +4670,29 @@ a.st-dash-last-result:hover strong {
   margin-top: 10px;
 }
 
+.st-hw-review-notebooks,
+.st-hw-review-history {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.st-hw-review-history__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.st-hw-review-history__item p {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: #334155;
+}
+
 .st-hw-summary__card {
   background: #FFFFFF;
   border: 1px solid #CBD5E1;

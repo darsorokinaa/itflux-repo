@@ -86,6 +86,79 @@ describe("buildExamTemplateDocument", () => {
     expect(doc.tasks.map((task) => task.part)).toEqual([1, 1, 2, 2]);
   });
 
+  it("passes the theme sheet background into the printed variant", () => {
+    const doc = buildExamTemplateDocument([{ id: 1, task_number: 1, text: "x" }], {
+      title: "Вариант",
+      mode: "variant",
+      level: "ege",
+      subject: "math",
+      sheetBackground: {
+        landscape: "/media/variant-themes/travel/wide.png",
+        portrait: "https://cdn.example/tall.png",
+      },
+    });
+    const origin =
+      typeof window !== "undefined" && window.location?.origin && window.location.origin !== "null"
+        ? window.location.origin
+        : "";
+    expect(doc.sheetBackground).toEqual({
+      landscape: `${origin}/media/variant-themes/travel/wide.png`,
+      portrait: "https://cdn.example/tall.png",
+    });
+
+    const empty = buildExamTemplateDocument([{ id: 1, task_number: 1, text: "x" }], {
+      title: "Вариант",
+      mode: "variant",
+      sheetBackground: { landscape: "javascript:alert(1)", portrait: "" },
+    });
+    expect(empty.sheetBackground).toBeUndefined();
+
+    const template = readFileSync(templatePath, "utf8");
+    expect(template).toContain(".sheet-bg{");
+    expect(template).toContain("paintSheetBackground");
+    expect(template).toContain(".sheet.has-sheet-bg .logical-page{background:transparent}");
+  });
+
+  it("prints the informatics task 1 road graph large inside the condition", () => {
+    const doc = buildExamTemplateDocument(
+      [
+        {
+          id: 1,
+          task_number: 1,
+          text: '<p>На рисунке — схема дорог.</p><p><img src="/media/task_files/roads.png" alt="схема" width="180" height="120"></p>',
+        },
+      ],
+      { title: "Вариант", mode: "variant", level: "ege", subject: "inf" }
+    );
+    const html = doc.tasks[0]?.html || "";
+    expect(doc.tasks[0]?.figure).toBeUndefined();
+    expect(html).toMatch(/class="[^"]*\billustration\b/);
+    expect(html).toContain("/media/task_files/roads.png");
+    expect(html).not.toMatch(/\bwidth=/);
+    const template = readFileSync(templatePath, "utf8");
+    expect(template).toContain(".prompt-text img.illustration{");
+    expect(template).toContain("illustration");
+  });
+
+  it("still floats a standalone picture in other tasks", () => {
+    const doc = buildExamTemplateDocument(
+      [
+        {
+          id: 2,
+          task_number: 2,
+          text: '<p>Условие.</p><p><img src="/media/task_files/plot.png" alt="график"></p>',
+        },
+      ],
+      { title: "Вариант", mode: "variant", level: "ege", subject: "inf" }
+    );
+    expect(doc.tasks[0]?.figure).toMatchObject({
+      widthMm: 42,
+      placement: "right",
+      alt: "график",
+    });
+    expect(doc.tasks[0]?.html || "").not.toContain("plot.png");
+  });
+
   it("keeps every task file as a linked material", () => {
     const tasks = variantTasksToWorkbookTasks([
       {
@@ -233,6 +306,8 @@ describe("injectExamTemplateData", () => {
     expect(data.tasks[0]?.number).toBe("1");
     expect(data.tasks[0]?.html).toContain("Первое условие");
     expect(data.tasks[0]?.html).toContain("\\(x^2\\)");
+    expect(html).toContain("function downloadTitle");
+    expect(html).toContain("return number+' '+base");
     expect(html).toContain('id="variant-download-style"');
     expect(html).toContain("https://t.me/itfluxacademy");
     expect(html).toContain(".answer-table th,.answer-table td{border:0.075mm solid #222;padding:0.165mm 1mm");

@@ -8,6 +8,37 @@ export const PLAN_DATE_INTERVALS = [
   { id: "biweekly", label: "Раз в две недели" },
 ];
 
+export const PLAN_INTERVAL_SELECT_OPTIONS = [
+  ...PLAN_DATE_INTERVALS,
+  { id: "every_n_weeks", label: "Каждые N недель" },
+  { id: "every_n_days", label: "Каждые N дней" },
+];
+
+export function intervalChoice(intervalId) {
+  const raw = String(intervalId || "");
+  const weeks = raw.match(/^every_(\d+)_weeks$/);
+  if (weeks) return { select: "every_n_weeks", step: Number(weeks[1]) || 2, token: raw };
+  const days = raw.match(/^every_(\d+)_days$/);
+  if (days) return { select: "every_n_days", step: Number(days[1]) || 1, token: raw };
+  const known = PLAN_DATE_INTERVALS.some((item) => item.id === raw);
+  return { select: known ? raw : "weekly", step: 1, token: known ? raw : "weekly" };
+}
+
+export function intervalToken(select, step) {
+  const max = select === "every_n_days" ? 366 : 52;
+  const count = Math.max(1, Math.min(max, Number(step) || 1));
+  if (select === "every_n_weeks") return `every_${count}_weeks`;
+  if (select === "every_n_days") return `every_${count}_days`;
+  return select || "weekly";
+}
+
+export function canonicalInterval(value) {
+  const raw = String(value || "").trim();
+  if (/^every_\d+_weeks$/.test(raw) || /^every_\d+_days$/.test(raw)) return raw;
+  if (raw === "manual" || PLAN_DATE_INTERVALS.some((item) => item.id === raw)) return raw;
+  return "weekly";
+}
+
 export const WEEKDAY_OPTIONS = [
   { id: 0, short: "Пн", full: "Понедельник" },
   { id: 1, short: "Вт", full: "Вторник" },
@@ -65,6 +96,10 @@ export function addDaysLocal(iso, days) {
 }
 
 export function intervalStepDays(intervalId, index) {
+  const weeks = String(intervalId || "").match(/^every_(\d+)_weeks$/);
+  if (weeks) return Math.max(1, Number(weeks[1]) || 1) * 7;
+  const days = String(intervalId || "").match(/^every_(\d+)_days$/);
+  if (days) return Math.max(1, Number(days[1]) || 1);
   if (intervalId === "daily") return 1;
   if (intervalId === "thrice_weekly") return [2, 2, 3][index % 3];
   if (intervalId === "four_weekly") return [1, 2, 1, 3][index % 4];

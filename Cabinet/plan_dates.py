@@ -6,6 +6,7 @@
 
 from datetime import date, time, timedelta
 import logging
+import re
 
 from django.utils.dateparse import parse_date
 
@@ -55,6 +56,8 @@ WEEKDAY_LABELS_RU = (
 
 def normalize_interval(value):
     raw = str(value or "").strip().lower().replace(" ", "_")
+    if raw in {"manual", "none", "off", "без_автоматического_расписания"}:
+        return "manual"
     if raw in VALID_INTERVALS:
         return raw
     aliases = {
@@ -84,7 +87,25 @@ def normalize_interval(value):
     }
     if raw in ("weekdays", "custom_weekdays", "по_дням", "дни_недели"):
         return INTERVAL_WEEKDAYS
-    return aliases.get(raw, INTERVAL_WEEKLY)
+    if aliases.get(raw):
+        return aliases[raw]
+    every = _every_n_step(raw)
+    if every:
+        return raw
+    return INTERVAL_WEEKLY
+
+
+def _every_n_step(interval):
+    """Постоянный шаг для «каждые N дней/недель». None, если это другой режим."""
+    match = re.fullmatch(r"every_(\d+)_(days|weeks)", str(interval or ""))
+    if not match:
+        return None
+    count = int(match.group(1))
+    if count < 1:
+        return None
+    if match.group(2) == "weeks":
+        return min(count, 52) * 7
+    return min(count, 366)
 
 
 def weekday_index(value):
@@ -177,6 +198,11 @@ def parse_plan_date(value):
 
 
 def interval_step_days(interval, index):
+    fixed = _every_n_step(interval)
+    if fixed:
+        return fixed
+    if interval == "manual":
+        return 0
     if interval == INTERVAL_DAILY:
         return 1
     if interval == INTERVAL_THRICE_WEEKLY:
@@ -204,6 +230,8 @@ def generate_plan_dates(start, count, interval=INTERVAL_WEEKLY, weekdays=None, u
     if days or normalize_interval(interval) == INTERVAL_WEEKDAYS:
         return _dates_for_weekdays(start_date, count, days or [start_date.weekday()], until_date)
     interval = normalize_interval(interval)
+    if interval == "manual":
+        return [start_date]
     dates = []
     current = start_date
     for index in range(count):

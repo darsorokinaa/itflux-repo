@@ -465,16 +465,155 @@ def user_can_edit_notebook(user, notebook: HomeworkNotebook) -> bool:
     return user_can_write_teacher_files(user, submission)
 
 
+def _mark_objects(state) -> list:
+    if not isinstance(state, dict):
+        return []
+    objects = state.get("objects")
+    return objects if isinstance(objects, list) else []
+
+
+def notebook_mark_signature(notebook: HomeworkNotebook) -> list:
+    signature = []
+    for page in notebook.pages.order_by("page_number", "id"):
+        objects = _mark_objects(page.state)
+        if objects:
+            signature.append((str(page.id), objects))
+    return signature
+
+
+def notebook_has_marks(notebook: HomeworkNotebook) -> bool:
+    return bool(notebook_mark_signature(notebook))
+
+
+def _snapshot_mark_signature(snapshot) -> list:
+    pages = snapshot.get("pages") if isinstance(snapshot, dict) else None
+    signature = []
+    for page in pages or []:
+        if not isinstance(page, dict):
+            continue
+        objects = _mark_objects(page.get("state"))
+        if objects:
+            signature.append((str(page.get("id") or ""), objects))
+    return signature
+
+
+def notebook_ref(notebook: HomeworkNotebook, revision: HomeworkNotebookRevision | None = None, *, legacy: bool = False) -> dict:
+    revision = revision or notebook.published_revision
+    pages = []
+    if revision is not None and isinstance(revision.snapshot, dict):
+        pages = revision.snapshot.get("pages") or []
+    elif legacy:
+        pages = list(notebook.pages.all())
+    return {
+        "notebook_id": str(notebook.id),
+        "task_id": notebook.task_key,
+        "revision_id": str(revision.id) if revision is not None else None,
+        "legacy": legacy,
+        "page_count": len(pages),
+    }
+
+
+def student_can_see_teacher_notebook(notebook: HomeworkNotebook) -> bool:
+    """Опубликованная ревизия или пометки уже опубликованной проверки без ревизии."""
+    if notebook.owner_role != HomeworkAttachmentOwnerRole.TEACHER:
+        return True
+    if notebook.published_revision_id:
+        return True
+    if not notebook_has_marks(notebook):
+        return False
+    from .homework_task_files import PUBLISHED_REVIEW_STATUSES
+
+    # Пока работа снова на проверке, живой черновик не показываем.
+    # Ревизия, созданная прошлой публикацией, остаётся доступной выше.
+    return notebook.submission.status in PUBLISHED_REVIEW_STATUSES
+
+
 def user_can_view_notebook(user, notebook: HomeworkNotebook) -> bool:
     if not user_can_view_submission(user, notebook.submission):
         return False
-    profile = getattr(user, "profile", None)
-    role = getattr(profile, "role", None)
-    if notebook.owner_role == HomeworkAttachmentOwnerRole.TEACHER:
-        if role == Profile.Role.STUDENT:
-            return bool(notebook.published_revision_id)
+    if notebook.owner_role != HomeworkAttachmentOwnerRole.TEACHER:
         return True
-    return True
+    from .homework_task_files import viewer_is_submission_teacher
+
+    if viewer_is_submission_teacher(user, notebook.submission):
+        return True
+    return student_can_see_teacher_notebook(notebook)
+
+
+def published_notebook_document(notebook: HomeworkNotebook) -> dict | None:
+    """Документ, который можно отдать ученику. Черновик после публикации не подменяет ревизию."""
+    revision = notebook.published_revision if notebook.published_revision_id else None
+    if revision is not None:
+        return {
+            "notebook_id": str(notebook.id),
+            "readonly": True,
+            "published": True,
+            "revision": serialize_revision(revision),
+            "document": revision.snapshot if isinstance(revision.snapshot, dict) else {},
+        }
+    if notebook.owner_role == HomeworkAttachmentOwnerRole.TEACHER and student_can_see_teacher_notebook(notebook):
+        return {
+            "notebook_id": str(notebook.id),
+            "id": str(notebook.id),
+            "readonly": True,
+            "published": True,
+            "legacy": True,
+            "document": snapshot_notebook(notebook),
+        }
+    return None
+
+
+def revision_visible_to_student(revision: HomeworkNotebookRevision) -> bool:
+    if revision is None:
+        return False
+    if revision.reason == HomeworkNotebookRevisionReason.TEACHER_RETURN:
+        return True
+    return bool(revision.notebook.published_revision_id) and revision.notebook.published_revision_id == revision.id
+
+
+def student_published_notebooks(submission: HomeworkSubmission) -> list[dict]:
+    refs = []
+    notebooks = HomeworkNotebook.objects.filter(
+        submission=submission,
+        owner_role=HomeworkAttachmentOwnerRole.TEACHER,
+    ).select_related("published_revision")
+    for notebook in notebooks:
+        if notebook.published_revision_id:
+            refs.append(notebook_ref(notebook, notebook.published_revision))
+        elif student_can_see_teacher_notebook(notebook):
+            refs.append(notebook_ref(notebook, legacy=True))
+    return refs
+
+
+def publish_teacher_notebooks(submission: HomeworkSubmission, user) -> list[dict]:
+    """
+    Публикация проверки отдаёт ученику уже сохранённые пометки.
+    Неизменённая ревизия не копируется. Новый черновик после этого остаётся скрытым.
+    """
+    refs = []
+    notebooks = (
+        HomeworkNotebook.objects.select_for_update()
+        .filter(submission=submission, owner_role=HomeworkAttachmentOwnerRole.TEACHER)
+        .order_by("task_key", "id")
+    )
+    for notebook in notebooks:
+        current = notebook_mark_signature(notebook)
+        published = notebook.published_revision if notebook.published_revision_id else None
+        if published is not None and _snapshot_mark_signature(published.snapshot) == current:
+            refs.append(notebook_ref(notebook, published))
+            continue
+        if not current and published is None:
+            continue
+        revision = create_revision(
+            notebook,
+            user=user,
+            reason=HomeworkNotebookRevisionReason.TEACHER_RETURN,
+        )
+        notebook.status = HomeworkNotebookStatus.RETURNED
+        notebook.published_revision = revision
+        notebook.save(update_fields=["status", "published_revision", "updated_at"])
+        refs.append(notebook_ref(notebook, revision))
+    return refs
 
 
 def _next_page_number(notebook: HomeworkNotebook) -> int:
@@ -1000,23 +1139,17 @@ class HomeworkNotebookDetailView(APIView):
         notebook = _notebook_or_404(notebook_id)
         if not notebook or not user_can_view_notebook(request.user, notebook):
             return Response({"detail": "Нет доступа."}, status=status.HTTP_404_NOT_FOUND)
-        profile = getattr(request.user, "profile", None)
+        from .homework_task_files import viewer_is_submission_teacher
+
         if (
             notebook.owner_role == HomeworkAttachmentOwnerRole.TEACHER
-            and getattr(profile, "role", None) == Profile.Role.STUDENT
+            and not viewer_is_submission_teacher(request.user, notebook.submission)
         ):
-            revision = notebook.published_revision
-            if not revision:
+            payload = published_notebook_document(notebook)
+            if not payload:
                 return Response({"detail": "Проверка ещё не отправлена."}, status=status.HTTP_404_NOT_FOUND)
-            return Response(
-                {
-                    "id": str(notebook.id),
-                    "readonly": True,
-                    "published": True,
-                    "revision": serialize_revision(revision),
-                    "document": revision.snapshot,
-                }
-            )
+            payload.setdefault("id", str(notebook.id))
+            return Response(payload)
         if notebook.owner_role == HomeworkAttachmentOwnerRole.TEACHER:
             seed_notebook_from_student_files(notebook)
         return Response(serialize_notebook(notebook))
@@ -1352,20 +1485,32 @@ class HomeworkNotebookPublishedView(APIView):
         submission = _submission_or_404(submission_id)
         if not submission or not user_can_view_submission(request.user, submission):
             return Response({"detail": "Нет доступа."}, status=status.HTTP_404_NOT_FOUND)
-        notebook = HomeworkNotebook.objects.filter(
-            submission=submission,
-            task_key=str(task_id),
-            owner_role=HomeworkAttachmentOwnerRole.TEACHER,
-        ).first()
-        if not notebook or not notebook.published_revision_id:
-            return Response({"detail": "Проверенная работа ещё не отправлена."}, status=status.HTTP_404_NOT_FOUND)
-        if not user_can_view_notebook(request.user, notebook):
-            return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
-        revision = notebook.published_revision
-        return Response(
-            {
-                "notebook_id": str(notebook.id),
-                "revision": serialize_revision(revision),
-                "document": revision.snapshot,
-            }
+        notebook = (
+            HomeworkNotebook.objects.select_related("published_revision")
+            .filter(
+                submission=submission,
+                task_key=str(task_id),
+                owner_role=HomeworkAttachmentOwnerRole.TEACHER,
+            )
+            .first()
         )
+        if not notebook:
+            return Response({"detail": "Проверенная работа ещё не отправлена."}, status=status.HTTP_404_NOT_FOUND)
+        revision_id = str(request.query_params.get("revision") or "").strip()
+        if revision_id:
+            revision = notebook.revisions.filter(pk=revision_id).select_related("notebook").first()
+            if not revision or not revision_visible_to_student(revision):
+                return Response({"detail": "Проверенная работа ещё не отправлена."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {
+                    "notebook_id": str(notebook.id),
+                    "readonly": True,
+                    "published": True,
+                    "revision": serialize_revision(revision),
+                    "document": revision.snapshot if isinstance(revision.snapshot, dict) else {},
+                }
+            )
+        payload = published_notebook_document(notebook) if user_can_view_notebook(request.user, notebook) else None
+        if not payload:
+            return Response({"detail": "Проверенная работа ещё не отправлена."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(payload)

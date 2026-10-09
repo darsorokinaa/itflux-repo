@@ -615,6 +615,33 @@ body:has(.hw-notebook) .cb-ai-embed-launcher {
   border-top: 1px solid #FECACA;
 }
 
+.hw-notebook__error p {
+  margin: 0;
+}
+
+.hw-notebook__conflict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.hw-notebook__conflict-actions button {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid #FECACA;
+  background: #fff;
+  color: #991B1B;
+  cursor: pointer;
+}
+
+.hw-notebook__conflict-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .hw-notebook-actions {
   display: flex;
   flex-wrap: wrap;

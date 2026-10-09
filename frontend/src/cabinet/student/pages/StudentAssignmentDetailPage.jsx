@@ -8,7 +8,11 @@ import HomeworkReviewResults, {
   buildHomeworkReviewFromVariant,
   FileLinks,
 } from "../../HomeworkReviewResults";
-import { homeworkTeacherCommentAttachments, parseVariantApiUrl } from "../../cabinetReviewUtils";
+import {
+  formatReviewDate,
+  homeworkAllTeacherFiles,
+  parseVariantApiUrl,
+} from "../../cabinetReviewUtils";
 import CabinetIcon from "../../CabinetIcons";
 import {
   extraHomeworkText,
@@ -25,11 +29,16 @@ import { usePageTitle } from "../../hooks/usePageTitle";
 import {
   STUDENT_PHASE_LABEL,
   studentAssignmentPhase,
+  studentShowsPublishedReview,
   studentTeacherRemark,
 } from "../studentAssignmentCards";
 import AttachmentPreviewModal, {
+  attachmentOpenClick,
+  isAppFileUrl,
   isAttachmentPreviewable,
   openAttachmentPreferPreview,
+  prefersInPlaceFileOpen,
+  withFileIntent,
 } from "../../components/AttachmentPreviewModal";
 
 const TASK_TYPE_META = {
@@ -88,7 +97,7 @@ function getTaskAction(task, isChecked, hasResultsBlock) {
   return null;
 }
 
-function AssignmentResourceCard({ task, isChecked, hasResultsBlock, onScrollToResults }) {
+function AssignmentResourceCard({ task, isChecked, hasResultsBlock, onScrollToResults, onPreviewFile }) {
   const meta = getTaskMeta(task);
   const action = getTaskAction(task, isChecked, hasResultsBlock);
   const hint = action?.scrollToResults
@@ -130,10 +139,13 @@ function AssignmentResourceCard({ task, isChecked, hasResultsBlock, onScrollToRe
             </button>
           ) : action.external ? (
             <a
-              href={action.href}
+              href={isAppFileUrl(action.href) ? (withFileIntent(action.href, "inline") || action.href) : action.href}
               className={`st-hw-btn st-hw-btn--small${action.variant ? " st-hw-btn--primary" : ""}`}
-              target="_blank"
-              rel="noreferrer"
+              {...(prefersInPlaceFileOpen() && isAppFileUrl(action.href) ? {} : { target: "_blank", rel: "noreferrer" })}
+              onClick={attachmentOpenClick(
+                { url: action.href, name: task.title, filename: task.title },
+                onPreviewFile,
+              )}
             >
               {action.label}
             </a>
@@ -175,6 +187,21 @@ function SummaryRow({ label, value, emphasize }) {
 }
 
 const STUDENT_HW_RESULTS_ID = "st-hw-results";
+
+function taskCommentLines(result) {
+  const map = result?.comments_by_task_id || result?.commentsByTaskId || {};
+  if (!map || typeof map !== "object") return [];
+  return Object.entries(map)
+    .map(([id, text]) => ({ id: String(id), text: String(text || "").trim() }))
+    .filter((row) => row.text);
+}
+
+function notebookHref(submissionId, notebook) {
+  const task = encodeURIComponent(String(notebook?.task_id || ""));
+  const base = `/cabinet/notebook/published/${submissionId}/${task}`;
+  if (!notebook?.revision_id) return base;
+  return `${base}?revision=${encodeURIComponent(String(notebook.revision_id))}`;
+}
 
 export default function StudentAssignmentDetailPage() {
   const { id } = useParams();
@@ -242,7 +269,8 @@ export default function StudentAssignmentDetailPage() {
   }, [loadAssignment]);
 
   useEffect(() => {
-    if (!item || item.status !== "checked" || !item.has_variant || !item.result) {
+    const published = item && (item.status === "checked" || item.status === "needs_fix");
+    if (!published || !item.has_variant || !item.result) {
       setVariantTasks(null);
       return undefined;
     }
@@ -279,9 +307,11 @@ export default function StudentAssignmentDetailPage() {
     && item.status !== "checked"
     && (item.status !== "submitted" || missingAttachment);
   const isChecked = item?.status === "checked";
+  const showReview = item ? studentShowsPublishedReview(item) : false;
   const dueLabel = item?.due_at ? formatDueDate(item.due_at) : "";
   const homeworkReview = useMemo(() => {
-    if (!isChecked || !item?.result || !variantTasks?.length) return null;
+    if (!item?.result || !variantTasks?.length) return null;
+    if (item.status !== "checked" && item.status !== "needs_fix") return null;
     const variantTask = (item.tasks || []).find((t) => t.is_variant);
     const meta = parseVariantMeta(variantTask?.open_url);
     if (!meta) return null;
@@ -291,7 +321,7 @@ export default function StudentAssignmentDetailPage() {
       meta.level,
       meta.subject
     );
-  }, [isChecked, item, variantTasks]);
+  }, [item, variantTasks]);
 
   const scrollToResults = () => {
     document.getElementById(STUDENT_HW_RESULTS_ID)?.scrollIntoView({
@@ -301,11 +331,11 @@ export default function StudentAssignmentDetailPage() {
   };
 
   useEffect(() => {
-    if (!isChecked) return undefined;
+    if (!showReview) return undefined;
     if (searchParams.get("focus") !== "results") return undefined;
     const timer = window.setTimeout(scrollToResults, 80);
     return () => window.clearTimeout(timer);
-  }, [isChecked, homeworkReview, item, searchParams]);
+  }, [showReview, homeworkReview, item, searchParams]);
 
   const answerSummary = useMemo(() => {
     if (!item) return "";
@@ -413,7 +443,13 @@ export default function StudentAssignmentDetailPage() {
   });
   const materialsCount = (item.attachments || []).length + materialTasks.length;
   const manualStats = item?.result?.manual_stats || null;
-  const commentFiles = homeworkTeacherCommentAttachments(item?.result);
+  const teacherFiles = homeworkAllTeacherFiles(item?.result);
+  const taskComments = taskCommentLines(item?.result);
+  const notebooks = Array.isArray(item.published_notebooks) ? item.published_notebooks : [];
+  const priorReviews = Array.isArray(item.review_history) && item.review_history.length > 1
+    ? item.review_history.slice(0, -1)
+    : [];
+  const reviewComment = remark && remark.kind !== "conflict" ? remark.text : "";
   const draftHint = isDirty
     ? "Есть несохранённые изменения"
     : phase === "needs_fix"
@@ -563,7 +599,12 @@ export default function StudentAssignmentDetailPage() {
                             Открыть
                           </button>
                         ) : (
-                          <a className="st-hw-btn st-hw-btn--outline" href={href} target="_blank" rel="noreferrer">
+                          <a
+                            className="st-hw-btn st-hw-btn--outline"
+                            href={isAppFileUrl(href) ? (withFileIntent(href, "inline") || href) : href}
+                            {...(prefersInPlaceFileOpen() && isAppFileUrl(href) ? {} : { target: "_blank", rel: "noreferrer" })}
+                            onClick={attachmentOpenClick(file, setFilePreview)}
+                          >
                             Открыть
                           </a>
                         )
@@ -582,6 +623,7 @@ export default function StudentAssignmentDetailPage() {
                     isChecked={isChecked}
                     hasResultsBlock={isChecked && Boolean(item.result)}
                     onScrollToResults={scrollToResults}
+                    onPreviewFile={setFilePreview}
                   />
                 ))}
               </div>
@@ -605,8 +647,96 @@ export default function StudentAssignmentDetailPage() {
             </section>
           ) : null}
 
-          {isChecked ? (
+          {showReview ? (
             <div id={STUDENT_HW_RESULTS_ID} className="st-hw-results-anchor">
+              <section className="st-hw-card st-hw-card--result" aria-label="Проверка учителя">
+                <div className="st-hw-section-head">
+                  <div>
+                    <h2 className="st-hw-card__title">Проверка учителя</h2>
+                    <p className="st-hw-section-desc">
+                      {badge?.label || "Проверка"}
+                      {item.review_checked_at ? ` · ${formatReviewDate(item.review_checked_at)}` : ""}
+                    </p>
+                  </div>
+                </div>
+                {isChecked && item.result_percent != null ? (
+                  <p className="st-hw-result-score">{Math.round(item.result_percent)}%</p>
+                ) : null}
+                {!homeworkReview && manualStats ? (
+                  <div className="st-hw-manual-stats">
+                    <div><span>Всего</span><strong>{manualStats.total ?? "—"}</strong></div>
+                    <div><span>Правильно</span><strong>{manualStats.correct ?? "—"}</strong></div>
+                    <div><span>Неправильно</span><strong>{manualStats.incorrect ?? "—"}</strong></div>
+                    <div><span>Не решено</span><strong>{manualStats.unsolved ?? "—"}</strong></div>
+                  </div>
+                ) : null}
+                {!homeworkReview ? (
+                  remark?.kind === "conflict" ? (
+                    <p className="st-hw-empty">{remark.text}</p>
+                  ) : reviewComment || taskComments.length || teacherFiles.length ? (
+                    <div className="st-hw-teacher-comment">
+                      <span className="st-hw-teacher-comment__label">Комментарий учителя</span>
+                      {reviewComment ? <p>{reviewComment}</p> : null}
+                      {taskComments.map((row) => (
+                        <p key={row.id}>Задание {row.id}: {row.text}</p>
+                      ))}
+                      {teacherFiles.length ? (
+                        <>
+                          <span className="st-hw-teacher-comment__label">Файлы от учителя</span>
+                          <FileLinks files={teacherFiles} />
+                        </>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="st-hw-empty">Комментарий пока не добавлен</p>
+                  )
+                ) : null}
+                {phase === "needs_fix" ? (
+                  <p className="st-hw-card__text">Исправьте ответ и отправьте работу снова.</p>
+                ) : null}
+                {notebooks.length && item.submission_id ? (
+                  <div className="st-hw-review-notebooks">
+                    <span className="st-hw-teacher-comment__label">Проверенная тетрадь</span>
+                    {notebooks.map((notebook) => (
+                      <Link
+                        key={notebook.notebook_id || notebook.task_id}
+                        className="st-hw-btn st-hw-btn--outline"
+                        to={notebookHref(item.submission_id, notebook)}
+                      >
+                        {notebooks.length > 1
+                          ? `Открыть тетрадь ${notebook.task_id}`
+                          : "Открыть с пометками учителя"}
+                      </Link>
+                    ))}
+                  </div>
+                ) : null}
+                {priorReviews.length ? (
+                  <div className="st-hw-review-history">
+                    <span className="st-hw-teacher-comment__label">Предыдущие проверки</span>
+                    {priorReviews.map((row) => (
+                      <div key={row.attempt_number} className="st-hw-review-history__item">
+                        <p>
+                          Попытка {row.attempt_number}
+                          {row.status === "returned" || row.status === "needs_revision" ? " · на доработке" : ""}
+                          {row.status === "checked" ? " · проверено" : ""}
+                          {row.checked_at ? ` · ${formatReviewDate(row.checked_at)}` : ""}
+                        </p>
+                        {row.teacher_comment ? <p>{row.teacher_comment}</p> : null}
+                        {row.published_notebooks?.length && item.submission_id ? row.published_notebooks.map((notebook) => (
+                          <Link
+                            key={`${row.attempt_number}-${notebook.revision_id || notebook.task_id}`}
+                            className="st-hw-btn st-hw-btn--outline"
+                            to={notebookHref(item.submission_id, notebook)}
+                          >
+                            Пометки попытки {row.attempt_number}
+                          </Link>
+                        )) : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+
               {hasVariant && item.result && !homeworkReview ? (
                 <section className="st-hw-card">
                   <p className="st-hw-card__text">Загрузка результатов…</p>
@@ -616,58 +746,11 @@ export default function StudentAssignmentDetailPage() {
               {homeworkReview ? (
                 <HomeworkReviewResults
                   review={homeworkReview}
-                  teacherComment={remark?.kind === "final" ? remark.text : ""}
+                  teacherComment={reviewComment}
                   className="st-hw-review"
                 />
               ) : null}
-
-              {!hasVariant ? (
-                <section className="st-hw-card st-hw-card--result">
-                  <div className="st-hw-section-head">
-                    <div>
-                      <h2 className="st-hw-card__title">Результаты</h2>
-                      <p className="st-hw-section-desc">Оценка и комментарий преподавателя</p>
-                    </div>
-                  </div>
-                  {item.result_percent != null ? (
-                    <p className="st-hw-result-score">{Math.round(item.result_percent)}%</p>
-                  ) : null}
-                  {manualStats ? (
-                    <div className="st-hw-manual-stats">
-                      <div><span>Всего</span><strong>{manualStats.total ?? "—"}</strong></div>
-                      <div><span>Правильно</span><strong>{manualStats.correct ?? "—"}</strong></div>
-                      <div><span>Неправильно</span><strong>{manualStats.incorrect ?? "—"}</strong></div>
-                      <div><span>Не решено</span><strong>{manualStats.unsolved ?? "—"}</strong></div>
-                    </div>
-                  ) : null}
-                  {remark?.kind === "conflict" ? (
-                    <p className="st-hw-empty">{remark.text}</p>
-                  ) : remark?.kind === "final" || commentFiles.length ? (
-                    <div className="st-hw-teacher-comment">
-                      <span className="st-hw-teacher-comment__label">Комментарий учителя</span>
-                      {remark?.kind === "final" ? <p>{remark.text}</p> : null}
-                      <FileLinks files={commentFiles} />
-                    </div>
-                  ) : (
-                    <p className="st-hw-empty">Комментарий пока не добавлен</p>
-                  )}
-                </section>
-              ) : null}
             </div>
-          ) : null}
-
-          {remark && remark.kind !== "final" ? (
-            <section className="st-hw-card" aria-label="Замечание преподавателя">
-              <h2 className="st-hw-card__title">
-                {remark.kind === "history"
-                  ? "Замечание к предыдущей попытке"
-                  : "Замечание преподавателя"}
-              </h2>
-              <p className="st-hw-card__text">{remark.text}</p>
-              {remark.kind === "current" ? (
-                <p className="st-hw-card__text">Исправьте ответ и отправьте работу снова.</p>
-              ) : null}
-            </section>
           ) : null}
 
           {!variantOnly ? (
@@ -776,7 +859,11 @@ export default function StudentAssignmentDetailPage() {
                                 {file.name || "Прикреплённый файл"}
                               </button>
                             ) : file.url ? (
-                              <a href={file.url} target="_blank" rel="noreferrer">
+                              <a
+                                href={isAppFileUrl(file.url) ? (withFileIntent(file.url, "inline") || file.url) : file.url}
+                                {...(prefersInPlaceFileOpen() && isAppFileUrl(file.url) ? {} : { target: "_blank", rel: "noreferrer" })}
+                                onClick={attachmentOpenClick(file, setFilePreview)}
+                              >
                                 {file.name || "Прикреплённый файл"}
                               </a>
                             ) : (

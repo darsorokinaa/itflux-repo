@@ -68,6 +68,8 @@ input[type=number]{background:white;color:#3e4554;padding:6px 9px;border:1px sol
 #preview{width:max-content;max-width:none;margin:0 auto 45px;display:flex;flex-direction:column;gap:22px}
 .sheet{display:flex;position:relative;flex:none;width:297mm;height:210mm;background:#fff;box-shadow:0 2px 13px #24304520;zoom:var(--preview-scale)}
 .logical-page{width:148.5mm;height:210mm;position:relative;flex:none;border:.15mm solid #222;background:#fff;color:var(--ink);font-family:ExamTimes,"Times New Roman",NimbusFallback,"DejaVu Serif",serif;font-size:var(--page-font);line-height:var(--page-line);font-kerning:normal}
+.sheet-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none;z-index:0}
+.sheet.has-sheet-bg .logical-page{background:transparent}
 .logical-page+.logical-page{border-left:0}
 .page-header{position:absolute;left:19mm;right:12mm;top:10.5mm;display:flex;align-items:baseline;justify-content:space-between;gap:2mm;white-space:nowrap;font-size:7.575pt;line-height:1.1}
 .header-right{display:flex;gap:1.7mm;white-space:nowrap}
@@ -94,6 +96,7 @@ input[type=number]{background:white;color:#3e4554;padding:6px 9px;border:1px sol
 .figure{margin:1.6mm auto 2mm;max-width:100%;break-inside:avoid}
 .figure.center{width:54mm;margin:2mm auto}
 .figure img,.figure svg{display:block;width:100%;height:auto;max-height:125mm;object-fit:contain}
+.prompt-text img.illustration{display:block;width:100%;max-width:100%;height:auto;max-height:125mm;margin:2.5mm auto;object-fit:contain}
 .figure figcaption{font-size:8pt;text-align:center;margin-top:1mm}
 .figure svg text{font-family:ExamTimes,"Times New Roman",NimbusFallback,serif;font-style:italic}
 .task-materials{margin:2.4mm 0 0;display:flex;flex-direction:column;gap:1.8mm}
@@ -1524,6 +1527,24 @@ let pages=[],currentPage=null;
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const node=(tag,cls,text)=>{let el=document.createElement(tag);if(cls)el.className=cls;if(text!==undefined)el.textContent=text;return el;};
 const clamp=(n,min,max,fallback)=>Number.isFinite(Number(n))?Math.max(min,Math.min(max,Number(n))):fallback;
+function safeSheetUrl(value){
+ const href=String(value||'').trim();
+ if(!href||href.length>2000||!/^(https?:\/\/|\/)/i.test(href))return '';
+ if(/[\s<>"'()\\]|javascript:|data:/i.test(href))return '';
+ return href;
+}
+function sanitizeSheetBackground(raw){
+ if(!raw||typeof raw!=='object'||Array.isArray(raw))return null;
+ const landscape=safeSheetUrl(raw.landscape);
+ const portrait=safeSheetUrl(raw.portrait);
+ if(!landscape&&!portrait)return null;
+ return {landscape,portrait};
+}
+function sheetImageUrl(){
+ const bg=current&&current.sheetBackground;
+ if(!bg)return '';
+ return current.options.layout==='single'?(bg.portrait||bg.landscape||''):(bg.landscape||bg.portrait||'');
+}
 function normalize(data){
  if(!data||typeof data!=='object'||Array.isArray(data))throw Error('Ожидается объект с настройками и массивом tasks.');
  if(!Array.isArray(data.tasks))throw Error('Поле tasks должно быть массивом заданий.');
@@ -1536,6 +1557,8 @@ function normalize(data){
  result.startPage=Math.floor(clamp(result.startPage,1,999,1));
  result.duration=clamp(result.duration,1,600,235);
  for(const key of ['title','subject','grade','year','level','variant','headerLeft','footer','watermark'])result[key]=String(result[key]??'');
+ const sheetBackground=sanitizeSheetBackground(data.sheetBackground);
+ if(sheetBackground)result.sheetBackground=sheetBackground;else delete result.sheetBackground;
  result.tasks=result.tasks.map((t,i)=>{
   if(!t||typeof t!=='object')throw Error(`Задание ${i+1}: ожидается объект.`);
   const task={...t,number:String(t.number??i+1),part:t.part===2?2:1};
@@ -1557,7 +1580,7 @@ function safeHtml(html){
    const name=attr.name.toLowerCase(),v=attr.value;
    if(!allowedAttrs.has(name)||/^on/i.test(name)||/url\s*\(|javascript:|expression\s*\(/i.test(v)){el.removeAttribute(attr.name);continue;}
    if(name==='src'&&!/^(data:image\/(png|jpeg|jpg|gif|webp|svg\+xml);|https?:\/\/|\/[^/]|\.\.?\/)/i.test(v))el.removeAttribute(attr.name);
-   if(name==='class')el.className=v.split(/\s+/).filter(c=>/^(math|formula|align-center|align-right|frac|numerator|denominator|no-wrap)$/.test(c)).join(' ');
+   if(name==='class')el.className=v.split(/\s+/).filter(c=>/^(math|formula|align-center|align-right|frac|numerator|denominator|no-wrap|illustration)$/.test(c)).join(' ');
   }
  }
  return template.content;
@@ -1800,7 +1823,27 @@ function answerKey(){
  const fresh=()=>{table=node('table','answer-table');table.innerHTML='<thead><tr><th>Задание</th><th>Ответ</th></tr></thead><tbody></tbody>';currentPage.body.append(table);};fresh();
  for(const [num,answer] of entries){const tr=node('tr');tr.append(node('td','',num),inlineText('td','',answer));table.tBodies[0].append(tr);if(!fits(table)){tr.remove();newPage();appendSimple(node('h2','answer-heading','Ответы для преподавателя'));fresh();table.tBodies[0].append(tr);if(!fits(table))errors.push(`Ответ к заданию ${num} не помещается в таблице.`);}}
 }
-function finalizeSheets(){
+function preloadSheetImage(){
+ const url=sheetImageUrl();
+ if(!url)return Promise.resolve('');
+ return new Promise(resolve=>{
+  const img=new Image();
+  const timer=setTimeout(()=>resolve(''),15000);
+  img.onload=()=>{clearTimeout(timer);resolve(url);};
+  img.onerror=()=>{clearTimeout(timer);resolve('');};
+  img.src=url;
+ });
+}
+function paintSheetBackground(sheet,url){
+ if(!url)return;
+ const img=node('img','sheet-bg');
+ img.alt='';
+ img.setAttribute('aria-hidden','true');
+ img.src=url;
+ sheet.prepend(img);
+ sheet.classList.add('has-sheet-bg');
+}
+function finalizeSheets(sheetUrl){
  const fragment=document.createDocumentFragment();
  const total=current.startPage+pages.length-1;
  for(const [i,page] of pages.entries()){
@@ -1809,7 +1852,7 @@ function finalizeSheets(){
   if(header.scrollWidth>header.clientWidth+1){header.style.fontSize='7pt';if(header.scrollWidth>header.clientWidth+1){header.style.fontSize='6.3pt';if(header.scrollWidth>header.clientWidth+1)warnings.push('Длинная шапка: сократите подпись в настройках.');}}
  }
  const single=current.options.layout==='single';
- for(let i=0;i<pages.length;i+=single?1:2){const sheet=node('div','sheet'+(single?' single-sheet':''));sheet.append(pages[i].el);if(!single){if(pages[i+1])sheet.append(pages[i+1].el);else{const blank=node('section','logical-page blank');blank.setAttribute('aria-hidden','true');sheet.append(blank);}}fragment.append(sheet);}
+ for(let i=0;i<pages.length;i+=single?1:2){const sheet=node('div','sheet'+(single?' single-sheet':''));paintSheetBackground(sheet,sheetUrl);sheet.append(pages[i].el);if(!single){if(pages[i+1])sheet.append(pages[i+1].el);else{const blank=node('section','logical-page blank');blank.setAttribute('aria-hidden','true');sheet.append(blank);}}fragment.append(sheet);}
  $('preview').replaceChildren(fragment);
  $('print-page-size').textContent=`@page{size:A4 ${single?'portrait':'landscape'};margin:0}`;
  applyZoom();
@@ -1817,7 +1860,7 @@ function finalizeSheets(){
 function syncControls(){
  $('mode').value=current.mode;$('layout').value=current.options.layout;$('cover').checked=current.options.includeCover;$('cover').disabled=current.mode==='worksheet';$('watermark').checked=current.options.showWatermark;$('answers').checked=current.options.showAnswerKey;$('alternatives').checked=current.options.showAlternatives;
  const lines=Math.floor(clamp(current.options.solutionLines,0,100,0));const preset=['0','4','8','12'].includes(String(lines));$('space-grid').checked=current.options.solutionStyle==='grid';$('space-lines').checked=current.options.solutionStyle!=='grid';$('space').value=preset?String(lines):'custom';$('space-custom').value=String(lines);$('space-custom-wrap').hidden=preset;
- document.title=(current.title||'Рабочий лист')+' • Цифровой поток';
+ document.title=downloadTitle()+' • Цифровой поток';
 }
 function applyZoom(){const mm=current?.options.layout==='single'?210:297;const scale=$('zoom').value==='fit'?Math.min(1.17,Math.max(.22,(window.innerWidth-38)/(mm*96/25.4))):Number($('zoom').value);document.documentElement.style.setProperty('--preview-scale',scale);}
 async function renderDocument(data){
@@ -1860,7 +1903,9 @@ async function renderDocument(data){
   for(const child of page.body.children){if(child.getBoundingClientRect().bottom>bounds.bottom+1&&!errors.length)errors.push('Обнаружено переполнение страницы. Уменьшите неделимый блок задания.');}
   for(const formula of page.body.querySelectorAll('.katex-html')){const r=formula.getBoundingClientRect();if(r.width>bounds.width+1||r.right>bounds.right+1||r.left<bounds.left-1)errors.push('Формула не помещается по ширине. Разбейте её на строки с помощью aligned в LaTeX.');}
  }
- finalizeSheets();isRendering=false;
+ const sheetUrl=await preloadSheetImage();
+ if(serial!==renderSerial)return {cancelled:true};
+ finalizeSheets(sheetUrl);isRendering=false;
  const uniqueErrors=[...new Set(errors)],uniqueWarnings=[...new Set(warnings)];
  $('notice').classList.toggle('error',uniqueErrors.length>0);$('notice').textContent=[...uniqueErrors,...uniqueWarnings].join('\n');
  $('status').textContent=`${current.tasks.length} заданий · ${pages.length} стр. · ${$('preview').children.length} лист(а) A4${uniqueErrors.length?' · требуется исправление':''}`;
@@ -1877,7 +1922,17 @@ function render(data){
 function rerender(){return render(current).catch(()=>{});}
 window.ExamTemplate={render,ready:Promise.resolve(),getData:()=>clone(current),getResult:()=>clone(lastResult),version:'1.0.0'};
 function download(name,content,type){const url=URL.createObjectURL(new Blob([content],{type}));const a=node('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),5000);}
-function filename(ext){return (current.mode==='worksheet'?'rabochiy_list':'variant')+'_'+(current.variant||'1').replace(/[^a-zA-Z0-9_-]/g,'_')+'.'+ext;}
+function downloadTitle(){
+ const base=String(current.title||(current.mode==='worksheet'?'Рабочий лист':'Тренировочный вариант'));
+ const number=String(current.variant||'').trim();
+ if(current.mode==='exam'&&number&&!base.startsWith(number+' ')&&!base.startsWith(number+'.'))return number+' '+base;
+ return base;
+}
+function filename(ext){
+ const number=String(current.variant||'1').replace(/[^a-zA-Z0-9_-]/g,'_')||'1';
+ const kind=current.mode==='worksheet'?'rabochiy_list':'variant';
+ return (current.mode==='exam'?number+'_'+kind:kind+'_'+number)+'.'+ext;
+}
 async function saveHtml(){
  await window.ExamTemplate.ready;if(lastResult?.errors.length)return;
  const copy=document.documentElement.cloneNode(true);copy.querySelector('#document-data').textContent=JSON.stringify(current,null,2).replace(/</g,'\\u003c');copy.querySelector('#preview').replaceChildren();copy.querySelector('#measure-root').replaceChildren();copy.querySelectorAll('dialog').forEach(d=>d.removeAttribute('open'));copy.querySelector('#json-editor').textContent='';copy.removeAttribute('data-render-ready');copy.querySelector('#status').textContent='Подготовка страниц…';copy.querySelector('#notice').textContent='';

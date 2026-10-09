@@ -477,6 +477,7 @@ export function mapApiPlanItem(item) {
     completedAt: item.completed_at || null,
     createdAt: item.created_at || null,
     updatedAt: item.updated_at || null,
+    importKey: item.import_key || "",
     raw: item,
   };
 }

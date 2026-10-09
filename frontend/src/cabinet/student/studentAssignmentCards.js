@@ -64,6 +64,16 @@ export function studentAssignmentPhase(item) {
   return "not_submitted";
 }
 
+/** Блок проверки показывается для опубликованного итога и для замечаний прошлой попытки. */
+export function studentShowsPublishedReview(item) {
+  const phase = studentAssignmentPhase(item);
+  if (phase === "checked" || phase === "needs_fix") return true;
+  if (phase !== "reviewing") return false;
+  if (studentTeacherRemark(item)) return true;
+  if (Array.isArray(item?.published_notebooks) && item.published_notebooks.length) return true;
+  return Array.isArray(item?.review_history) && item.review_history.length > 0;
+}
+
 export function studentTeacherRemark(item) {
   if (!item) return null;
   if (item.review_comment_conflict) {

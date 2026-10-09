@@ -105,7 +105,6 @@ export function VariantThemeRoot({ payload, children }) {
     };
 
     const pageImageUrl = safeAssetUrl(orientedImageUrl(theme.background.url, theme.background.urlVertical, orientation));
-    const pageImage = cssImageUrl(pageImageUrl);
     const hasPageImage = Boolean(pageImageUrl);
     const hasPaint = hasPageImage || ["color", "gradient", "image"].includes(theme.background.type);
     if (theme.isClassic && !hasPaint) {
@@ -119,7 +118,7 @@ export function VariantThemeRoot({ payload, children }) {
       node.classList.add(...extraClasses);
       if (blockImage) node.classList.add("variant-theme-has-block-image");
       if (node.dataset) node.dataset.variantTheme = theme.slug || theme.layoutType;
-      if (pageImage) node.style.setProperty("--variant-theme-bg-image", pageImage);
+      if (painted.backgroundImage) node.style.setProperty("--variant-theme-bg-image", painted.backgroundImage);
       else node.style.removeProperty("--variant-theme-bg-image");
       if (blockImage) node.style.setProperty("--variant-theme-block-bg-image", blockImage);
       else node.style.removeProperty("--variant-theme-block-bg-image");

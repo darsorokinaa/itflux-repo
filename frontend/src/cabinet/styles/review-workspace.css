@@ -609,6 +609,11 @@
   background: #edf1f7;
 }
 
+.rv-stage a {
+  display: block;
+  max-width: 100%;
+}
+
 .rv-stage img {
   max-width: 100%;
   max-height: 460px;

@@ -158,7 +158,11 @@ class HomeworkNormalizedAttachmentTests(TestCase):
             f"/api/homework/submissions/{submission.pk}/attachments/"
         ).json()
         self.assertEqual(grouped["tasks"]["20"]["student"][0]["filename"], "a.jpg")
-        self.assertEqual(grouped["tasks"]["20"]["teacher"][0]["filename"], "note.jpg")
+        self.assertEqual(grouped["tasks"]["20"]["teacher"], [])
+        teacher_grouped = self.teacher_client.get(
+            f"/api/homework/submissions/{submission.pk}/attachments/"
+        ).json()
+        self.assertEqual(teacher_grouped["tasks"]["20"]["teacher"][0]["filename"], "note.jpg")
         student_roles = {
             (row.owner_role, row.original_filename)
             for row in HomeworkAttachment.objects.filter(is_deleted=False)

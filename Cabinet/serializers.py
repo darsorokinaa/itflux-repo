@@ -822,10 +822,11 @@ class LessonPlanItemSerializer(serializers.ModelSerializer):
             "scheduled_date",
             "completed_at",
             "teacher_comment",
+            "import_key",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["created_at", "updated_at"]
+        read_only_fields = ["created_at", "updated_at", "import_key"]
 
     def get_linked_lesson_title(self, obj):
         if obj.linked_lesson_id:
@@ -1033,9 +1034,26 @@ class LessonPlanListSerializer(serializers.ModelSerializer):
 
 class LessonPlanDetailSerializer(LessonPlanListSerializer):
     items = LessonPlanItemSerializer(many=True, read_only=True)
+    schedule = serializers.SerializerMethodField()
 
     class Meta(LessonPlanListSerializer.Meta):
-        fields = LessonPlanListSerializer.Meta.fields + ["items"]
+        fields = LessonPlanListSerializer.Meta.fields + ["items", "schedule"]
+
+    def get_schedule(self, obj):
+        from .choices import EnrollmentStatus
+
+        enrollment = (
+            obj.enrollments.exclude(status__in=[EnrollmentStatus.COMPLETED, EnrollmentStatus.CANCELLED])
+            .order_by("-updated_at", "-id")
+            .first()
+        )
+        if enrollment is None:
+            return None
+        return {
+            "frequency": enrollment.frequency or "",
+            "weekday_slots": enrollment.weekday_slots or [],
+            "start_date": enrollment.start_date.isoformat() if enrollment.start_date else "",
+        }
 
 
 class LessonPlanWriteSerializer(serializers.ModelSerializer):

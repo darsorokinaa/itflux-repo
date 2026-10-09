@@ -9,7 +9,7 @@ from django.http import FileResponse
 from rest_framework import status
 from rest_framework.response import Response
 
-from .files_storage import content_disposition, sanitize_filename
+from .files_storage import content_disposition, resolved_mime, sanitize_filename, wants_inline_preview
 from .models import HomeworkSubmission, HomeworkSubmissionAttachment
 from .upload_validation import UploadValidationError, validate_uploaded_file
 
@@ -83,10 +83,14 @@ def serialize_submission_files(submission: HomeworkSubmission | None, *, for_stu
         name = submission.attached_file.name.split("/")[-1]
     url = submission_file_url(submission, for_student=for_student)
     if url or name:
+        main_type = mimetypes.guess_type(name or "")[0] or ""
         items.append({
             "id": "main",
             "name": name or "Файл",
+            "filename": name or "Файл",
             "url": url,
+            "content_type": main_type,
+            "mime_type": main_type,
         })
 
     attachments = submission.file_attachments.all()
@@ -96,14 +100,18 @@ def serialize_submission_files(submission: HomeworkSubmission | None, *, for_stu
         if not att.file:
             continue
         att_name = att.original_name or (att.file.name.split("/")[-1] if att.file.name else "Файл")
+        att_type = mimetypes.guess_type(att_name or "")[0] or ""
         items.append({
             "id": att.id,
             "name": att_name or "Файл",
+            "filename": att_name or "Файл",
             "url": extra_attachment_api_url(
                 att,
                 for_student=for_student,
                 homework_id=submission.homework_id,
             ),
+            "content_type": att_type,
+            "mime_type": att_type,
         })
     return items
 
@@ -146,7 +154,7 @@ def save_submission_files(submission: HomeworkSubmission, uploaded_files: list) 
         cache.pop("file_attachments", None)
 
 
-def filefield_download_response(file_field, download_name: str = ""):
+def filefield_download_response(file_field, download_name: str = "", *, inline: bool | None = None, request=None):
     if not file_field:
         return Response({"error": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
     try:
@@ -154,7 +162,10 @@ def filefield_download_response(file_field, download_name: str = ""):
     except Exception:
         return Response({"error": "Файл недоступен."}, status=status.HTTP_404_NOT_FOUND)
     name = download_name or (file_field.name.split("/")[-1] if file_field.name else "file") or "file"
-    content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    content_type = resolved_mime("", name)
+    if inline is None:
+        inline = wants_inline_preview(request, content_type, name) if request is not None else False
     response = FileResponse(fh, content_type=content_type)
-    response["Content-Disposition"] = content_disposition(name, inline=False)
+    response["Content-Disposition"] = content_disposition(name, inline=inline)
+    response["Cache-Control"] = "private, no-store"
     return response

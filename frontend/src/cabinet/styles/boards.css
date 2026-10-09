@@ -2121,6 +2121,8 @@ html.cb-board-editor-open body {
 }
 
 .lesson-board .tl-canvas {
+  /* Safari оставляет кадр удалённого штриха при content-visibility: auto.
+     contain: strict не снимаем: paint изолирует перерисовку холста от урока. */
   content-visibility: visible;
 }
 
