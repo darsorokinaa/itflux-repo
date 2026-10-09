@@ -30,28 +30,33 @@ def _as_bool(value) -> bool:
     return raw in ("1", "true", "yes", "on")
 
 
-def _apply_theme_fields(theme: VariantTheme, data: dict, *, files=None) -> list[str]:
+def _apply_theme_fields(theme: VariantTheme, data: dict, *, files=None) -> tuple[list[str], list[str]]:
     errors = []
+    update_fields: list[str] = []
     if "name" in data:
         name = str(data.get("name") or "").strip()
         if not name:
             errors.append("Укажите название")
         else:
             theme.name = name[:160]
+            update_fields.append("name")
     if "slug" in data:
         slug = str(data.get("slug") or "").strip().lower()
         if not slug:
             errors.append("Укажите код (slug)")
         else:
             theme.slug = slug[:80]
+            update_fields.append("slug")
     if "description" in data:
         theme.description = str(data.get("description") or "")[:4000]
+        update_fields.append("description")
     if "layout_type" in data:
         layout = str(data.get("layout_type") or "").strip().lower()
         if layout not in ALLOWED_LAYOUTS:
             errors.append("Неизвестный layout_type")
         else:
             theme.layout_type = layout
+            update_fields.append("layout_type")
     if "config" in data:
         raw_config = data.get("config")
         if isinstance(raw_config, str):
@@ -63,37 +68,32 @@ def _apply_theme_fields(theme: VariantTheme, data: dict, *, files=None) -> list[
                 errors.append("Некорректный config")
                 raw_config = {}
         theme.config = sanitize_variant_theme_config(raw_config)
+        update_fields.append("config")
     if "is_active" in data:
         theme.is_active = _as_bool(data.get("is_active"))
+        update_fields.append("is_active")
     if "is_published" in data:
         theme.is_published = _as_bool(data.get("is_published"))
+        update_fields.append("is_published")
 
     files = files or {}
-    if "preview_image" in files:
-        theme.preview_image = files.get("preview_image")
-    if "background_image" in files:
-        theme.background_image = files.get("background_image")
-    if "background_image_vertical" in files:
-        theme.background_image_vertical = files.get("background_image_vertical")
-    if "block_background_image" in files:
-        theme.block_background_image = files.get("block_background_image")
-    if "sheet_background_image" in files:
-        theme.sheet_background_image = files.get("sheet_background_image")
-    if "sheet_background_image_vertical" in files:
-        theme.sheet_background_image_vertical = files.get("sheet_background_image_vertical")
-    if data.get("clear_preview_image"):
-        theme.preview_image = None
-    if data.get("clear_background_image"):
-        theme.background_image = None
-    if data.get("clear_background_image_vertical"):
-        theme.background_image_vertical = None
-    if data.get("clear_block_background_image"):
-        theme.block_background_image = None
-    if data.get("clear_sheet_background_image"):
-        theme.sheet_background_image = None
-    if data.get("clear_sheet_background_image_vertical"):
-        theme.sheet_background_image_vertical = None
-    return errors
+    image_fields = (
+        "preview_image",
+        "background_image",
+        "background_image_vertical",
+        "block_background_image",
+        "sheet_background_image",
+        "sheet_background_image_vertical",
+    )
+    for field in image_fields:
+        if field in files:
+            setattr(theme, field, files.get(field))
+            update_fields.append(field)
+        if data.get(f"clear_{field}"):
+            setattr(theme, field, None)
+            if field not in update_fields:
+                update_fields.append(field)
+    return errors, list(dict.fromkeys(update_fields))
 
 
 class VariantThemeAvailableView(APIView):
@@ -141,7 +141,7 @@ class VariantThemeAdminListCreateView(APIView):
             layout_type=VariantTheme.LayoutType.CLASSIC,
             config=sanitize_variant_theme_config({}),
         )
-        errors = _apply_theme_fields(theme, data, files=request.FILES)
+        errors, _update_fields = _apply_theme_fields(theme, data, files=request.FILES)
         if not theme.name:
             errors.append("Укажите название")
         if not theme.slug:
@@ -174,14 +174,16 @@ class VariantThemeAdminDetailView(APIView):
         if theme is None:
             return Response({"error": "Тема не найдена"}, status=404)
         data = request.data or {}
-        errors = _apply_theme_fields(theme, data, files=request.FILES)
+        errors, update_fields = _apply_theme_fields(theme, data, files=request.FILES)
         if "slug" in data:
             clash = VariantTheme.objects.filter(slug=theme.slug).exclude(pk=theme.pk).exists()
             if clash:
                 errors.append("Тема с таким кодом уже есть")
         if errors:
             return Response({"error": errors[0], "errors": errors}, status=400)
-        theme.save()
+        if update_fields:
+            theme.save(update_fields=[*update_fields, "updated_at"])
+            theme.refresh_from_db()
         return Response(serialize_variant_theme(theme, request))
 
     def delete(self, request, theme_id: int):

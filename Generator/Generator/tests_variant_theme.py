@@ -258,6 +258,29 @@ class VariantThemeApiTests(TestCase):
         self.assertNotEqual(payload["sheet_background_image_url"], payload["background_image_url"])
         self.travel.refresh_from_db()
         self.assertTrue(self.travel.background_image)
+        page_name = self.travel.background_image.name
+        resp = self.api.patch(
+            f"/api/admin/variant-themes/{self.travel.id}/",
+            {"block_background_image": tiny_png("blocks-2.png")},
+            format="multipart",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json().get("background_image_url"))
+        self.assertTrue(resp.json().get("block_background_image_url"))
+        resp = self.api.patch(
+            f"/api/admin/variant-themes/{self.travel.id}/",
+            {"name": "Путешествие с картинками"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json().get("background_image_url"))
+        self.assertTrue(resp.json().get("background_image_vertical_url"))
+        self.assertTrue(resp.json().get("block_background_image_url"))
+        self.assertTrue(resp.json().get("sheet_background_image_url"))
+        self.assertTrue(resp.json().get("sheet_background_image_vertical_url"))
+        self.travel.refresh_from_db()
+        self.assertEqual(self.travel.background_image.name, page_name)
+        self.assertTrue(self.travel.background_image)
         self.assertTrue(self.travel.background_image_vertical)
         self.assertTrue(self.travel.block_background_image)
         self.assertTrue(self.travel.sheet_background_image)

@@ -30,15 +30,15 @@ function sameThemeId(left, right) {
 
 function ThemeCardPreview({ theme }) {
   const slug = String(theme.slug || theme.layout_type || "");
+  if (theme.preview_image_url) {
+    return <img className="variant-theme-selector__preview" src={theme.preview_image_url} alt="" />;
+  }
   if (slug === "travel" || theme.layout_type === "route") {
     return (
       <span className="variant-theme-selector__preview variant-theme-selector__preview--travel">
         <TravelMiniMap />
       </span>
     );
-  }
-  if (theme.preview_image_url) {
-    return <img className="variant-theme-selector__preview" src={theme.preview_image_url} alt="" />;
   }
   return <span className="variant-theme-selector__preview" />;
 }

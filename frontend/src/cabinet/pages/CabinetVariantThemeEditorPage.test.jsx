@@ -15,6 +15,7 @@ vi.mock("../../variantThemes/variantThemeApi", () => ({
   fetchAdminVariantThemes: vi.fn(),
   updateVariantTheme: vi.fn(),
   uploadVariantThemeImage: vi.fn(),
+  uploadVariantThemeImages: vi.fn(),
 }));
 
 function renderEditor(path = "/cabinet/variant-themes/new") {

@@ -911,21 +911,14 @@ textarea.te-input {
 }
 
 .te-task-card.has-image {
-  background: #fff;
+  background-color: #fff;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.55)),
+    var(--te-card-image, none);
+  background-size: auto, cover;
+  background-position: center, center;
+  background-repeat: no-repeat;
   border-color: rgba(29, 79, 120, 0.12);
-}
-
-.te-task-card.has-image::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background-image: var(--te-card-image);
-  background-size: cover;
-  background-position: center;
-  opacity: var(--variant-theme-block-opacity, 0.72);
-  pointer-events: none;
-  z-index: -1;
 }
 
 .te-task-meta {

@@ -6,7 +6,7 @@ import {
   createVariantTheme,
   fetchAdminVariantThemes,
   updateVariantTheme,
-  uploadVariantThemeImage,
+  uploadVariantThemeImages,
 } from "../../variantThemes/variantThemeApi";
 import { DEFAULT_VARIANT_THEME_LABELS, DECORATION_GROUPS, decorationLineKind, VARIANT_THEME_ANIMATIONS, VARIANT_THEME_LAYOUTS } from "../../variantThemes/registry";
 import DecorationSample, { ANIMATION_LABELS, DECORATION_LABELS } from "../../variantThemes/DecorationSample";
@@ -31,6 +31,15 @@ const IMAGE_FIELDS = [
   "sheet_background_image",
   "sheet_background_image_vertical",
 ];
+
+const IMAGE_URL_KEY = {
+  preview_image: "preview_image_url",
+  background_image: "background_image_url",
+  background_image_vertical: "background_image_vertical_url",
+  block_background_image: "block_background_image_url",
+  sheet_background_image: "sheet_background_image_url",
+  sheet_background_image_vertical: "sheet_background_image_vertical_url",
+};
 
 const PAGE_IMAGES = [
   ["background_image", "background_image_url", "clear_background_image", "Альбомное изображение", "Фон широкой страницы"],
@@ -643,7 +652,14 @@ export default function CabinetVariantThemeEditorPage() {
   const saveLock = useRef(false);
   const saveSeq = useRef(0);
   const uploadTokens = useRef({});
+  const uploadChain = useRef(Promise.resolve());
   const keepDraft = useRef(false);
+
+  const enqueueImageUpload = (task) => {
+    const run = uploadChain.current.then(task, task);
+    uploadChain.current = run.then(() => undefined, () => undefined);
+    return run;
+  };
 
   usePageTitle(isNew ? "Новая тема варианта" : "Редактирование темы");
 
@@ -718,12 +734,13 @@ export default function CabinetVariantThemeEditorPage() {
 
   const patch = (partial) => setForm((prev) => {
     editRev.current += 1;
-    const next = { ...prev, ...partial };
+    const resolved = typeof partial === "function" ? partial(prev) : partial;
+    const next = { ...prev, ...resolved };
     if (
-      partial.labels !== undefined
-      || partial.decorations !== undefined
-      || partial.animation !== undefined
-      || partial.background !== undefined
+      resolved.labels !== undefined
+      || resolved.decorations !== undefined
+      || resolved.animation !== undefined
+      || resolved.background !== undefined
     ) {
       next.configText = stringifyConfig(configObjectFromForm(next));
     }
@@ -765,14 +782,14 @@ export default function CabinetVariantThemeEditorPage() {
 
   const applyUrls = (saved) => {
     if (!saved) return;
-    const urls = {
-      preview_image_url: saved.preview_image_url || "",
-      background_image_url: saved.background_image_url || "",
-      background_image_vertical_url: saved.background_image_vertical_url || "",
-      block_background_image_url: saved.block_background_image_url || "",
-      sheet_background_image_url: saved.sheet_background_image_url || "",
-      sheet_background_image_vertical_url: saved.sheet_background_image_vertical_url || "",
-    };
+    const urls = {};
+    IMAGE_FIELDS.forEach((field) => {
+      const urlKey = IMAGE_URL_KEY[field];
+      const nextUrl = saved[urlKey] || "";
+      if (!nextUrl && pendingFiles.current[field]) return;
+      urls[urlKey] = nextUrl;
+    });
+    if (!Object.keys(urls).length) return;
     patch(urls);
     setBaseline((prev) => ({ ...prev, ...urls }));
   };
@@ -789,16 +806,19 @@ export default function CabinetVariantThemeEditorPage() {
     });
   };
 
-  const flushPendingUploads = async (themePk) => {
-    let latest = null;
+  const flushPendingUploads = (themePk) => enqueueImageUpload(async () => {
+    const files = {};
     for (const field of IMAGE_FIELDS) {
       const file = pendingFiles.current[field]?.file;
-      if (!file) continue;
-      latest = await uploadVariantThemeImage(themePk, field, file);
-      dropPending(field);
+      if (file) files[field] = file;
     }
-    return latest;
-  };
+    if (!Object.keys(files).length) return null;
+    const saved = await uploadVariantThemeImages(themePk, files);
+    Object.keys(files).forEach((field) => {
+      if (pendingFiles.current[field]?.file === files[field]) dropPending(field);
+    });
+    return saved;
+  });
 
   const save = async () => {
     if (saveLock.current || !loaded) return null;
@@ -904,9 +924,13 @@ export default function CabinetVariantThemeEditorPage() {
       return;
     }
     try {
-      const saved = await uploadVariantThemeImage(themePk, field, file);
-      if (uploadTokens.current[field] !== token) return;
-      dropPending(field);
+      const saved = await enqueueImageUpload(async () => {
+        if (uploadTokens.current[field] !== token) return null;
+        if (pendingFiles.current[field]?.file !== file) return null;
+        return uploadVariantThemeImages(themePk, { [field]: file });
+      });
+      if (!saved || uploadTokens.current[field] !== token) return;
+      if (pendingFiles.current[field]?.file === file) dropPending(field);
       applyUrls(saved);
       showToast("Изображение добавлено");
     } catch (err) {
@@ -1289,11 +1313,12 @@ export default function CabinetVariantThemeEditorPage() {
                               type="checkbox"
                               checked={form.decorations.includes(name)}
                               onChange={(event) => {
-                                patch({
-                                  decorations: event.target.checked
-                                    ? [...form.decorations, name]
-                                    : form.decorations.filter((item) => item !== name),
-                                });
+                                const checked = event.target.checked;
+                                patch((prev) => ({
+                                  decorations: checked
+                                    ? (prev.decorations.includes(name) ? prev.decorations : [...prev.decorations, name])
+                                    : prev.decorations.filter((item) => item !== name),
+                                }));
                               }}
                             />
                             <DecorationSample name={name} />

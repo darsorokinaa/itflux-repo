@@ -3335,7 +3335,9 @@ function ExamPage() {
                   )}
                 </div>
                 <div className="exam-edu-hero-visual" aria-hidden="true">
-                  {!resolvedTheme.isClassic ? (
+                  {resolvedTheme.previewImageUrl ? (
+                    <img className="exam-edu-hero-visual__theme" src={resolvedTheme.previewImageUrl} alt="" />
+                  ) : !resolvedTheme.isClassic ? (
                     <TravelMiniMap className="exam-edu-hero-visual__theme" />
                   ) : (
                     <div className="exam-edu-hero-visual-inner">

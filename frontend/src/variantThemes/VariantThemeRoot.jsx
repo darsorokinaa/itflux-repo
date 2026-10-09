@@ -107,12 +107,19 @@ export function VariantThemeRoot({ payload, children }) {
     const pageImageUrl = safeAssetUrl(orientedImageUrl(theme.background.url, theme.background.urlVertical, orientation));
     const hasPageImage = Boolean(pageImageUrl);
     const hasPaint = hasPageImage || ["color", "gradient", "image"].includes(theme.background.type);
+    const blockImage = cssImageUrl(theme.background.blockUrl);
     if (theme.isClassic && !hasPaint) {
       nodes.forEach(clearNode);
-      return undefined;
+      if (!blockImage) return undefined;
+      nodes.forEach((node) => {
+        node.classList.add(activeClass, layoutClass, "variant-theme-has-block-image");
+        if (slugClass) node.classList.add(slugClass);
+        node.style.setProperty("--variant-theme-block-bg-image", blockImage);
+        node.style.setProperty("--variant-theme-block-opacity", String(BLOCK_IMAGE_OPACITY));
+      });
+      return () => nodes.forEach(clearNode);
     }
 
-    const blockImage = cssImageUrl(theme.background.blockUrl);
     const painted = pageBackgroundStyle(theme.background, pageImageUrl);
     nodes.forEach((node) => {
       node.classList.add(...extraClasses);

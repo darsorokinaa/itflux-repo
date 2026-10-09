@@ -57,8 +57,14 @@ export function updateVariantTheme(themeId, payload) {
 }
 
 export function uploadVariantThemeImage(themeId, field, file) {
+  return uploadVariantThemeImages(themeId, { [field]: file });
+}
+
+export function uploadVariantThemeImages(themeId, files) {
   const body = new FormData();
-  body.append(field, file);
+  Object.entries(files || {}).forEach(([field, file]) => {
+    if (file) body.append(field, file);
+  });
   return themeFetch(`/api/admin/variant-themes/${encodeURIComponent(themeId)}/`, {
     method: "PATCH",
     body,
