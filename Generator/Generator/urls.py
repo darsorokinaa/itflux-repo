@@ -311,6 +311,11 @@ urlpatterns = [
         name="api_variant_check_answer",
     ),
     path(
+        "api/variant/<int:variant_id>/score/",
+        views.api_variant_score,
+        name="api_variant_score",
+    ),
+    path(
         "api/<str:level>/<str:subject>/task-bank-filters/",
         views.api_task_bank_filters,
         name="api_task_bank_filters",

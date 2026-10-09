@@ -1549,6 +1549,7 @@ class StudentAssignmentDetailView(StudentScopedView):
             homework_has_variant_task,
             homework_instruction_text,
             issue_homework_token,
+            redact_student_result,
             serialize_homework_tasks,
         )
 
@@ -1589,7 +1590,11 @@ class StudentAssignmentDetailView(StudentScopedView):
             "mistakes": [],
             # Черновик (есть result_payload) ≠ сдача. Учитель видит работу только после submitted_at.
             "variant_submitted": bool(submission and submission.submitted_at),
-            "result": submission.result_payload if submission and submission.status == SubmissionStatus.CHECKED else None,
+            "result": (
+                redact_student_result(submission.result_payload)
+                if submission and submission.status == SubmissionStatus.CHECKED
+                else None
+            ),
         })
         return Response(card)
 

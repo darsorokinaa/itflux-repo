@@ -107,11 +107,33 @@ def build_submission_result_summary(submission, *, for_student: bool = False) ->
     auto_correct, auto_total = payload_checked_counts(payload)
     manual_correct, manual_total = payload_manual_counts(payload)
 
+    scoring = payload.get("scoring") if isinstance(payload.get("scoring"), dict) else None
+    scoring_final = bool(scoring) and scoring.get("review_status") == "final"
+
     correct_count = None
     total_count = None
     percentage = None
+    earned_points = None
+    max_points = None
 
-    if is_final:
+    if is_final and scoring and not scoring_final:
+        percentage = None
+        correct_count = None
+        total_count = None
+    elif is_final and scoring_final:
+        correct_count = _as_int(scoring.get("correct_count"))
+        total_count = _as_int(scoring.get("total_tasks"))
+        earned_points = scoring.get("earned_points")
+        max_points = scoring.get("max_points")
+        percentage = _as_float(scoring.get("percentage"))
+        if percentage is None:
+            percentage = _as_float(getattr(submission, "score", None))
+        if percentage is not None:
+            percentage = round(float(percentage), 2)
+        if total_count == 0:
+            correct_count = None
+            total_count = None
+    elif is_final:
         if manual_total:
             correct_count, total_count = manual_correct, manual_total
         elif auto_total:
@@ -142,8 +164,15 @@ def build_submission_result_summary(submission, *, for_student: bool = False) ->
         "percentage": percentage,
         "correct_count": correct_count,
         "total_count": total_count,
+        "incorrect_count": _as_int(scoring.get("incorrect_count")) if scoring_final else None,
+        "partial_count": _as_int(scoring.get("partial_count")) if scoring_final else None,
+        "unanswered_count": _as_int(scoring.get("unanswered_count")) if scoring_final else None,
+        "pending_review_count": _as_int(scoring.get("pending_review_count")) if scoring else None,
+        "earned_points": earned_points if is_final and scoring_final else None,
+        "max_points": max_points if is_final and scoring_final else None,
         "score": percentage,
         "max_score": 100 if percentage is not None else None,
+        "review_status": (scoring or {}).get("review_status") or ("final" if is_final else status_key),
         "teacher_comment_preview": preview,
     }
 
@@ -158,7 +187,13 @@ def build_submission_result_summary(submission, *, for_student: bool = False) ->
 
     summary["needs_manual_review"] = bool(needs_manual)
     summary["teacher_comment"] = comment if comment_ok else ""
-    if not is_final and auto_total:
+    if not is_final and scoring and scoring.get("total_tasks"):
+        pending = _as_int(scoring.get("pending_review_count")) or 0
+        auto_universe = max(0, int(scoring.get("total_tasks") or 0) - pending)
+        if auto_universe:
+            summary["auto_correct_count"] = _as_int(scoring.get("correct_count")) or 0
+            summary["auto_total_count"] = auto_universe
+    elif not is_final and auto_total:
         summary["auto_correct_count"] = auto_correct
         summary["auto_total_count"] = auto_total
     return summary

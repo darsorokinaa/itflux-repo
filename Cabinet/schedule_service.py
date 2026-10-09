@@ -28,9 +28,10 @@ def conducted_event_statuses():
 
 
 def series_edit_excluded_statuses():
-    """Массовые операции серии не трогают отменённые и уже проведённые занятия."""
+    """Массовые операции серии не трогают отменённые, пропущенные и уже проведённые занятия."""
     return (
         ScheduleEvent.Status.CANCELLED,
+        ScheduleEvent.Status.SKIPPED,
         ScheduleEvent.Status.DONE,
         ScheduleEvent.Status.COMPLETED,
     )
@@ -56,6 +57,8 @@ def event_snapshot(event):
         "status": event.status,
         "telemost_url": event.telemost_url,
         "topic": event.topic,
+        "lesson_plan_item_id": event.lesson_plan_item_id,
+        "status_reason": getattr(event, "status_reason", "") or "",
     }
 
 
@@ -222,12 +225,24 @@ def update_series_template(series, data, *, reference_event=None):
         series.save(update_fields=fields_to_update)
 
 
+def event_has_manual_date(event):
+    """Отдельный перенос этого занятия. Серия его не переписывает."""
+    return "starts_at" in (event.manual_override_fields or [])
+
+
 def events_for_series_scope(series, event, scope):
     qs = ScheduleEvent.objects.filter(series=series).exclude(
         status__in=series_edit_excluded_statuses(),
     )
     if scope == "following":
         qs = qs.filter(starts_at__gte=event.starts_at)
+    excluded = [
+        row.pk
+        for row in qs.order_by("starts_at")
+        if row.pk != event.pk and event_has_manual_date(row)
+    ]
+    if excluded:
+        qs = qs.exclude(pk__in=excluded)
     return qs.order_by("starts_at")
 
 
@@ -308,7 +323,7 @@ def check_conflicts(
         })
 
     base = ScheduleEvent.objects.filter(owner=teacher).exclude(
-        status=ScheduleEvent.Status.CANCELLED,
+        status__in=(ScheduleEvent.Status.CANCELLED, ScheduleEvent.Status.SKIPPED),
     )
     if excluded_ids:
         base = base.exclude(pk__in=excluded_ids)
@@ -701,15 +716,56 @@ def create_series(
     return series, events
 
 
-def move_event(event, *, starts_at, ends_at, changed_by, notify=True):
-    old = event_snapshot(event)
+def move_event(event, *, starts_at, ends_at, changed_by, notify=True, as_exception=False):
     starts_at = coerce_schedule_datetime(starts_at, event=event, teacher=changed_by)
     ends_at = coerce_schedule_datetime(ends_at, event=event, teacher=changed_by)
+    if starts_at is None or ends_at is None:
+        raise ValueError("Укажите дату и время начала и окончания.")
+    if ends_at <= starts_at:
+        raise ValueError("Время окончания должно быть позже начала.")
+    with transaction.atomic():
+        locked = (
+            ScheduleEvent.objects.select_for_update(of=("self",))
+            .filter(pk=event.pk)
+            .first()
+        )
+        if locked is None:
+            return event
+        event = locked
+        if _same_schedule_moment(event.starts_at, starts_at) and _same_schedule_moment(event.ends_at, ends_at):
+            return event
+        return _move_locked_event(
+            event,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            changed_by=changed_by,
+            notify=notify,
+            as_exception=as_exception,
+        )
+
+
+def _move_locked_event(event, *, starts_at, ends_at, changed_by, notify, as_exception):
+    old = event_snapshot(event)
     event.original_start_at = event.original_start_at or event.starts_at
     event.starts_at = starts_at
     event.ends_at = ends_at
-    event.status = ScheduleEvent.Status.MOVED
+    previous_status = old.get("status")
+    inactive = previous_status in (ScheduleEvent.Status.CANCELLED, ScheduleEvent.Status.SKIPPED)
+    if not inactive:
+        event.status = ScheduleEvent.Status.MOVED
+    if as_exception:
+        overrides = list(event.manual_override_fields or [])
+        if "starts_at" not in overrides:
+            overrides.append("starts_at")
+        event.manual_override_fields = overrides
     event.save()
+    if previous_status in (ScheduleEvent.Status.CANCELLED, ScheduleEvent.Status.SKIPPED) and not event.lesson_plan_item_id:
+        from .lesson_lifecycle import _item_from_cancel_log
+
+        item = _item_from_cancel_log(event)
+        if item is not None:
+            event.lesson_plan_item = item
+            event.save(update_fields=["lesson_plan_item", "updated_at"])
     # Старые логи напоминаний относятся к прежнему времени — сбрасываем,
     # чтобы cron мог отправить напоминания по новому starts_at.
     from .models import EventReminderLog
@@ -722,7 +778,7 @@ def move_event(event, *, starts_at, ends_at, changed_by, notify=True):
         old_data=old,
         new_data=event_snapshot(event),
     )
-    if notify:
+    if notify and not inactive:
         NotificationService.notify_event_moved(
             event, old_start_at=old.get("starts_at"), old_end_at=old.get("ends_at"),
         )
@@ -802,11 +858,20 @@ def move_event_with_scope(event, *, starts_at, ends_at, changed_by, scope=None, 
     duration = ends_at - starts_at
 
     if scope == "single":
-        return move_event(event, starts_at=starts_at, ends_at=ends_at, changed_by=changed_by, notify=notify)
+        return move_event(
+            event, starts_at=starts_at, ends_at=ends_at, changed_by=changed_by, notify=notify, as_exception=True,
+        )
 
     scope_events = list(events_for_edit_scope(event, scope))
     if len(scope_events) <= 1:
-        return move_event(event, starts_at=starts_at, ends_at=ends_at, changed_by=changed_by, notify=notify)
+        return move_event(
+            event,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            changed_by=changed_by,
+            notify=notify,
+            as_exception=scope == "single",
+        )
 
     old_snapshots = {ev.pk: event_snapshot(ev) for ev in scope_events}
 
@@ -847,7 +912,13 @@ def move_event_with_scope(event, *, starts_at, ends_at, changed_by, scope=None, 
     return moved[0] if moved else event
 
 
-def cancel_event(event, *, changed_by, notify=True, plan_cancel_action=None):
+def _same_schedule_moment(left, right):
+    if left is None or right is None:
+        return left is right
+    return abs((left - right).total_seconds()) < 30
+
+
+def cancel_event(event, *, changed_by, notify=True, plan_cancel_action=None, reason=""):
     from .plan_sync import PlanSyncService
     from .video_meeting_service import cancel_meeting_for_event
 
@@ -860,6 +931,10 @@ def cancel_event(event, *, changed_by, notify=True, plan_cancel_action=None):
         if locked is None:
             return event
         if locked.status == ScheduleEvent.Status.CANCELLED:
+            reason_text = (reason or "").strip()[:500]
+            if reason_text and locked.status_reason != reason_text:
+                locked.status_reason = reason_text
+                locked.save(update_fields=["status_reason", "updated_at"])
             return locked
 
         old = event_snapshot(locked)
@@ -877,7 +952,12 @@ def cancel_event(event, *, changed_by, notify=True, plan_cancel_action=None):
             pass
 
         locked.status = ScheduleEvent.Status.CANCELLED
-        locked.save(update_fields=["status", "updated_at"])
+        reason_text = (reason or "").strip()[:500]
+        update_fields = ["status", "updated_at"]
+        if reason_text:
+            locked.status_reason = reason_text
+            update_fields.append("status_reason")
+        locked.save(update_fields=update_fields)
         PlanSyncService.on_event_cancelled(locked, plan_cancel_action=plan_cancel_action)
         locked.refresh_from_db()
         cancel_meeting_for_event(locked)
@@ -894,11 +974,17 @@ def cancel_event(event, *, changed_by, notify=True, plan_cancel_action=None):
         return locked
 
 
-def cancel_event_with_scope(event, *, changed_by, scope=None, notify=True, plan_cancel_action=None):
+def cancel_event_with_scope(event, *, changed_by, scope=None, notify=True, plan_cancel_action=None, reason=""):
     """scope: single | following | series (None = single)."""
     scope = scope or "single"
     if scope == "series" and event.series_id:
-        cancel_series(event.series, changed_by=changed_by, notify=notify, plan_cancel_action=plan_cancel_action)
+        cancel_series(
+            event.series,
+            changed_by=changed_by,
+            notify=notify,
+            plan_cancel_action=plan_cancel_action,
+            reason=reason,
+        )
         return event
     if scope == "following" and event.series_id:
         cancel_series(
@@ -907,12 +993,19 @@ def cancel_event_with_scope(event, *, changed_by, scope=None, notify=True, plan_
             from_date=event.starts_at.astimezone(_event_timezone(event)).date(),
             notify=notify,
             plan_cancel_action=plan_cancel_action,
+            reason=reason,
         )
         return event
-    return cancel_event(event, changed_by=changed_by, notify=notify, plan_cancel_action=plan_cancel_action)
+    return cancel_event(
+        event,
+        changed_by=changed_by,
+        notify=notify,
+        plan_cancel_action=plan_cancel_action,
+        reason=reason,
+    )
 
 
-def cancel_series(series, *, changed_by, from_date=None, notify=True, plan_cancel_action=None):
+def cancel_series(series, *, changed_by, from_date=None, notify=True, plan_cancel_action=None, reason=""):
     qs = ScheduleEvent.objects.filter(series=series).exclude(
         status__in=series_edit_excluded_statuses(),
     )
@@ -925,6 +1018,7 @@ def cancel_series(series, *, changed_by, from_date=None, notify=True, plan_cance
             changed_by=changed_by,
             notify=False,
             plan_cancel_action=plan_cancel_action,
+            reason=reason,
         )
     series.status = SeriesStatus.CANCELLED
     series.save(update_fields=["status", "updated_at"])

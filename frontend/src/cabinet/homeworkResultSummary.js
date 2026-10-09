@@ -9,6 +9,22 @@ export function roundResultPercent(value) {
 
 export function formatResultCounts(summary) {
   if (!summary || !summary.is_final) return "";
+  const earned = summary.earned_points;
+  const max = summary.max_points;
+  if (earned != null && max != null && Number(max) > 0) {
+    const points = `${earned} из ${max}`;
+    const correct = summary.correct_count;
+    const total = summary.total_count;
+    if (
+      correct != null
+      && total != null
+      && total > 0
+      && (Number(correct) !== Number(earned) || Number(total) !== Number(max))
+    ) {
+      return `${points} · ${correct} верно`;
+    }
+    return points;
+  }
   const correct = summary.correct_count;
   const total = summary.total_count;
   if (correct == null || total == null || total <= 0) return "";

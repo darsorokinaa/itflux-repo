@@ -107,6 +107,7 @@ from .lesson_collection_api import (
 from .latex_utils import process_latex
 from . import pdf_utils
 from . import telegram_utils
+from .variant_instructions import instructions_for_variant
 from .report_pedagogy import build_pedagogical_report_context
 
 logger = logging.getLogger(__name__)
@@ -4142,6 +4143,7 @@ def _variant_detail_payload(request, variant, *, include_answers=True):
         "theme_id": getattr(variant, "theme_id", None),
         "theme": theme_for_variant_payload(variant, request),
         **_subject_background_payload(variant.var_subject, request),
+        **instructions_for_variant(variant),
     }
     if show_teacher_meta:
         payload["owner_public_code"] = owner_bank_code
@@ -4267,21 +4269,88 @@ def api_variant_check_answer(request, variant_id):
     except (TypeError, ValueError):
         task_id = None
 
-    expected = expected_answer_for_variant_task(
-        int(variant.id),
-        task_id=task_id,
-        task_number_key=task_number,
-    )
+    from .variant_scoring import load_variant_tasks_for_scoring, score_variant_attempt
+
+    level = (getattr(getattr(variant, "level", None), "level", None) or "").strip().lower()
     subject = (getattr(getattr(variant, "var_subject", None), "subject_short", None) or "").strip().lower()
-    is_correct = answers_equal(answer, expected, subject=subject)
+    tasks = load_variant_tasks_for_scoring(variant.id)
+    task = None
+    if task_id is not None:
+        task = next((row for row in tasks if int(row.get("id") or 0) == task_id), None)
+    if task is None and task_number.isdigit():
+        number = int(task_number)
+        task = next((row for row in tasks if int(row.get("number") or 0) == number), None)
+    if task is None:
+        expected = expected_answer_for_variant_task(
+            int(variant.id),
+            task_id=task_id,
+            task_number_key=task_number,
+        )
+        is_correct = answers_equal(answer, expected, subject=subject)
+        return JsonResponse(
+            {
+                "ok": True,
+                "correct": bool(is_correct),
+                "is_correct": bool(is_correct),
+                "task_id": task_id,
+                "points": 1 if is_correct else 0,
+                "max_points": 1,
+                "status": "correct" if is_correct else ("unanswered" if not str(answer).strip() else "incorrect"),
+            }
+        )
+    summary = score_variant_attempt(
+        tasks=[task],
+        level=level,
+        subject=subject,
+        answers={task["id"]: answer},
+    )
+    row = summary["tasks"][0]
+    is_correct = row["status"] == "correct"
     return JsonResponse(
         {
             "ok": True,
             "correct": bool(is_correct),
             "is_correct": bool(is_correct),
-            "task_id": task_id,
+            "task_id": task.get("id"),
+            "points": row["points"],
+            "max_points": row["max_points"],
+            "status": row["status"],
         }
     )
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_variant_score(request, variant_id):
+    """Итог попытки по составу варианта. Эталон в ответ не входит."""
+    from .variant_scoring import load_variant_tasks_for_scoring, score_variant_attempt
+
+    variant = get_object_or_404(Variant.objects.select_related("level", "var_subject"), id=variant_id)
+    try:
+        data = json.loads(request.body.decode("utf-8") or "{}")
+    except (TypeError, ValueError, UnicodeDecodeError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    answers = data.get("answers") or data.get("by_task_id") or {}
+    scores = data.get("scores") or {}
+    if not isinstance(answers, dict):
+        answers = {}
+    if not isinstance(scores, dict):
+        scores = {}
+    level = (getattr(getattr(variant, "level", None), "level", None) or "").strip().lower()
+    subject = (getattr(getattr(variant, "var_subject", None), "subject_short", None) or "").strip().lower()
+    tasks = load_variant_tasks_for_scoring(variant.id)
+    # Баллы части 2 приходят с выбора критериев. Часть 1 пересчитывается по эталону.
+    summary = score_variant_attempt(
+        tasks=tasks,
+        level=level,
+        subject=subject,
+        answers=answers,
+        scores=scores,
+    )
+    summary.pop("tasks", None)
+    return JsonResponse({"ok": True, **summary})
 
 
 @require_http_methods(["GET"])
@@ -7335,10 +7404,19 @@ def _upsert_lesson_student_result(
     if total_tasks <= 0:
         total_tasks = answers_qs.count()
 
-    correct_count = answers_qs.filter(is_correct=True).count()
-    non_empty_count = answers_qs.filter(is_empty=False).count()
-    empty_count = max(total_tasks - non_empty_count, 0)
-    wrong_count = max(total_tasks - correct_count, 0)
+    from .variant_scoring import lesson_result_counts
+
+    correct_count = answers_qs.filter(is_correct=True, is_empty=False).count()
+    answered_wrong_count = answers_qs.filter(is_correct=False, is_empty=False).count()
+    counted = lesson_result_counts(
+        total_tasks=total_tasks,
+        correct_count=correct_count,
+        answered_wrong_count=answered_wrong_count,
+    )
+    total_tasks = counted["total_tasks"]
+    correct_count = counted["correct_count"]
+    wrong_count = counted["wrong_count"]
+    empty_count = counted["empty_count"]
 
     prev = LessonStudentResult.objects.filter(
         room_id=room_id, variant_id=variant_id, student=student_name

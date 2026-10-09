@@ -394,6 +394,52 @@
   flex: none;
 }
 
+.cb-section--plan-editor .cb-pe-weekdays-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.cb-section--plan-editor .cb-pe-weekdays {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cb-section--plan-editor .cb-pe-weekday {
+  min-width: 40px;
+  padding: 6px 8px;
+  border: 1px solid var(--pe-line, #e2e8f0);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.cb-section--plan-editor .cb-pe-weekday.is-on {
+  border-color: #2563eb;
+  color: #1d4ed8;
+}
+
+.cb-section--plan-editor .cb-pe-weekday-times {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.cb-section--plan-editor .cb-pe-weekday-time {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 8px;
+  align-items: center;
+}
+
+.cb-section--plan-editor .cb-pe-weekday-time span {
+  grid-column: 1 / -1;
+}
+
 .cb-section--plan-editor .cb-pe-info {
   display: flex;
   gap: 8px;

@@ -422,13 +422,17 @@ class LessonPlanContentSyncServiceTests(TestCase):
             self.enrollment, teacher=self.teacher,
         )
         self.assertIsNone(result["warning"])
+        self.assertTrue(result["links_preserved"])
         event1.refresh_from_db()
         event2.refresh_from_db()
-        # После смены order темы раскладываются по будущим занятиям заново.
-        self.assertEqual(event1.lesson_plan_item_id, self.item2.id)
-        self.assertEqual(event2.lesson_plan_item_id, self.item1.id)
-        self.assertEqual(event1.topic, "Графы")
-        self.assertEqual(event2.topic, "Множества")
+        self.item1.refresh_from_db()
+        self.item2.refresh_from_db()
+        self.assertEqual(event1.lesson_plan_item_id, self.item1.id)
+        self.assertEqual(event2.lesson_plan_item_id, self.item2.id)
+        self.assertEqual(event1.topic, "Множества")
+        self.assertEqual(event2.topic, "Графы")
+        self.assertEqual(self.item1.order, 2)
+        self.assertEqual(self.item2.order, 1)
 
     # 13. Нельзя связать урок с планом другого ученика.
     def test_cannot_link_to_other_students_plan(self):
@@ -525,7 +529,9 @@ class LessonPlanContentSyncServiceTests(TestCase):
 
         LessonLearningPlanSyncService.reorder_future_lessons_from_plan(self.enrollment, teacher=self.teacher)
         event1.refresh_from_db()
-        self.assertEqual(event1.homework_description, "Решить №5-10")
+        self.item1.refresh_from_db()
+        self.assertEqual(event1.lesson_plan_item_id, self.item1.id)
+        self.assertEqual(self.item1.homework_description, "Решить №5-10")
 
     # 14f. Черновик-заглушка материалов теряет scheduled_event при реальной привязке,
     # а легитимные пункты других участников группы — нет (см. 14c).
@@ -793,6 +799,7 @@ class LessonPlanContentSyncApiTests(TestCase):
                 "ends_at": new_end.strftime("%Y-%m-%dT%H:%M:%S"),
                 "location": "Кабинет 2",
                 "notify_participants": False,
+                "expected_updated_at": self.event.updated_at.isoformat(),
             },
             format="json",
         )

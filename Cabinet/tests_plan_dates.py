@@ -316,7 +316,7 @@ class PlanDateScheduleSyncTests(TestCase):
         self.assertEqual(event.lesson_plan_item_id, self.items[0].id)
         self.assertEqual(event.topic, "Кодирование")
 
-    def test_item_dated_today_binds_that_topic_not_first(self):
+    def test_free_lesson_follows_plan_order_not_a_later_date(self):
         today = timezone.localdate()
         self.items[0].scheduled_date = today - timedelta(days=7)
         self.items[0].save(update_fields=["scheduled_date", "updated_at"])
@@ -325,6 +325,8 @@ class PlanDateScheduleSyncTests(TestCase):
         event = self._today_event(student_subject=self.subject)
         PlanSyncService.realign_enrollment_topics(self.enrollment)
         event.refresh_from_db()
-        self.assertEqual(event.lesson_plan_item_id, self.items[1].id)
-        self.assertEqual(event.topic, "Системы счисления")
+        self.items[1].refresh_from_db()
+        self.assertEqual(event.lesson_plan_item_id, self.items[0].id)
+        self.assertEqual(event.topic, "Кодирование")
+        self.assertIsNone(self.items[1].scheduled_event_id)
 

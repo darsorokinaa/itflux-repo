@@ -1,5 +1,6 @@
 import { PlaneIcon } from "./TravelMarks";
-import { useVariantThemeLabels } from "./VariantThemeRoot";
+import { decorationLineKind } from "./registry";
+import { useVariantTheme, useVariantThemeLabels } from "./VariantThemeRoot";
 
 function chunkRows(tasks, columns) {
   const rows = [];
@@ -66,13 +67,14 @@ export function ThemeRouteProgress({
   userAnswers = {},
   columns = 4,
 }) {
+  const lineKind = decorationLineKind(useVariantTheme().decorations);
   if (!tasks.length) return null;
   const activeIndex = Math.max(0, tasks.findIndex((task) => String(task.id) === String(activeId)));
   const rows = chunkRows(tasks, columns);
   const indexById = new Map(tasks.map((task, index) => [String(task.id), index]));
 
   return (
-    <nav className="variant-theme-route" aria-label="Маршрут">
+    <nav className={`variant-theme-route variant-theme-route--${lineKind}`} aria-label="Маршрут">
       {rows.map((row, rowIndex) => (
         <ol
           key={`route-row-${rowIndex}`}

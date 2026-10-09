@@ -9,6 +9,8 @@ import {
   mapIndexAfterMove,
   moveListItem,
   moveSessionToTopic,
+  orderChangeNeedsPreview,
+  topicOrderPreviewLines,
   renameTopicInRange,
   shouldShowTopicChrome,
   uniquePlanTopics,
@@ -103,6 +105,18 @@ describe("applyReorderWithTopic", () => {
   it("keeps topic when reordering inside the same group", () => {
     const sessions = [session("A", "1"), session("A", "2"), session("A", "3")];
     expect(applyReorderWithTopic(sessions, 0, 2).map((s) => s.topic)).toEqual(["A", "A", "A"]);
+  });
+
+  it("asks for a preview when dated lessons change order", () => {
+    const previous = [
+      { id: 1, topic: "Алгебра", scheduledDate: "2026-10-05" },
+      { id: 2, topic: "Геометрия", scheduledDate: "2026-10-07" },
+    ];
+    const next = [previous[1], previous[0]];
+    expect(orderChangeNeedsPreview(previous, next)).toBe(true);
+    expect(orderChangeNeedsPreview(previous, previous)).toBe(false);
+    expect(topicOrderPreviewLines(next)[0]).toContain("Геометрия");
+    expect(topicOrderPreviewLines(next)[0]).toContain("2026-10-07");
   });
 
   it("does not send a no-op reorder", () => {

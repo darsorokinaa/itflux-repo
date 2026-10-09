@@ -53,18 +53,39 @@ class VariantTheme(models.Model):
         help_text="Картинка в каталоге тем. Выберите файл и нажмите «Сохранить».",
     )
     background_image = models.ImageField(
-        "Фон",
+        "Фон, альбомный",
         upload_to=variant_theme_upload_to,
         blank=True,
         null=True,
-        help_text="Фон всей страницы варианта.",
+        help_text="Фон страницы варианта в альбомной ориентации. Если книжный фон не задан, используется и для узкого экрана.",
+    )
+    background_image_vertical = models.ImageField(
+        "Фон, книжный",
+        upload_to=variant_theme_upload_to,
+        blank=True,
+        null=True,
+        help_text="Фон страницы варианта в книжной ориентации. Если не задан, берётся альбомный.",
     )
     block_background_image = models.ImageField(
         "Фон блоков",
         upload_to=variant_theme_upload_to,
         blank=True,
         null=True,
-        help_text="Фон карточек: вариант, задания, таймер и оформление.",
+        help_text="Рисунок карточки задания. На карточке он виден плотно, текст остаётся читаемым.",
+    )
+    sheet_background_image = models.ImageField(
+        "Фон листа, альбомный",
+        upload_to=variant_theme_upload_to,
+        blank=True,
+        null=True,
+        help_text="Фон рабочего листа и печатного варианта в альбомной ориентации.",
+    )
+    sheet_background_image_vertical = models.ImageField(
+        "Фон листа, книжный",
+        upload_to=variant_theme_upload_to,
+        blank=True,
+        null=True,
+        help_text="Фон рабочего листа и печатного варианта в книжной ориентации. Если не задан, берётся альбомный.",
     )
     is_active = models.BooleanField(
         "Активна",

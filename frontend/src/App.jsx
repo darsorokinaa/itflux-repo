@@ -510,7 +510,6 @@ function App() {
             <Route path="more" element={<CabinetMorePage />} />
             <Route path="upgrade" element={<CabinetUpgradePage />} />
             <Route path="variant-themes" element={<CabinetVariantThemesPage />} />
-            <Route path="variant-themes/new" element={<CabinetVariantThemeEditorPage />} />
             <Route path="variant-themes/:themeId" element={<CabinetVariantThemeEditorPage />} />
           </Route>
           <Route path="/login" element={<Navigate to="/cabinet/login" replace />} />

@@ -36,6 +36,7 @@ from Cabinet.video_meeting_service import (
 
 
 @override_settings(
+    VIDEO_PROVIDER="meet",
     JITSI_DOMAIN="meet.example.test",
     JITSI_AUTH_MODE="jwt",
     JITSI_APP_ID="itflux-test",

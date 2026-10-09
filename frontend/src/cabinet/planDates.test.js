@@ -13,6 +13,29 @@ import {
 } from "./planDates";
 
 describe("planDates", () => {
+  it("builds Monday and Wednesday dates for several months", () => {
+    const dates = generatePlanDates("2026-10-05", 8, "weekdays", [0, 2]);
+    expect(dates).toEqual([
+      "2026-10-05",
+      "2026-10-07",
+      "2026-10-12",
+      "2026-10-14",
+      "2026-10-19",
+      "2026-10-21",
+      "2026-10-26",
+      "2026-10-28",
+    ]);
+    expect(dates.every((iso) => [0, 2].includes((new Date(`${iso}T12:00:00`).getDay() + 6) % 7))).toBe(true);
+  });
+
+  it("keeps the weekday derived from the date when the date changes", () => {
+    expect(generatePlanDates("2026-12-28", 3, "weekdays", [0])).toEqual([
+      "2026-12-28",
+      "2027-01-04",
+      "2027-01-11",
+    ]);
+  });
+
   it("fills weekly dates from the first lesson", () => {
     expect(generatePlanDates("2026-09-01", 3, "weekly")).toEqual([
       "2026-09-01",

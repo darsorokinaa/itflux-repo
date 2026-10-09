@@ -61,10 +61,9 @@ class PlanSyncService:
         if event_consumed_plan_topic(event, student_id=event.student_id):
             advanced = cls._complete_linked_plan(event, ensure_journal=True)
         else:
-            cls._release_plan_item_shift(event)
-            cls._ensure_journal_for_event(event, None)
+            # Неявка не съедает тему и не переносит её на следующее занятие.
+            cls._ensure_journal_for_event(event, event.lesson_plan_item)
             advanced = []
-        cls.realign_for_event(event)
         return advanced
 
     @classmethod
@@ -116,12 +115,6 @@ class PlanSyncService:
         завершён/пропущен и не занят другим активным событием.
         """
         from .models import ScheduleEvent
-        from .plan_schedule import plan_slots_exhausted
-
-        if plan_slots_exhausted(
-            enrollment, enrollment.teacher, exclude_event=exclude_event,
-        ):
-            return None
 
         busy_ids = set(
             enrollment.plan.items.filter(
@@ -151,6 +144,10 @@ class PlanSyncService:
             busy_ids.discard(
                 getattr(exclude_event, "lesson_plan_item_id", None)
             )
+            for owned_id in enrollment.plan.items.filter(
+                scheduled_event_id=exclude_event.pk,
+            ).values_list("id", flat=True):
+                busy_ids.discard(owned_id)
         from .plan_schedule import plan_start_order_for_enrollment
 
         qs = enrollment.plan.items.exclude(status__in=cls.TERMINAL_ITEM).order_by("order", "id")
@@ -191,13 +188,15 @@ class PlanSyncService:
 
     @classmethod
     def _next_prefetched_plan_item(cls, enrollment, items, *, exclude_event=None):
-        from .plan_schedule import plan_slots_exhausted, plan_start_order_for_enrollment
+        from .plan_schedule import plan_start_order_for_enrollment
 
-        if plan_slots_exhausted(enrollment, enrollment.teacher, exclude_event=exclude_event):
-            return None
         busy_ids = set(cls._progress_busy_item_ids(enrollment))
         if exclude_event is not None:
             busy_ids.discard(getattr(exclude_event, "lesson_plan_item_id", None))
+            for owned_id in enrollment.plan.items.filter(
+                scheduled_event_id=exclude_event.pk,
+            ).values_list("id", flat=True):
+                busy_ids.discard(owned_id)
         start_order = plan_start_order_for_enrollment(enrollment, items)
         min_order = items[0].order if items else 0
         for item in items:
@@ -511,7 +510,11 @@ class PlanSyncService:
 
     @classmethod
     def link_next_plan_item(cls, event, *, force=False):
-        """Привязать следующее свободное занятие плана, если явной связи ещё нет."""
+        """Привязать следующее свободное занятие плана, если явной связи ещё нет.
+
+        Берётся первый свободный пункт по порядку плана. Уже закреплённая
+        тема другому занятию не отдаётся и не дублируется.
+        """
         if event.lesson_plan_item_id and not force:
             return event.lesson_plan_item
         for _ in range(8):
@@ -566,7 +569,6 @@ class PlanSyncService:
                 len(remaining),
                 enrollment.pk,
             )
-        cls.realign_enrollment_topics(enrollment)
 
     @classmethod
     def on_event_cancelled(cls, event, *, plan_cancel_action=None):
@@ -578,33 +580,40 @@ class PlanSyncService:
             item = event.plan_items.order_by("order", "id").first()
         if item is None:
             logger.info("lesson cancelled event=%s action=%s", event.pk, action)
-            cls.realign_for_event(event)
             return action
         if action == PLAN_CANCEL_SKIP:
             logger.info("lesson cancelled event=%s item=%s skipped", event.pk, item.pk)
-            cls.realign_for_event(event)
             return action
-        cls._release_plan_item_shift(event, item=item)
-        logger.info("lesson cancelled event=%s item=%s returned to planned", event.pk, item.pk)
-        cls.realign_for_event(event)
+        logger.info(
+            "lesson cancelled event=%s item=%s topic kept on this lesson",
+            event.pk,
+            item.pk,
+        )
         return action
 
     @classmethod
     def on_event_rescheduled(cls, event):
+        """Перенос сохраняет тему и связь. Дату плана и открытый журнал подтягиваем к событию.
+
+        Полный realign здесь не вызывается: иначе соседние занятия меняют темы.
+        """
+        from .lesson_lifecycle import sync_event_datetime_to_linked_records
+
         logger.info("lesson rescheduled event=%s item=%s", event.pk, event.lesson_plan_item_id)
-        cls.realign_for_event(event)
+        sync_event_datetime_to_linked_records(event)
         event.refresh_from_db()
         return event.lesson_plan_item
 
     @classmethod
     def on_event_deleted(cls, event, *, plan_cancel_action=None):
-        """Удаление будущего занятия освобождает непройденный пункт плана."""
-        from .plan_schedule import PLAN_CANCEL_SHIFT
+        """Удаление занятия снимает связь с пунктом, не копируя его на соседа."""
+        from .plan_schedule import PLAN_CANCEL_SKIP
 
-        return cls.on_event_cancelled(
-            event,
-            plan_cancel_action=plan_cancel_action or PLAN_CANCEL_SHIFT,
-        )
+        if plan_cancel_action == PLAN_CANCEL_SKIP:
+            return cls.on_event_cancelled(event, plan_cancel_action=PLAN_CANCEL_SKIP)
+        item = event.lesson_plan_item
+        cls._release_plan_item_shift(event, item=item)
+        return "keep"
 
     @classmethod
     def realign_for_event(cls, event):
@@ -646,11 +655,10 @@ class PlanSyncService:
     @transaction.atomic
     def realign_enrollment_topics(cls, enrollment) -> dict:
         """
-        Раскладывает темы плана по занятиям:
+        Дозаполняет только занятия без пункта плана.
 
-        1. Сколько уроков фактически прошло (проведён / опоздал / ушёл раньше /
-           тех. причина) — столько первых пунктов плана считаются пройденными.
-        2. Оставшиеся пункты по порядку вешаются на будущие занятия.
+        Уже связанные пары ScheduleEvent ↔ LessonPlanItem не разрываются
+        и не обмениваются темами, домашними заданиями и материалами.
         """
         if getattr(_realign_guard, "active", False):
             return {"ok": True, "skipped": True, "updated_event_ids": []}
@@ -662,270 +670,71 @@ class PlanSyncService:
 
     @classmethod
     def _realign_enrollment_topics_inner(cls, enrollment) -> dict:
-        from .lesson_plan_content_sync import CONTENT_FIELDS, LessonLearningPlanSyncService
-        from .plan_schedule import (
-            attendance_statuses_by_event,
-            event_consumed_plan_topic,
-            event_is_upcoming_for_plan,
-            events_for_enrollment,
-            plan_items_for_enrollment,
-            unique_plan_slot_events,
-        )
+        """Привязывает свободные будущие занятия к свободным пунктам. Связанные пары не меняет."""
+        from .plan_schedule import event_local_date, events_for_enrollment
 
         now = timezone.now()
-        items = [
-            item for item in plan_items_for_enrollment(enrollment)
-            if item.status != PlanItemStatus.SKIPPED
-        ]
         sequence_events = [
             ev for ev in events_for_enrollment(enrollment, enrollment.teacher)
             if getattr(ev, "plan_sync_enabled", True)
         ]
-        attendance_map = attendance_statuses_by_event(
-            [ev.pk for ev in sequence_events],
-            student_id=enrollment.student_id,
-        )
-
         from .models import LessonPlanItem, ScheduleEvent
-        from .journal_models import LessonJournal
 
-        event_ids = {ev.pk for ev in sequence_events if getattr(ev, "pk", None)}
-        item_ids = sorted({item.pk for item in items if getattr(item, "pk", None)})
-        if item_ids:
-            event_ids.update(
-                LessonPlanItem.objects.filter(
-                    pk__in=item_ids,
-                    scheduled_event_id__isnull=False,
-                ).values_list("scheduled_event_id", flat=True)
-            )
-            event_ids.update(
-                ScheduleEvent.objects.filter(lesson_plan_item_id__in=item_ids).values_list("pk", flat=True)
-            )
-        ordered_event_ids = sorted(pk for pk in event_ids if pk)
-        if ordered_event_ids:
+        event_ids = sorted({ev.pk for ev in sequence_events if getattr(ev, "pk", None)})
+        item_ids = list(enrollment.plan.items.values_list("pk", flat=True))
+        if event_ids:
             list(
                 ScheduleEvent.objects.select_for_update(of=("self",))
-                .filter(pk__in=ordered_event_ids)
+                .filter(pk__in=event_ids)
                 .order_by("pk")
             )
         if item_ids:
-            list(
-                LessonPlanItem.objects.select_for_update()
-                .filter(pk__in=item_ids)
-                .order_by("pk")
-            )
-
-        journals = {
-            journal.schedule_event_id: journal
-            for journal in LessonJournal.objects.filter(
-                schedule_event_id__in=[ev.pk for ev in sequence_events],
-            )
-        }
-
-        conducted = []
-        upcoming = []
-        for ev in sequence_events:
-            if ev.status in (ScheduleEvent.Status.CANCELLED, ScheduleEvent.Status.DRAFT):
-                continue
-            consumed = event_consumed_plan_topic(
-                ev,
-                student_id=enrollment.student_id,
-                attendance_statuses=attendance_map.get(ev.pk) or [],
-                journal=journals.get(ev.pk),
-            )
-            # Будущее занятие не считаем проведённым, даже если статус сбился.
-            future_open = event_is_upcoming_for_plan(ev, now=now) or (
-                ev.starts_at >= now
-                and ev.status not in cls.COMPLETED_STATUSES
-            )
-            if consumed and not future_open:
-                conducted.append(ev)
-            elif future_open:
-                upcoming.append(ev)
-
-        conducted = unique_plan_slot_events(conducted)
-        upcoming = unique_plan_slot_events(upcoming)
-        parked = unique_plan_slot_events([
-            ev for ev in sequence_events
-            if ev.status not in (ScheduleEvent.Status.CANCELLED, ScheduleEvent.Status.DRAFT)
-            and ev.pk not in {row.pk for row in conducted}
-            and ev.pk not in {row.pk for row in upcoming}
-            and getattr(ev, "plan_sync_enabled", True)
-        ])
-        history_slots = unique_plan_slot_events([*conducted, *parked])
-        restart_plan = len(history_slots) >= len(items)
-
-        desired = {}
-        used_item_ids = set()
-
-        def take_next_item():
-            for item in items:
-                if item.id not in used_item_ids:
-                    used_item_ids.add(item.id)
-                    return item
-            return None
-
-        def take_item_for_event(ev):
-            from .plan_schedule import event_local_date
-            event_date = event_local_date(ev)
-            if event_date:
-                for item in items:
-                    if item.id in used_item_ids:
-                        continue
-                    if item.scheduled_date == event_date:
-                        used_item_ids.add(item.id)
-                        return item
-            return take_next_item()
-
-        # Журнал по дате → пункты плана по порядку. Старые FK не сохраняем:
-        # иначе «дыра» (тема 04 пройдена, а 03 ещё в будущем).
-        for ev in conducted:
-            nxt = take_next_item()
-            if nxt is not None:
-                desired[ev.pk] = nxt
-        def keep_existing_item(ev):
-            """Тема, которую учитель только что добавил в календарь (последний пункт на эту дату), не сдвигаем."""
-            current_item = next(
-                (item for item in items if item.id == ev.lesson_plan_item_id),
-                None,
-            )
-            if current_item is None or current_item.id in used_item_ids:
-                return None
-            max_order = max((item.order or 0) for item in items)
-            if (current_item.order or 0) < max_order:
-                return None
-            from .plan_schedule import event_local_date
-            event_date = event_local_date(ev)
-            if current_item.scheduled_date and event_date and current_item.scheduled_date == event_date:
-                return current_item
-            return None
-
-        for ev in upcoming:
-            kept = keep_existing_item(ev)
-            if kept is not None:
-                used_item_ids.add(kept.id)
-                desired[ev.pk] = kept
-                continue
-            if restart_plan:
-                continue
-            nxt = take_item_for_event(ev)
-            if nxt is not None:
-                desired[ev.pk] = nxt
+            list(LessonPlanItem.objects.select_for_update().filter(pk__in=item_ids).order_by("pk"))
 
         updated_ids = []
-        conducted_ids = {ev.pk for ev in conducted}
-
-        for ev in sequence_events:
-            want = desired.get(ev.pk)
-            if ev.lesson_plan_item_id and (want is None or ev.lesson_plan_item_id != want.id):
-                cls._clear_event_plan_link(ev)
-                ev.lesson_plan_item = None
-                ev.lesson_plan_item_id = None
-                if ev.pk not in updated_ids:
-                    updated_ids.append(ev.pk)
-
-        assigned_item_ids = {item.id for item in desired.values()}
-        for item in items:
-            want_event_id = next(
-                (event_id for event_id, bound in desired.items() if bound.id == item.id),
-                None,
-            )
-            if item.scheduled_event_id and item.scheduled_event_id != want_event_id:
-                item.scheduled_event = None
-                item.save(update_fields=["scheduled_event", "updated_at"])
-
-        for ev in [*conducted, *upcoming]:
-            item = desired.get(ev.pk)
-            if item is None:
+        linked = 0
+        for ev in ScheduleEvent.objects.filter(pk__in=event_ids).order_by("starts_at", "pk"):
+            if ev.lesson_plan_item_id:
+                linked += 1
                 continue
+            if ev.status in (
+                ScheduleEvent.Status.CANCELLED,
+                ScheduleEvent.Status.SKIPPED,
+                ScheduleEvent.Status.DRAFT,
+                ScheduleEvent.Status.DONE,
+                ScheduleEvent.Status.COMPLETED,
+            ):
+                continue
+            local_date = event_local_date(ev)
+            if local_date is None or ev.starts_at is None:
+                continue
+            from .plan_schedule import event_zone
+
+            zone_today = now.astimezone(event_zone(ev)).date()
+            if local_date < zone_today:
+                continue
+            before = ev.lesson_plan_item_id
+            cls.link_next_plan_item(ev)
             ev.refresh_from_db()
-            item.refresh_from_db()
-            consumed = ev.pk in conducted_ids
-            changed = ev.lesson_plan_item_id != item.id
-            cls.link_event_to_plan(
-                ev,
-                item,
-                copy_topic=not consumed,
-                overwrite_topic=not consumed,
-                force=True,
-            )
-            ev.refresh_from_db()
-            item.refresh_from_db()
-            if changed and ev.pk not in updated_ids:
+            if ev.lesson_plan_item_id and ev.lesson_plan_item_id != before:
                 updated_ids.append(ev.pk)
-            if consumed:
-                cls._complete_item_and_advance(item, ev)
-                cls._sync_journal_planned_from_item(ev, item)
-                continue
-            overrides = set(ev.manual_override_fields or [])
-            fields = [field for field in CONTENT_FIELDS if field not in overrides]
-            if fields and ev.plan_sync_enabled:
-                LessonLearningPlanSyncService._copy_item_fields_to_event(
-                    ev, item, force_fields=fields,
-                )
-                LessonLearningPlanSyncService._sync_plan_materials_onto_event(ev, item)
-                ev.content_source = LessonContentSource.PLAN
-                ev.plan_synced_at = timezone.now()
-                ev.save()
-                LessonLearningPlanSyncService._sync_journal_topic(ev)
-                if ev.pk not in updated_ids:
-                    updated_ids.append(ev.pk)
-
-        for item in items:
-            item.refresh_from_db()
-            if item.id in assigned_item_ids:
-                continue
-            update_fields = ["updated_at"]
-            if item.scheduled_event_id:
-                item.scheduled_event = None
-                update_fields.append("scheduled_event")
-            if item.status == PlanItemStatus.COMPLETED:
-                item.status = PlanItemStatus.PLANNED
-                item.completed_at = None
-                update_fields.extend(["status", "completed_at"])
-            if len(update_fields) > 1:
-                item.save(update_fields=update_fields)
-
-        for item in items:
-            item.refresh_from_db()
-            want_event_id = next(
-                (event_id for event_id, bound in desired.items() if bound.id == item.id),
-                None,
-            )
-            if want_event_id in conducted_ids:
-                continue
-            if item.status == PlanItemStatus.COMPLETED:
-                item.status = PlanItemStatus.PLANNED
-                item.completed_at = None
-                item.save(update_fields=["status", "completed_at", "updated_at"])
-
-        remaining_open = [
-            item for item in items
-            if item.status not in (PlanItemStatus.COMPLETED, PlanItemStatus.SKIPPED)
-        ]
-        if enrollment.status == EnrollmentStatus.COMPLETED and remaining_open:
-            from .plan_schedule import active_enrollment_conflicts
-
-            if not active_enrollment_conflicts(enrollment):
-                enrollment.status = EnrollmentStatus.ACTIVE
-                enrollment.save(update_fields=["status", "updated_at"])
+                linked += 1
 
         logger.info(
-            "plan realigned enrollment=%s conducted=%s upcoming=%s updated=%s",
+            "plan links kept enrollment=%s linked=%s filled=%s",
             enrollment.pk,
-            len(conducted),
-            len(upcoming),
+            linked,
             len(updated_ids),
         )
         return {
             "ok": True,
             "updated_event_ids": updated_ids,
-            "conducted": len(conducted),
-            "future_events": len(upcoming),
-            "plan_items": len(items),
+            "conducted": 0,
+            "future_events": len(updated_ids),
+            "plan_items": len(item_ids),
+            "links_preserved": True,
         }
 
-    @classmethod
     def _clear_event_plan_link(cls, event):
         item = event.lesson_plan_item
         if event.lesson_plan_item_id:

@@ -4,14 +4,37 @@ import json
 
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import Client, TestCase
+from django.test import Client, SimpleTestCase, TestCase
 from rest_framework.test import APIClient
 
 from Cabinet.models import Profile
 from Generator.models import Level, Part, Subject, Task, TaskList, Variant, VariantContent
 from Generator.variant_theme_access import can_manage_variant_themes, can_select_variant_theme
 from Generator.variant_theme_models import VariantTheme
-from Generator.variant_theme_service import TRAVEL_CONFIG, sanitize_variant_theme_config
+from Generator.variant_theme_service import (
+    ALLOWED_ANIMATIONS,
+    ALLOWED_DECORATIONS,
+    TRAVEL_CONFIG,
+    animation_ids_from_catalog,
+    decoration_ids_from_catalog,
+    sanitize_variant_theme_config,
+)
+
+
+class DecorationCatalogTests(SimpleTestCase):
+    def test_server_allows_ids_from_the_catalog_file(self):
+        ids = decoration_ids_from_catalog()
+        animations = animation_ids_from_catalog()
+        self.assertEqual(ALLOWED_DECORATIONS, ids)
+        self.assertEqual(ALLOWED_ANIMATIONS, animations)
+        self.assertIn("clouds", ids)
+        self.assertIn("route-dots", ids)
+        self.assertNotIn("falling-leaves", ids)
+        self.assertIn("falling-leaves", animations)
+        self.assertNotIn("plane-route", animations)
+        self.assertNotIn("plane", ids)
+        self.assertNotIn("camera", ids)
+        self.assertNotIn("malware", ids)
 
 
 def _make_teacher(username):
@@ -124,8 +147,14 @@ class VariantThemeApiTests(TestCase):
         self.assertEqual(theme.get("layout_type"), "route")
         self.assertEqual(theme.get("config", {}).get("labels", {}).get("task"), "Остановка")
         self.assertIn("background_image_url", theme)
+        self.assertIn("background_image_vertical_url", theme)
         self.assertIn("block_background_image_url", theme)
+        self.assertIn("sheet_background_image_url", theme)
+        self.assertIn("sheet_background_image_vertical_url", theme)
         self.assertEqual(theme.get("block_background_image_url"), "")
+        self.assertEqual(theme.get("sheet_background_image_url"), "")
+        self.assertEqual(theme.get("background_image_vertical_url"), "")
+        self.assertEqual(theme.get("sheet_background_image_vertical_url"), "")
 
     def test_disabled_theme_falls_back_to_classic_payload(self):
         variant = self._create_variant(theme=self.disabled)
@@ -209,18 +238,30 @@ class VariantThemeApiTests(TestCase):
             f"/api/admin/variant-themes/{self.travel.id}/",
             {
                 "background_image": tiny_png("page.png"),
+                "background_image_vertical": tiny_png("page-tall.png"),
                 "block_background_image": tiny_png("blocks.png"),
+                "sheet_background_image": tiny_png("sheet.png"),
+                "sheet_background_image_vertical": tiny_png("sheet-tall.png"),
             },
             format="multipart",
         )
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertTrue(payload.get("background_image_url"))
+        self.assertTrue(payload.get("background_image_vertical_url"))
         self.assertTrue(payload.get("block_background_image_url"))
+        self.assertTrue(payload.get("sheet_background_image_url"))
+        self.assertTrue(payload.get("sheet_background_image_vertical_url"))
+        self.assertNotEqual(payload["background_image_url"], payload["background_image_vertical_url"])
+        self.assertNotEqual(payload["sheet_background_image_url"], payload["sheet_background_image_vertical_url"])
         self.assertNotEqual(payload["background_image_url"], payload["block_background_image_url"])
+        self.assertNotEqual(payload["sheet_background_image_url"], payload["background_image_url"])
         self.travel.refresh_from_db()
         self.assertTrue(self.travel.background_image)
+        self.assertTrue(self.travel.background_image_vertical)
         self.assertTrue(self.travel.block_background_image)
+        self.assertTrue(self.travel.sheet_background_image)
+        self.assertTrue(self.travel.sheet_background_image_vertical)
 
     def test_teacher_cannot_set_theme_id_on_create(self):
         self.client.force_login(self.teacher)
@@ -266,6 +307,38 @@ class VariantThemeApiTests(TestCase):
         variant.refresh_from_db()
         self.assertIsNone(variant.theme_id)
 
+    def test_legacy_route_color_keeps_its_visible_gradient(self):
+        import importlib
+
+        from django.apps import apps
+
+        migration = importlib.import_module(
+            "Generator.migrations.0106_variant_theme_legacy_route_gradient"
+        )
+        legacy = VariantTheme.objects.create(
+            name="Старый маршрут",
+            slug="old-route",
+            layout_type="route",
+            config={
+                "background": {"type": "color", "color": "#e7f3fb"},
+                "labels": {"task": "Остановка"},
+            },
+        )
+        custom = VariantTheme.objects.create(
+            name="Свой цвет",
+            slug="custom-color",
+            layout_type="route",
+            config={"background": {"type": "color", "color": "#224466"}},
+        )
+        migration.preserve_legacy_route_gradient(apps, None)
+        legacy.refresh_from_db()
+        custom.refresh_from_db()
+        self.assertEqual(legacy.config["background"]["type"], "gradient")
+        self.assertEqual(legacy.config["background"]["colors"][0], "#9fc8e4")
+        self.assertEqual(legacy.config["labels"]["task"], "Остановка")
+        self.assertEqual(custom.config["background"]["color"], "#224466")
+        self.assertEqual(custom.config["background"]["type"], "color")
+
     def test_config_rejects_html_and_unknown_animation(self):
         cleaned = sanitize_variant_theme_config(
             {
@@ -291,7 +364,7 @@ class VariantThemeApiTests(TestCase):
                     "finish": "Завершить путешествие",
                     "previous": "Вернуться",
                 },
-                "animation": "travel-route",
+                "animation": "clouds",
                 "background": {
                     "type": "gradient",
                     "colors": ["#f7d6a3", "#f6b97a", "#9dcfe3"],
@@ -300,12 +373,6 @@ class VariantThemeApiTests(TestCase):
                 "decorations": [
                     "map",
                     "camera",
-                    "backpack",
-                    "compass",
-                    "suitcase",
-                    "postcard",
-                    "passport",
-                    "airplane",
                     "route-dots",
                     "mountains",
                     "sea",
@@ -314,7 +381,7 @@ class VariantThemeApiTests(TestCase):
                 ],
             }
         )
-        self.assertEqual(cleaned["animation"], "travel-route")
+        self.assertEqual(cleaned["animation"], "clouds")
         self.assertEqual(cleaned["labels"]["task"], "Остановка")
         self.assertEqual(cleaned["background"]["type"], "gradient")
         self.assertEqual(cleaned["background"]["colors"], ["#f7d6a3", "#f6b97a", "#9dcfe3"])
@@ -323,13 +390,6 @@ class VariantThemeApiTests(TestCase):
             cleaned["decorations"],
             [
                 "map",
-                "camera",
-                "backpack",
-                "compass",
-                "suitcase",
-                "postcard",
-                "passport",
-                "airplane",
                 "route-dots",
                 "mountains",
                 "sea",
@@ -353,13 +413,13 @@ class VariantThemeApiTests(TestCase):
                 "config": json.dumps(
                     {
                         "labels": {"task": "Остановка", "finish": "Завершить путешествие"},
-                        "animation": "travel-route",
+                        "animation": "clouds",
                         "background": {
                             "type": "gradient",
                             "colors": ["#f7d6a3", "#f6b97a", "#9dcfe3"],
                             "direction": "sunset",
                         },
-                        "decorations": ["map", "backpack", "airplane"],
+                        "decorations": ["map"],
                     }
                 ),
             },
@@ -368,11 +428,11 @@ class VariantThemeApiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertTrue(payload.get("preview_image_url"))
-        self.assertEqual(payload["config"]["animation"], "travel-route")
+        self.assertEqual(payload["config"]["animation"], "clouds")
         self.assertEqual(payload["config"]["background"]["type"], "gradient")
         self.travel.refresh_from_db()
         self.assertTrue(self.travel.preview_image)
-        self.assertEqual(self.travel.config.get("animation"), "travel-route")
+        self.assertEqual(self.travel.config.get("animation"), "clouds")
 
     def test_me_exposes_theme_permissions(self):
         self.client.force_login(self.staff)

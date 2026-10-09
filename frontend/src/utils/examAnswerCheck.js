@@ -154,7 +154,7 @@ export function parseCorrectTableAnswer(correctAnswerHtml, rows = INF_TABLE_ROWS
   return matrix;
 }
 
-function getInfTask26Score(userMatrix, correctMatrix) {
+export function getInfTask26Score(userMatrix, correctMatrix) {
   const u = (userMatrix[0] || []).map((c) => normalize(c));
   const c = (correctMatrix[0] || []).map((cell) => normalize(cell));
   let match = 0;
@@ -163,7 +163,7 @@ function getInfTask26Score(userMatrix, correctMatrix) {
   return match === 2 ? 2 : match === 1 ? 1 : 0;
 }
 
-function getInfTask27Score(userMatrix, correctMatrix) {
+export function getInfTask27Score(userMatrix, correctMatrix) {
   const rowMatch = (r) => {
     const u = (userMatrix[r] || []).map((cell) => normalize(cell));
     const c = (correctMatrix[r] || []).map((cell) => normalize(cell));
@@ -174,6 +174,17 @@ function getInfTask27Score(userMatrix, correctMatrix) {
   if (r0 && r1) return 2;
   if (r0 || r1) return 1;
   return 0;
+}
+
+/** Баллы 0/1/2 для ЕГЭ информатика №26 и №27. null — это не такое задание. */
+export function scoreInformaticsTableTask(taskNumber, userRaw, correctHtml) {
+  const num = Number(taskNumber);
+  if (num !== 26 && num !== 27) return null;
+  const userMatrix = parseUserTableAnswer(userRaw);
+  const correctMatrix = parseCorrectTableAnswer(correctHtml || "");
+  return num === 26
+    ? getInfTask26Score(userMatrix, correctMatrix)
+    : getInfTask27Score(userMatrix, correctMatrix);
 }
 
 /**

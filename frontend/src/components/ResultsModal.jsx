@@ -341,7 +341,31 @@ function deriveHeroPresentation(r) {
       note: null,
     };
   }
-  const { examMode, scoreExam, markLevel, level, fullyCorrectTaskCount, taskCountTotal, totalScore, maxScore, scorePart1Only } = r;
+  const { examMode, scoreExam, markLevel, level, fullyCorrectTaskCount, taskCountTotal, totalScore, maxScore, scorePart1Only, preliminary } = r;
+
+  if (preliminary) {
+    return {
+      heroClass: "results-hero--neutral",
+      fg: "#757575",
+      iconKind: "warn",
+      mainNum: String(totalScore ?? 0),
+      suffix: ` из ${maxScore ?? 0}`,
+      variant: "neutral",
+      note: "Предварительный первичный балл: есть задания без проверки. Это не итоговый результат.",
+    };
+  }
+
+  if (r.serverScoreConfirmed === false) {
+    return {
+      heroClass: "results-hero--neutral",
+      fg: "#757575",
+      iconKind: "warn",
+      mainNum: String(totalScore ?? 0),
+      suffix: ` из ${maxScore ?? 0}`,
+      variant: "neutral",
+      note: "Сервер не подтвердил итог. Числа посчитаны в браузере и в работу не записаны.",
+    };
+  }
 
   if (scorePart1Only) {
     const ok = fullyCorrectTaskCount;

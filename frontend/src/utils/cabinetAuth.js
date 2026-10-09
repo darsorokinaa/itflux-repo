@@ -678,8 +678,9 @@ export function fetchCalendarEvents({ from, to }) {
   return cabinetFetch(`/calendar/events/?${params.toString()}`, { method: "GET" });
 }
 
-export function fetchScheduleEvents({ from, to }) {
+export function fetchScheduleEvents({ from, to, includeCancelled = true }) {
   const params = new URLSearchParams({ from, to });
+  if (includeCancelled) params.set("include_cancelled", "1");
   return cabinetFetch(`/schedule/events/?${params.toString()}`, { method: "GET" });
 }
 
@@ -813,12 +814,13 @@ export function updateScheduleEventMaterials(eventId, payload = {}) {
   });
 }
 
-export function deleteScheduleEvent(eventId, { scope, notifyParticipants = true } = {}) {
+export function deleteScheduleEvent(eventId, { scope, notifyParticipants = true, expectedUpdatedAt = "" } = {}) {
   if (scope) {
     return updateScheduleEvent(eventId, {
       status: "cancelled",
       scope,
       notify_participants: notifyParticipants,
+      ...(expectedUpdatedAt ? { expected_updated_at: expectedUpdatedAt } : {}),
     });
   }
   return cabinetFetch(`/schedule/events/${encodeURIComponent(eventId)}/delete/`, {

@@ -344,7 +344,7 @@ class PlanScheduleMappingTests(TestCase):
         self.assertEqual(payload2["planItem"]["title"], "Таблицы истинности")
 
     def test_cancel_shift_rebinds_future_lessons(self):
-        """Отмена со сдвигом переносит тему на следующее занятие."""
+        """Отмена не переносит тему отменённого занятия на следующее."""
         base = timezone.now().replace(hour=15, minute=0, second=0, microsecond=0)
         event3 = create_single_event(
             teacher=self.teacher,
@@ -366,10 +366,12 @@ class PlanScheduleMappingTests(TestCase):
             plan_cancel_action="shift",
         )
         event3.refresh_from_db()
-        self.assertEqual(event3.lesson_plan_item_id, self.item2.id)
-        self.assertEqual(event3.topic, (self.item2.topic or self.item2.title))
+        self.item2.refresh_from_db()
+        self.assertEqual(event3.lesson_plan_item_id, self.item3.id)
+        self.assertEqual(event3.topic, (self.item3.topic or self.item3.title))
+        self.assertEqual(self.item2.scheduled_event_id, self.event2.pk)
         next_item = PlanSyncService.get_next_plan_item(self.enrollment)
-        self.assertEqual(next_item.id, self.item3.id)
+        self.assertIsNone(next_item)
         event4 = create_single_event(
             teacher=self.teacher,
             data={
@@ -382,7 +384,7 @@ class PlanScheduleMappingTests(TestCase):
             student_ids=[self.student.pk],
             notify=False,
         )
-        self.assertEqual(event4.lesson_plan_item_id, self.item3.id)
+        self.assertIsNone(event4.lesson_plan_item_id)
 
     def test_cancel_skip_advances_plan_topic(self):
         base = timezone.now().replace(hour=15, minute=0, second=0, microsecond=0)
@@ -937,6 +939,7 @@ class ScheduleEventUpdateApiTests(TestCase):
                 "telemost_url": "https://telemost.yandex.ru/j/test123",
                 "scope": "single",
                 "notify_participants": False,
+                "expected_updated_at": self.event.updated_at.isoformat(),
             },
             format="json",
         )
@@ -979,6 +982,7 @@ class ScheduleEventUpdateApiTests(TestCase):
                 "telemost_url": "https://telemost.yandex.ru/j/reschedule-once",
                 "scope": "single",
                 "notify_participants": True,
+                "expected_updated_at": self.event.updated_at.isoformat(),
             },
             format="json",
         )
@@ -1008,6 +1012,7 @@ class ScheduleEventUpdateApiTests(TestCase):
                 "telemost_url": "https://telemost.yandex.ru/j/series-all",
                 "scope": "series",
                 "notify_participants": False,
+                "expected_updated_at": self.event.updated_at.isoformat(),
             },
             format="json",
         )
@@ -1038,6 +1043,7 @@ class ScheduleEventUpdateApiTests(TestCase):
                 "telemost_url": "https://telemost.yandex.ru/j/from-second",
                 "scope": "following",
                 "notify_participants": False,
+                "expected_updated_at": second.updated_at.isoformat(),
             },
             format="json",
         )
@@ -1069,6 +1075,7 @@ class ScheduleEventUpdateApiTests(TestCase):
                 "ends_at": new_end.strftime("%Y-%m-%dT%H:%M:%S"),
                 "scope": "following",
                 "notify_participants": False,
+                "expected_updated_at": first.updated_at.isoformat(),
             },
             format="json",
         )
@@ -1108,6 +1115,7 @@ class ScheduleEventUpdateApiTests(TestCase):
                 "ends_at": new_end.strftime("%Y-%m-%dT%H:%M:%S"),
                 "scope": "series",
                 "notify_participants": False,
+                "expected_updated_at": first.updated_at.isoformat(),
             },
             format="json",
         )
@@ -1151,6 +1159,7 @@ class ScheduleEventUpdateApiTests(TestCase):
                 "ends_at": local_end.strftime("%Y-%m-%dT%H:%M:%S"),
                 "scope": "series",
                 "notify_participants": False,
+                "expected_updated_at": orphan.updated_at.isoformat(),
             },
             format="json",
         )

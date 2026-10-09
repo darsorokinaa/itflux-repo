@@ -104,8 +104,10 @@ export function homeworkTaskComment(result, taskId, taskNumber, tasks) {
 
 export function taskMaxScore(task) {
   const raw = task?.max_score;
-  if (raw != null && !Number.isNaN(Number(raw))) return Number(raw);
-  return 3;
+  if (raw == null || raw === "") return 1;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return 1;
+  return n;
 }
 
 export function formatReviewDate(value) {

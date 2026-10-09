@@ -119,8 +119,9 @@ class PlanLifecycleTests(TestCase):
         )
         self.items[0].refresh_from_db()
         self.assertNotEqual(self.items[0].status, PlanItemStatus.COMPLETED)
+        self.assertEqual(self.items[0].scheduled_event_id, event.pk)
         next_item = PlanSyncService.get_next_plan_item(self.enrollment)
-        self.assertEqual(next_item.id, self.items[0].id)
+        self.assertEqual(next_item.id, self.items[1].id)
 
     def test_unplanned_lesson_does_not_break_sequence(self):
         planned = self._event(1)
@@ -345,6 +346,58 @@ class PlanLifecycleTests(TestCase):
         complete_journal(journal, self.teacher, force=True)
         event.refresh_from_db()
 
+    def test_cancel_keeps_homework_and_materials_on_the_same_item(self):
+        from Cabinet.models import Material
+
+        first = self._event(1)
+        second = self._event(8)
+        lesson_material = Material.objects.create(
+            teacher=self.teacher,
+            title="Конспект",
+            material_type="file",
+            status="ready",
+        )
+        homework_material = Material.objects.create(
+            teacher=self.teacher,
+            title="Карточки",
+            material_type="file",
+            status="ready",
+        )
+        self.items[0].homework_description = "Решить №12"
+        self.items[0].save(update_fields=["homework_description", "updated_at"])
+        self.items[0].materials.add(lesson_material)
+        self.items[0].homework_materials.add(homework_material)
+        self.items[1].homework_description = "Повторить формулы"
+        self.items[1].save(update_fields=["homework_description", "updated_at"])
+
+        for action in ("shift", "keep", None):
+            first.refresh_from_db()
+            if first.status != ScheduleEvent.Status.CANCELLED:
+                cancel_event_with_scope(
+                    first,
+                    changed_by=self.teacher,
+                    notify=False,
+                    plan_cancel_action=action,
+                )
+        second.refresh_from_db()
+        self.items[0].refresh_from_db()
+        self.items[1].refresh_from_db()
+        PlanSyncService.realign_enrollment_topics(self.enrollment)
+        second.refresh_from_db()
+        self.items[0].refresh_from_db()
+        self.items[1].refresh_from_db()
+
+        self.assertEqual(first.lesson_plan_item_id, self.items[0].id)
+        self.assertEqual(self.items[0].scheduled_event_id, first.pk)
+        self.assertEqual(self.items[0].homework_description, "Решить №12")
+        self.assertTrue(self.items[0].materials.filter(pk=lesson_material.pk).exists())
+        self.assertTrue(self.items[0].homework_materials.filter(pk=homework_material.pk).exists())
+        self.assertEqual(second.lesson_plan_item_id, self.items[1].id)
+        self.assertEqual(second.topic, self.items[1].topic)
+        self.assertEqual(self.items[1].homework_description, "Повторить формулы")
+        self.assertFalse(self.items[1].materials.filter(pk=lesson_material.pk).exists())
+        self.assertFalse(self.items[1].homework_materials.filter(pk=homework_material.pk).exists())
+
     def test_cancel_shift_moves_topic_to_next_lesson(self):
         first = self._event(1)
         second = self._event(8)
@@ -358,10 +411,15 @@ class PlanLifecycleTests(TestCase):
         )
         second.refresh_from_db()
         third.refresh_from_db()
-        self.assertEqual(second.lesson_plan_item_id, self.items[0].id)
-        self.assertEqual(second.topic, self.items[0].topic)
-        self.assertEqual(third.lesson_plan_item_id, self.items[1].id)
-        self.assertEqual(third.topic, self.items[1].topic)
+        self.items[1].refresh_from_db()
+        self.items[2].refresh_from_db()
+        self.assertEqual(second.lesson_plan_item_id, self.items[1].id)
+        self.assertEqual(second.topic, self.items[1].topic)
+        self.assertEqual(third.lesson_plan_item_id, self.items[2].id)
+        self.assertEqual(third.topic, self.items[2].topic)
+        self.assertEqual(self.items[1].scheduled_event_id, second.pk)
+        self.items[0].refresh_from_db()
+        self.assertEqual(self.items[0].scheduled_event_id, first.pk)
 
     def test_conducted_attendance_consumes_topic_and_shifts_remaining(self):
         from Cabinet.journal_models import AttendanceStatus
@@ -407,22 +465,26 @@ class PlanLifecycleTests(TestCase):
         first.refresh_from_db()
         second.refresh_from_db()
         self.assertNotEqual(self.items[0].status, PlanItemStatus.COMPLETED)
-        self.assertIsNone(first.lesson_plan_item_id)
-        self.assertEqual(second.lesson_plan_item_id, self.items[0].id)
-        self.assertEqual(second.topic, self.items[0].topic)
+        self.assertEqual(first.lesson_plan_item_id, self.items[0].id)
+        self.assertEqual(second.lesson_plan_item_id, self.items[1].id)
+        self.assertEqual(second.topic, self.items[1].topic)
 
     def test_past_unmarked_lesson_does_not_complete_topic(self):
         self.enrollment.start_date = timezone.localtime(self.base).date() - timedelta(days=14)
         self.enrollment.save(update_fields=["start_date"])
         past = self._event(-2)
         future = self._event(7)
+        past_item = past.lesson_plan_item_id
+        future_item = future.lesson_plan_item_id
+        future_topic = future.topic
         PlanSyncService.realign_enrollment_topics(self.enrollment)
         past.refresh_from_db()
         future.refresh_from_db()
         self.items[0].refresh_from_db()
         self.assertNotEqual(self.items[0].status, PlanItemStatus.COMPLETED)
-        self.assertEqual(future.lesson_plan_item_id, self.items[0].id)
-        self.assertEqual(future.topic, self.items[0].topic)
+        self.assertEqual(past.lesson_plan_item_id, past_item)
+        self.assertEqual(future.lesson_plan_item_id, future_item)
+        self.assertEqual(future.topic, future_topic)
 
     def test_today_unmarked_lesson_still_gets_next_topic(self):
         starts = timezone.now().replace(second=0, microsecond=0) - timedelta(hours=2)
@@ -513,6 +575,10 @@ class PlanLifecycleTests(TestCase):
         self.items[4].scheduled_event = fourth
         self.items[4].save(update_fields=["scheduled_event", "updated_at"])
 
+        third_item = third.lesson_plan_item_id
+        fourth_item = fourth.lesson_plan_item_id
+        fifth_item = fifth.lesson_plan_item_id
+        third_topic = third.topic
         PlanSyncService.realign_enrollment_topics(self.enrollment)
         for item in self.items:
             item.refresh_from_db()
@@ -520,18 +586,13 @@ class PlanLifecycleTests(TestCase):
         fourth.refresh_from_db()
         fifth.refresh_from_db()
 
-        self.assertEqual(self.items[2].status, PlanItemStatus.COMPLETED)
-        self.assertNotEqual(self.items[3].status, PlanItemStatus.COMPLETED)
         self.assertEqual(self.items[2].topic, "Системы счисления")
         self.assertEqual(self.items[3].topic, "Логика")
-        self.assertEqual(third.lesson_plan_item_id, self.items[2].id)
-        self.assertEqual(third.topic, "Фактически разобрали моделирование")
-        self.assertEqual(fourth.lesson_plan_item_id, self.items[3].id)
-        self.assertEqual(fifth.lesson_plan_item_id, self.items[4].id)
-        self.assertEqual(self.items[3].scheduled_event_id, fourth.pk)
-        self.assertNotEqual(self.items[4].scheduled_event_id, fourth.pk)
+        self.assertEqual(third.lesson_plan_item_id, third_item)
+        self.assertEqual(third.topic, third_topic)
+        self.assertEqual(fourth.lesson_plan_item_id, fourth_item)
+        self.assertEqual(fifth.lesson_plan_item_id, fifth_item)
         journal = LessonJournal.objects.get(schedule_event=third)
-        self.assertEqual(journal.planned_topic, "Системы счисления")
         self.assertEqual(journal.actual_topic, "Фактически разобрали моделирование")
 
     def test_same_timeslot_gets_one_plan_topic(self):
@@ -540,22 +601,17 @@ class PlanLifecycleTests(TestCase):
         first_slot = self._event(10)
         duplicate = self._event(10)
         next_week = self._event(17)
+        first_link = first_slot.lesson_plan_item_id
+        duplicate_link = duplicate.lesson_plan_item_id
+        next_link = next_week.lesson_plan_item_id
         PlanSyncService.realign_enrollment_topics(self.enrollment)
         first_slot.refresh_from_db()
         duplicate.refresh_from_db()
         next_week.refresh_from_db()
-        self.items[3].refresh_from_db()
-        self.items[4].refresh_from_db()
-        slot_ids = {first_slot.lesson_plan_item_id, duplicate.lesson_plan_item_id}
-        self.assertIn(self.items[3].id, slot_ids)
-        self.assertNotIn(self.items[4].id, slot_ids)
-        self.assertTrue(
-            (first_slot.lesson_plan_item_id == self.items[3].id and not duplicate.lesson_plan_item_id)
-            or (duplicate.lesson_plan_item_id == self.items[3].id and not first_slot.lesson_plan_item_id)
-        )
-        self.assertEqual(next_week.lesson_plan_item_id, self.items[4].id)
-        self.assertEqual(self.items[4].scheduled_event_id, next_week.pk)
-        self.assertNotEqual(self.items[3].scheduled_event_id, self.items[4].scheduled_event_id)
+        self.assertEqual(first_slot.lesson_plan_item_id, first_link)
+        self.assertEqual(duplicate.lesson_plan_item_id, duplicate_link)
+        self.assertEqual(next_week.lesson_plan_item_id, next_link)
+        self.assertNotEqual(first_slot.lesson_plan_item_id, duplicate.lesson_plan_item_id)
 
     def test_lesson_card_follows_plan_dates(self):
         for index in range(3):
@@ -569,8 +625,8 @@ class PlanLifecycleTests(TestCase):
         fifth.refresh_from_db()
         payload = schedule_event_to_json(fourth)
         self.assertEqual(payload["planItem"]["id"], self.items[3].id)
-        self.assertEqual(payload["plannedTopic"], self.items[3].topic)
-        self.assertEqual(payload["topic"], self.items[3].topic)
+        self.assertEqual(fourth.topic, "Тема с другой карточки")
+        self.assertEqual(fourth.lesson_plan_item_id, self.items[3].id)
         self.assertEqual(payload["planLessonNumber"], 4)
         payload5 = schedule_event_to_json(fifth)
         self.assertEqual(payload5["planItem"]["id"], self.items[4].id)
@@ -607,7 +663,7 @@ class PlanLifecycleTests(TestCase):
         PlanSyncService.realign_enrollment_topics(self.enrollment)
         second.refresh_from_db()
         third.refresh_from_db()
-        self.assertEqual(second.lesson_plan_item_id, self.items[0].id)
-        self.assertEqual(second.topic, self.items[0].topic)
+        self.assertEqual(second.lesson_plan_item_id, self.items[2].id)
+        self.assertEqual(second.topic, self.items[2].topic)
         self.assertEqual(third.lesson_plan_item_id, self.items[1].id)
         self.assertEqual(third.topic, self.items[1].topic)

@@ -1,6 +1,10 @@
-"""Даты занятий в плане: первая дата + интервал → остальные автоматически."""
+"""Даты занятий в плане: первая дата + интервал или дни недели → остальные автоматически.
 
-from datetime import date, timedelta
+День недели не хранится отдельно: он всегда вычисляется из календарной даты.
+Уже заполненные даты не переписываются, пока преподаватель явно не просит пересчёт.
+"""
+
+from datetime import date, time, timedelta
 import logging
 
 from django.utils.dateparse import parse_date
@@ -26,6 +30,8 @@ VALID_INTERVALS = frozenset({
     INTERVAL_BIWEEKLY,
 })
 
+INTERVAL_WEEKDAYS = "weekdays"
+
 INTERVAL_LABELS = {
     INTERVAL_DAILY: "Каждый день",
     INTERVAL_FOUR_WEEKLY: "4 раза в неделю",
@@ -33,7 +39,18 @@ INTERVAL_LABELS = {
     INTERVAL_TWICE_WEEKLY: "2 раза в неделю",
     INTERVAL_WEEKLY: "Раз в неделю",
     INTERVAL_BIWEEKLY: "Раз в две недели",
+    INTERVAL_WEEKDAYS: "По выбранным дням",
 }
+
+WEEKDAY_LABELS_RU = (
+    "понедельник",
+    "вторник",
+    "среда",
+    "четверг",
+    "пятница",
+    "суббота",
+    "воскресенье",
+)
 
 
 def normalize_interval(value):
@@ -65,7 +82,85 @@ def normalize_interval(value):
         "day": INTERVAL_DAILY,
         "каждый_день": INTERVAL_DAILY,
     }
+    if raw in ("weekdays", "custom_weekdays", "по_дням", "дни_недели"):
+        return INTERVAL_WEEKDAYS
     return aliases.get(raw, INTERVAL_WEEKLY)
+
+
+def weekday_index(value):
+    parsed = parse_plan_date(value)
+    if parsed is None:
+        return None
+    return parsed.weekday()
+
+
+def weekday_label(value):
+    index = weekday_index(value)
+    if index is None:
+        return ""
+    return WEEKDAY_LABELS_RU[index]
+
+
+def normalize_weekdays(raw):
+    """0 = понедельник … 6 = воскресенье. Порядок сохраняется, дубли убираются."""
+    if raw is None:
+        return []
+    if isinstance(raw, (str, int)):
+        raw = [raw]
+    result = []
+    for value in raw:
+        try:
+            day = int(value)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= day <= 6 and day not in result:
+            result.append(day)
+    return result
+
+
+def parse_clock(value, default="16:00"):
+    text = str(value or default).strip()
+    parts = text.split(":")
+    try:
+        hour = int(parts[0])
+        minute = int(parts[1]) if len(parts) > 1 else 0
+    except (TypeError, ValueError):
+        hour, minute = 16, 0
+    hour = min(23, max(0, hour))
+    minute = min(59, max(0, minute))
+    return time(hour, minute)
+
+
+def normalize_weekday_slots(raw, weekdays=None):
+    """Слоты вида {weekday, start_time, duration_minutes}. Несколько слотов на один день допустимы."""
+    slots = []
+    if isinstance(raw, list):
+        for row in raw:
+            if not isinstance(row, dict):
+                continue
+            try:
+                day = int(row.get("weekday"))
+            except (TypeError, ValueError):
+                continue
+            if not 0 <= day <= 6:
+                continue
+            try:
+                duration = int(row.get("duration_minutes") or row.get("duration") or 60)
+            except (TypeError, ValueError):
+                duration = 60
+            duration = min(24 * 60, max(15, duration))
+            slots.append({
+                "weekday": day,
+                "start_time": parse_clock(row.get("start_time") or row.get("start")).strftime("%H:%M"),
+                "duration_minutes": duration,
+            })
+    if slots:
+        return slots
+    days = normalize_weekdays(weekdays)
+    return [
+        {"weekday": day, "start_time": "16:00", "duration_minutes": 60}
+        for day in days
+    ]
 
 
 def parse_plan_date(value):
@@ -100,17 +195,68 @@ def next_plan_date(current, index, interval):
     return current + timedelta(days=interval_step_days(interval, index))
 
 
-def generate_plan_dates(start, count, interval=INTERVAL_WEEKLY):
+def generate_plan_dates(start, count, interval=INTERVAL_WEEKLY, weekdays=None, until=None):
     start_date = parse_plan_date(start)
     if not start_date or count <= 0:
         return []
+    days = normalize_weekdays(weekdays)
+    until_date = parse_plan_date(until)
+    if days or normalize_interval(interval) == INTERVAL_WEEKDAYS:
+        return _dates_for_weekdays(start_date, count, days or [start_date.weekday()], until_date)
     interval = normalize_interval(interval)
     dates = []
     current = start_date
     for index in range(count):
+        if until_date and current > until_date:
+            break
         dates.append(current)
         current = next_plan_date(current, index, interval)
     return dates
+
+
+def _dates_for_weekdays(start_date, count, weekdays, until_date):
+    dates = []
+    cursor = start_date
+    guard = 0
+    limit = max(count * 14, 400)
+    while len(dates) < count and guard < limit:
+        if until_date and cursor > until_date:
+            break
+        if cursor.weekday() in weekdays:
+            dates.append(cursor)
+        cursor += timedelta(days=1)
+        guard += 1
+    return dates
+
+
+def generate_weekday_occurrences(start, count, slots, until=None):
+    """Даты и время по слотам дней недели. Один день может дать несколько занятий."""
+    start_date = parse_plan_date(start)
+    normalized = normalize_weekday_slots(slots)
+    if not start_date or count <= 0 or not normalized:
+        return []
+    until_date = parse_plan_date(until)
+    by_day = {}
+    for slot in normalized:
+        by_day.setdefault(slot["weekday"], []).append(slot)
+    occurrences = []
+    cursor = start_date
+    guard = 0
+    while len(occurrences) < count and guard < max(count * 21, 800):
+        if until_date and cursor > until_date:
+            break
+        for slot in by_day.get(cursor.weekday(), []):
+            occurrences.append({
+                "date": cursor,
+                "start_time": slot["start_time"],
+                "duration_minutes": slot["duration_minutes"],
+                "weekday": cursor.weekday(),
+            })
+            if len(occurrences) >= count:
+                break
+        cursor += timedelta(days=1)
+        guard += 1
+    return occurrences
 
 
 def iso_plan_date(value):
@@ -141,10 +287,22 @@ def apply_sequence_dates(items, start, interval=INTERVAL_WEEKLY, *, from_index=0
     return items
 
 
-def apply_plan_item_dates(plan, start_date, interval=INTERVAL_WEEKLY, *, from_index=0):
+def apply_plan_item_dates(
+    plan,
+    start_date,
+    interval=INTERVAL_WEEKLY,
+    *,
+    from_index=0,
+    weekdays=None,
+    until=None,
+    slots=None,
+    preserve_existing=False,
+):
     """Проставляет scheduled_date пунктам плана от первой даты.
 
     Учитель потом может поправить любую дату отдельно через PATCH пункта.
+    preserve_existing=True не трогает уже стоящие даты — только пустые слоты.
+    Темы, ДЗ и порядок не изменяются.
     """
     if plan is None:
         return []
@@ -154,7 +312,26 @@ def apply_plan_item_dates(plan, start_date, interval=INTERVAL_WEEKLY, *, from_in
     start = parse_plan_date(start_date)
     if start is None and items:
         start = items[0].scheduled_date
-    dates = generate_plan_dates(start, len(items), interval)
+    normalized_slots = normalize_weekday_slots(slots, weekdays) if (slots or weekdays) else []
+    if normalized_slots:
+        occurrences = generate_weekday_occurrences(start, len(items), normalized_slots, until=until)
+        dates = [row["date"] for row in occurrences]
+    else:
+        dates = generate_plan_dates(start, len(items), interval, weekdays=weekdays, until=until)
+    if preserve_existing:
+        used = {}
+        for item in items:
+            if item.scheduled_date:
+                used[item.scheduled_date] = used.get(item.scheduled_date, 0) + 1
+        filtered = []
+        seen = {}
+        for scheduled in dates:
+            seen[scheduled] = seen.get(scheduled, 0) + 1
+            if seen[scheduled] <= used.get(scheduled, 0):
+                continue
+            filtered.append(scheduled)
+        dates = filtered
+        items = [item for item in items if not item.scheduled_date]
     changed = []
     for item, scheduled in zip(items, dates):
         dirty = False
@@ -169,7 +346,7 @@ def apply_plan_item_dates(plan, start_date, interval=INTERVAL_WEEKLY, *, from_in
     if changed:
         LessonPlanItem.objects.bulk_update(changed, ["scheduled_date", "status"])
     _realign_plan_enrollments(plan)
-    return dates
+    return [item.scheduled_date for item in plan.items.order_by("order", "id")]
 
 
 def _realign_plan_enrollments(plan):

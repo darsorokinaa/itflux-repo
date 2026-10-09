@@ -147,10 +147,7 @@ class LessonLearningPlanSyncService:
         from .plan_sync import PlanSyncService
 
         enrollment = get_active_enrollment(event)
-        if enrollment is not None:
-            PlanSyncService.realign_enrollment_topics(enrollment)
-            event.refresh_from_db()
-        else:
+        if enrollment is not None or event.student_id or event.group_id:
             PlanSyncService.link_next_plan_item(event)
             event.refresh_from_db()
         linked = cls._linked_real_plan_item(event)
@@ -431,19 +428,18 @@ class LessonLearningPlanSyncService:
 
         _set_guard(True)
         try:
-            from .plan_sync import PlanSyncService
-
-            result = PlanSyncService.realign_enrollment_topics(enrollment)
             remaining_items = [
                 item for item in plan_items_for_enrollment(enrollment)
                 if item.status not in (PlanItemStatus.COMPLETED, PlanItemStatus.SKIPPED)
             ]
+            # Порядок тем меняет только номер в плане. Связь с занятием остаётся.
             return {
                 "ok": True,
-                "updated_event_ids": result.get("updated_event_ids") or [],
+                "updated_event_ids": [],
                 "warning": None,
-                "future_events": result.get("future_events", 0),
+                "future_events": 0,
                 "plan_items": len(remaining_items),
+                "links_preserved": True,
             }
         finally:
             _set_guard(False)

@@ -17,6 +17,7 @@ _plan_items_cache: ContextVar[dict | None] = ContextVar("schedule_plan_items", d
 
 PLAN_CANCEL_SHIFT = "shift"
 PLAN_CANCEL_SKIP = "skip"
+PLAN_CANCEL_KEEP = "keep"
 
 # Посещаемость, которая для плана считается проведённым занятием:
 # присутствовал, опоздал, ушёл раньше, часть урока, техническая причина.
@@ -36,12 +37,31 @@ def enrollment_start_date(enrollment):
 
 
 def event_local_date(event):
+    """Календарная дата занятия в часовом поясе самого занятия, не сервера."""
     starts = getattr(event, "starts_at", None)
     if starts is None:
         return None
     if timezone.is_aware(starts):
-        starts = timezone.localtime(starts)
+        starts = starts.astimezone(event_zone(event))
     return starts.date()
+
+
+def event_zone(event):
+    import zoneinfo
+
+    name = (getattr(event, "timezone", None) or "").strip()
+    if not name:
+        series = getattr(event, "series", None)
+        name = (getattr(series, "timezone", None) or "").strip() if series is not None else ""
+    if not name:
+        owner = getattr(event, "owner", None)
+        profile = getattr(owner, "profile", None) if owner is not None else None
+        name = (getattr(profile, "timezone", None) or "").strip() if profile is not None else ""
+    name = name or "Europe/Moscow"
+    try:
+        return zoneinfo.ZoneInfo(name)
+    except Exception:
+        return zoneinfo.ZoneInfo("Europe/Moscow")
 
 
 def linked_schedule_event_for_item(item):
@@ -368,7 +388,7 @@ def event_consumed_plan_topic(event, *, student_id=None, attendance_statuses=Non
     """
     if not getattr(event, "plan_sync_enabled", True):
         return False
-    if event.status == ScheduleEvent.Status.CANCELLED:
+    if event.status in (ScheduleEvent.Status.CANCELLED, ScheduleEvent.Status.SKIPPED):
         return False
 
     marked = attendance_statuses
@@ -383,6 +403,8 @@ def event_consumed_plan_topic(event, *, student_id=None, attendance_statuses=Non
 
         if journal.status == JournalStatus.CANCELLED:
             return False
+        if journal.completed_at and journal.status == JournalStatus.REOPENED:
+            return True
         if journal.status == JournalStatus.COMPLETED and (journal.actual_topic or "").strip():
             if event.starts_at >= timezone.now() and event.status not in (
                 ScheduleEvent.Status.DONE,
@@ -403,6 +425,7 @@ def event_is_upcoming_for_plan(event, *, now=None):
         return False
     if event.status in (
         ScheduleEvent.Status.CANCELLED,
+        ScheduleEvent.Status.SKIPPED,
         ScheduleEvent.Status.DONE,
         ScheduleEvent.Status.COMPLETED,
         ScheduleEvent.Status.DRAFT,
@@ -783,10 +806,18 @@ def reopen_completed_enrollments(plan):
 
 
 def apply_plan_cancel_action(event, plan_cancel_action):
-    """Apply plan topic shift/skip when a lesson is cancelled."""
-    action = (plan_cancel_action or PLAN_CANCEL_SHIFT).strip().lower()
-    if action not in (PLAN_CANCEL_SHIFT, PLAN_CANCEL_SKIP):
-        action = PLAN_CANCEL_SHIFT
+    """Отмена занятия в календаре не меняет порядок тем.
+
+    keep — тема, домашнее задание и материалы остаются на этом пункте.
+    skip — преподаватель явно пропускает тему для ученика.
+    shift оставлен для старых клиентов и тоже не переносит содержимое
+    на другое занятие: последовательность меняется только в редакторе плана.
+    """
+    action = (plan_cancel_action or PLAN_CANCEL_KEEP).strip().lower()
+    if action not in (PLAN_CANCEL_SHIFT, PLAN_CANCEL_SKIP, PLAN_CANCEL_KEEP):
+        action = PLAN_CANCEL_KEEP
+    if action == PLAN_CANCEL_SHIFT:
+        action = PLAN_CANCEL_KEEP
 
     event.plan_cancel_action = action if action == PLAN_CANCEL_SKIP else ""
     event.save(update_fields=["plan_cancel_action", "updated_at"])

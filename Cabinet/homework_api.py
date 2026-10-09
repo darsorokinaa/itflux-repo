@@ -791,23 +791,191 @@ def submission_api_status(submission: HomeworkSubmission | None) -> str:
 def compute_score_percent(result: dict | None) -> float | None:
     if not result or not isinstance(result, dict):
         return None
+    scoring = result.get("scoring")
+    if isinstance(scoring, dict) and scoring.get("total_tasks") is not None:
+        if scoring.get("review_status") != "final":
+            return None
+        percentage = scoring.get("percentage")
+        if percentage is None:
+            return None
+        try:
+            return round(float(percentage), 2)
+        except (TypeError, ValueError):
+            return None
     checked = result.get("checked")
     if isinstance(checked, dict) and checked:
         total = len(checked)
         correct = sum(1 for value in checked.values() if value)
         return round(correct * 100 / total, 2) if total else None
-    scores = result.get("scores")
-    if isinstance(scores, dict) and scores:
-        nums = []
-        for value in scores.values():
-            try:
-                nums.append(float(value))
-            except (TypeError, ValueError):
-                continue
-        if nums:
-            max_score = max(nums) if max(nums) > 0 else 100
-            return round(sum(nums) / (len(nums) * max_score) * 100, 2)
     return None
+
+
+def _import_attach_variant_scoring():
+    try:
+        from Generator.variant_scoring import attach_variant_scoring
+    except Exception:
+        from Generator.Generator.variant_scoring import attach_variant_scoring
+    return attach_variant_scoring
+
+
+def _score_number(value):
+    if value is None or value == "":
+        return None
+    try:
+        return round(float(value), 4)
+    except (TypeError, ValueError):
+        return None
+
+
+def manual_scores_changed(previous: dict | None, scores) -> bool:
+    """Учитель изменил балл задания. Повторная отправка тех же чисел — не изменение."""
+    if not isinstance(scores, dict) or not scores:
+        return False
+    prev = {}
+    if isinstance(previous, dict) and isinstance(previous.get("scores"), dict):
+        prev = previous["scores"]
+    for key, value in scores.items():
+        number = _score_number(value)
+        if number is None:
+            continue
+        if _score_number(prev.get(str(key), prev.get(key))) != number:
+            return True
+    return False
+
+
+def store_variant_scoring(
+    payload,
+    homework,
+    *,
+    previous_snapshot=None,
+    previous_grading=None,
+    level="",
+    subject="",
+    refresh_from_bank=False,
+):
+    """Записать снимок состава, эталон и единый scoring. Без варианта payload не меняется."""
+    if not isinstance(payload, dict) or homework is None:
+        return payload
+    variant_id = None
+    for task in homework.tasks.filter(is_active=True):
+        variant_id = extract_variant_id(task.description)
+        if variant_id:
+            break
+    if not variant_id:
+        return payload
+    attach = _import_attach_variant_scoring()
+    return attach(
+        payload,
+        variant_id,
+        level=level,
+        subject=subject,
+        previous_snapshot=previous_snapshot,
+        previous_grading=previous_grading,
+        refresh_from_bank=refresh_from_bank,
+    )
+
+
+def redact_student_result(payload):
+    try:
+        from Generator.variant_scoring import redact_result_for_student
+    except Exception:
+        from Generator.Generator.variant_scoring import redact_result_for_student
+    return redact_result_for_student(payload)
+
+
+def _variant_id_for_homework(homework) -> int | None:
+    if homework is None:
+        return None
+    for task in homework.tasks.filter(is_active=True):
+        variant_id = extract_variant_id(task.description)
+        if variant_id:
+            return variant_id
+    return None
+
+
+def _criteria_differ(frozen, live_tasks) -> bool:
+    frozen_rows = frozen if isinstance(frozen, list) else []
+    live_rows = live_tasks if isinstance(live_tasks, list) else []
+    frozen_map = {
+        str(row.get("id")): str(row.get("answer") or "")
+        for row in frozen_rows
+        if isinstance(row, dict) and row.get("id") is not None
+    }
+    live_map = {
+        str(row.get("id")): str(row.get("answer") or "")
+        for row in live_rows
+        if isinstance(row, dict) and row.get("id") is not None
+    }
+    if set(frozen_map) != set(live_map):
+        return True
+    return any(frozen_map[key] != live_map[key] for key in frozen_map)
+
+
+def preview_variant_rescore(submission) -> dict:
+    """Сравнение сохранённого итога с пересчётом по текущему банку. Ничего не записывает."""
+    try:
+        from Generator.variant_scoring import load_variant_tasks_for_scoring, scoring_summary
+    except Exception:
+        from Generator.Generator.variant_scoring import load_variant_tasks_for_scoring, scoring_summary
+
+    payload = submission.result_payload if isinstance(getattr(submission, "result_payload", None), dict) else {}
+    stored = scoring_summary(payload.get("scoring") if isinstance(payload.get("scoring"), dict) else None)
+    variant_id = _variant_id_for_homework(getattr(submission, "homework", None))
+    base = {
+        "submission_id": getattr(submission, "pk", None),
+        "applied": False,
+        "stored_score": _score_number(getattr(submission, "score", None)),
+        "stored": stored,
+    }
+    if not variant_id:
+        return {**base, "applicable": False, "reason": "no_variant", "proposed": None, "changed": False}
+    live_tasks = load_variant_tasks_for_scoring(variant_id)
+    proposed_payload = store_variant_scoring(
+        dict(payload),
+        submission.homework,
+        refresh_from_bank=True,
+    )
+    proposed = scoring_summary(proposed_payload.get("scoring") if isinstance(proposed_payload, dict) else None)
+    criteria_changed = _criteria_differ(payload.get("grading_snapshot"), live_tasks) or stored is None
+    changed = criteria_changed or stored != proposed
+    return {
+        **base,
+        "applicable": True,
+        "proposed": proposed,
+        "criteria_changed": criteria_changed,
+        "changed": changed,
+    }
+
+
+def apply_variant_rescore(submission) -> dict:
+    """Записать пересчёт одной попытки по текущему банку. Вызывается только после confirm."""
+    preview = preview_variant_rescore(submission)
+    if not preview.get("applicable"):
+        return preview
+    payload = submission.result_payload if isinstance(submission.result_payload, dict) else {}
+    updated = store_variant_scoring(
+        dict(payload),
+        submission.homework,
+        refresh_from_bank=True,
+    )
+    submission.result_payload = updated
+    assign_submission_score(submission, updated)
+    submission.save(update_fields=["result_payload", "score", "updated_at"])
+    preview["applied"] = True
+    preview["stored"] = preview.get("proposed")
+    preview["stored_score"] = _score_number(submission.score)
+    return preview
+
+
+def assign_submission_score(submission, payload) -> None:
+    """Процент попытки. Пока проверка не завершена, предварительный балл не сохраняется."""
+    computed = compute_score_percent(payload if isinstance(payload, dict) else None)
+    scoring = payload.get("scoring") if isinstance(payload, dict) else None
+    if isinstance(scoring, dict):
+        submission.score = computed
+        return
+    if computed is not None:
+        submission.score = computed
 
 
 def recompute_variant_checked(result: dict | None, variant_id: int | None, *, subject: str = "") -> dict | None:
@@ -901,7 +1069,7 @@ def serialize_assignment_payload(*, homework: Homework, submission: HomeworkSubm
         "assignment_id": homework.id,
         "submission_id": submission.pk if submission else None,
         "status": submission_api_status(submission),
-        "result": result,
+        "result": redact_student_result(result) if result else result,
         "task_attachments": (result or {}).get("task_attachments") if result else {"tasks": {}, "comment": []},
         "revision_task_ids": [],
         "deadline": homework.due_at.isoformat() if homework.due_at else None,
@@ -1121,6 +1289,7 @@ _RESULT_MAP_KEYS = (
     "comments_by_task_id",
     "comments_by_number",
 )
+_SERVER_RESULT_KEYS = ("scoring", "tasks_snapshot", "grading_snapshot")
 
 
 def _merge_result_payload(
@@ -1141,12 +1310,19 @@ def _merge_result_payload(
         return dict(prev)
     merged = dict(prev)
     for key, val in incoming.items():
+        if key in _SERVER_RESULT_KEYS:
+            continue
         if key in _RESULT_MAP_KEYS:
             old = merged.get(key) if isinstance(merged.get(key), dict) else {}
             nxt = val if isinstance(val, dict) else {}
             merged[key] = {**old, **nxt}
         else:
             merged[key] = val
+    for key in _SERVER_RESULT_KEYS:
+        if key in prev:
+            merged[key] = prev[key]
+        else:
+            merged.pop(key, None)
     return merged
 
 
@@ -1702,7 +1878,10 @@ class HomeworkAssignmentSaveDraftView(HomeworkAssignmentBaseView):
                     else "Работа уже отправлена на проверку."
                 )
                 return Response({"error": message}, status=status.HTTP_403_FORBIDDEN)
-            merged = _merge_result_payload(submission.result_payload, result)
+            previous = submission.result_payload if isinstance(submission.result_payload, dict) else {}
+            previous_snapshot = previous.get("tasks_snapshot")
+            previous_grading = previous.get("grading_snapshot")
+            merged = _merge_result_payload(previous, result)
             variant_id = None
             for task in homework.tasks.filter(is_active=True):
                 variant_id = extract_variant_id(task.description)
@@ -1719,10 +1898,14 @@ class HomeworkAssignmentSaveDraftView(HomeworkAssignmentBaseView):
 
             ensure_payload_migrated(submission)
             merged = overlay_payload_attachments(submission, merged)
+            merged = store_variant_scoring(
+                merged,
+                homework,
+                previous_snapshot=previous_snapshot if isinstance(previous_snapshot, list) else None,
+                previous_grading=previous_grading if isinstance(previous_grading, list) else None,
+            )
             submission.result_payload = merged
-            computed = compute_score_percent(merged)
-            if computed is not None:
-                submission.score = computed
+            assign_submission_score(submission, merged)
             submission.save(update_fields=["result_payload", "score", "updated_at"])
         logger.info(
             "homework.save_draft ok student_id=%s homework_id=%s submission_id=%s "
@@ -1738,7 +1921,7 @@ class HomeworkAssignmentSaveDraftView(HomeworkAssignmentBaseView):
             {
                 "ok": True,
                 "status": submission_api_status(submission),
-                "result": merged,
+                "result": redact_student_result(merged),
             }
         )
 

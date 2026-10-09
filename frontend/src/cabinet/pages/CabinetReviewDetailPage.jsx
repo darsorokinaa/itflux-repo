@@ -26,6 +26,7 @@ import {
   taskMaxScore,
 } from "../cabinetReviewUtils";
 import { assignDisplayNumbers } from "../../utils/taskDocument";
+import { scoreVariantAttempt, tasksForStoredAttempt } from "../../utils/variantResult";
 import { SUBJECTS_BY_LEVEL, buildSubjectDefinition } from "../../data/subjects";
 import { TaskPosition } from "../../components/taskDocument/TaskNumber";
 import {
@@ -465,10 +466,13 @@ function ReviewWorkspace({
   reviewTaskTotal,
   assignment,
 }) {
-  const tasks = useMemo(() => [
-    ...part1Tasks.map((task) => ({ ...task, part: 1 })),
-    ...part2Tasks.map((task) => ({ ...task, part: 2 })),
-  ], [part1Tasks, part2Tasks]);
+  const tasks = useMemo(() => {
+    const live = [
+      ...part1Tasks.map((task) => ({ ...task, part: 1 })),
+      ...part2Tasks.map((task) => ({ ...task, part: 2 })),
+    ];
+    return tasksForStoredAttempt(live, result, level, subject);
+  }, [part1Tasks, part2Tasks, result, level, subject]);
   const [selectedId, setSelectedId] = useState(null);
   const [filter, setFilter] = useState("all");
 
@@ -495,20 +499,28 @@ function ReviewWorkspace({
   const selected = tasks.find((task) => String(task.id) === String(selectedId)) || tasks[0] || null;
   const selectedIndex = selected ? tasks.findIndex((task) => task.id === selected.id) : -1;
 
-  const correctCount = part1Tasks.filter((task) => (
-    getPart1Verdict(task, homeworkTaskAnswer(result, task.id, task.number, tasks)) === true
-  )).length;
   const answeredCount = tasks.filter((task) => {
     const answer = homeworkTaskAnswer(result, task.id, task.number, tasks);
     const files = homeworkTaskAttachments(result, task.id, task.number);
     return Boolean(String(answer || "").trim()) || files.length > 0 || (task.part === 2 && scores[String(task.id)] != null && scores[String(task.id)] !== "");
   }).length;
-  const earned = correctCount + part2Tasks.reduce((sum, task) => {
-    const raw = scores[String(task.id)];
-    const n = Number(raw);
-    return sum + (raw === "" || raw == null || Number.isNaN(n) ? 0 : n);
-  }, 0);
-  const possible = part1Tasks.length + part2Tasks.reduce((sum, task) => sum + taskMaxScore(task), 0);
+  const scoring = scoreVariantAttempt({
+    tasks,
+    level,
+    subject,
+    answers: Object.fromEntries(tasks.map((task) => [
+      task.id,
+      homeworkTaskAnswer(result, task.id, task.number, tasks),
+    ])),
+    scores,
+    attachmentIds: Object.fromEntries(tasks.map((task) => [
+      String(task.id),
+      homeworkTaskAttachments(result, task.id, task.number).length > 0,
+    ])),
+  });
+  const correctCount = scoring.tasks.filter((row) => row.part === 1 && row.status === "correct").length;
+  const earned = scoring.earned_points;
+  const possible = scoring.max_points;
 
   if (!tasks.length) {
     return <p className="cb-review-detail__empty-answer">Задания варианта ещё загружаются.</p>;
@@ -552,7 +564,11 @@ function ReviewWorkspace({
         </div>
         <div className="rv-summary__item">
           <span className="rv-summary__mark"><CabinetIcon name="spark" /></span>
-          <div><b>{earned} <small>баллов</small></b><p>Подтверждено из {possible} возможных</p></div>
+          <div><b>{earned} <small>баллов</small></b><p>{
+            Array.isArray(result?.tasks_snapshot) && result.tasks_snapshot.length
+              ? (scoring.preliminary ? "Предварительно" : "Подтверждено")
+              : "По текущему варианту"
+          } из {possible} возможных</p></div>
         </div>
       </section>
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 from typing import Any
 
 from django.utils.html import strip_tags
@@ -11,32 +13,30 @@ from .variant_theme_access import can_manage_variant_themes, can_select_variant_
 from .variant_theme_models import VariantTheme
 
 ALLOWED_LAYOUTS = frozenset(choice[0] for choice in VariantTheme.LayoutType.choices)
-ALLOWED_ANIMATIONS = frozenset(
+_ANIMATION_FALLBACK = frozenset(
     (
         "none",
         "falling-leaves",
         "snow",
         "floating-stars",
-        "plane-route",
-        "travel-route",
         "clouds",
     )
 )
-ALLOWED_DECORATIONS = frozenset(
+_DECORATION_CATALOG = (
+    Path(__file__).resolve().parents[2]
+    / "frontend"
+    / "src"
+    / "variantThemes"
+    / "decorations.jsx"
+)
+_DECORATION_ID_RE = re.compile(r'(?m)^[ \t]*id:\s*"([a-z0-9-]+)"\s*,')
+_DECORATION_FALLBACK = frozenset(
     (
         "clouds",
         "route",
-        "plane",
         "leaves",
         "stars",
         "map",
-        "camera",
-        "backpack",
-        "compass",
-        "suitcase",
-        "postcard",
-        "passport",
-        "airplane",
         "route-dots",
         "mountains",
         "sea",
@@ -44,6 +44,38 @@ ALLOWED_DECORATIONS = frozenset(
         "flowers",
     )
 )
+
+
+def _catalog_text(path=None):
+    catalog = Path(path) if path else _DECORATION_CATALOG
+    try:
+        return catalog.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _ids_in_export(text, export_name):
+    if not text:
+        return None
+    match = re.search(rf"export const {export_name} = \[(.*?)\];", text, re.S)
+    if not match:
+        return None
+    found = _DECORATION_ID_RE.findall(match.group(1))
+    return frozenset(found) if found else None
+
+
+def decoration_ids_from_catalog(path=None):
+    """Имена декораций из frontend/src/variantThemes/decorations.jsx."""
+    return _ids_in_export(_catalog_text(path), "DECORATIONS")
+
+
+def animation_ids_from_catalog(path=None):
+    """Имена анимаций из того же файла."""
+    return _ids_in_export(_catalog_text(path), "ANIMATIONS")
+
+
+ALLOWED_DECORATIONS = decoration_ids_from_catalog() or _DECORATION_FALLBACK
+ALLOWED_ANIMATIONS = animation_ids_from_catalog() or _ANIMATION_FALLBACK
 ALLOWED_BACKGROUND_TYPES = frozenset(("none", "color", "image", "gradient"))
 ALLOWED_GRADIENT_DIRECTIONS = frozenset(
     ("sunset", "sunrise", "vertical", "horizontal", "radial")
@@ -59,7 +91,11 @@ DEFAULT_LABELS = {
 }
 
 TRAVEL_CONFIG = {
-    "background": {"type": "color", "color": "#e7f3fb"},
+    "background": {
+        "type": "gradient",
+        "colors": ["#9fc8e4", "#c5e0f2", "#e7f3fb"],
+        "direction": "vertical",
+    },
     "labels": {
         "task": "Остановка",
         "tasks": "Маршрут",
@@ -67,8 +103,8 @@ TRAVEL_CONFIG = {
         "previous": "Вернуться",
         "finish": "Завершить путешествие",
     },
-    "decorations": ["clouds", "route", "plane"],
-    "animation": "plane-route",
+    "decorations": ["clouds", "route", "map"],
+    "animation": "clouds",
 }
 
 
@@ -186,7 +222,10 @@ def serialize_variant_theme(theme: VariantTheme | None, request=None) -> dict | 
         "config": config,
         "preview_image_url": _absolute_media_url(request, theme.preview_image),
         "background_image_url": bg_url,
+        "background_image_vertical_url": _absolute_media_url(request, theme.background_image_vertical),
         "block_background_image_url": block_bg_url,
+        "sheet_background_image_url": _absolute_media_url(request, theme.sheet_background_image),
+        "sheet_background_image_vertical_url": _absolute_media_url(request, theme.sheet_background_image_vertical),
         "is_active": bool(theme.is_active),
         "is_published": bool(theme.is_published),
         "created_at": theme.created_at.isoformat() if theme.created_at else None,

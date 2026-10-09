@@ -410,10 +410,19 @@ class LessonConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
         )
         if total_tasks <= 0:
             total_tasks = answers_qs.count()
-        correct_count = answers_qs.filter(is_correct=True).count()
-        non_empty_count = answers_qs.filter(is_empty=False).count()
-        empty_count = max(total_tasks - non_empty_count, 0)
-        wrong_count = max(total_tasks - correct_count, 0)
+        from .variant_scoring import lesson_result_counts
+
+        correct_count = answers_qs.filter(is_correct=True, is_empty=False).count()
+        answered_wrong_count = answers_qs.filter(is_correct=False, is_empty=False).count()
+        counted = lesson_result_counts(
+            total_tasks=total_tasks,
+            correct_count=correct_count,
+            answered_wrong_count=answered_wrong_count,
+        )
+        total_tasks = counted["total_tasks"]
+        correct_count = counted["correct_count"]
+        wrong_count = counted["wrong_count"]
+        empty_count = counted["empty_count"]
 
         prev = LessonStudentResult.objects.filter(
             room_id=self.room_id[:200],

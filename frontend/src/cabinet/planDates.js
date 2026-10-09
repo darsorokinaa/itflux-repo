@@ -1,4 +1,5 @@
 export const PLAN_DATE_INTERVALS = [
+  { id: "weekdays", label: "По выбранным дням" },
   { id: "daily", label: "Каждый день" },
   { id: "four_weekly", label: "4 раза в неделю" },
   { id: "thrice_weekly", label: "3 раза в неделю" },
@@ -6,6 +7,39 @@ export const PLAN_DATE_INTERVALS = [
   { id: "weekly", label: "Раз в неделю" },
   { id: "biweekly", label: "Раз в две недели" },
 ];
+
+export const WEEKDAY_OPTIONS = [
+  { id: 0, short: "Пн", full: "Понедельник" },
+  { id: 1, short: "Вт", full: "Вторник" },
+  { id: 2, short: "Ср", full: "Среда" },
+  { id: 3, short: "Чт", full: "Четверг" },
+  { id: 4, short: "Пт", full: "Пятница" },
+  { id: 5, short: "Сб", full: "Суббота" },
+  { id: 6, short: "Вс", full: "Воскресенье" },
+];
+
+export function weekdayIndex(iso) {
+  const date = parseLocalISODate(iso);
+  if (!date) return null;
+  return (date.getDay() + 6) % 7;
+}
+
+export function weekdayLabel(iso, { full = false } = {}) {
+  const index = weekdayIndex(iso);
+  if (index == null) return "";
+  const option = WEEKDAY_OPTIONS[index];
+  return full ? option.full : option.short;
+}
+
+export function normalizeWeekdays(raw) {
+  const values = Array.isArray(raw) ? raw : [];
+  const days = [];
+  values.forEach((value) => {
+    const day = Number(value);
+    if (Number.isInteger(day) && day >= 0 && day <= 6 && !days.includes(day)) days.push(day);
+  });
+  return days;
+}
 
 export function parseLocalISODate(value) {
   if (!value) return null;
@@ -39,8 +73,21 @@ export function intervalStepDays(intervalId, index) {
   return 7;
 }
 
-export function generatePlanDates(startIso, count, intervalId = "weekly") {
+export function generatePlanDates(startIso, count, intervalId = "weekly", weekdays = null) {
   if (!startIso || count <= 0) return [];
+  const days = normalizeWeekdays(weekdays);
+  if (days.length || intervalId === "weekdays") {
+    const selected = days.length ? days : [weekdayIndex(startIso)].filter((day) => day != null);
+    const dates = [];
+    let cursor = startIso;
+    let guard = 0;
+    while (dates.length < count && guard < Math.max(count * 14, 400)) {
+      if (selected.includes(weekdayIndex(cursor))) dates.push(cursor);
+      cursor = addDaysLocal(cursor, 1);
+      guard += 1;
+    }
+    return dates;
+  }
   const dates = [];
   let current = startIso;
   for (let index = 0; index < count; index += 1) {
@@ -58,7 +105,12 @@ export function applyPlanDates(sessions, startIso, intervalId = "weekly", fromIn
     ? calendarDateKey(startIso)
     : calendarDateKey(sessions[fromIndex]?.scheduledDate) || calendarDateKey(startIso);
   if (!start) return sessions;
-  const dates = generatePlanDates(start, Math.max(0, sessions.length - fromIndex), intervalId);
+  const dates = generatePlanDates(
+    start,
+    Math.max(0, sessions.length - fromIndex),
+    intervalId,
+    options.weekdays,
+  );
   const manual = new Set();
   if (preserveManual) {
     for (let index = fromIndex + 1; index < sessions.length; index += 1) {
@@ -103,7 +155,9 @@ export function inferPlanDateInterval(sessions) {
 export function formatPlanDateLabel(iso) {
   const date = parseLocalISODate(iso);
   if (!date) return "";
-  return date.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+  const day = weekdayLabel(iso);
+  const label = date.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+  return day ? `${day}, ${label}` : label;
 }
 
 export function nextPlanDateAfter(iso, index, intervalId = "weekly") {

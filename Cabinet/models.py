@@ -1070,6 +1070,12 @@ class LessonPlanEnrollment(models.Model):
     end_date = models.DateField("Дата окончания", null=True, blank=True)
     frequency = models.CharField("Частота занятий", max_length=64, blank=True,
                                  help_text="Например: 2 раза в неделю")
+    weekday_slots = models.JSONField(
+        "Слоты по дням недели",
+        default=list,
+        blank=True,
+        help_text="Список {weekday, start_time, duration_minutes}. День недели занятия считается по дате.",
+    )
     status = models.CharField(
         "Статус",
         max_length=20,
@@ -2409,6 +2415,7 @@ class ScheduleEvent(models.Model):
         CANCELLED = "cancelled", "Отменено"
         DRAFT = "draft", "Черновик"
         MOVED = "moved", "Перенесено"
+        SKIPPED = "skipped", "Пропущено"
 
     owner = models.ForeignKey(
         User,
@@ -2556,6 +2563,12 @@ class ScheduleEvent(models.Model):
         null=True,
         blank=True,
         help_text="За сколько минут до урока напомнить",
+    )
+    status_reason = models.CharField(
+        "Причина статуса",
+        max_length=500,
+        blank=True,
+        help_text="Причина отмены, пропуска или восстановления. Не заменяет учебные данные.",
     )
     plan_cancel_action = models.CharField(
         "Действие с темой плана при отмене",

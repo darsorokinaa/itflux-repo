@@ -1,3 +1,12 @@
+import {
+  DECORATION_GROUPS,
+  VARIANT_THEME_ANIMATIONS,
+  VARIANT_THEME_DECORATIONS,
+  decorationLineKind,
+} from "./decorations";
+
+export { DECORATION_GROUPS, VARIANT_THEME_ANIMATIONS, VARIANT_THEME_DECORATIONS, decorationLineKind };
+
 export const DEFAULT_VARIANT_THEME_LABELS = {
   task: "Задание",
   tasks: "Задания",
@@ -8,36 +17,6 @@ export const DEFAULT_VARIANT_THEME_LABELS = {
 
 export const VARIANT_THEME_LAYOUTS = ["classic", "cards", "route", "game"];
 export const IMPLEMENTED_VARIANT_THEME_LAYOUTS = ["classic", "route"];
-export const VARIANT_THEME_ANIMATIONS = [
-  "none",
-  "falling-leaves",
-  "snow",
-  "floating-stars",
-  "plane-route",
-  "travel-route",
-  "clouds",
-];
-export const VARIANT_THEME_DECORATIONS = [
-  "clouds",
-  "route",
-  "plane",
-  "leaves",
-  "stars",
-  "map",
-  "camera",
-  "backpack",
-  "compass",
-  "suitcase",
-  "postcard",
-  "passport",
-  "airplane",
-  "route-dots",
-  "mountains",
-  "sea",
-  "sailboats",
-  "flowers",
-];
-
 export const CLASSIC_VARIANT_THEME = {
   id: null,
   slug: "classic",
@@ -46,14 +25,14 @@ export const CLASSIC_VARIANT_THEME = {
   labels: { ...DEFAULT_VARIANT_THEME_LABELS },
   decorations: [],
   animation: "none",
-  background: { type: "none", color: "", url: "", blockUrl: "", colors: [], direction: "" },
+  background: { type: "none", color: "", url: "", urlVertical: "", blockUrl: "", colors: [], direction: "" },
   previewImageUrl: "",
   isClassic: true,
 };
 
 export const variantThemeRegistry = {
   classic: { layout: "classic" },
-  travel: { layout: "route", decorations: ["clouds", "route", "plane", "map"] },
+  travel: { layout: "route", decorations: ["clouds", "route", "map"] },
   route: { layout: "route" },
 };
 
@@ -104,6 +83,7 @@ export function resolveVariantTheme(payload) {
         : "none",
       color: String(backgroundSrc.color || ""),
       url: String(payload.background_image_url || payload.backgroundImageUrl || backgroundSrc.url || ""),
+      urlVertical: String(payload.background_image_vertical_url || payload.backgroundImageVerticalUrl || ""),
       blockUrl: String(payload.block_background_image_url || payload.blockBackgroundImageUrl || ""),
       colors: Array.isArray(backgroundSrc.colors)
         ? backgroundSrc.colors.map((item) => String(item || "")).filter((item) => /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(item))

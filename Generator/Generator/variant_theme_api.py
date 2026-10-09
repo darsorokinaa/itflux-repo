@@ -73,14 +73,26 @@ def _apply_theme_fields(theme: VariantTheme, data: dict, *, files=None) -> list[
         theme.preview_image = files.get("preview_image")
     if "background_image" in files:
         theme.background_image = files.get("background_image")
+    if "background_image_vertical" in files:
+        theme.background_image_vertical = files.get("background_image_vertical")
     if "block_background_image" in files:
         theme.block_background_image = files.get("block_background_image")
+    if "sheet_background_image" in files:
+        theme.sheet_background_image = files.get("sheet_background_image")
+    if "sheet_background_image_vertical" in files:
+        theme.sheet_background_image_vertical = files.get("sheet_background_image_vertical")
     if data.get("clear_preview_image"):
         theme.preview_image = None
     if data.get("clear_background_image"):
         theme.background_image = None
+    if data.get("clear_background_image_vertical"):
+        theme.background_image_vertical = None
     if data.get("clear_block_background_image"):
         theme.block_background_image = None
+    if data.get("clear_sheet_background_image"):
+        theme.sheet_background_image = None
+    if data.get("clear_sheet_background_image_vertical"):
+        theme.sheet_background_image_vertical = None
     return errors
 
 

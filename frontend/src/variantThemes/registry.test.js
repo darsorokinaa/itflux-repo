@@ -14,15 +14,15 @@ describe("resolveVariantTheme", () => {
       layout_type: "route",
       config: {
         labels: { task: "Остановка", next: "Следующая остановка" },
-        decorations: ["clouds", "plane"],
-        animation: "plane-route",
+        decorations: ["clouds", "route"],
+        animation: "clouds",
       },
     });
     expect(theme.isClassic).toBe(false);
     expect(theme.layoutType).toBe("route");
     expect(theme.labels.task).toBe("Остановка");
     expect(theme.labels.finish).toBe("Завершить вариант");
-    expect(theme.animation).toBe("plane-route");
+    expect(theme.animation).toBe("clouds");
     expect(theme.background.blockUrl).toBe("");
   });
 
@@ -35,7 +35,19 @@ describe("resolveVariantTheme", () => {
       config: { background: { type: "image", url: "https://example.test/page.png" } },
     });
     expect(theme.background.url).toBe("https://example.test/page.png");
+    expect(theme.background.urlVertical).toBe("");
     expect(theme.background.blockUrl).toBe("https://example.test/blocks.png");
+  });
+
+  it("keeps horizontal and vertical page images separate", () => {
+    const theme = resolveVariantTheme({
+      slug: "travel",
+      layout_type: "route",
+      background_image_url: "https://example.test/wide.png",
+      background_image_vertical_url: "https://example.test/tall.png",
+    });
+    expect(theme.background.url).toBe("https://example.test/wide.png");
+    expect(theme.background.urlVertical).toBe("https://example.test/tall.png");
   });
 
   it("falls back to classic for unknown layout and slug", () => {
@@ -53,7 +65,7 @@ describe("resolveVariantTheme", () => {
       slug: "travel",
       layout_type: "route",
       config: {
-        animation: "travel-route",
+        animation: "clouds",
         background: {
           type: "gradient",
           colors: ["#f7d6a3", "#f6b97a", "#9dcfe3"],
@@ -62,11 +74,11 @@ describe("resolveVariantTheme", () => {
         decorations: ["map", "backpack", "airplane", "malware"],
       },
     });
-    expect(theme.animation).toBe("travel-route");
+    expect(theme.animation).toBe("clouds");
     expect(theme.background.type).toBe("gradient");
     expect(theme.background.colors).toEqual(["#f7d6a3", "#f6b97a", "#9dcfe3"]);
     expect(theme.background.direction).toBe("sunset");
-    expect(theme.decorations).toEqual(["map", "backpack", "airplane"]);
+    expect(theme.decorations).toEqual(["map"]);
   });
 
   it("ignores unknown animation and decorations", () => {

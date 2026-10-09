@@ -1,7 +1,8 @@
-import { createContext, useContext, useEffect, useMemo } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { CLASSIC_VARIANT_THEME, resolveVariantTheme } from "./registry";
 import ThemeEffects from "./ThemeEffects";
 import ThemeDecorations from "./ThemeDecorations";
+import { BLOCK_IMAGE_OPACITY, orientedImageUrl, pageBackgroundStyle } from "./themeSurface";
 import "./variant-themes.css";
 
 const VariantThemeContext = createContext(CLASSIC_VARIANT_THEME);
@@ -18,7 +19,7 @@ const PAGE_BG_PROPS = [
 ];
 
 function stripThemeClasses(node) {
-  node.classList.remove("variant-theme-active", ...LAYOUT_CLASSES);
+  node.classList.remove("variant-theme-active", "variant-theme-has-block-image", ...LAYOUT_CLASSES);
   [...node.classList].forEach((cls) => {
     if (cls.startsWith(SLUG_PREFIX)) node.classList.remove(cls);
   });
@@ -29,34 +30,19 @@ function clearPageBackground(node) {
   if (node.dataset) delete node.dataset.variantTheme;
   node.style.removeProperty("--variant-theme-bg-image");
   node.style.removeProperty("--variant-theme-block-bg-image");
+  node.style.removeProperty("--variant-theme-block-opacity");
   node.style.removeProperty("--variant-theme-bg-color");
   PAGE_BG_PROPS.forEach((prop) => node.style.removeProperty(prop));
 }
 
-function fallbackGradient(background) {
-  const colors = Array.isArray(background?.colors)
-    ? background.colors.filter((item) => /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(item))
-    : [];
-  if (background?.type === "gradient" && colors.length >= 2) {
-    const joined = colors.join(", ");
-    if (background.direction === "radial") return `radial-gradient(ellipse at 50% 0%, ${joined})`;
-    if (background.direction === "sunset") return `linear-gradient(160deg, ${joined})`;
-    if (background.direction === "sunrise") return `linear-gradient(20deg, ${joined})`;
-    if (background.direction === "horizontal") return `linear-gradient(90deg, ${joined})`;
-    return `linear-gradient(180deg, ${joined})`;
-  }
-  return "linear-gradient(180deg, #9fc8e4 0%, #c5e0f2 42%, #e7f3fb 100%)";
-}
-
-function applyPageBackground(node, { pageImage, color, background }) {
-  const wash = "linear-gradient(rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.3))";
-  const image = pageImage || fallbackGradient(background);
-  node.style.setProperty("background-image", `${wash}, ${image}`, "important");
-  node.style.setProperty("background-size", pageImage ? "auto, cover" : "auto, 100% 100%", "important");
-  node.style.setProperty("background-repeat", "no-repeat", "important");
+function applyPageBackground(node, { pageImageUrl, background }) {
+  const style = pageBackgroundStyle(background, pageImageUrl);
+  node.style.setProperty("background-image", style.backgroundImage, "important");
+  node.style.setProperty("background-size", style.backgroundSize, "important");
+  node.style.setProperty("background-repeat", style.backgroundRepeat, "important");
   node.style.setProperty("background-attachment", "fixed", "important");
-  node.style.setProperty("background-position", "center, center top", "important");
-  node.style.setProperty("background-color", color, "important");
+  node.style.setProperty("background-position", style.backgroundPosition, "important");
+  node.style.setProperty("background-color", style.backgroundColor, "important");
 }
 
 export function useVariantTheme() {
@@ -72,7 +58,7 @@ function themeSlugClass(slug) {
   return safe ? `variant-theme-slug--${safe}` : "";
 }
 
-function cssImageUrl(url) {
+function safeAssetUrl(url) {
   let safe = String(url || "").replace(/["'\\)]/g, "").trim();
   if (!safe) return "";
   try {
@@ -83,11 +69,25 @@ function cssImageUrl(url) {
   } catch {
     /* keep original */
   }
-  return `url("${safe}")`;
+  return safe;
+}
+
+function cssImageUrl(url) {
+  const safe = safeAssetUrl(url);
+  return safe ? `url("${safe}")` : "";
 }
 
 export function VariantThemeRoot({ payload, children }) {
   const theme = useMemo(() => resolveVariantTheme(payload), [payload]);
+  const [orientation, setOrientation] = useState("horizontal");
+
+  useEffect(() => {
+    const media = window.matchMedia("(orientation: portrait)");
+    const apply = () => setOrientation(media.matches ? "vertical" : "horizontal");
+    apply();
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, []);
 
   useEffect(() => {
     const nodes = [
@@ -104,28 +104,33 @@ export function VariantThemeRoot({ payload, children }) {
       clearPageBackground(node);
     };
 
-    if (theme.isClassic) {
+    const pageImageUrl = safeAssetUrl(orientedImageUrl(theme.background.url, theme.background.urlVertical, orientation));
+    const pageImage = cssImageUrl(pageImageUrl);
+    const hasPageImage = Boolean(pageImageUrl);
+    const hasPaint = hasPageImage || ["color", "gradient", "image"].includes(theme.background.type);
+    if (theme.isClassic && !hasPaint) {
       nodes.forEach(clearNode);
       return undefined;
     }
 
-    const pageImage = cssImageUrl(theme.background.url);
     const blockImage = cssImageUrl(theme.background.blockUrl);
-    const color = theme.background.color || "#cfe8f6";
+    const painted = pageBackgroundStyle(theme.background, pageImageUrl);
     nodes.forEach((node) => {
       node.classList.add(...extraClasses);
+      if (blockImage) node.classList.add("variant-theme-has-block-image");
       if (node.dataset) node.dataset.variantTheme = theme.slug || theme.layoutType;
       if (pageImage) node.style.setProperty("--variant-theme-bg-image", pageImage);
       else node.style.removeProperty("--variant-theme-bg-image");
       if (blockImage) node.style.setProperty("--variant-theme-block-bg-image", blockImage);
       else node.style.removeProperty("--variant-theme-block-bg-image");
-      node.style.setProperty("--variant-theme-bg-color", color);
-      applyPageBackground(node, { pageImage, color, background: theme.background });
+      node.style.setProperty("--variant-theme-block-opacity", String(BLOCK_IMAGE_OPACITY));
+      node.style.setProperty("--variant-theme-bg-color", painted.backgroundColor);
+      applyPageBackground(node, { pageImageUrl, background: theme.background });
     });
     return () => {
       nodes.forEach(clearNode);
     };
-  }, [theme]);
+  }, [orientation, theme]);
 
   return (
     <VariantThemeContext.Provider value={theme}>

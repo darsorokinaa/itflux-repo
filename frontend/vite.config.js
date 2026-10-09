@@ -137,9 +137,11 @@ function restoreRootPublicUrls(indexPath) {
 }
 
 /** Общий для dev и preview: без прокси запросы к /api на vite preview дают HTML SPA → ломается JSON.parse в клиенте */
+const apiProxyTarget = process.env.VITE_API_PROXY || 'http://127.0.0.1:8000'
+
 const backendProxy = {
   '/api': {
-    target: 'http://127.0.0.1:8000',
+    target: apiProxyTarget,
     changeOrigin: true,
     timeout: 600000,
     configure: (proxy) => {
@@ -147,23 +149,23 @@ const backendProxy = {
     },
   },
   '/media': {
-    target: 'http://127.0.0.1:8000',
+    target: apiProxyTarget,
     changeOrigin: true,
   },
   '/admin': {
-    target: 'http://127.0.0.1:8000',
+    target: apiProxyTarget,
     changeOrigin: true,
   },
   '/ckeditor5': {
-    target: 'http://127.0.0.1:8000',
+    target: apiProxyTarget,
     changeOrigin: true,
   },
   '/static': {
-    target: 'http://127.0.0.1:8000',
+    target: apiProxyTarget,
     changeOrigin: true,
   },
   '^/lesson(?:/|$)': {
-    target: 'http://127.0.0.1:8000',
+    target: apiProxyTarget,
     changeOrigin: true,
   },
   '/ws/tldraw': {
@@ -172,7 +174,7 @@ const backendProxy = {
     ws: true,
   },
   '/ws': {
-    target: 'http://127.0.0.1:8000',
+    target: apiProxyTarget,
     changeOrigin: true,
     ws: true,
   },

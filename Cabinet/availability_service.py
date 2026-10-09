@@ -343,13 +343,16 @@ def blocking_events_for_range(teacher, date_from, date_to, tz):
             starts_at__lt=end_dt,
             ends_at__gt=start_dt,
         )
-        .exclude(status=ScheduleEvent.Status.CANCELLED)
+        .exclude(status__in=(
+            ScheduleEvent.Status.CANCELLED,
+            ScheduleEvent.Status.SKIPPED,
+        ))
         .select_related("series")
     )
 
 
 def event_blocks_slot(event, slot_start, slot_end):
-    if event.status == ScheduleEvent.Status.CANCELLED:
+    if event.status in (ScheduleEvent.Status.CANCELLED, ScheduleEvent.Status.SKIPPED):
         return False
     if event.series_id:
         series = getattr(event, "series", None)

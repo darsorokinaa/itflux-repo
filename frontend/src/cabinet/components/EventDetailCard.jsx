@@ -843,7 +843,7 @@ function MoreMenu({ open, onClose, items = [], isMobile, anchorEl }) {
       onClose={onClose}
       className={`cb-lesson-card__menu${isMobile ? " cb-lesson-card__menu--sheet" : ""}`}
       placement={isMobile ? "sheet" : "anchor"}
-      width={200}
+      width={280}
     >
       {regular.map((item) => (
         <button
@@ -851,12 +851,14 @@ function MoreMenu({ open, onClose, items = [], isMobile, anchorEl }) {
           type="button"
           className="cb-lesson-card__menu-item"
           role="menuitem"
+          title={item.hint || item.label}
           onClick={() => {
             onClose();
             item.onClick();
           }}
           >
-            {item.label}
+            <span className="cb-lesson-card__menu-label">{item.label}</span>
+            {item.hint ? <span className="cb-lesson-card__menu-hint">{item.hint}</span> : null}
           </button>
         ))}
         {danger.length ? <div className="cb-lesson-card__menu-divider" role="separator" /> : null}
@@ -866,12 +868,14 @@ function MoreMenu({ open, onClose, items = [], isMobile, anchorEl }) {
             type="button"
             className="cb-lesson-card__menu-item cb-lesson-card__menu-item--danger"
             role="menuitem"
+            title={item.hint || item.label}
             onClick={() => {
               onClose();
               item.onClick();
             }}
           >
-            {item.label}
+            <span className="cb-lesson-card__menu-label">{item.label}</span>
+            {item.hint ? <span className="cb-lesson-card__menu-hint">{item.hint}</span> : null}
           </button>
         ))}
     </CabinetFloatingMenu>
@@ -896,6 +900,7 @@ function ActionBar({
   onOpenLesson,
   onFooterPrimary,
   onEdit,
+  onRestore,
   onOpenJournal,
   moreItems,
   onCheckDevices,
@@ -969,6 +974,15 @@ function ActionBar({
   return (
     <footer className="cb-lesson-card__footer">
       <div className={`cb-lesson-card__footer-row${isMobile ? " cb-lesson-card__footer-row--mobile" : ""}`}>
+        {isCancelled && onRestore ? (
+          <button
+            type="button"
+            className={`cb-lesson-card__btn cb-lesson-card__btn--primary${isMobile ? " cb-lesson-card__btn--wide" : ""}`}
+            onClick={onRestore}
+          >
+            Восстановить
+          </button>
+        ) : null}
         {footerPrimaryLabel ? (
           <button
             type="button"
@@ -1071,6 +1085,10 @@ export default function EventDetailCard({
   onOpenMeetingPage,
   onRequestDelete,
   onRequestCancel,
+  onRestore,
+  onRestoreMove,
+  onSkip,
+  onReopen,
   onDuplicate,
   onSaveLink,
   savingLinkId,
@@ -1234,16 +1252,22 @@ export default function EventDetailCard({
     handleOpenExternalOrMeeting();
   };
 
-  const showStatusBadge = !studentMode && statusMeta && ["moved", "cancelled", "done"].includes(statusMeta.mod);
+  const showStatusBadge = !studentMode && statusMeta && ["moved", "cancelled", "done", "planned"].includes(statusMeta.mod);
 
-  const moreItems = isCancelled
-    ? [{ label: "Удалить", danger: true, onClick: onRequestDelete }]
+  const moreItems = (isCancelled
+    ? [
+        { label: "Восстановить", hint: "Вернуть на это же время, если оно свободно.", onClick: onRestore },
+        { label: "Перенести и восстановить", hint: "Новая дата и возврат в расписание одной правкой. Тема и работы сохраняются.", onClick: onRestoreMove },
+        { label: "Удалить", danger: true, onClick: onRequestDelete },
+      ]
     : [
-        { label: "Перенести", onClick: onEdit },
-        { label: "Отменить", danger: true, onClick: onRequestCancel },
+        { label: "Перенести", hint: "Другая дата. Занятие остаётся в расписании.", onClick: onEdit },
+        { label: "Пропустить", hint: "Ученик не был. Тема остаётся, время освобождается.", onClick: onSkip },
+        { label: "Отменить", hint: "Занятие не состоится. Тема остаётся, время освобождается.", danger: true, onClick: onRequestCancel },
+        ...(isDone ? [{ label: "Исправить «проведено»", hint: "Вернуть занятие в план. Оценки в журнале остаются.", onClick: onReopen }] : []),
         { label: "Дублировать", onClick: onDuplicate },
         { label: "Удалить", danger: true, onClick: onRequestDelete },
-      ];
+      ]).filter((item) => typeof item.onClick === "function");
 
   const overlayClass = [
     "cb-sch-overlay",
@@ -1687,6 +1711,7 @@ export default function EventDetailCard({
           isMobile={isMobile}
           onOpenLesson={openLesson}
           onFooterPrimary={handleFooterPrimary}
+          onRestore={onRestore}
           onEdit={onEdit}
           onOpenJournal={() => onOpenJournal?.(event)}
           moreItems={moreItems}

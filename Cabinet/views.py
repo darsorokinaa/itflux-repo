@@ -810,10 +810,12 @@ def api_schedule_events(request):
             "error": "Укажите параметры from и to в формате YYYY-MM-DD.",
         }, status=400)
 
+    include_cancelled = str(request.GET.get("include_cancelled") or "").lower() in ("1", "true", "yes")
     events = list_schedule_events(
         user=request.user,
         date_from=date_from,
         date_to=date_to,
+        include_cancelled=include_cancelled,
     )
     return JsonResponse({
         "ok": True,
@@ -1047,6 +1049,37 @@ def api_schedule_update(request, event_id):
     if data is None:
         return JsonResponse({"ok": False, "error": "Некорректный JSON"}, status=400)
 
+    expected = data.get("expected_updated_at")
+    changes_schedule = any(key in data for key in ("starts_at", "ends_at", "status"))
+    if changes_schedule and not expected:
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": (
+                    "Это занятие уже изменили в другой вкладке. "
+                    "Сравните сохранённую версию со своей правкой и повторите действие, если она всё ещё нужна."
+                ),
+                "code": "stale_write",
+                "event": schedule_event_to_json(event),
+            },
+            status=409,
+        )
+    if expected:
+        from .lesson_lifecycle import LessonLifecycleError, assert_fresh_write
+
+        try:
+            assert_fresh_write(event, expected)
+        except LessonLifecycleError as exc:
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": exc.message,
+                    "code": exc.code,
+                    "event": schedule_event_to_json(event),
+                },
+                status=exc.status,
+            )
+
     from .schedule_service import (
         apply_series_edit,
         cancel_event_with_scope,
@@ -1061,6 +1094,53 @@ def api_schedule_update(request, event_id):
     original_start = event.starts_at
     original_end = event.ends_at
     time_rescheduled = False
+
+    status_value_early = (data.get("status") or "").strip()
+    restoring_inactive = (
+        status_value_early in (ScheduleEvent.Status.PLANNED, "restored")
+        and event.status in (ScheduleEvent.Status.CANCELLED, ScheduleEvent.Status.SKIPPED)
+        and ("starts_at" in data or "ends_at" in data)
+    )
+    if restoring_inactive:
+        from .lesson_lifecycle import LessonLifecycleError, restore_event
+
+        new_start = original_start
+        new_end = original_end
+        if "starts_at" in data:
+            parsed = coerce_schedule_datetime(
+                data.get("starts_at"),
+                event=event,
+                teacher=request.user,
+                tz_name=data.get("timezone"),
+            )
+            if parsed is None:
+                return JsonResponse({"ok": False, "error": "Некорректная дата или время начала."}, status=400)
+            new_start = parsed
+        if "ends_at" in data:
+            parsed = coerce_schedule_datetime(
+                data.get("ends_at"),
+                event=event,
+                teacher=request.user,
+                tz_name=data.get("timezone"),
+            )
+            if parsed is None:
+                return JsonResponse({"ok": False, "error": "Некорректная дата или время окончания."}, status=400)
+            new_end = parsed
+        try:
+            restore_event(
+                event,
+                changed_by=request.user,
+                reason=(data.get("reason") or data.get("status_reason") or ""),
+                starts_at=new_start,
+                ends_at=new_end,
+            )
+        except LessonLifecycleError as exc:
+            payload = {"ok": False, "error": exc.message, "code": exc.code}
+            if exc.extra:
+                payload.update(exc.extra)
+            return JsonResponse(payload, status=exc.status)
+        event.refresh_from_db()
+        return JsonResponse({"ok": True, "event": schedule_event_to_json(event)})
 
     if "starts_at" in data or "ends_at" in data:
         new_start = original_start
@@ -1116,18 +1196,23 @@ def api_schedule_update(request, event_id):
                         "conflicts": conflicts,
                         "code": "schedule_conflict",
                     }, status=409)
-            move_event_with_scope(
-                event,
-                starts_at=new_start,
-                ends_at=new_end,
-                changed_by=request.user,
-                scope=scope,
-                notify=notify,
-            )
+            try:
+                move_event_with_scope(
+                    event,
+                    starts_at=new_start,
+                    ends_at=new_end,
+                    changed_by=request.user,
+                    scope=scope,
+                    notify=notify,
+                )
+            except ValueError as exc:
+                return JsonResponse({"ok": False, "error": str(exc)}, status=400)
             time_rescheduled = True
             event.refresh_from_db()
 
-    if data.get("status") == ScheduleEvent.Status.CANCELLED:
+    status_value = (data.get("status") or "").strip()
+    reason = (data.get("reason") or data.get("status_reason") or "").strip()
+    if status_value == ScheduleEvent.Status.CANCELLED:
         plan_cancel_action = (data.get("plan_cancel_action") or data.get("planOnCancel") or "").strip() or None
         cancel_event_with_scope(
             event,
@@ -1135,9 +1220,48 @@ def api_schedule_update(request, event_id):
             scope=scope,
             notify=notify,
             plan_cancel_action=plan_cancel_action,
+            reason=reason,
         )
         event.refresh_from_db()
         return JsonResponse({"ok": True, "event": schedule_event_to_json(event)})
+    if status_value in (ScheduleEvent.Status.SKIPPED, "skip"):
+        from .lesson_lifecycle import LessonLifecycleError, skip_event
+
+        try:
+            skip_event(event, changed_by=request.user, reason=reason)
+        except LessonLifecycleError as exc:
+            return JsonResponse({"ok": False, "error": exc.message, "code": exc.code}, status=exc.status)
+        event.refresh_from_db()
+        return JsonResponse({"ok": True, "event": schedule_event_to_json(event)})
+    if status_value in (ScheduleEvent.Status.PLANNED, "restored") and event.status in (
+        ScheduleEvent.Status.CANCELLED,
+        ScheduleEvent.Status.SKIPPED,
+    ):
+        from .lesson_lifecycle import LessonLifecycleError, restore_event
+
+        try:
+            restore_event(event, changed_by=request.user, reason=reason)
+        except LessonLifecycleError as exc:
+            payload = {"ok": False, "error": exc.message, "code": exc.code}
+            if exc.extra:
+                payload.update(exc.extra)
+            return JsonResponse(payload, status=exc.status)
+        event.refresh_from_db()
+        return JsonResponse({"ok": True, "event": schedule_event_to_json(event)})
+    if status_value == "reopened":
+        from .lesson_lifecycle import LessonLifecycleError, reopen_conducted_lesson
+
+        try:
+            reopen_conducted_lesson(event, changed_by=request.user, reason=reason)
+        except LessonLifecycleError as exc:
+            return JsonResponse({"ok": False, "error": exc.message, "code": exc.code}, status=exc.status)
+        event.refresh_from_db()
+        return JsonResponse({"ok": True, "event": schedule_event_to_json(event)})
+    if reason and "status_reason" in data:
+        from .lesson_lifecycle import update_status_reason
+
+        update_status_reason(event, changed_by=request.user, reason=reason)
+        event.refresh_from_db()
 
     update_fields = {}
     if "title" in data:

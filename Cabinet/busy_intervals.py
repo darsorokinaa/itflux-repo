@@ -210,7 +210,10 @@ def get_busy_intervals(
             starts_at__lt=query_end,
             ends_at__gt=query_start,
         )
-        .exclude(status=ScheduleEvent.Status.CANCELLED)
+        .exclude(status__in=(
+            ScheduleEvent.Status.CANCELLED,
+            ScheduleEvent.Status.SKIPPED,
+        ))
         .select_related("student", "series")
     )
     if exclude_event_ids:
@@ -230,7 +233,10 @@ def get_busy_intervals(
     if exclude_event_ids or True:
         cancelled_rows = ScheduleEvent.objects.filter(
             owner=teacher,
-            status=ScheduleEvent.Status.CANCELLED,
+            status__in=(
+                ScheduleEvent.Status.CANCELLED,
+                ScheduleEvent.Status.SKIPPED,
+            ),
             starts_at__lt=query_end,
             ends_at__gt=query_start,
             series_id__isnull=False,

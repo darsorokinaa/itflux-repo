@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import { trackActivationIntent } from "../activationAnalytics";
+import { expectedUpdatedAtForWrite, scheduleConflictMessage } from "../scheduleConflict";
 import {
   createScheduleEvent,
   deleteScheduleEvent,
@@ -1113,6 +1114,8 @@ function ScheduleToolbar({
   onOpenBooking,
   onShare,
   onCloseBooking,
+  showInactiveLessons,
+  onToggleInactiveLessons,
 }) {
   const views = VIEWS;
   const paintTip = !bookingAllowed
@@ -1188,6 +1191,14 @@ function ScheduleToolbar({
               />
             </>
           ) : null}
+          <button
+            type="button"
+            className={`cb-sch-tool-btn${showInactiveLessons ? " is-active" : ""}`}
+            aria-pressed={showInactiveLessons}
+            onClick={onToggleInactiveLessons}
+          >
+            <span>{showInactiveLessons ? "Скрыть отменённые" : "Показать отменённые"}</span>
+          </button>
         </div>
 
         <CreateTypeMenu
@@ -1202,7 +1213,6 @@ function ScheduleToolbar({
 function buildEventDaysInMonth(events, year, month) {
   const days = new Set();
   events.forEach((ev) => {
-    if (ev.status === "cancelled") return;
     const d = eventDate(ev);
     if (d.getFullYear() === year && d.getMonth() === month) {
       days.add(d.getDate());
@@ -1388,6 +1398,7 @@ function CalendarEventBlock({
   const shortBlock = !compact && eventDurationMinutes(eventLocalStartTime(event), eventLocalEndTime(event)) < 35;
   const isOnline = event.format === "Онлайн" || Boolean(event.link);
   const cancelled = event.status === "cancelled";
+  const skipped = event.status === "skipped";
   const recurring = isRecurring(event);
   const isAvailability = event.kind === "availability";
   const isTravel = isCalendarTravelEvent(event);
@@ -1471,6 +1482,7 @@ function CalendarEventBlock({
         <span className="cb-sch-event__audience">онлайн</span>
       ) : null}
       {cancelled ? <span className="cb-sch-event__status">Отменено</span> : null}
+      {skipped ? <span className="cb-sch-event__status">Пропущено</span> : null}
     </>
     )
   ) : (
@@ -1494,7 +1506,8 @@ function CalendarEventBlock({
   const cardClass = [
     "cb-sch-event",
     compact ? "cb-sch-event--compact" : "",
-    cancelled ? "cb-sch-event--cancelled" : "",
+    cancelled || skipped ? "cb-sch-event--cancelled" : "",
+    skipped ? "cb-sch-event--skipped" : "",
     event.selfBooked && !cancelled ? "cb-sch-event--self-booked" : "",
     event.kind === "availability" ? "cb-sch-event--availability" : "",
     isPersonal ? "cb-sch-event--personal" : "",
@@ -2152,7 +2165,13 @@ function ListView({ events, onOpen, onStart, onCreateLink, onAddLesson }) {
 }
 
 function ConfirmActionModal({ action, onClose, onConfirm, saving = false }) {
-  const [planAction, setPlanAction] = useState("shift");
+  const [planAction, setPlanAction] = useState("keep");
+  const [restoreDate, setRestoreDate] = useState(() => (
+    action?.event ? formatApiDate(eventDate(action.event)) : ""
+  ));
+  const [restoreTime, setRestoreTime] = useState(() => (
+    action?.event ? (eventLocalStartTime(action.event) || "16:00") : "16:00"
+  ));
   if (!action) return null;
 
   const { type, event, targetDate, targetStartTime } = action;
@@ -2198,10 +2217,29 @@ function ConfirmActionModal({ action, onClose, onConfirm, saving = false }) {
       entire: "Всю серию",
       danger: false,
     },
+    restoreMove: {
+      title: "Перенести и восстановить",
+      text: "Дата и возврат в расписание сохраняются вместе. Тема, домашнее задание и журнал остаются у этого занятия.",
+      single: "Перенести и восстановить",
+      following: "",
+      entire: "",
+      danger: false,
+    },
   }[type];
 
   const confirm = (scope) => {
     if (saving) return;
+    if (type === "restoreMove") {
+      const startDt = combineLocalDateAndTime(new Date(`${restoreDate}T12:00:00`), restoreTime);
+      if (!startDt || Number.isNaN(startDt.getTime())) return;
+      const duration = eventDurationMinutes(eventLocalStartTime(event), eventLocalEndTime(event)) || 60;
+      const endDt = new Date(startDt.getTime() + duration * 60000);
+      onConfirm("single", {
+        startsAt: formatLocalDateTimeIso(startDt),
+        endsAt: formatLocalDateTimeIso(endDt),
+      });
+      return;
+    }
     if (type === "cancel" && hasPlan) {
       onConfirm(scope, { planCancelAction: planAction });
       return;
@@ -2229,13 +2267,40 @@ function ConfirmActionModal({ action, onClose, onConfirm, saving = false }) {
         >
           <CabinetIcon name="close" />
         </button>
-        <h2 id="sch-confirm-title" className="cb-sch-confirm__title">{copy.title}</h2>
-        <p className="cb-sch-confirm__text">{copy.text}</p>
+        <h2 id="sch-confirm-title" className="cb-sch-confirm__title">
+          {action.conflict ? scheduleConflictMessage(action.conflict, action).title : copy.title}
+        </h2>
+        {action.conflict ? (
+          <div className="cb-sch-confirm__text">
+            <p>{scheduleConflictMessage(action.conflict, action).text}</p>
+            <p>Сейчас сохранено: {scheduleConflictMessage(action.conflict, action).saved}</p>
+            <p>Ваша правка: {scheduleConflictMessage(action.conflict, action).mine}</p>
+          </div>
+        ) : (
+          <p className="cb-sch-confirm__text">{copy.text}</p>
+        )}
         {saving ? (
           <p className="cb-sch-confirm__hint" role="status">Сохранение… Не закрывайте окно.</p>
         ) : null}
         {recurring ? (
           <p className="cb-sch-confirm__hint">Занятие входит в повторяющуюся серию ({event.recurrence === "weekly" ? "еженедельно" : "по расписанию"}).</p>
+        ) : null}
+        {type === "cancel" ? (
+          <p className="cb-sch-confirm__hint">
+            Перенести — другая дата, занятие остаётся в расписании. Отменить — занятие не состоится, тема остаётся, время освобождается. Пропустить — ученик не был, тема остаётся, время освобождается. Восстановить — вернуть на это время, если оно свободно.
+          </p>
+        ) : null}
+        {type === "restoreMove" ? (
+          <div className="cb-sch-confirm__plan">
+            <label className="cb-sch-confirm__plan-label">
+              Дата
+              <input type="date" value={restoreDate} onChange={(e) => setRestoreDate(e.target.value)} disabled={saving} />
+            </label>
+            <label className="cb-sch-confirm__plan-label">
+              Время
+              <input type="time" value={restoreTime} onChange={(e) => setRestoreTime(e.target.value)} disabled={saving} />
+            </label>
+          </div>
         ) : null}
         {type === "cancel" && hasPlan ? (
           <div className="cb-sch-confirm__plan">
@@ -2244,15 +2309,15 @@ function ConfirmActionModal({ action, onClose, onConfirm, saving = false }) {
                 Тема занятия: <strong>{planTopic}</strong>
               </p>
             ) : null}
-            <p className="cb-sch-confirm__plan-label">Что сделать с темой из плана?</p>
+            <p className="cb-sch-confirm__plan-label">Тема, домашнее задание и материалы остаются на этом пункте плана.</p>
             <div className="cb-sch-confirm__plan-actions">
               <button
                 type="button"
-                className={`cb-sch-confirm__plan-btn${planAction === "shift" ? " cb-sch-confirm__plan-btn--active" : ""}`}
-                onClick={() => setPlanAction("shift")}
+                className={`cb-sch-confirm__plan-btn${planAction === "keep" ? " cb-sch-confirm__plan-btn--active" : ""}`}
+                onClick={() => setPlanAction("keep")}
                 disabled={saving}
               >
-                Перенести на следующее занятие
+                Оставить тему на этом занятии
               </button>
               <button
                 type="button"
@@ -2266,6 +2331,16 @@ function ConfirmActionModal({ action, onClose, onConfirm, saving = false }) {
           </div>
         ) : null}
         <div className="cb-sch-confirm__actions">
+          {action.conflict ? (
+            <button
+              type="button"
+              className="cb-btn cb-btn--sm cb-btn--primary"
+              onClick={() => confirm(action.conflict.scope || "single")}
+              disabled={saving}
+            >
+              {saving ? "Сохранение…" : "Повторить правку"}
+            </button>
+          ) : (
           <button
             type="button"
             className={`cb-btn cb-btn--sm${copy.danger ? " cb-btn--danger" : " cb-btn--primary"}`}
@@ -2274,7 +2349,8 @@ function ConfirmActionModal({ action, onClose, onConfirm, saving = false }) {
           >
             {saving ? "Сохранение…" : copy.single}
           </button>
-          {recurring ? (
+          )}
+          {recurring && !action.conflict ? (
             <>
               <button
                 type="button"
@@ -2300,7 +2376,7 @@ function ConfirmActionModal({ action, onClose, onConfirm, saving = false }) {
             onClick={onClose}
             disabled={saving}
           >
-            Не менять
+            {action.conflict ? "Оставить сохранённое" : "Не менять"}
           </button>
         </div>
       </div>
@@ -2396,8 +2472,10 @@ function shortenMeetingUrl(url) {
 
 function eventStatusMeta(event) {
   if (event.status === "cancelled") return { label: "Отменено", mod: "cancelled" };
+  if (event.status === "skipped") return { label: "Пропущено", mod: "cancelled" };
   if (event.status === "done" || event.status === "completed") return { label: "Проведено", mod: "done" };
   if (event.status === "moved") return { label: "Перенесено", mod: "moved" };
+  if (event.status === "planned") return { label: "Запланировано", mod: "planned" };
   return null;
 }
 
@@ -2437,7 +2515,8 @@ function EventDetailPopover(props) {
       statusMeta={statusMeta}
       recurring={isRecurring(event)}
       isOnline={event.format === "Онлайн"}
-      isCancelled={event.status === "cancelled"}
+      isCancelled={event.status === "cancelled" || event.status === "skipped"}
+      isSkipped={event.status === "skipped"}
       isDone={event.status === "done" || event.status === "completed"}
       canStart={event.status === "planned" && event.format === "Онлайн"}
       hasLink={Boolean(
@@ -2508,6 +2587,7 @@ export default function CabinetSchedulePage() {
     all: true,
     yandex: true,
   });
+  const [showInactiveLessons, setShowInactiveLessons] = useState(true);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [prepareMaterialsPrompt, setPrepareMaterialsPrompt] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -2544,6 +2624,8 @@ export default function CabinetSchedulePage() {
   const [pendingAction, setPendingAction] = useState(null);
   const [actionSaving, setActionSaving] = useState(false);
   const actionSavingRef = useRef(false);
+  const editServerStampRef = useRef("");
+  const editEventIdRef = useRef(null);
   const [homeworkAssignModal, setHomeworkAssignModal] = useState(null);
   const [lessonResourcePicker, setLessonResourcePicker] = useState(null);
   // { eventId, planItemId, initialTab, attachedMaterialIds, attachedInteractiveIds }
@@ -3178,8 +3260,27 @@ export default function CabinetSchedulePage() {
 
   const handleEditSave = useCallback(async (payload) => {
     if (!editEvent) return;
+    if (editEventIdRef.current !== editEvent.id) {
+      editEventIdRef.current = editEvent.id;
+      editServerStampRef.current = "";
+    }
     const scope = parseScheduleScope(payload.scope);
-    const data = await updateScheduleEvent(editEvent.id, payload);
+    const expected = payload.expected_updated_at
+      || editServerStampRef.current
+      || expectedUpdatedAtForWrite(editEvent);
+    let data;
+    try {
+      data = await updateScheduleEvent(editEvent.id, {
+        ...payload,
+        ...(expected ? { expected_updated_at: expected } : {}),
+      });
+    } catch (err) {
+      if (err?.code === "stale_write" && err.data?.event?.updatedAt) {
+        editServerStampRef.current = err.data.event.updatedAt;
+      }
+      throw err;
+    }
+    editServerStampRef.current = "";
     if (scope === "series" || scope === "following") {
       const range = getSeriesRefreshRange(focusDate);
       const refreshed = await fetchScheduleEvents(range);
@@ -3268,8 +3369,11 @@ export default function CabinetSchedulePage() {
   );
 
   const filteredEvents = useMemo(
-    () => calendarEvents.filter((ev) => ev.status !== "cancelled" && matchesFilters(ev, calendars)),
-    [calendarEvents, calendars],
+    () => calendarEvents.filter((ev) => {
+      if (!showInactiveLessons && (ev.status === "cancelled" || ev.status === "skipped")) return false;
+      return matchesFilters(ev, calendars);
+    }),
+    [calendarEvents, calendars, showInactiveLessons],
   );
 
   const openCreateLesson = useCallback((draft = {}) => {
@@ -3289,7 +3393,12 @@ export default function CabinetSchedulePage() {
 
   const handleSavePersonalEvent = useCallback(async (payload, event) => {
     if (event?.id && !String(event.id).startsWith("travel-")) {
-      await updateScheduleEvent(event.id, payload);
+      await updateScheduleEvent(event.id, {
+        ...payload,
+        ...(payload.expected_updated_at
+          ? {}
+          : { expected_updated_at: expectedUpdatedAtForWrite(event) }),
+      });
     } else {
       await createScheduleEvent(payload);
     }
@@ -3600,6 +3709,21 @@ export default function CabinetSchedulePage() {
     const planCancelAction = options.planCancelAction;
 
     try {
+      if (type === "restoreMove") {
+        const expectedUpdatedAt = expectedUpdatedAtForWrite(event, action.conflict);
+        await updateScheduleEvent(event.id, {
+          starts_at: options.startsAt,
+          ends_at: options.endsAt,
+          status: "planned",
+          notify_participants: false,
+          ...(expectedUpdatedAt ? { expected_updated_at: expectedUpdatedAt } : {}),
+        });
+        const refreshed = await fetchEventsForCalendarView(fetchScheduleEvents, view, focusDate);
+        setEvents(refreshed);
+        showStatus("Занятие перенесено и восстановлено. Тема и работы сохранены.");
+        setPendingAction(null);
+        return;
+      }
       if (type === "move") {
         if (event.kind === "availability") {
           const newStart = targetStartTime;
@@ -3634,6 +3758,9 @@ export default function CabinetSchedulePage() {
             ...buildEventDateTime(updated),
             scope: apiScope,
             notify_participants: !isNonLessonCalendarEvent(event),
+            ...(expectedUpdatedAtForWrite(event, action.conflict)
+              ? { expected_updated_at: expectedUpdatedAtForWrite(event, action.conflict) }
+              : {}),
           });
           if (apiScope === "series" || apiScope === "following" || isNonLessonCalendarEvent(event) || event.travelBeforeMinutes || event.travelAfterMinutes) {
             const refreshed = await fetchEventsForCalendarView(fetchScheduleEvents, view, focusDate);
@@ -3651,13 +3778,20 @@ export default function CabinetSchedulePage() {
           ends_at: formatLocalDateTimeIso(endDt),
           scope: apiScope,
           notify_participants: !isNonLessonCalendarEvent(event),
+          ...(expectedUpdatedAtForWrite(event, action.conflict)
+            ? { expected_updated_at: expectedUpdatedAtForWrite(event, action.conflict) }
+            : {}),
         });
         const refreshed = await fetchEventsForCalendarView(fetchScheduleEvents, view, focusDate);
         setEvents(refreshed);
         showStatus("Длительность обновлена.");
       } else if (type === "delete") {
         if (local) {
-          await deleteScheduleEvent(event.id, { scope: apiScope, notifyParticipants: true });
+          await deleteScheduleEvent(event.id, {
+            scope: apiScope,
+            notifyParticipants: true,
+            expectedUpdatedAt: expectedUpdatedAtForWrite(event, action.conflict),
+          });
         }
         setEvents((prev) => applyRemoveEvents(prev, event, scope).filter((ev) => String(ev.parentEventId) !== String(event.id)));
         showStatus(scope === "entire" ? "Вся серия удалена" : scope === "following" ? "Серия удалена" : "Событие удалено");
@@ -3668,7 +3802,10 @@ export default function CabinetSchedulePage() {
             status: "cancelled",
             scope: apiScope,
             notify_participants: true,
-            plan_cancel_action: planCancelAction || "shift",
+            plan_cancel_action: planCancelAction || "keep",
+            ...(expectedUpdatedAtForWrite(event, action.conflict)
+              ? { expected_updated_at: expectedUpdatedAtForWrite(event, action.conflict) }
+              : {}),
           });
           const refreshed = await fetchEventsForCalendarView(fetchScheduleEvents, view, focusDate);
           setEvents(refreshed);
@@ -3677,7 +3814,7 @@ export default function CabinetSchedulePage() {
         }
         const planMsg = planCancelAction === "skip"
           ? "Занятие отменено, тема пропущена для ученика"
-          : "Занятие отменено, тема перенесена на следующее занятие";
+          : "Занятие отменено. Тема, домашнее задание и материалы остаются на этом пункте плана.";
         showStatus(scope === "entire" ? "Вся серия отменена" : scope === "following" ? "Серия отменена" : planMsg);
         setSelectedEvent(null);
         if (!isNonLessonCalendarEvent(event)) {
@@ -3687,8 +3824,33 @@ export default function CabinetSchedulePage() {
       setPendingAction(null);
       refreshAvailability();
     } catch (err) {
-      if (type === "move") {
-        setEvents(snapshotEvents);
+      if (err?.code === "stale_write") {
+        let serverEvent = err.data?.event || null;
+        try {
+          const refreshed = await fetchEventsForCalendarView(fetchScheduleEvents, view, focusDate);
+          setEvents(refreshed);
+          serverEvent = refreshed.find((row) => row.id === event.id) || serverEvent;
+        } catch {
+          setEvents(snapshotEvents);
+        }
+        setPendingAction({
+          ...action,
+          conflict: {
+            message: err.message,
+            serverEvent,
+            scope,
+          },
+        });
+        showStatus(err.message || "Занятие уже изменили в другой вкладке.");
+        return;
+      }
+      if (type === "move" || type === "resize") {
+        try {
+          const refreshed = await fetchEventsForCalendarView(fetchScheduleEvents, view, focusDate);
+          setEvents(refreshed);
+        } catch {
+          setEvents(snapshotEvents);
+        }
       }
       if (openFromError(err)) {
         setPendingAction(null);
@@ -3748,6 +3910,8 @@ export default function CabinetSchedulePage() {
           }
           setShareOpen(true);
         }}
+        showInactiveLessons={showInactiveLessons}
+        onToggleInactiveLessons={() => setShowInactiveLessons((value) => !value)}
         onCloseBooking={async () => {
           const data = await publishTeacherBookingLink({ is_active: false });
           setBookingLink({
@@ -3927,6 +4091,62 @@ export default function CabinetSchedulePage() {
           }}
           onRequestCancel={() => {
             setPendingAction({ type: "cancel", event: selectedEvent });
+          }}
+          onRestore={() => {
+            void (async () => {
+              try {
+                await updateScheduleEvent(selectedEvent.id, {
+                  status: "planned",
+                  expected_updated_at: expectedUpdatedAtForWrite(selectedEvent),
+                });
+                const refreshed = await fetchEventsForCalendarView(fetchScheduleEvents, view, focusDate);
+                setEvents(refreshed);
+                setSelectedEvent(null);
+                showStatus("Занятие восстановлено");
+              } catch (err) {
+                if (err?.code === "schedule_conflict") {
+                  showStatus(err.message || "Это время уже занято. Выберите другое время. Остальные занятия не переносятся.");
+                  return;
+                }
+                showStatus(err.message || "Не удалось восстановить занятие");
+              }
+            })();
+          }}
+          onRestoreMove={() => {
+            setPendingAction({ type: "restoreMove", event: selectedEvent });
+            setSelectedEvent(null);
+          }}
+          onSkip={() => {
+            void (async () => {
+              try {
+                await updateScheduleEvent(selectedEvent.id, {
+                  status: "skipped",
+                  expected_updated_at: expectedUpdatedAtForWrite(selectedEvent),
+                });
+                const refreshed = await fetchEventsForCalendarView(fetchScheduleEvents, view, focusDate);
+                setEvents(refreshed);
+                setSelectedEvent(null);
+                showStatus("Занятие отмечено пропущенным. Тему и работы можно вернуть через «Восстановить».");
+              } catch (err) {
+                showStatus(err.message || "Не удалось отметить пропуск");
+              }
+            })();
+          }}
+          onReopen={() => {
+            void (async () => {
+              try {
+                await updateScheduleEvent(selectedEvent.id, {
+                  status: "reopened",
+                  expected_updated_at: expectedUpdatedAtForWrite(selectedEvent),
+                });
+                const refreshed = await fetchEventsForCalendarView(fetchScheduleEvents, view, focusDate);
+                setEvents(refreshed);
+                setSelectedEvent(null);
+                showStatus("Отметка о проведении снята. Оценки и работы сохранены.");
+              } catch (err) {
+                showStatus(err.message || "Не удалось исправить статус");
+              }
+            })();
           }}
           onDuplicate={() => handleDuplicateLesson(selectedEvent)}
           onSaveLink={handleSaveTelemostLink}

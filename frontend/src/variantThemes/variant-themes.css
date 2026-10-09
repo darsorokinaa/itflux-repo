@@ -36,11 +36,9 @@ body.variant-theme-active.variant-theme--route:has(#main-wrapper.exam-page--edu)
 html.variant-theme-active.seasonal-theme-active,
 html.variant-theme-active.seasonal-theme-active body {
   background-color: var(--variant-theme-bg-color, #cfe8f6) !important;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.3)),
-    var(--variant-theme-bg-image, linear-gradient(180deg, #9fc8e4 0%, #c5e0f2 42%, #e7f3fb 100%)) !important;
+  background-image: var(--variant-theme-bg-image, linear-gradient(rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.3)), linear-gradient(180deg, #9fc8e4 0%, #c5e0f2 42%, #e7f3fb 100%)) !important;
   background-repeat: no-repeat !important;
-  background-size: auto, cover !important;
+  background-size: cover !important;
   background-attachment: fixed !important;
   background-position: center, center top !important;
 }
@@ -155,6 +153,27 @@ html.variant-theme--route #main-wrapper.exam-page--edu .exam-task-card {
   box-shadow: none !important;
 }
 
+html.variant-theme--route.variant-theme-has-block-image #main-wrapper.exam-page--edu .exam-task-card {
+  background-color: #fff !important;
+  background-image: none !important;
+  isolation: isolate;
+  position: relative;
+}
+
+html.variant-theme--route.variant-theme-has-block-image #main-wrapper.exam-page--edu .exam-task-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-image: var(--variant-theme-block-bg-image, none);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: var(--variant-theme-block-opacity, 0.72);
+  pointer-events: none;
+  z-index: -1;
+}
+
 html.variant-theme--route #main-wrapper.exam-page--edu .exam-task-card.is-theme-current {
   box-shadow: 0 0 0 2px rgba(47, 111, 159, 0.22), 0 12px 32px rgba(15, 76, 129, 0.08) !important;
 }
@@ -176,7 +195,7 @@ html.variant-theme--route #main-wrapper.exam-page--edu .exam-task-card.is-theme-
   width: 120px;
   height: 42px;
   border-radius: 40px;
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.92);
   filter: blur(0.2px);
   animation: variant-theme-cloud 36s linear infinite;
 }
@@ -207,6 +226,7 @@ html.variant-theme--route #main-wrapper.exam-page--edu .exam-task-card.is-theme-
 .variant-theme-decor__cloud--b { top: 18%; left: 40%; width: 90px; animation-duration: 56s; animation-delay: -12s; }
 .variant-theme-decor__cloud--c { top: 6%; right: -8%; left: auto; animation-duration: 42s; animation-delay: -20s; }
 
+.variant-theme-fx__particle,
 .variant-theme-fx--falling-leaves .variant-theme-fx__particle,
 .variant-theme-fx--snow .variant-theme-fx__particle,
 .variant-theme-fx--floating-stars .variant-theme-fx__particle,
@@ -218,6 +238,32 @@ html.variant-theme--route #main-wrapper.exam-page--edu .exam-task-card.is-theme-
   animation-name: variant-theme-fall;
   animation-timing-function: linear;
   animation-iteration-count: infinite;
+}
+
+.variant-theme-fx__particle--leaf {
+  border-radius: 40% 0 40% 0;
+}
+
+.variant-theme-fx__particle--star {
+  clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+  animation-name: variant-theme-twinkle;
+}
+
+.variant-theme-fx__particle--cloud {
+  width: 84px !important;
+  height: 28px !important;
+  border-radius: 20px;
+  animation-name: variant-theme-cloud;
+  top: 12%;
+}
+
+.variant-theme-fx__flyer {
+  position: absolute;
+  top: 12%;
+  right: 8%;
+  width: 88px;
+  height: 54px;
+  animation: variant-theme-cloud 8s ease-in-out infinite;
 }
 
 .variant-theme-fx--falling-leaves .variant-theme-fx__particle {
@@ -250,6 +296,20 @@ html.variant-theme--route #main-wrapper.exam-page--edu .exam-task-card.is-theme-
   --route-ink: #1d4f78;
   padding: 2px 0 0;
   isolation: isolate;
+}
+
+.variant-theme-route--none .variant-theme-route__rail,
+.variant-theme-route--none .variant-theme-route__row:not(:last-child)::after {
+  display: none;
+}
+
+.variant-theme-route--solid .variant-theme-route__rail {
+  background: var(--route-line);
+}
+
+.variant-theme-route--solid .variant-theme-route__stop--done .variant-theme-route__rail,
+.variant-theme-route--solid .variant-theme-route__stop--current .variant-theme-route__rail {
+  background: var(--route-line-done);
 }
 
 .variant-theme-route__row {
@@ -607,20 +667,42 @@ body.variant-theme--route .variant-theme-nav {
   box-shadow: 0 12px 36px rgba(15, 23, 42, 0.16);
 }
 
+.vt-admin-list {
+  width: 100%;
+  max-width: none;
+  overflow-x: auto;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+}
+
 .vt-admin-table {
   width: 100%;
+  min-width: 760px;
   border-collapse: collapse;
   background: #fff;
-  border-radius: 16px;
-  overflow: hidden;
 }
 
 .vt-admin-table th,
 .vt-admin-table td {
-  padding: 12px 14px;
+  padding: 14px 16px;
   text-align: left;
   border-bottom: 1px solid rgba(15, 23, 42, 0.06);
   vertical-align: middle;
+  white-space: nowrap;
+}
+
+.vt-admin-table th {
+  font-size: 13px;
+  font-weight: 650;
+  color: #334155;
+}
+
+.vt-admin-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  align-items: center;
 }
 
 .vt-admin-preview {
@@ -635,13 +717,65 @@ body.variant-theme--route .variant-theme-nav {
 .vt-admin-form {
   display: grid;
   gap: 14px;
-  max-width: 720px;
+  max-width: 960px;
+  width: 100%;
 }
 
 .vt-admin-form label {
   display: grid;
   gap: 6px;
   font-weight: 600;
+}
+
+.vt-decor-fieldset {
+  margin: 0;
+  padding: 12px 14px 14px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 14px;
+}
+
+.vt-decor-fieldset legend {
+  padding: 0 6px;
+  font-weight: 700;
+}
+
+.vt-decor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.vt-admin-form label.vt-decor-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.vt-admin-form label.vt-decor-option input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  flex: none;
+}
+
+.vt-decor-sample {
+  display: block;
+  width: 72px;
+  height: 44px;
+  flex: none;
+  overflow: hidden;
+  border: 1px solid rgba(47, 111, 159, 0.16);
+  border-radius: 8px;
+}
+
+.vt-decor-sample svg {
+  display: block;
 }
 
 .vt-admin-form input,
@@ -653,12 +787,128 @@ body.variant-theme--route .variant-theme-nav {
   border: 1px solid rgba(15, 23, 42, 0.14);
 }
 
+.vt-admin-preview-caption {
+  margin: 0 0 8px;
+  font-weight: 700;
+}
+
 .vt-admin-preview-box {
   position: relative;
-  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 340px;
   border-radius: 20px;
   overflow: hidden;
   background: linear-gradient(180deg, #d7edf8, #eaf6fd);
+}
+
+.vt-admin-preview-box .variant-theme-decor,
+.variant-theme-decor--contained,
+.vt-admin-preview-box .variant-theme-fx {
+  position: absolute;
+  inset: 0;
+}
+
+.vt-pattern-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.vt-pattern-svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.variant-theme-decor__scene {
+  position: absolute;
+  z-index: 0;
+  width: 168px;
+  height: 100px;
+  pointer-events: none;
+}
+
+.variant-theme-decor__scene .vt-decor-sample,
+.variant-theme-decor__scene svg {
+  width: 100%;
+  height: 100%;
+}
+
+.variant-theme-decor__scene--stars { top: 6%; right: 6%; width: 120px; }
+.variant-theme-decor__scene--leaves { top: 14%; left: 34%; width: 130px; }
+.variant-theme-decor__scene--mountains { left: 0; bottom: 0; width: 220px; height: 120px; }
+.variant-theme-decor__scene--sea { right: 0; bottom: 0; width: 220px; height: 110px; }
+.variant-theme-decor__scene--sailboats { right: 12%; bottom: 8%; width: 160px; }
+.variant-theme-decor__scene--flowers { left: 34%; bottom: 2%; width: 140px; }
+
+.variant-theme-decor__item {
+  position: absolute;
+  z-index: 2;
+  width: 88px;
+  height: 54px;
+}
+
+.variant-theme-decor__item .vt-decor-sample {
+  width: 100%;
+  height: 100%;
+}
+
+.variant-theme-decor__item--route { top: 14%; left: 4%; width: 140px; }
+.variant-theme-decor__item--leaves { top: 6%; left: 28%; }
+.variant-theme-decor__item--stars { top: 8%; right: 26%; }
+.variant-theme-decor__item--route-dots { bottom: 38%; left: 8%; width: 130px; }
+.variant-theme-decor__item--mountains { bottom: 22%; left: 2%; width: 150px; }
+.variant-theme-decor__item--sea { bottom: 18%; right: 4%; width: 150px; }
+.variant-theme-decor__item--sailboats { bottom: 28%; right: 18%; }
+.variant-theme-decor__item--flowers { bottom: 26%; left: 42%; }
+
+.vt-admin-preview-sheet {
+  position: relative;
+  z-index: 3;
+  margin: 88px 16px 16px;
+  padding: 12px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 10px 24px rgba(36, 85, 122, 0.08);
+}
+
+.vt-admin-preview-fly {
+  position: absolute;
+  z-index: 2;
+  top: 16%;
+  left: 0;
+  width: 88px;
+  height: 54px;
+  animation: vt-admin-preview-fly 7s linear infinite;
+}
+
+.vt-admin-preview-box .variant-theme-fx__particle {
+  animation-name: vt-admin-preview-fall;
+}
+
+.vt-admin-preview-box .variant-theme-fx--floating-stars .variant-theme-fx__particle {
+  animation-name: variant-theme-twinkle;
+}
+
+.vt-admin-preview-box .variant-theme-fx--clouds .variant-theme-fx__particle {
+  animation-name: variant-theme-cloud;
+}
+
+@keyframes vt-admin-preview-fly {
+  from { transform: translateX(-20%); }
+  to { transform: translateX(720px); }
+}
+
+@keyframes vt-admin-preview-fall {
+  from { transform: translate3d(0, -12px, 0) rotate(0deg); }
+  to { transform: translate3d(8px, 280px, 0) rotate(140deg); }
 }
 
 @keyframes variant-theme-hint-in {
@@ -685,6 +935,12 @@ body.variant-theme--route .variant-theme-nav {
   .variant-theme-fx,
   .variant-theme-decor__cloud {
     display: none !important;
+  }
+
+  .vt-admin-preview-box .variant-theme-fx,
+  .vt-admin-preview-box .variant-theme-decor__cloud,
+  .vt-admin-preview-box .vt-admin-preview-fly {
+    display: block !important;
   }
 
   .variant-theme-selector__hint {

@@ -131,6 +131,20 @@ export function destinationTopic(sessions, fromIndex, toIndex) {
   return topicKeyOf(moved);
 }
 
+export function orderChangeNeedsPreview(previous, next) {
+  const ids = (list) => (list || []).map((session) => session?.id).filter(Boolean).join(",");
+  if (ids(previous) === ids(next)) return false;
+  return (next || []).some((session) => session?.scheduledDate || session?.scheduledEventId);
+}
+
+export function topicOrderPreviewLines(sessions) {
+  return (sessions || []).map((session, index) => {
+    const topic = String(session?.topic || session?.title || "Без темы").trim() || "Без темы";
+    const date = session?.scheduledDate ? String(session.scheduledDate) : "";
+    return date ? `${index + 1}. ${topic} — ${date}` : `${index + 1}. ${topic}`;
+  });
+}
+
 export function applyReorderWithTopic(sessions, fromIndex, toIndex) {
   if (fromIndex === toIndex) return sessions;
   const next = moveListItem(sessions, fromIndex, toIndex);

@@ -17,6 +17,8 @@ import { usePlanListPointerReorder } from "../hooks/usePlanListPointerReorder";
 import {
   applyReorderWithTopic,
   groupSessionsByTopic,
+  orderChangeNeedsPreview,
+  topicOrderPreviewLines,
   lessonsWord,
   mapIndexAfterMove,
   moveSessionToTopic,
@@ -26,6 +28,7 @@ import {
   topicKeyOf,
   visualDropLineIndex,
 } from "../planEditorGrouping";
+import { createPersistQueue } from "../planPersistQueue";
 import "../styles/plan-editor.css";
 import {
   addLessonPlanItem,
@@ -74,6 +77,7 @@ import { useAutoSave } from "../hooks/useAutoSave";
 import { usePageTitle } from "../hooks/usePageTitle";
 import {
   PLAN_DATE_INTERVALS,
+  WEEKDAY_OPTIONS,
   applyPlanDates,
   calendarDateKey,
   compressPlanDatesAfterRemove,
@@ -175,6 +179,7 @@ export default function CabinetLessonPlanEditorPage() {
   const [expandedIndex, setExpandedIndex] = useState(isNew ? 0 : null);
   const [extraOpen, setExtraOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [calendarBusy, setCalendarBusy] = useState(false);
   const [orderStatus, setOrderStatus] = useState("idle");
   const [orderRetry, setOrderRetry] = useState(null);
   const [renamingTopicId, setRenamingTopicId] = useState(null);
@@ -192,6 +197,10 @@ export default function CabinetLessonPlanEditorPage() {
   const [scheduleDraft, setScheduleDraft] = useState(null);
   const [schedulingFirst, setSchedulingFirst] = useState(false);
   const [dateInterval, setDateInterval] = useState("weekly");
+  const [weekdays, setWeekdays] = useState([]);
+  const [weekdayTimes, setWeekdayTimes] = useState({});
+  const [scheduleConfirm, setScheduleConfirm] = useState(null);
+  const [orderConfirm, setOrderConfirm] = useState(null);
   const [deleteSessionIndex, setDeleteSessionIndex] = useState(null);
   const [makePublic, setMakePublic] = useState(false);
   const [canPublishCatalog, setCanPublishCatalog] = useState(false);
@@ -222,6 +231,10 @@ export default function CabinetLessonPlanEditorPage() {
     setSessions(next);
     return next;
   }, []);
+  const enqueuePlanPersistRef = useRef(null);
+  if (!enqueuePlanPersistRef.current) {
+    enqueuePlanPersistRef.current = createPersistQueue();
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -485,15 +498,26 @@ export default function CabinetLessonPlanEditorPage() {
     await persistDateShifts(previous, compressed);
   }, [commitSessions, persistDateShifts, sessions]);
 
-  const persistFilledPlanDates = useCallback(async (previous, next, interval) => {
+  const persistFilledPlanDates = useCallback(async (previous, next, interval, scheduleDays = null) => {
     const planKey = savedPlanKey();
     const startDate = calendarDateKey(next?.[0]?.scheduledDate);
     if (!planKey || !startDate) return;
     try {
-      await fillLessonPlanDates(planKey, {
+      const payload = {
         start_date: startDate,
         interval,
-      });
+      };
+      const days = scheduleDays || weekdays;
+      if (interval === "weekdays" && days.length) {
+        payload.weekdays = days;
+        payload.weekday_slots = days.map((day) => ({
+          weekday: day,
+          start_time: weekdayTimes[day]?.start || "16:00",
+          duration_minutes: Number(weekdayTimes[day]?.duration) || 60,
+        }));
+        payload.overwrite = true;
+      }
+      await fillLessonPlanDates(planKey, payload);
     } catch {
       await persistDateShifts(previous, next);
       return;
@@ -510,7 +534,7 @@ export default function CabinetLessonPlanEditorPage() {
         }
       }
     }
-  }, [persistDateShifts, savedPlanKey, showToast]);
+  }, [persistDateShifts, savedPlanKey, showToast, weekdayTimes, weekdays]);
 
   const handleToggleSession = useCallback((index) => {
     setExpandedIndex((prev) => (prev === index ? null : index));
@@ -523,15 +547,50 @@ export default function CabinetLessonPlanEditorPage() {
   const handleFirstDateChange = useCallback((value) => {
     const nextValue = calendarDateKey(value);
     const prev = sessionsRef.current;
-    const next = nextValue ? applyPlanDates(prev, nextValue, dateInterval, 0) : prev;
+    const next = nextValue
+      ? applyPlanDates(prev, nextValue, dateInterval, 0, { weekdays: dateInterval === "weekdays" ? weekdays : null })
+      : prev;
     if (next === prev && calendarDateKey(prev[0]?.scheduledDate) === nextValue) return;
     skipDirtyRef.current = true;
     commitSessions(next);
     void persistFilledPlanDates(prev, next, dateInterval);
+  }, [commitSessions, dateInterval, persistFilledPlanDates, weekdays]);
+
+  const applyWeekdaySchedule = useCallback((nextDays, { confirmed = false } = {}) => {
+    const days = [...nextDays].sort((a, b) => a - b);
+    setDateInterval("weekdays");
+    const prev = sessionsRef.current;
+    const first = calendarDateKey(prev[0]?.scheduledDate);
+    if (!first || !days.length) {
+      setWeekdays(days);
+      return;
+    }
+    const next = applyPlanDates(prev, first, "weekdays", 0, {
+      previousIntervalId: dateInterval,
+      weekdays: days,
+    });
+    const changed = next.filter((session, index) => (
+      calendarDateKey(session.scheduledDate) !== calendarDateKey(prev[index]?.scheduledDate)
+    )).length;
+    if (!confirmed && changed > 1) {
+      setScheduleConfirm({ days, changed });
+      return;
+    }
+    setWeekdays(days);
+    if (next === prev) return;
+    skipDirtyRef.current = true;
+    commitSessions(next);
+    void persistFilledPlanDates(prev, next, "weekdays", days);
   }, [commitSessions, dateInterval, persistFilledPlanDates]);
 
   const handleDateIntervalChange = useCallback((nextInterval) => {
     setDateInterval(nextInterval);
+    if (nextInterval === "weekdays") {
+      const first = calendarDateKey(sessionsRef.current[0]?.scheduledDate);
+      const fallback = first ? [(new Date(`${first}T12:00:00`).getDay() + 6) % 7] : [0];
+      applyWeekdaySchedule(weekdays.length ? weekdays : fallback, { confirmed: weekdays.length === 0 });
+      return;
+    }
     const prev = sessionsRef.current;
     const first = calendarDateKey(prev[0]?.scheduledDate);
     if (!first) return;
@@ -540,7 +599,7 @@ export default function CabinetLessonPlanEditorPage() {
     skipDirtyRef.current = true;
     commitSessions(next);
     void persistFilledPlanDates(prev, next, nextInterval);
-  }, [commitSessions, dateInterval, persistFilledPlanDates]);
+  }, [applyWeekdaySchedule, commitSessions, dateInterval, persistFilledPlanDates, weekdays]);
 
   const applySessionDate = useCallback(async (index, value, { shiftFollowing = false } = {}) => {
     const previous = sessionsRef.current;
@@ -728,26 +787,31 @@ export default function CabinetLessonPlanEditorPage() {
     }
   }, []);
 
-  const moveSession = useCallback((index, dir) => {
-    const target = index + dir;
-    setSessions((prev) => {
-      if (target < 0 || target >= prev.length) return prev;
-      const next = applyReorderWithTopic(prev, index, target);
-      void persistOrderWithRollback(next, prev, { fromIndex: index, toIndex: target });
-      return next;
-    });
-    setExpandedIndex((prev) => mapIndexAfterMove(prev, index, target));
+  const applySessionOrder = useCallback((next, previous, fromIndex, toIndex) => {
+    setSessions(next);
+    setExpandedIndex((index) => mapIndexAfterMove(index, fromIndex, toIndex));
+    void persistOrderWithRollback(next, previous, { fromIndex, toIndex });
   }, [persistOrderWithRollback]);
 
-  const handlePointerReorder = useCallback((fromIndex, toIndex) => {
+  const requestSessionOrder = useCallback((fromIndex, toIndex) => {
     if (fromIndex === toIndex) return;
-    setSessions((prev) => {
-      const next = applyReorderWithTopic(prev, fromIndex, toIndex);
-      void persistOrderWithRollback(next, prev, { fromIndex, toIndex });
-      return next;
-    });
-    setExpandedIndex((prev) => mapIndexAfterMove(prev, fromIndex, toIndex));
-  }, [persistOrderWithRollback]);
+    const previous = sessionsRef.current;
+    if (toIndex < 0 || toIndex >= previous.length) return;
+    const next = applyReorderWithTopic(previous, fromIndex, toIndex);
+    if (orderChangeNeedsPreview(previous, next)) {
+      setOrderConfirm({ next, previous, fromIndex, toIndex });
+      return;
+    }
+    applySessionOrder(next, previous, fromIndex, toIndex);
+  }, [applySessionOrder]);
+
+  const moveSession = useCallback((index, dir) => {
+    requestSessionOrder(index, index + dir);
+  }, [requestSessionOrder]);
+
+  const handlePointerReorder = useCallback((fromIndex, toIndex) => {
+    requestSessionOrder(fromIndex, toIndex);
+  }, [requestSessionOrder]);
 
   const handleMoveToTopic = useCallback((index, topic) => {
     setSessions((prev) => {
@@ -1173,8 +1237,8 @@ export default function CabinetLessonPlanEditorPage() {
   }, [title, type, subject, goal, description, grade, sessions, makePublic, planStatus, loadingExisting]);
 
   const persistPlanDraft = useCallback(async () => {
-    if (!title.trim() || saving || autoSaving) return false;
-
+    if (!title.trim()) return false;
+    return enqueuePlanPersistRef.current(async () => {
     setAutoSaving(true);
     try {
       const targetPlanId = await ensurePlanId();
@@ -1211,7 +1275,7 @@ export default function CabinetLessonPlanEditorPage() {
 
       skipDirtyRef.current = true;
       setPlanDirty(false);
-      setSessions((prev) => prev.map((session, index) => {
+      commitSessions(sessionsRef.current.map((session, index) => {
         const remote = savedByKey.get(sessionListKey(session, index));
         if (!remote) return session;
         return keepLocalSessionWithRemoteId(session, { id: remote.id });
@@ -1229,9 +1293,10 @@ export default function CabinetLessonPlanEditorPage() {
     } finally {
       setAutoSaving(false);
     }
+    });
   }, [
-    autoSaving,
     canPublishCatalog,
+    commitSessions,
     description,
     ensurePlanId,
     goal,
@@ -1241,7 +1306,6 @@ export default function CabinetLessonPlanEditorPage() {
     navigate,
     planId,
     planStatus,
-    saving,
     subject,
     title,
     type,
@@ -1249,13 +1313,14 @@ export default function CabinetLessonPlanEditorPage() {
 
   useAutoSave({
     enabled: !loadingExisting && Boolean(title.trim()),
-    isDirty: true,
+    isDirty: planDirty,
     isSaving: saving || autoSaving || schedulingFirst || orderStatus === "saving",
     onSave: persistPlanDraft,
   });
 
   const handleSave = async () => {
-    if (!title.trim() || saving || autoSaving) return false;
+    if (!title.trim()) return false;
+    return enqueuePlanPersistRef.current(async () => {
     setSaving(true);
     try {
       const payload = {
@@ -1277,6 +1342,7 @@ export default function CabinetLessonPlanEditorPage() {
       const snapshot = sessionsRef.current;
       await updateLessonPlan(savedPlanId, payload);
       const savedItems = [];
+      const savedByKey = new Map();
       for (let i = 0; i < snapshot.length; i++) {
         const session = snapshot[i];
         const live = resolveLivePlanSession(sessionsRef.current, session, i);
@@ -1285,19 +1351,22 @@ export default function CabinetLessonPlanEditorPage() {
           ...buildPlanItemApiPayload(live, i + 1),
           title: sessionPersistTitle(live, i),
         };
-        if (live.id || session.id) {
-          const data = await updateLessonPlanItem(live.id || session.id, itemPayload);
-          savedItems.push(data.id);
-        } else {
-          const data = await addLessonPlanItem(savedPlanId, itemPayload);
-          savedItems.push(data.id);
-        }
+        const data = (live.id || session.id)
+          ? await updateLessonPlanItem(live.id || session.id, itemPayload)
+          : await addLessonPlanItem(savedPlanId, itemPayload);
+        savedByKey.set(sessionListKey(session, i), data);
+        savedItems.push(data.id);
       }
       if (savedItems.length > 1) {
         await reorderLessonPlanItems(savedItems.map((id, order) => ({ id, order: order + 1 })));
       }
       skipDirtyRef.current = true;
       setPlanDirty(false);
+      commitSessions(sessionsRef.current.map((session, index) => {
+        const remote = savedByKey.get(sessionListKey(session, index));
+        if (!remote) return session;
+        return keepLocalSessionWithRemoteId(session, { id: remote.id });
+      }));
       setAutoSavedAt(Date.now());
       if (String(planId) !== String(savedPlanId)) {
         navigate(`/cabinet/plans/${savedPlanId}/edit`, { replace: true });
@@ -1308,6 +1377,54 @@ export default function CabinetLessonPlanEditorPage() {
       return false;
     } finally {
       setSaving(false);
+    }
+    });
+  };
+
+  const handleBuildCalendar = async () => {
+    const saved = await handleSave();
+    if (!saved) return;
+    const planKey = createdPlanIdRef.current || activePlanId || planId;
+    const startDate = calendarDateKey(sessionsRef.current?.[0]?.scheduledDate);
+    if (!planKey || String(planKey) === "new") {
+      showToast("Сначала сохраните план.");
+      return;
+    }
+    if (!startDate) {
+      showToast("Укажите дату первого занятия.");
+      return;
+    }
+    setCalendarBusy(true);
+    try {
+      const payload = {
+        start_date: startDate,
+        interval: dateInterval,
+        sync_calendar: true,
+      };
+      if (dateInterval === "weekdays" && weekdays.length) {
+        payload.weekdays = weekdays;
+        payload.weekday_slots = weekdays.map((day) => ({
+          weekday: day,
+          start_time: weekdayTimes[day]?.start || "16:00",
+          duration_minutes: Number(weekdayTimes[day]?.duration) || 60,
+        }));
+      }
+      const data = await fillLessonPlanDates(planKey, payload);
+      const calendar = data?.calendar;
+      if (calendar && calendar.ok === false) {
+        showToast(calendar.detail || "Назначьте план ученику или группе, чтобы поставить занятия в календарь.");
+        return;
+      }
+      const createdCount = Array.isArray(calendar?.created) ? calendar.created.length : 0;
+      if (createdCount) {
+        showToast(`В календарь добавлено занятий: ${createdCount}. Повторное создание не добавляет копии.`);
+      } else {
+        showToast("Занятия уже стоят в календаре. Новых копий нет.");
+      }
+    } catch (err) {
+      showToast(err?.message || "Не удалось поставить занятия в календарь.");
+    } finally {
+      setCalendarBusy(false);
     }
   };
 
@@ -1488,10 +1605,19 @@ export default function CabinetLessonPlanEditorPage() {
             type="button"
             className="cb-btn cb-btn--ghost cb-pe-header__save"
             onClick={() => void handleSave()}
-            disabled={saveBusy || !title.trim()}
+            disabled={saveBusy || calendarBusy || !title.trim()}
             aria-label="Сохранить план"
           >
             {saveBusy ? "Сохранение…" : "Сохранить"}
+          </button>
+          <button
+            type="button"
+            className="cb-btn cb-btn--ghost"
+            onClick={() => void handleBuildCalendar()}
+            disabled={saveBusy || calendarBusy || !title.trim()}
+            aria-label="Поставить занятия в календарь"
+          >
+            {calendarBusy ? "Календарь…" : "В календарь"}
           </button>
           <button type="button" className="cb-btn cb-btn--primary cb-pe-header__add" onClick={() => addSession()}>
             <CabinetIcon name="plus" />
@@ -1735,6 +1861,71 @@ export default function CabinetLessonPlanEditorPage() {
               <small className="cb-pe-field__hint">Используется для автоматического расчёта дат уроков.</small>
             </label>
           </div>
+          {dateInterval === "weekdays" ? (
+            <div className="cb-pe-weekdays-block">
+              <div className="cb-pe-weekdays" role="group" aria-label="Дни недели">
+                {WEEKDAY_OPTIONS.map((day) => {
+                  const selected = weekdays.includes(day.id);
+                  return (
+                    <button
+                      key={day.id}
+                      type="button"
+                      className={`cb-pe-weekday${selected ? " is-on" : ""}`}
+                      aria-pressed={selected}
+                      onClick={() => {
+                        const nextDays = selected
+                          ? weekdays.filter((value) => value !== day.id)
+                          : [...weekdays, day.id];
+                        applyWeekdaySchedule(nextDays);
+                      }}
+                    >
+                      {day.short}
+                    </button>
+                  );
+                })}
+              </div>
+              {weekdays.length ? (
+                <div className="cb-pe-weekday-times">
+                  {weekdays.map((day) => {
+                    const option = WEEKDAY_OPTIONS.find((item) => item.id === day);
+                    const slot = weekdayTimes[day] || { start: "16:00", duration: 60 };
+                    return (
+                      <label key={day} className="cb-pe-field cb-pe-weekday-time">
+                        <span>{option?.full}</span>
+                        <input
+                          type="time"
+                          value={slot.start}
+                          aria-label={`Время, ${option?.full}`}
+                          onChange={(event) => {
+                            setWeekdayTimes((prev) => ({
+                              ...prev,
+                              [day]: { ...slot, start: event.target.value },
+                            }));
+                          }}
+                        />
+                        <input
+                          type="number"
+                          min={15}
+                          step={15}
+                          value={slot.duration}
+                          aria-label={`Длительность, ${option?.full}`}
+                          onChange={(event) => {
+                            setWeekdayTimes((prev) => ({
+                              ...prev,
+                              [day]: { ...slot, duration: Number(event.target.value) || 60 },
+                            }));
+                          }}
+                        />
+                        <small className="cb-pe-field__hint">минут</small>
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="cb-pe-info">Выберите дни, по которым проходят занятия. Даты уже стоящих уроков не изменятся без подтверждения.</p>
+              )}
+            </div>
+          ) : null}
           <p className="cb-pe-info">
             Изменение расписания пересчитает автоматические даты. Даты, заданные вручную, сохраняются.
           </p>
@@ -2054,6 +2245,44 @@ export default function CabinetLessonPlanEditorPage() {
         onSecondaryConfirm={dateConfirm?.canShiftFollowing ? () => {
           void applySessionDate(dateConfirm.index, dateConfirm.nextValue, { shiftFollowing: true });
         } : undefined}
+      />
+      <ConfirmActionModal
+        open={orderConfirm != null}
+        title="Изменить порядок тем?"
+        text={orderConfirm ? (
+          <div className="cb-confirm-text">
+            <p>Каждая тема останется на своём занятии. Изменится только порядок в плане:</p>
+            <ul>
+              {topicOrderPreviewLines(orderConfirm.next).map((line) => <li key={line}>{line}</li>)}
+            </ul>
+          </div>
+        ) : null}
+        confirmLabel="Сохранить порядок"
+        onClose={() => setOrderConfirm(null)}
+        onConfirm={() => {
+          if (!orderConfirm) return;
+          const pending = orderConfirm;
+          setOrderConfirm(null);
+          applySessionOrder(pending.next, pending.previous, pending.fromIndex, pending.toIndex);
+        }}
+      />
+      <ConfirmActionModal
+        open={scheduleConfirm != null}
+        title="Изменить расписание?"
+        text={scheduleConfirm ? (
+          <p className="cb-confirm-text">
+            Будут пересчитаны даты {scheduleConfirm.changed} занятий по выбранным дням недели.
+            Темы, домашние задания и вручную изменённые даты сохранятся. Прошедшие проведённые уроки в журнале не сдвигаются.
+          </p>
+        ) : null}
+        confirmLabel="Пересчитать даты"
+        onClose={() => setScheduleConfirm(null)}
+        onConfirm={() => {
+          if (!scheduleConfirm) return;
+          const pending = scheduleConfirm.days;
+          setScheduleConfirm(null);
+          applyWeekdaySchedule(pending, { confirmed: true });
+        }}
       />
     </CabinetPageShell>
   );

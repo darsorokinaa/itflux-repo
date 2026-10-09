@@ -2,6 +2,14 @@ import { Link, Navigate, useOutletContext } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { CabinetPageHeader, CabinetPageShell } from "../CabinetSectionUi";
 import { deleteVariantTheme, fetchAdminVariantThemes } from "../../variantThemes/variantThemeApi";
+import "../../variantThemes/variant-themes.css";
+
+const LAYOUT_LABELS = {
+  classic: "Классический",
+  cards: "Карточки",
+  route: "Маршрут",
+  game: "Игровой",
+};
 
 function statusLabel(theme) {
   if (!theme.is_active) return "Выключена";
@@ -42,13 +50,13 @@ export default function CabinetVariantThemesPage() {
         actions={[{ label: "Создать тему", href: "/cabinet/variant-themes/new", primary: true }]}
       />
       {error ? <p className="cb-page-sub" role="alert">{error}</p> : null}
-      <div className="cb-hw-card" style={{ overflowX: "auto" }}>
+      <div className="vt-admin-list">
         <table className="vt-admin-table">
           <thead>
             <tr>
-              <th>Preview</th>
+              <th>Превью</th>
               <th>Название</th>
-              <th>Layout</th>
+              <th>Макет</th>
               <th>Статус</th>
               <th>Действия</th>
             </tr>
@@ -64,13 +72,13 @@ export default function CabinetVariantThemesPage() {
                   )}
                 </td>
                 <td>{theme.name}</td>
-                <td>{theme.layout_type}</td>
+                <td>{LAYOUT_LABELS[theme.layout_type] || theme.layout_type}</td>
                 <td>{statusLabel(theme)}</td>
                 <td>
+                  <div className="vt-admin-actions">
                   <Link className="cb-btn cb-btn--outline cb-btn--sm" to={`/cabinet/variant-themes/${theme.id}`}>
                     Изменить
                   </Link>
-                  {" "}
                   <button
                     type="button"
                     className="cb-btn cb-btn--outline cb-btn--sm"
@@ -90,6 +98,7 @@ export default function CabinetVariantThemesPage() {
                   >
                     Удалить
                   </button>
+                  </div>
                 </td>
               </tr>
             ))}

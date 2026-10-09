@@ -24,6 +24,12 @@ import {
   normalizeTimeValue,
 } from "../scheduleLessonUtils";
 
+function savedScheduleMoment(serverEvent) {
+  const raw = serverEvent?.startsAt || "";
+  if (!raw) return "";
+  return raw.replace("T", " ").slice(0, 16);
+}
+
 const CONTENT_SOURCE_LABEL = {
   plan: "Из плана обучения",
   manual: "Введено вручную",
@@ -650,6 +656,7 @@ export default function EditScheduleLessonModal({ event, onClose, onSave, onEven
   const [notifyParticipants, setNotifyParticipants] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [staleSaved, setStaleSaved] = useState("");
   const [scopeOpen, setScopeOpen] = useState(false);
   const [scopeTimeChanged, setScopeTimeChanged] = useState(false);
   const [studentSubjects, setStudentSubjects] = useState([]);
@@ -687,7 +694,7 @@ export default function EditScheduleLessonModal({ event, onClose, onSave, onEven
   }, [event.studentId]);
 
   const buildPayload = () => ({
-    title: (event.audience || event.title || "").trim(),
+    title: (event.title || "").trim(),
     ...buildScheduleDateTimePayload(date, startTime, endTime),
     telemost_url: link.trim(),
     link: link.trim(),
@@ -723,6 +730,7 @@ export default function EditScheduleLessonModal({ event, onClose, onSave, onEven
     } catch (err) {
       setScopeOpen(false);
       setError(err.message || "Не удалось сохранить изменения.");
+      setStaleSaved(savedScheduleMoment(err?.data?.event));
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -761,6 +769,7 @@ export default function EditScheduleLessonModal({ event, onClose, onSave, onEven
       onClose();
     } catch (err) {
       setError(err.message || "Не удалось сохранить изменения.");
+      setStaleSaved(savedScheduleMoment(err?.data?.event));
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -793,7 +802,12 @@ export default function EditScheduleLessonModal({ event, onClose, onSave, onEven
             </button>
           </div>
           <form className="cb-sch-form cb-sch-form--sections" onSubmit={handleSubmit}>
-            {error ? <p className="cb-sch-form__error" role="alert">{error}</p> : null}
+            {error ? (
+              <p className="cb-sch-form__error" role="alert">
+                {error}
+                {staleSaved ? ` Сейчас сохранено: ${staleSaved}. Ваша правка: ${date} ${startTime}–${endTime}.` : ""}
+              </p>
+            ) : null}
             {saving ? (
               <p className="cb-sch-form__hint" role="status">Сохранение… Не закрывайте окно.</p>
             ) : null}

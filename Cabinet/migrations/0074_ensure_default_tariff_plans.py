@@ -9,9 +9,20 @@ def seed_if_missing(apps, schema_editor):
     existing = set(TariffPlan.objects.filter(slug__in=required).values_list("slug", flat=True))
     if existing.issuperset(required):
         return
-    from Cabinet.management.commands.seed_tariffs import apply_tariff_catalog
+    # Каталог берётся из текущего кода, но записываются только поля,
+    # которые уже есть в этой миграции. Иначе свежая база падает на
+    # столбцах, добавленных позже (например ai_images_monthly_limit).
+    from Cabinet.management.commands.seed_tariffs import TARIFFS
 
-    apply_tariff_catalog()
+    field_names = {field.name for field in TariffPlan._meta.concrete_fields}
+    for raw in TARIFFS:
+        slug = raw["slug"]
+        defaults = {
+            key: value
+            for key, value in raw.items()
+            if key != "slug" and key in field_names
+        }
+        TariffPlan.objects.update_or_create(slug=slug, defaults=defaults)
 
 
 def noop(apps, schema_editor):

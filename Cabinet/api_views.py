@@ -1359,19 +1359,6 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
 
     def retrieve(self, request, *args, **kwargs):
         plan = self.get_object()
-        from .plan_sync import PlanSyncService
-
-        if not is_catalog_lesson_plan(plan):
-            enrollments = LessonPlanEnrollment.objects.filter(
-                plan=plan,
-                teacher=self.get_teacher(),
-            ).exclude(status__in=[EnrollmentStatus.COMPLETED, EnrollmentStatus.CANCELLED])
-            for enrollment in enrollments:
-                try:
-                    PlanSyncService.realign_enrollment_topics(enrollment)
-                except Exception:
-                    pass
-            plan = self.get_object()
         serializer = self.get_serializer(plan)
         return Response(serializer.data)
 
@@ -1502,7 +1489,49 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         interval = request.data.get("interval") or request.data.get("frequency") or "weekly"
-        apply_plan_item_dates(plan, start_date, interval)
+        weekdays = request.data.get("weekdays")
+        slots = request.data.get("weekday_slots") or request.data.get("slots")
+        overwrite = request.data.get("overwrite")
+        preserve_existing = bool(request.data.get("preserve_existing"))
+        if (weekdays or slots) and overwrite not in (True, "true", "1", 1, "yes"):
+            preserve_existing = True
+        if overwrite in (True, "true", "1", 1, "yes"):
+            preserve_existing = False
+        apply_plan_item_dates(
+            plan,
+            start_date,
+            interval,
+            weekdays=weekdays,
+            until=request.data.get("end_date") or request.data.get("until"),
+            slots=slots,
+            preserve_existing=preserve_existing,
+        )
+        if slots or weekdays:
+            from .choices import EnrollmentStatus
+            from .plan_dates import normalize_interval, normalize_weekday_slots, INTERVAL_WEEKDAYS
+
+            normalized_slots = normalize_weekday_slots(slots, weekdays)
+            LessonPlanEnrollment.objects.filter(plan=plan, teacher=self.get_teacher()).exclude(
+                status__in=[EnrollmentStatus.COMPLETED, EnrollmentStatus.CANCELLED],
+            ).update(
+                weekday_slots=normalized_slots,
+                frequency=normalize_interval(interval) if not weekdays else INTERVAL_WEEKDAYS,
+            )
+        if request.data.get("sync_calendar") in (True, "true", "1", 1, "yes"):
+            from .lesson_lifecycle import materialize_plan_calendar
+
+            calendar = materialize_plan_calendar(
+                plan,
+                teacher=self.get_teacher(),
+                slots=slots,
+                notify=bool(request.data.get("notify_participants")),
+            )
+            plan = self.get_queryset().filter(pk=plan.pk).first() or plan
+            payload = LessonPlanDetailSerializer(plan).data
+            payload["calendar"] = calendar
+            if not calendar.get("ok"):
+                payload["calendar_warning"] = calendar.get("detail")
+            return Response(payload)
         plan = self.get_queryset().filter(pk=plan.pk).first() or plan
         return Response(LessonPlanDetailSerializer(plan).data)
 
@@ -1730,27 +1759,32 @@ class LessonPlanItemViewSet(
                     status=status.HTTP_403_FORBIDDEN,
                 )
             return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
+        expected = request.data.get("expected_updated_at")
+        if expected:
+            from .lesson_lifecycle import LessonLifecycleError, assert_fresh_write
+
+            try:
+                assert_fresh_write(item, expected)
+            except LessonLifecycleError as exc:
+                return Response(
+                    {"detail": exc.message, "code": exc.code, "updated_at": item.updated_at},
+                    status=exc.status,
+                )
         response = super().update(request, *args, **kwargs)
         item.refresh_from_db()
         # После M2M-обновления не полагаемся на устаревший prefetch.
         if hasattr(item, "_prefetched_objects_cache"):
             item._prefetched_objects_cache.clear()
         from .lesson_plan_content_sync import LessonLearningPlanSyncService
-        from .plan_sync import PlanSyncService
         sync_result = LessonLearningPlanSyncService.sync_plan_item_to_lessons(
             item, teacher=self.get_teacher(), update_source="plan",
         )
-        if "scheduled_date" in request.data:
-            try:
-                enrollments = LessonPlanEnrollment.objects.filter(plan=plan).exclude(
-                    status__in=[EnrollmentStatus.COMPLETED, EnrollmentStatus.CANCELLED],
-                )
-                for enrollment in enrollments:
-                    PlanSyncService.realign_enrollment_topics(enrollment)
-            except Exception:
-                pass
         data = LessonPlanItemSerializer(item).data
         data["synced_events"] = sync_result
+        if "scheduled_date" in request.data:
+            from .lesson_lifecycle import sync_plan_item_date_to_event
+
+            data["calendar_sync"] = sync_plan_item_date_to_event(item, changed_by=self.get_teacher())
         return Response(data)
 
     def destroy(self, request, *args, **kwargs):
@@ -1824,6 +1858,9 @@ class LessonPlanItemViewSet(
     @action(detail=False, methods=["post"], url_path="reorder")
     def reorder(self, request):
         order_map = request.data.get("items") or []
+        preview_only = request.data.get("preview") in (True, "true", 1, "1", "yes")
+        if preview_only:
+            return Response(self._topic_order_preview(order_map))
         plan_ids = set()
         for entry in order_map:
             item_id = entry.get("id")
@@ -1862,7 +1899,39 @@ class LessonPlanItemViewSet(
             "warning": warnings[0] if warnings else None,
             "warnings": warnings,
             "updated_event_ids": list(dict.fromkeys(updated_event_ids)),
+            "preview": self._topic_order_preview(order_map).get("preview"),
+            "links_preserved": True,
         })
+
+    def _topic_order_preview(self, order_map):
+        """Показывает новый порядок тем, не меняя связи с календарём."""
+        proposed = {}
+        for entry in order_map or []:
+            if entry.get("id") is None or entry.get("order") is None:
+                continue
+            proposed[int(entry["id"])] = int(entry["order"])
+        items = LessonPlanItem.objects.filter(
+            pk__in=proposed.keys() or [],
+            plan__teacher=self.get_teacher(),
+        ).select_related("scheduled_event")
+        rows = []
+        for item in items:
+            event = item.scheduled_event
+            rows.append({
+                "id": item.pk,
+                "order": proposed.get(item.pk, item.order),
+                "topic": item.topic or item.title,
+                "scheduled_date": item.scheduled_date.isoformat() if item.scheduled_date else None,
+                "event_id": event.pk if event else None,
+                "event_topic": (event.topic if event else "") or "",
+            })
+        rows.sort(key=lambda row: (row["order"], row["id"]))
+        return {
+            "ok": True,
+            "preview": rows,
+            "links_preserved": True,
+            "detail": "Порядок тем изменится. Дата, занятие и домашнее задание каждого пункта останутся на месте.",
+        }
 
 
 class LessonPlanEnrollmentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
@@ -2432,19 +2501,20 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
         rejected = self._reject_unsubmitted(item)
         if rejected is not None:
             return rejected
-        item.status = ReviewStatus.CHECKED
-        item.checked_at = timezone.now()
-        item.teacher_comment = request.data.get("teacher_comment", item.teacher_comment)
-        item.save()
-        self._sync_source(
-            item,
-            checked=True,
-            comment=item.teacher_comment,
-            scores=request.data.get("scores"),
-            checked_tasks=request.data.get("checked"),
-            comments_by_task_id=request.data.get("comments_by_task_id"),
-            manual_stats=request.data.get("manual_stats"),
-        )
+        with transaction.atomic():
+            item.status = ReviewStatus.CHECKED
+            item.checked_at = timezone.now()
+            item.teacher_comment = request.data.get("teacher_comment", item.teacher_comment)
+            self._sync_source(
+                item,
+                checked=True,
+                comment=item.teacher_comment,
+                scores=request.data.get("scores"),
+                checked_tasks=request.data.get("checked"),
+                comments_by_task_id=request.data.get("comments_by_task_id"),
+                manual_stats=request.data.get("manual_stats"),
+            )
+            item.save()
         try:
             from .student_notifications import notify_student_homework_reviewed
 
@@ -2465,17 +2535,18 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
         rejected = self._reject_unsubmitted(item)
         if rejected is not None:
             return rejected
-        item.status = ReviewStatus.RETURNED
-        item.checked_at = timezone.now()
-        item.teacher_comment = request.data.get("teacher_comment", item.teacher_comment)
-        item.save()
-        self._sync_source(
-            item,
-            checked=False,
-            comment=item.teacher_comment,
-            comments_by_task_id=request.data.get("comments_by_task_id"),
-            manual_stats=request.data.get("manual_stats"),
-        )
+        with transaction.atomic():
+            item.status = ReviewStatus.RETURNED
+            item.checked_at = timezone.now()
+            item.teacher_comment = request.data.get("teacher_comment", item.teacher_comment)
+            self._sync_source(
+                item,
+                checked=False,
+                comment=item.teacher_comment,
+                comments_by_task_id=request.data.get("comments_by_task_id"),
+                manual_stats=request.data.get("manual_stats"),
+            )
+            item.save()
         try:
             from .student_notifications import notify_student_homework_reviewed
 
@@ -2489,6 +2560,43 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
             logger.exception("Failed to notify student about returned review %s", item.pk)
         item.refresh_from_db()
         return Response(ReviewItemSerializer(item).data)
+
+    @action(detail=True, methods=["post"], url_path="scoring-preview")
+    def scoring_preview(self, request, pk=None):
+        """Предпросмотр пересчёта одной попытки по текущему банку. Запись не меняется."""
+        from .homework_api import preview_variant_rescore
+
+        item = self.get_object()
+        if item.source_type != "homework":
+            return Response({"detail": "Для этой работы пересчёт не применяется."}, status=status.HTTP_400_BAD_REQUEST)
+        submission = HomeworkSubmission.objects.filter(pk=item.source_id).select_related("homework").first()
+        if submission is None:
+            return Response({"detail": "Сдача не найдена."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(preview_variant_rescore(submission))
+
+    @action(detail=True, methods=["post"], url_path="scoring-apply")
+    def scoring_apply(self, request, pk=None):
+        """Применить предпросмотр к одной попытке. Без confirm запись не меняется."""
+        from .homework_api import apply_variant_rescore
+
+        if not isinstance(request.data, dict) or request.data.get("confirm") is not True:
+            return Response(
+                {"detail": "Пересчёт не записан. Передайте confirm: true после просмотра."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        item = self.get_object()
+        if item.source_type != "homework":
+            return Response({"detail": "Для этой работы пересчёт не применяется."}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            submission = (
+                HomeworkSubmission.objects.select_for_update()
+                .filter(pk=item.source_id)
+                .select_related("homework")
+                .first()
+            )
+            if submission is None:
+                return Response({"detail": "Сдача не найдена."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(apply_variant_rescore(submission))
 
     @action(detail=True, methods=["get"], url_path="create-homework-preview")
     def create_homework_preview(self, request, pk=None):
@@ -2735,10 +2843,11 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
             if not submission:
                 return
 
+            previous = submission.result_payload if isinstance(submission.result_payload, dict) else {}
             submission.status = SubmissionStatus.CHECKED if checked else SubmissionStatus.RETURNED
             submission.teacher_comment = comment or ""
             update_fields = ["status", "teacher_comment", "updated_at"]
-            payload = dict(submission.result_payload or {})
+            payload = dict(previous)
             changed_payload = False
 
             if isinstance(scores, dict) and scores:
@@ -2750,7 +2859,10 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
                         continue
                 payload["scores"] = merged
                 changed_payload = True
-            if isinstance(checked_tasks, dict) and checked_tasks:
+            from .homework_api import manual_scores_changed
+
+            scores_changed = manual_scores_changed(previous, scores)
+            if isinstance(checked_tasks, dict) and checked_tasks and scores_changed:
                 merged = dict(payload.get("checked") or {})
                 for key, value in checked_tasks.items():
                     merged[str(key)] = bool(value)
@@ -2787,17 +2899,37 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
                         submission.score = round(correct * 100 / total, 2)
                         update_fields.append("score")
 
-            if changed_payload:
-                from .homework_api import compute_score_percent
+            from .homework_api import (
+                assign_submission_score,
+                homework_has_variant_task,
+                store_variant_scoring,
+            )
+
+            has_variant = homework_has_variant_task(submission.homework)
+            has_attempt_basis = any(
+                isinstance(previous.get(key), (dict, list)) and previous.get(key)
+                for key in ("grading_snapshot", "tasks_snapshot", "scoring")
+            )
+            # Обычное сохранение и комментарий не пересчитывают уже утверждённый итог.
+            # Пересчёт — только если учитель изменил балл и у попытки уже есть снимок.
+            should_rescore = bool(has_variant and scores_changed and has_attempt_basis)
+            if changed_payload or should_rescore:
                 from .homework_task_files import overlay_payload_attachments
 
+                previous_snapshot = previous.get("tasks_snapshot")
+                previous_grading = previous.get("grading_snapshot")
                 payload = overlay_payload_attachments(submission, payload)
-                submission.result_payload = payload
-                if "score" not in update_fields:
-                    computed = compute_score_percent(payload)
-                    if computed is not None:
-                        submission.score = computed
+                if should_rescore:
+                    payload = store_variant_scoring(
+                        payload,
+                        submission.homework,
+                        previous_snapshot=previous_snapshot if isinstance(previous_snapshot, list) else None,
+                        previous_grading=previous_grading if isinstance(previous_grading, list) else None,
+                    )
+                    if isinstance(payload.get("scoring"), dict) or "score" not in update_fields:
+                        assign_submission_score(submission, payload)
                         update_fields.append("score")
+                submission.result_payload = payload
                 update_fields.append("result_payload")
 
             seen = set()

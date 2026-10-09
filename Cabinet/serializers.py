@@ -1110,6 +1110,7 @@ class LessonPlanEnrollmentSerializer(serializers.ModelSerializer):
             "start_date",
             "end_date",
             "frequency",
+            "weekday_slots",
             "status",
             "status_label",
             "notes",
@@ -1148,6 +1149,7 @@ class LessonPlanEnrollmentWriteSerializer(serializers.ModelSerializer):
             "start_date",
             "end_date",
             "frequency",
+            "weekday_slots",
             "status",
             "notes",
         ]

@@ -97,16 +97,6 @@ export default function WorkbookCreateBar({
           <label className="workbook-create-bar__option">
             <input
               type="checkbox"
-              checked={options.showGrading}
-              onChange={(e) =>
-                setOptions((prev) => ({ ...prev, showGrading: e.target.checked }))
-              }
-            />
-            Блок для учителя (внизу)
-          </label>
-          <label className="workbook-create-bar__option">
-            <input
-              type="checkbox"
               checked={options.showSolutionSpace}
               onChange={(e) =>
                 setOptions((prev) => ({
@@ -136,26 +126,6 @@ export default function WorkbookCreateBar({
               }
             />
             Ответы
-          </label>
-          <label className="workbook-create-bar__option">
-            <input
-              type="checkbox"
-              checked={options.showTaskIds}
-              onChange={(e) =>
-                setOptions((prev) => ({ ...prev, showTaskIds: e.target.checked }))
-              }
-            />
-            ID задач
-          </label>
-          <label className="workbook-create-bar__option">
-            <input
-              type="checkbox"
-              checked={options.showStudentLine}
-              onChange={(e) =>
-                setOptions((prev) => ({ ...prev, showStudentLine: e.target.checked }))
-              }
-            />
-            Строка ученика
           </label>
         </div>
       ) : null}

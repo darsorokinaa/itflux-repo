@@ -1,11 +1,10 @@
-import { useEffect, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
-import { User } from "lucide-react";
-import { getActiveNavTab, NAV_TABS } from "../config/navTabs";
+import { FormEvent, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { getActiveNavTab, NAV_TABS, type NavTabDef } from "../config/navTabs";
 import SoonModal from "./SoonModal";
-import TaskSearchPanel from "./TaskSearchPanel";
 import { displayName } from "../pages/CabinetAuthPage";
 import { fetchCabinetSession, getCabinetHomePath } from "../utils/cabinetAuth";
+import { openSupport } from "../cabinet/support";
 
 function pickFirstNonEmptyString(values: unknown[]) {
   for (const value of values) {
@@ -63,15 +62,80 @@ function resolveUserAvatarUrl(user: unknown): string {
   return normalizeAvatarUrl(fromTop || fromProfile);
 }
 
+function FluxIcon({ children }: { children: ReactNode }) {
+  return (
+    <svg className="flux-icon" viewBox="0 0 24 24" aria-hidden="true">
+      {children}
+    </svg>
+  );
+}
+
+function TabIcon({ tabKey }: { tabKey: string }) {
+  if (tabKey === "tasks") {
+    return (
+      <FluxIcon>
+        <rect x="4" y="4" width="6" height="6" rx="1.4" />
+        <rect x="14" y="4" width="6" height="6" rx="1.4" />
+        <rect x="4" y="14" width="6" height="6" rx="1.4" />
+        <rect x="14" y="14" width="6" height="6" rx="1.4" />
+      </FluxIcon>
+    );
+  }
+  if (tabKey === "my-tasks") {
+    return (
+      <FluxIcon>
+        <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h4l2 2H18a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z" />
+        <path d="M8 11h8M8 15h5" />
+      </FluxIcon>
+    );
+  }
+  if (tabKey === "generator") {
+    return (
+      <FluxIcon>
+        <rect x="5" y="3" width="14" height="18" rx="2.3" />
+        <path d="M9 7h6M9 11h6M9 15h2M14 15l1 1 2-2" />
+      </FluxIcon>
+    );
+  }
+  if (tabKey === "lessons") {
+    return (
+      <FluxIcon>
+        <path d="M12 6c-2-2-5.5-2.5-9-1.5V19c3.5-1 7-.5 9 1.5 2-2 5.5-2.5 9-1.5V4.5c-3.5-1-7-.5-9 1.5ZM12 6v14.5" />
+      </FluxIcon>
+    );
+  }
+  if (tabKey === "worksheets") {
+    return (
+      <FluxIcon>
+        <path d="m4 20 11-11 3 3L7 23ZM14 10l3 3M6 3v4M4 5h4M18 2v4M16 4h4M20 17v4M18 19h4" />
+      </FluxIcon>
+    );
+  }
+  if (tabKey === "interesting") {
+    return (
+      <FluxIcon>
+        <rect x="3" y="5" width="18" height="14" rx="3" />
+        <path d="m10 9 5 3-5 3ZM7 22h10" />
+      </FluxIcon>
+    );
+  }
+  return (
+    <FluxIcon>
+      <circle cx="9" cy="8" r="3" />
+      <path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5.3a3 3 0 0 1 0 5.4M18 14a5 5 0 0 1 3 4.6V20" />
+    </FluxIcon>
+  );
+}
+
 function LogoMark() {
   const src = `${import.meta.env.BASE_URL}favicon.png?v=1`;
   return (
     <img
       src={src}
       alt=""
-      className="site-nav__logo"
-      width={40}
-      height={40}
+      className="flux-brand-mark"
+      width={36}
+      height={36}
       loading="eager"
       decoding="async"
     />
@@ -87,15 +151,6 @@ type SessionUser = {
   avatar?: string | null;
 };
 
-function tokenWord(count: number) {
-  const abs = Math.abs(count) % 100;
-  const last = abs % 10;
-  if (abs > 10 && abs < 20) return "токенов";
-  if (last === 1) return "токен";
-  if (last >= 2 && last <= 4) return "токена";
-  return "токенов";
-}
-
 type SpendLine = { key: string; label: string; amount: number };
 
 const FALLBACK_SPEND: SpendLine[] = [
@@ -107,8 +162,17 @@ const FALLBACK_SPEND: SpendLine[] = [
   { key: "image_generation", label: "Картинка к заданию", amount: 8 },
 ];
 
-function CabinetNavButton({ onNavigate }: { onNavigate?: () => void }) {
-  const [cabinetAuthed, setCabinetAuthed] = useState(false);
+function tokenWord(count: number) {
+  const abs = Math.abs(count) % 100;
+  const last = abs % 10;
+  if (abs > 10 && abs < 20) return "токенов";
+  if (last === 1) return "токен";
+  if (last >= 2 && last <= 4) return "токена";
+  return "токенов";
+}
+
+function useHeaderSession() {
+  const [authed, setAuthed] = useState(false);
   const [user, setUser] = useState<SessionUser | null>(null);
   const [avatarUrl, setAvatarUrl] = useState("");
   const [tokens, setTokens] = useState<number | null>(null);
@@ -121,12 +185,13 @@ function CabinetNavButton({ onNavigate }: { onNavigate?: () => void }) {
       fetchCabinetSession()
         .then((data) => {
           if (cancelled) return;
-          const authed = !!data?.authenticated;
-          const nextUser = (authed && data?.user ? data.user : null) as SessionUser | null;
-          setCabinetAuthed(authed);
+          const nextAuthed = !!data?.authenticated;
+          const nextUser = (nextAuthed && data?.user ? data.user : null) as SessionUser | null;
+          setAuthed(nextAuthed);
           setUser(nextUser);
-          setAvatarUrl(authed ? resolveUserAvatarUrl(nextUser) : "");
-          if (!authed || nextUser?.role !== "teacher") {
+          const rawAvatar = typeof nextUser?.avatar === "string" ? nextUser.avatar.trim() : "";
+          setAvatarUrl(nextAuthed ? (rawAvatar || resolveUserAvatarUrl(nextUser)) : "");
+          if (!nextAuthed || nextUser?.role !== "teacher") {
             setTokens(null);
             return;
           }
@@ -145,7 +210,7 @@ function CabinetNavButton({ onNavigate }: { onNavigate?: () => void }) {
         })
         .catch(() => {
           if (cancelled) return;
-          setCabinetAuthed(false);
+          setAuthed(false);
           setUser(null);
           setAvatarUrl("");
           setTokens(null);
@@ -170,30 +235,159 @@ function CabinetNavButton({ onNavigate }: { onNavigate?: () => void }) {
   }, []);
 
   const name = user ? displayName(user) : "";
-  const initial = name ? name.charAt(0).toUpperCase() : "?";
+  const initial = name ? name.charAt(0).toUpperCase() : "";
   const isTeacher = user?.role === "teacher";
-  const showAvatarMode = cabinetAuthed && (isTeacher || Boolean(avatarUrl) || Boolean(name));
-  const href = cabinetAuthed ? getCabinetHomePath(user) : "/cabinet/login";
-  const label = cabinetAuthed
+  const href = authed ? getCabinetHomePath(user) : "/cabinet/login";
+  const label = authed
     ? (isTeacher ? `Кабинет учителя — ${name}` : `Личный кабинет — ${name}`)
     : "Личный кабинет";
 
-  const tokenLabel = tokens == null ? "" : `Осталось ${tokens} ${tokenWord(tokens)}`;
+  return { authed, user, avatarUrl, setAvatarUrl, tokens, spend, isTeacher, href, label, initial, name };
+}
+
+function PrivateMark() {
+  return (
+    <span className="flux-private-mark" title="Личный раздел" aria-label="Личный раздел">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="5" y="11" width="14" height="9" rx="2" />
+        <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+      </svg>
+    </span>
+  );
+}
+
+function NavTab({
+  tab,
+  isActive,
+  onSoon,
+}: {
+  tab: NavTabDef;
+  isActive: boolean;
+  onSoon: (title: string) => void;
+}) {
+  const className = "flux-nav-link";
+  const icon = tab.key === "my-tasks" ? <PrivateMark /> : <TabIcon tabKey={tab.key} />;
+  const badge = tab.badge ? (
+    <span className="flux-nav-badge">{tab.badge}</span>
+  ) : tab.soon ? (
+    <span className="flux-nav-badge">скоро</span>
+  ) : null;
+
+  if (tab.disabled) {
+    return (
+      <span className={`${className} is-disabled`} aria-disabled="true" title="Раздел в разработке">
+        {icon}
+        <span>{tab.label}</span>
+        {badge}
+      </span>
+    );
+  }
+
+  if (tab.soon) {
+    return (
+      <button type="button" className={className} onClick={() => onSoon(tab.label)}>
+        {icon}
+        <span>{tab.label}</span>
+        {badge}
+      </button>
+    );
+  }
+
+  return (
+    <Link to={tab.to || "/"} className={className} aria-current={isActive ? "page" : undefined}>
+      {icon}
+      <span>{tab.label}</span>
+      {badge}
+    </Link>
+  );
+}
+
+function CabinetLink({
+  session,
+}: {
+  session: ReturnType<typeof useHeaderSession>;
+}) {
+  return (
+    <Link to={session.href} className="flux-cabinet" aria-label={session.label} title={session.label}>
+      <span className={`flux-avatar${session.authed && session.avatarUrl ? " flux-avatar--photo" : ""}`} aria-hidden="true">
+        {session.authed && session.avatarUrl ? (
+          <img
+            src={session.avatarUrl}
+            alt=""
+            onError={() => session.setAvatarUrl("")}
+          />
+        ) : session.authed && session.initial ? (
+          session.initial
+        ) : (
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="8" r="3.5" />
+            <path d="M5 21v-2a7 7 0 0 1 14 0v2" />
+          </svg>
+        )}
+      </span>
+      <span className="flux-cabinet__label">Личный кабинет</span>
+    </Link>
+  );
+}
+
+function TokenMenu({
+  tokens,
+  spend,
+}: {
+  tokens: number;
+  spend: SpendLine[];
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const panelId = useId();
+  const label = Math.floor(tokens).toLocaleString("ru-RU");
   const aiSpend = spend.filter((item) => item.amount > 0 && item.key !== "base_worksheet_generation" && item.key !== "task_from_bank");
   const spendOf = (key: string) => spend.find((item) => item.key === key)?.amount;
   const typicalHelp = 10 * (spendOf("ai_new_task") ?? 3) + (spendOf("ai_design") ?? 5);
 
+  useEffect(() => {
+    if (!open) return undefined;
+    const onPointer = (event: MouseEvent) => {
+      if (!wrapRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
   return (
-    <div className="cabinet-nav-account">
-    {isTeacher && tokens != null ? (
-      <span className="cabinet-nav-tokens" tabIndex={0} aria-label={tokenLabel}>
-        <strong>{tokens}</strong>
-        <span>{tokenWord(tokens)}</span>
-        <span className="cabinet-nav-tokens__tip" role="tooltip">
-          <strong>Токены — только на помощь ИИ</strong>
-          <p>Рабочий лист можно собрать и править бесплатно. Сколько листов доступно, зависит от тарифа.</p>
-          <p>Токены списываются, когда ИИ помогает:</p>
-          <ul>
+    <div className="flux-popover-wrap" ref={wrapRef}>
+      <button
+        type="button"
+        className="flux-token-button"
+        aria-expanded={open}
+        aria-controls={panelId}
+        aria-label={`Баланс: ${label} ${tokenWord(tokens)}. Открыть меню`}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <FluxIcon>
+          <path d="m10 3 2.5 6.5L19 12l-6.5 2.5L10 21l-2.5-6.5L1 12l6.5-2.5ZM20 2v5M17.5 4.5h5" />
+        </FluxIcon>
+        <span className="flux-token-count">{label}</span>
+        <span className="flux-token-label">{tokenWord(tokens)}</span>
+        <svg className="flux-icon flux-token-arrow" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+      {open ? (
+        <div className="flux-popover" id={panelId}>
+          <div className="flux-token-summary">
+            <small>Ваши AI-токены</small>
+            <strong>{label}</strong>
+            <p>Для создания и оформления учебных материалов. Лист можно собрать бесплатно.</p>
+          </div>
+          <ul className="flux-token-spend">
             {aiSpend.map((item) => (
               <li key={item.key}>
                 <span>{item.label}</span>
@@ -201,196 +395,178 @@ function CabinetNavButton({ onNavigate }: { onNavigate?: () => void }) {
               </li>
             ))}
           </ul>
-          <p>Например, 10 новых заданий и оформление — {typicalHelp} токенов.</p>
-          <Link className="cabinet-nav-tokens__link" to="/pricing">Тарифы</Link>
-        </span>
-      </span>
-    ) : null}
-    <Link
-      to={href}
-      className={`cabinet-nav-button${showAvatarMode ? " cabinet-nav-button--avatar" : ""}`}
-      onClick={onNavigate}
-      aria-label={label}
-      title={label}
-    >
-      <span className="cabinet-nav-button__icon" aria-hidden="true">
-        {cabinetAuthed && avatarUrl ? (
-          <img
-            src={avatarUrl}
-            alt=""
-            className="cabinet-nav-button__avatar"
-            loading="lazy"
-            decoding="async"
-            onError={() => setAvatarUrl("")}
-          />
-        ) : cabinetAuthed ? (
-          <span className="cabinet-nav-button__avatar-fallback cabinet-nav-button__avatar-fallback--initials">
-            {initial}
-          </span>
-        ) : (
-          <span className="cabinet-nav-button__avatar-fallback">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M20 21a8 8 0 0 0-16 0" />
-              <circle cx="12" cy="7" r="4" />
-            </svg>
-          </span>
-        )}
-      </span>
-      {showAvatarMode ? (
-        <span className="cabinet-nav-button__text cabinet-nav-button__text--mobile">{name || "Кабинет"}</span>
-      ) : (
-        <span className="cabinet-nav-button__text">Личный кабинет</span>
-      )}
-    </Link>
+          <p className="flux-token-example">10 новых заданий и оформление — {typicalHelp} токенов.</p>
+          <Link className="flux-popover-link flux-topup" to="/pricing" onClick={() => setOpen(false)}>
+            <FluxIcon>
+              <path d="M12 5v14M5 12h14" />
+            </FluxIcon>
+            Пополнить баланс
+          </Link>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-export default function Nav() {
-  const { pathname, search, hash } = useLocation();
-  const active = getActiveNavTab(pathname);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [isTeacher, setIsTeacher] = useState(false);
-  const [soonTitle, setSoonTitle] = useState("");
+function HeaderSearch() {
+  const navigate = useNavigate();
+  const taskRef = useRef<HTMLInputElement>(null);
+  const variantRef = useRef<HTMLInputElement>(null);
+  const [taskId, setTaskId] = useState("");
+  const [variantId, setVariantId] = useState("");
 
   useEffect(() => {
-    setMenuOpen(false);
-  }, [pathname, search, hash]);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchCabinetSession()
-      .then((data) => {
-        if (cancelled) return;
-        setIsTeacher(!!data?.authenticated && data?.user?.role === "teacher");
-      })
-      .catch(() => {
-        if (!cancelled) setIsTeacher(false);
-      });
-    return () => {
-      cancelled = true;
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "k") return;
+      const target = event.target as HTMLElement | null;
+      const typing = !!target && (
+        target.tagName === "INPUT"
+        || target.tagName === "TEXTAREA"
+        || target.isContentEditable
+      );
+      if (typing && target !== taskRef.current && target !== variantRef.current) return;
+      event.preventDefault();
+      taskRef.current?.focus();
     };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
   }, []);
+
+  const openResult = (kind: "task" | "variant", value: string) => {
+    const query = value.trim();
+    if (!query) return;
+    if (kind === "variant") navigate(`/search-variant?q=${encodeURIComponent(query)}`);
+    else navigate(`/search/tasks?q=${encodeURIComponent(query)}`);
+    setTaskId("");
+    setVariantId("");
+  };
+
+  const onSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const task = taskId.trim();
+    const variant = variantId.trim();
+    if (document.activeElement === variantRef.current && variant) {
+      openResult("variant", variant);
+      return;
+    }
+    if (task) {
+      openResult("task", task);
+      return;
+    }
+    if (variant) openResult("variant", variant);
+  };
+
+  return (
+    <form className="flux-inline-search" role="search" aria-label="Поиск по номеру" onSubmit={onSubmit}>
+      <label>
+        <span className="flux-sr-only">Номер задания</span>
+        <input
+          ref={taskRef}
+          type="search"
+          value={taskId}
+          placeholder="№ задания"
+          maxLength={120}
+          autoComplete="off"
+          enterKeyHint="search"
+          onChange={(event) => setTaskId(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            openResult("task", event.currentTarget.value);
+          }}
+        />
+      </label>
+      <span className="flux-inline-search__divider" aria-hidden="true" />
+      <label>
+        <span className="flux-sr-only">Номер варианта</span>
+        <input
+          ref={variantRef}
+          type="search"
+          value={variantId}
+          placeholder="№ варианта"
+          maxLength={120}
+          autoComplete="off"
+          enterKeyHint="search"
+          onChange={(event) => setVariantId(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            openResult("variant", event.currentTarget.value);
+          }}
+        />
+      </label>
+      <button type="submit" className="flux-inline-search__submit" aria-label="Найти">
+        <FluxIcon>
+          <circle cx="10.7" cy="10.7" r="6.6" />
+          <path d="m16 16 4.5 4.5" />
+        </FluxIcon>
+      </button>
+    </form>
+  );
+}
+
+export default function Nav() {
+  const { pathname } = useLocation();
+  const active = getActiveNavTab(pathname);
+  const session = useHeaderSession();
+  const [soonTitle, setSoonTitle] = useState("");
+  const primaryTabs = NAV_TABS.filter((tab) => (
+    tab.key !== "teachers"
+    && tab.key !== "worksheets"
+    && (!tab.teacherOnly || session.isTeacher)
+  ));
+  const community = NAV_TABS.find((tab) => tab.key === "teachers");
 
   return (
     <header className="site-header">
-      <nav className="site-nav" aria-label="Основная навигация">
-        <div className="site-nav__inner">
-          <Link to="/" className="site-nav__brand">
+      <div className="flux-header">
+        <div className="flux-secondary" aria-label="Дополнительные инструменты">
+          <Link to="/" className="flux-brand" aria-label="Цифровой поток — главная">
             <LogoMark />
-            <span className="site-nav__titles">
-              <span className="brand-name">Цифровой поток</span>
-              <span className="brand-sub">ОГЭ · ЕГЭ · Школьная программа</span>
+            <span className="flux-brand-text">
+              <span className="flux-wordmark">Цифровой поток</span>
+              <span className="flux-brand-caption">ОГЭ · ЕГЭ · Школьная программа</span>
             </span>
           </Link>
-
-          <button
-            type="button"
-            className={`site-nav__menu-btn${menuOpen ? " is-open" : ""}`}
-            aria-expanded={menuOpen}
-            aria-controls="site-nav-mobile-panel"
-            onClick={() => setMenuOpen((open) => !open)}
-          >
-            <span className="site-nav__menu-icon" aria-hidden="true">
-              <span />
-              <span />
-              <span />
-            </span>
-            <span className="site-nav__menu-text">Меню</span>
-          </button>
-
-          <div
-            id="site-nav-mobile-panel"
-            className={`site-nav__panel${menuOpen ? " is-open" : ""}`}
-          >
-            <div className="site-nav__tabs" role="tablist" aria-label="Разделы платформы">
-              {NAV_TABS.filter((tab) => !tab.teacherOnly || isTeacher).map((tab) => {
-                const isActive = active === tab.key;
-                const className = [
-                  "site-nav__tab",
-                  isActive ? "site-nav__tab--active" : "",
-                  tab.key === "teachers" ? "site-nav__tab--teachers" : "",
-                  tab.key === "my-tasks" ? "site-nav__tab--personal" : "",
-                  tab.disabled ? "site-nav__tab--disabled" : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ");
-
-                if (tab.disabled) {
-                  return (
-                    <span
-                      key={tab.key}
-                      className={className}
-                      role="tab"
-                      aria-selected={false}
-                      aria-disabled="true"
-                      title="Раздел в разработке"
-                    >
-                      <span className="site-nav__tab-label">{tab.label}</span>
-                      {tab.badge ? (
-                        <span className="site-nav__tab-badge site-nav__tab-badge--beta">{tab.badge}</span>
-                      ) : tab.soon ? (
-                        <span className="site-nav__tab-badge">скоро</span>
-                      ) : null}
-                    </span>
-                  );
-                }
-
-                if (tab.soon) {
-                  return (
-                    <button
-                      key={tab.key}
-                      type="button"
-                      className={className}
-                      role="tab"
-                      aria-selected={false}
-                      onClick={() => {
-                        setMenuOpen(false);
-                        setSoonTitle(tab.label);
-                      }}
-                    >
-                      <span className="site-nav__tab-label">{tab.label}</span>
-                      <span className="site-nav__tab-badge">скоро</span>
-                    </button>
-                  );
-                }
-
-                return (
-                  <Link
-                    key={tab.key}
-                    to={tab.to || "/"}
-                    className={className}
-                    role="tab"
-                    aria-selected={isActive}
-                    onClick={() => setMenuOpen(false)}
-                  >
-                    <span className="site-nav__tab-label">{tab.label}</span>
-                    {tab.key === "my-tasks" ? (
-                      <span
-                        className="site-nav__tab-badge site-nav__tab-badge--personal"
-                        title="Личный банк"
-                        aria-label="Личный банк"
-                      >
-                        <User size={12} strokeWidth={2.2} aria-hidden="true" />
-                      </span>
-                    ) : tab.badge ? (
-                      <span className="site-nav__tab-badge site-nav__tab-badge--beta">{tab.badge}</span>
-                    ) : tab.soon ? (
-                      <span className="site-nav__tab-badge">скоро</span>
-                    ) : null}
-                  </Link>
-                );
-              })}
-            </div>
-
-            <CabinetNavButton onNavigate={() => setMenuOpen(false)} />
-            <TaskSearchPanel
-              className="site-nav__quick-search"
-              onSearch={() => setMenuOpen(false)}
-            />
+          {community?.to ? (
+            <Link
+              to={community.to}
+              className="flux-secondary-link"
+              aria-current={active === "teachers" ? "page" : undefined}
+            >
+              <TabIcon tabKey="teachers" />
+              <span>Сообщество<span className="flux-community-extra"> учителей</span></span>
+            </Link>
+          ) : null}
+          <span className="flux-secondary-spacer" />
+          <HeaderSearch />
+          {session.isTeacher && session.tokens != null ? (
+            <TokenMenu tokens={session.tokens} spend={session.spend} />
+          ) : null}
+        </div>
+        <div className="flux-primary">
+          <nav className="flux-nav" aria-label="Разделы платформы">
+            {primaryTabs.map((tab) => (
+              <NavTab
+                key={tab.key}
+                tab={tab}
+                isActive={active === tab.key}
+                onSoon={setSoonTitle}
+              />
+            ))}
+          </nav>
+          <div className="flux-primary-actions" aria-label="Помощь и личный кабинет">
+            <button type="button" className="flux-help" onClick={() => openSupport()}>
+              <FluxIcon>
+                <circle cx="12" cy="12" r="9" />
+                <path d="M9.4 9a2.7 2.7 0 1 1 4.4 2.1c-1 .7-1.8 1.1-1.8 2.4M12 17h.01" />
+              </FluxIcon>
+              <span>Помощь</span>
+            </button>
+            <CabinetLink session={session} />
           </div>
         </div>
-      </nav>
+      </div>
       {soonTitle ? <SoonModal title={soonTitle} onClose={() => setSoonTitle("")} /> : null}
     </header>
   );

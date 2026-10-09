@@ -356,6 +356,7 @@ def schedule_event_to_json(event, *, self_booked=None):
 
     return {
         "id": local_event_id(event.pk),
+        "updatedAt": event.updated_at.isoformat() if getattr(event, "updated_at", None) else None,
         "dayOffset": (local_start.date() - today).days,
         "startsAt": local_start.isoformat(),
         "endsAt": local_end.isoformat(),

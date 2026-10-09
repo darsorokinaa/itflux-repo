@@ -30,6 +30,7 @@ import {
   truthTableAnswerMaxChars,
 } from "../utils/truthTable";
 import { checkVariantAnswerOnServer } from "../utils/examAnswerCheck";
+import { scoreVariantAttempt, taskMaxPoints } from "../utils/variantResult";
 import {
   axesNeedScoreMatrix,
   axesScoreRows,
@@ -1714,15 +1715,43 @@ function ExamPage() {
   }
 
   /** Проверка задания 26 или 27 по информатике: выставляет баллы 0/1/2 и помечает задание проверенным. */
-  function checkInfTask26Or27(task, rows, cols) {
+  async function checkInfTask26Or27(task, rows, cols) {
     const userMatrix = getTableAnswerString(task.id, rows, cols);
-    const correctMatrix = parseCorrectTableAnswer(task.answer, rows, cols);
-    const score =
-      task.number === 26
-        ? getInfTask26Score(userMatrix, correctMatrix)
-        : task.number === 27
-          ? getInfTask27Score(userMatrix, correctMatrix)
-          : 0;
+    const hasLocalAnswer = task.answer != null && String(task.answer).trim() !== "";
+    let score = 0;
+    if (!hasLocalAnswer && variant?.id) {
+      const raw = getTableAnswerForCheck(task.id, rows, cols);
+      try {
+        const res = await fetch(`/api/variant/${encodeURIComponent(String(variant.id))}/check-answer/`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            task_id: task.id,
+            task_number: task.number,
+            answer: raw,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.points != null && Number.isFinite(Number(data.points))) {
+            score = Number(data.points);
+          } else if (data?.correct) {
+            score = getTaskMaxScore(task);
+          }
+        }
+      } catch {
+        score = 0;
+      }
+    } else {
+      const correctMatrix = parseCorrectTableAnswer(task.answer, rows, cols);
+      score =
+        task.number === 26
+          ? getInfTask26Score(userMatrix, correctMatrix)
+          : task.number === 27
+            ? getInfTask27Score(userMatrix, correctMatrix)
+            : 0;
+    }
     setScores((prev) => ({ ...prev, [task.id]: score }));
     setCheckedTasks((prev) => ({ ...prev, [task.id]: score > 0 }));
   }
@@ -1758,12 +1787,12 @@ function ExamPage() {
             criteria: data.criteria || [],
             axes: data.axes || [],
             scoring_mode: data.scoring_mode || "single",
-            max_score: data.max_score != null ? data.max_score : (task.max_score ?? 3),
+            max_score: data.max_score != null ? data.max_score : taskMaxPoints(task),
           },
         })))
         .catch(() => setCriteriaByTaskList((prev) => ({
           ...prev,
-          [cacheKey]: { criteria: [], axes: [], scoring_mode: "single", max_score: task.max_score ?? 3 },
+          [cacheKey]: { criteria: [], axes: [], scoring_mode: "single", max_score: taskMaxPoints(task) },
         })));
     }
   }
@@ -1781,7 +1810,7 @@ function ExamPage() {
     const axes = cache?.axes || [];
     const maxScore = cache?.max_score != null
       ? cache.max_score
-      : (task.max_score ?? 3);
+      : taskMaxPoints(task);
     setSelectedAxesByTask((prev) => {
       const nextAxes = { ...(prev[tid] || {}), [axisCode]: Number(score) };
       const result = computeAxesTaskScore(axes, nextAxes);
@@ -2163,7 +2192,12 @@ function ExamPage() {
     homeworkReadonly: homeworkStudentMode && hRead,
   });
 
-  const getTaskMaxScore = (task) => task.max_score ?? 3;
+  const getTaskMaxScore = (task) => {
+    const key = getCriteriaCacheKey(task);
+    const cached = key != null ? criteriaByTaskList[key]?.max_score : null;
+    if (cached != null && cached !== "") return taskMaxPoints({ max_score: cached });
+    return taskMaxPoints(task);
+  };
   const part2ScoreSum = part2Tasks.reduce((sum, t) => sum + (scores[t.id] || 0), 0);
   /** Не useMemo: эти вычисления ниже ранних return (variant null) — хуки здесь ломали порядок вызовов. */
   const part2MaxAggregate = part2Tasks.reduce((sum, t) => {
@@ -2186,75 +2220,67 @@ function ExamPage() {
     part2MaxAggregate > 0
       ? Math.min(100, (part2ScoreSum / part2MaxAggregate) * 100)
       : 0;
-  const part1MaxScore = part1Tasks.length;
-  const maxScore = hwScorePart1Only
-    ? part1MaxScore
-    : String(subject).toLowerCase() === "inf" && String(level).toLowerCase() === "ege"
-      ? 29
-      : part1Tasks.length + part2Tasks.reduce((sum, t) => sum + getTaskMaxScore(t), 0);
-
   /**
-   * Подсчёт эффективных баллов.
-   * autoCheckUnchecked=false (по умолчанию, live-режим): непроверенные задания не дают балла —
-   *   цвет/баллы появляются только после нажатия «Проверить».
-   * autoCheckUnchecked=true (при «Завершить»): авто-проверка непроверенных заданий ч.1
-   *   для итогового подсчёта.
+   * Баллы по фактическому составу. Непроверенная часть 2 не даёт 0 «за неправильно»:
+   * это ожидание оценки, итог остаётся предварительным.
+   * autoCheckUnchecked=true только если эталон уже есть на клиенте.
    */
   function getEffectiveResults({ autoCheckUnchecked = false } = {}) {
-    const part1ConfirmedCount = part1Tasks.filter((t) => homeworkConfirmedTasks[t.id]).length;
-    const effectiveCheckedTasks = {};
-    for (const task of part1Tasks) {
+    const tasks = Array.isArray(variant.tasks) ? variant.tasks : [];
+    const part1Answered = part1Tasks.filter((task) => {
+      const raw = userAnswers[task.id];
+      return homeworkConfirmedTasks[task.id] || (raw != null && String(raw).trim() !== "");
+    }).length;
+    const checked = {};
+    for (const task of tasks) {
+      if (inferPart(task) !== 1) continue;
       if (checkedTasks[task.id] !== undefined) {
-        effectiveCheckedTasks[task.id] = checkedTasks[task.id];
-      } else if (autoCheckUnchecked) {
-        effectiveCheckedTasks[task.id] = computeTaskCorrectness(task);
-      } else {
-        effectiveCheckedTasks[task.id] = null;
+        checked[task.id] = checkedTasks[task.id];
+      } else if (
+        autoCheckUnchecked
+        && task.answer
+        && String(task.answer).trim() !== ""
+      ) {
+        checked[task.id] = computeTaskCorrectness(task);
       }
     }
-    const correctCount = hwScorePart1Only
-      ? part1ConfirmedCount
-      : part1Tasks.filter((t) => effectiveCheckedTasks[t.id] === true).length;
+    const summary = scoreVariantAttempt({
+      tasks,
+      level,
+      subject,
+      answers: userAnswers,
+      scores: hwScorePart1Only ? {} : scores,
+      checked,
+    });
     const effectiveScores = {};
-    for (const task of variant.tasks) {
-      if (inferPart(task) === 2) {
-        effectiveScores[task.id] = hwScorePart1Only ? 0 : (scores[task.id] ?? 0);
-      } else {
-        effectiveScores[task.id] = effectiveCheckedTasks[task.id] === true ? 1 : 0;
+    const effectiveCheckedTasks = {};
+    for (const row of summary.tasks) {
+      effectiveScores[row.id] = row.points;
+      if (row.part === 1 && row.status !== "pending_review" && row.status !== "unanswered") {
+        effectiveCheckedTasks[row.id] = row.status === "correct" || row.status === "partial";
       }
     }
-    const totalScore = hwScorePart1Only ? correctCount : correctCount + part2ScoreSum;
-    // Кол-во верно решённых задач геометрии (subdivision === "geom")
-    const geoCorrectCount =
-      Array.isArray(variant.tasks)
-        ? variant.tasks.filter((t) => t.subdivision === "geom" && (effectiveScores[t.id] || 0) > 0).length
-        : 0;
-    const fullyCorrectTaskCount = hwScorePart1Only
-      ? part1ConfirmedCount
-      : variant.tasks.filter((task) => {
-          if (inferPart(task) === 1) {
-            if (checkedTasks[task.id] !== undefined) return !!checkedTasks[task.id];
-            if (autoCheckUnchecked) return !!computeTaskCorrectness(task);
-            return false;
-          }
-          return (scores[task.id] ?? 0) >= getTaskMaxScore(task);
-        }).length;
+    const geoCorrectCount = tasks.filter(
+      (task) => task.subdivision === "geom" && (effectiveScores[task.id] || 0) > 0,
+    ).length;
     return {
       effectiveCheckedTasks,
       effectiveScores,
-      correctCount,
-      totalScore,
+      correctCount: hwScorePart1Only ? part1Answered : summary.correct_count,
+      totalScore: hwScorePart1Only ? part1Answered : summary.earned_points,
+      maxScore: hwScorePart1Only ? part1Tasks.length : summary.max_points,
       geoCorrectCount,
-      fullyCorrectTaskCount,
+      fullyCorrectTaskCount: hwScorePart1Only ? part1Answered : summary.correct_count,
+      summary,
     };
   }
 
-  const { totalScore, fullyCorrectTaskCount } = getEffectiveResults();
+  const { totalScore, fullyCorrectTaskCount, maxScore } = getEffectiveResults();
   const taskCountTotal = hwScorePart1Only ? part1Tasks.length : variant.tasks.length;
   const sidebarProgressPct =
     mode === "test"
-      ? Math.min(100, (fullyCorrectTaskCount / Math.max(1, taskCountTotal)) * 100)
-      : Math.min(100, (totalScore / Math.max(1, maxScore)) * 100);
+      ? (taskCountTotal > 0 ? Math.min(100, (fullyCorrectTaskCount / taskCountTotal) * 100) : 0)
+      : (maxScore > 0 ? Math.min(100, (totalScore / maxScore) * 100) : 0);
 
   const handleTaskFocus = (taskId) => {
     currentTaskIdRef.current = taskId;
@@ -2291,21 +2317,54 @@ function ExamPage() {
     endTimeRef.current = new Date().toISOString();
     const totalTimeFormatted = formatTimer(timerStore.getSeconds());
     const taskTimes = { ...taskTimesRef.current };
-    const {
+    let {
       effectiveCheckedTasks,
       effectiveScores,
       correctCount: effCorrectCount,
       totalScore: effTotalScore,
+      maxScore: effMaxScore,
       geoCorrectCount,
       fullyCorrectTaskCount: effFullyCorrect,
+      summary: effSummary,
     } = getEffectiveResults({ autoCheckUnchecked: true });
+
+    let serverScoreConfirmed;
+    if (variant?.id && mode !== "test" && !hwScorePart1Only) {
+      serverScoreConfirmed = false;
+      try {
+        const scoreRes = await fetch(`/api/variant/${encodeURIComponent(String(variant.id))}/score/`, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            answers: userAnswers,
+            scores,
+          }),
+        });
+        if (scoreRes.ok) {
+          const serverSummary = await scoreRes.json();
+          if (serverSummary && serverSummary.ok !== false && serverSummary.max_points != null) {
+            effSummary = serverSummary;
+            effTotalScore = serverSummary.earned_points;
+            effMaxScore = serverSummary.max_points;
+            effCorrectCount = serverSummary.correct_count;
+            effFullyCorrect = serverSummary.correct_count;
+            serverScoreConfirmed = true;
+          }
+        }
+      } catch {
+        serverScoreConfirmed = false;
+      }
+    }
 
     let scoreExam = null;
     let scoreComment = null;
     let markLevel = null;
+    const resultIsPreliminary = Boolean(effSummary?.preliminary) || effSummary?.review_status === "pending_review";
 
-    // В режиме тренировки по номерам конвертация в баллы/оценку не нужна; в ДЗ — только часть 1
-    if (mode !== "test" && !hwScorePart1Only) {
+    // В режиме тренировки по номерам конвертация в баллы/оценку не нужна; в ДЗ — только часть 1.
+    // Незавершённая ручная проверка не переводится в тестовый балл.
+    if (mode !== "test" && !hwScorePart1Only && !resultIsPreliminary) {
       const isOgeMath =
         String(level).toLowerCase() === "oge" && isMathLikeSubject(subject);
       const geoParam = isOgeMath ? `&geo_correct=${geoCorrectCount}` : "";
@@ -2325,10 +2384,9 @@ function ExamPage() {
       }
     }
 
-    // Для тренировки maxScore = кол-во задач в тесте (1 балл за задачу), для варианта — как обычно
     const effectiveMaxScore = mode === "test"
       ? (hwScorePart1Only ? part1Tasks.length : variant.tasks.length)
-      : maxScore;
+      : effMaxScore;
     const effectiveTaskCountTotal = hwScorePart1Only ? part1Tasks.length : variant.tasks.length;
 
     setResultsData({
@@ -2352,6 +2410,12 @@ function ExamPage() {
       fullyCorrectTaskCount: effFullyCorrect,
       taskCountTotal: effectiveTaskCountTotal,
       scorePart1Only: hwScorePart1Only,
+      preliminary: resultIsPreliminary,
+      serverScoreConfirmed,
+      pendingReviewCount: effSummary?.pending_review_count || 0,
+      incorrectCount: effSummary?.incorrect_count,
+      partialCount: effSummary?.partial_count,
+      unansweredCount: effSummary?.unanswered_count,
     });
 
     setResultsOpen(true);
@@ -2400,6 +2464,8 @@ function ExamPage() {
       mode: "variant",
       examDuration: examDurationLabel(level, subject),
       options: VARIANT_PDF_OPTIONS,
+      partInstructions: variant.part_instructions,
+      coverParagraphs: variant.cover_paragraphs,
     });
   };
 
@@ -2472,14 +2538,16 @@ function ExamPage() {
   const activeBoardHasDraft = boardPersistHasDraft(activeBoardPersist);
 
   function examP1PointsBadge(task) {
-    if (String(subject) === "inf" && (task.number === 26 || task.number === 27)) {
-      const s = scores[task.id] ?? 0;
-      if (s === 0) return "+0 баллов";
-      if (s === 1) return "+1 балл";
-      if (s >= 2 && s <= 4) return `+${s} балла`;
-      return `+${s} баллов`;
-    }
-    return "+1 балл";
+    const max = getTaskMaxScore(task);
+    const stored = scores[task.id];
+    const awarded = stored != null && stored !== ""
+      ? Number(stored)
+      : (checkedTasks[task.id] ? max : 0);
+    const s = Number.isFinite(awarded) ? awarded : 0;
+    if (s === 0) return "+0 баллов";
+    if (s === 1) return "+1 балл";
+    if (s >= 2 && s <= 4) return `+${s} балла`;
+    return `+${s} баллов`;
   }
 
   function examNavBtnClass(task) {

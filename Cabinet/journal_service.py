@@ -180,24 +180,31 @@ def ensure_default_criteria(teacher: User) -> list[AssessmentCriterion]:
     existing = list(AssessmentCriterion.objects.filter(teacher=teacher).order_by("sort_order", "id"))
     if existing:
         return existing
-    created = []
-    for idx, (title, description, scale_type, recommended) in enumerate(DEFAULT_CRITERIA):
-        lo, hi = SCALE_BOUNDS[scale_type]
-        created.append(
-            AssessmentCriterion.objects.create(
-                teacher=teacher,
-                title=title,
-                description=description,
-                scale_type=scale_type,
-                min_value=lo,
-                max_value=hi,
-                sort_order=idx,
-                is_active=recommended,
-                is_recommended_default=recommended,
-                visible_to_student=True,
-            )
-        )
-    return created
+    from django.db import IntegrityError, transaction
+
+    try:
+        with transaction.atomic():
+            created = []
+            for idx, (title, description, scale_type, recommended) in enumerate(DEFAULT_CRITERIA):
+                lo, hi = SCALE_BOUNDS[scale_type]
+                row, _created = AssessmentCriterion.objects.get_or_create(
+                    teacher=teacher,
+                    title=title,
+                    defaults={
+                        "description": description,
+                        "scale_type": scale_type,
+                        "min_value": lo,
+                        "max_value": hi,
+                        "sort_order": idx,
+                        "is_active": recommended,
+                        "is_recommended_default": recommended,
+                        "visible_to_student": True,
+                    },
+                )
+                created.append(row)
+            return created
+    except IntegrityError:
+        return list(AssessmentCriterion.objects.filter(teacher=teacher).order_by("sort_order", "id"))
 
 
 @transaction.atomic
@@ -653,7 +660,10 @@ def _refresh_variant_result_verdicts(variant_result: dict | None, *, subject: st
     out["tasks"] = fixed_tasks
     out["checked_count"] = checked_count
     out["correct_count"] = correct_count if checked_count else out.get("correct_count")
-    if checked_count:
+    stored_percent = variant_result.get("score_percent")
+    if stored_percent is not None and stored_percent != "":
+        out["score_percent"] = stored_percent
+    elif checked_count:
         out["score_percent"] = round(correct_count * 100 / checked_count, 2)
     return out
 
@@ -779,10 +789,11 @@ def _answer_rows_from_submission(
         elif num_key and number_counts.get(num_key, 0) <= 1 and num_key in checked:
             saved_ok = bool(checked[num_key])
         expected_raw = task.get("answer") or ""
-        # Есть ответ ученика и эталон — пересчитываем, даже если checked пустой/ложный.
-        if saved_ok is None and str(student_answer).strip() and str(expected_raw).strip():
-            saved_ok = False
-        ok = _resolve_answer_ok(student_answer, expected_raw, saved_ok)
+        # Сохранённый флаг не пересчитывается по текущему эталону банка.
+        if saved_ok is None:
+            ok = None
+        else:
+            ok = bool(saved_ok)
         row = {
             "id": tid,
             "number": num,
@@ -806,6 +817,44 @@ def resolve_homework_for_journal_record(
     if event is None:
         return None
     return previous_homework_for_student(journal.teacher, student, event)
+
+
+def _rows_from_stored_scoring(payload: dict, *, for_student: bool) -> list[dict]:
+    """Строки журнала по уже посчитанной попытке, без текущего банка."""
+    scoring = payload.get("scoring") if isinstance(payload, dict) else None
+    if not isinstance(scoring, dict):
+        return []
+    by_id = payload.get("by_task_id") or payload.get("byTaskId") or {}
+    if not isinstance(by_id, dict):
+        by_id = {}
+    grading = payload.get("grading_snapshot") if isinstance(payload.get("grading_snapshot"), list) else []
+    answers = {
+        str(row.get("id")): _strip_answer_html(row.get("answer") or "")
+        for row in grading
+        if isinstance(row, dict)
+    }
+    rows = []
+    for row in scoring.get("tasks") or []:
+        if not isinstance(row, dict):
+            continue
+        status = row.get("status")
+        if status == "correct":
+            ok = True
+        elif status in ("incorrect", "partial"):
+            ok = False
+        else:
+            ok = None
+        key = str(row.get("id"))
+        item = {
+            "id": row.get("id"),
+            "number": row.get("number"),
+            "student_answer": str(by_id.get(key) or by_id.get(row.get("id")) or ""),
+            "ok": ok,
+        }
+        if not for_student:
+            item["correct_answer"] = answers.get(key, "")
+        rows.append(item)
+    return rows
 
 
 def build_homework_result_payload(
@@ -856,20 +905,48 @@ def build_homework_result_payload(
         score = compute_score_percent(submission.result_payload)
 
     variant_id, tasks = _homework_variant_meta(homework)
-    task_rows = (
-        _answer_rows_from_submission(
-            submission=submission,
-            tasks=tasks,
+    stored_scoring = None
+    if submission and isinstance(submission.result_payload, dict):
+        raw_scoring = submission.result_payload.get("scoring")
+        if isinstance(raw_scoring, dict) and isinstance(raw_scoring.get("tasks"), list):
+            stored_scoring = raw_scoring
+    if stored_scoring is not None:
+        task_rows = _rows_from_stored_scoring(
+            submission.result_payload,
             for_student=for_student,
         )
-        if tasks
-        else []
-    )
+    else:
+        task_rows = (
+            _answer_rows_from_submission(
+                submission=submission,
+                tasks=tasks,
+                for_student=for_student,
+            )
+            if tasks
+            else []
+        )
+
+    if stored_scoring and stored_scoring.get("review_status") != "final":
+        score = None
 
     checked_count = sum(1 for r in task_rows if r.get("ok") is not None)
     correct_count = sum(1 for r in task_rows if r.get("ok") is True)
-    if score is None and checked_count:
+    if score is None and checked_count and not (
+        stored_scoring and stored_scoring.get("review_status") != "final"
+    ):
         score = round(correct_count * 100 / checked_count, 2)
+
+    scoring = None
+    if submission and isinstance(submission.result_payload, dict):
+        raw_scoring = submission.result_payload.get("scoring")
+        if isinstance(raw_scoring, dict) and raw_scoring.get("review_status") == "final":
+            scoring = raw_scoring
+            if raw_scoring.get("correct_count") is not None:
+                correct_count = raw_scoring.get("correct_count")
+            if raw_scoring.get("checked_count") is not None:
+                checked_count = raw_scoring.get("checked_count")
+            if score is None and raw_scoring.get("percentage") is not None:
+                score = raw_scoring.get("percentage")
 
     from .homework_attempts import serialize_attempts
 
@@ -916,6 +993,12 @@ def build_homework_result_payload(
         "variant_id": variant_id,
         "checked_count": checked_count or None,
         "correct_count": correct_count if checked_count else None,
+        "earned_points": scoring.get("earned_points") if scoring else None,
+        "max_points": scoring.get("max_points") if scoring else None,
+        "incorrect_count": scoring.get("incorrect_count") if scoring else None,
+        "partial_count": scoring.get("partial_count") if scoring else None,
+        "unanswered_count": scoring.get("unanswered_count") if scoring else None,
+        "pending_review_count": scoring.get("pending_review_count") if scoring else None,
         "tasks": task_rows,
         "attempt_count": (
             submission.attempt_count
@@ -2025,6 +2108,9 @@ def _safe_float(value) -> float | None:
 def _variant_score_percent(variant_result) -> float | None:
     if not isinstance(variant_result, dict) or not variant_result:
         return None
+    stored = _safe_float(variant_result.get("score_percent"))
+    if stored is not None:
+        return stored
     refreshed = _refresh_variant_result_verdicts(variant_result) or variant_result
     tasks = refreshed.get("tasks") or []
     if isinstance(tasks, list) and tasks:

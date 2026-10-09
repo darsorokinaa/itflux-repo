@@ -100,11 +100,12 @@ def submit_homework_for_student(
         _ensure_review_item,
         _merge_result_payload,
         _notify_homework_submitted,
+        assign_submission_score,
         build_homework_review_context,
-        compute_score_percent,
         extract_variant_id,
         is_live_meeting_homework,
         recompute_variant_checked,
+        store_variant_scoring,
     )
     from .homework_attempts import maybe_snapshot_before_resubmit
     from .submission_files import save_submission_files, submission_has_files
@@ -146,7 +147,17 @@ def submit_homework_for_student(
     maybe_snapshot_before_resubmit(submission)
 
     if result is not None:
-        merged = _merge_result_payload(submission.result_payload, result)
+        previous = submission.result_payload if isinstance(submission.result_payload, dict) else {}
+        previous_snapshot = previous.get("tasks_snapshot")
+        previous_grading = previous.get("grading_snapshot")
+        base = previous
+        if old_status in (SubmissionStatus.RETURNED, SubmissionStatus.NEEDS_REVISION):
+            try:
+                from Generator.variant_scoring import strip_previous_grades
+            except Exception:
+                from Generator.Generator.variant_scoring import strip_previous_grades
+            base = strip_previous_grades(previous)
+        merged = _merge_result_payload(base, result)
         variant_id = None
         for task in homework.tasks.filter(is_active=True):
             variant_id = extract_variant_id(task.description)
@@ -163,10 +174,14 @@ def submit_homework_for_student(
 
         ensure_payload_migrated(submission)
         merged = overlay_payload_attachments(submission, merged)
+        merged = store_variant_scoring(
+            merged,
+            homework,
+            previous_snapshot=previous_snapshot if isinstance(previous_snapshot, list) else None,
+            previous_grading=previous_grading if isinstance(previous_grading, list) else None,
+        )
         submission.result_payload = merged
-        computed = compute_score_percent(merged)
-        if computed is not None:
-            submission.score = computed
+        assign_submission_score(submission, merged)
 
     if answer_text is not None and (answer_text or not (submission.submitted_at and not has_new_files)):
         submission.answer_text = answer_text

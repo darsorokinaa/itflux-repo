@@ -6282,10 +6282,13 @@ button.cb-sch-event {
   font-weight: 700;
   color: #EF4444;
 }
-.cb-sch-event--cancelled {
-  opacity: 0.75;
+.cb-sch-event--cancelled,
+.cb-sch-event--skipped {
+  opacity: 0.55;
+  filter: grayscale(0.35);
 }
-.cb-sch-event--cancelled .cb-sch-event__title {
+.cb-sch-event--cancelled .cb-sch-event__title,
+.cb-sch-event--skipped .cb-sch-event__title {
   text-decoration: line-through;
 }
 
@@ -9496,7 +9499,10 @@ select.cb-lesson-card__about-input.is-empty {
 }
 
 .cb-lesson-card__menu-item {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
   width: 100%;
   padding: 10px 12px;
   border: none;
@@ -9508,6 +9514,12 @@ select.cb-lesson-card__about-input.is-empty {
   font-weight: 600;
   text-align: left;
   cursor: pointer;
+}
+.cb-lesson-card__menu-hint {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: #64748b;
 }
 
 .cb-lesson-card__menu-item:hover {
