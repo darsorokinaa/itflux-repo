@@ -1624,7 +1624,9 @@ function articleShell(task,continued=false,alternative=false){
  const main=node('div','task-main');article.append(main);return article;
 }
 function makeFigure(fig){
- const f=node('figure','figure '+(fig.placement==='center'?'center':'right'));f.style.width=clamp(fig.widthMm,12,112,fig.placement==='center'?54:36)+'mm';
+ const width=clamp(fig.widthMm,12,112,fig.placement==='center'?54:36);
+ const f=node('figure','figure '+(fig.placement==='center'?'center':'right'));f.style.width=width+'mm';
+ if(width>48)f.style.maxWidth='100%';
  if(fig.svg){f.append(safeHtml(fig.svg));const svg=f.querySelector('svg');if(svg){svg.setAttribute('role','img');svg.setAttribute('aria-label',String(fig.alt||'Рисунок к заданию'));}}
  else if(fig.src){const img=node('img');const source=String(fig.src);if(/^(data:image\/(png|jpeg|jpg|gif|webp|svg\+xml);|https?:\/\/|\/[^/]|\.\.?\/)/i.test(source))img.src=source;else errors.push('Недопустимый адрес изображения.');img.alt=fig.alt||'Рисунок к заданию';f.append(img);}
  if(fig.caption)f.append(node('figcaption','',fig.caption));return f;

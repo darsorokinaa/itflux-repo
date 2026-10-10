@@ -542,7 +542,7 @@ def _is_real_data_table(table_html: str) -> bool:
 
 
 _ANSWER_STUB_RE = re.compile(
-    r"^(?:цифр[аы]|букв[аы]|символ[аы]?|код)\s*[:.]?\s*$",
+    r"^(?:цифр[аы]|букв[аы]|символ[аы]?|код|номер(?:\s+\S+){1,3})\s*[:.]?\s*$",
     re.IGNORECASE,
 )
 
@@ -560,7 +560,9 @@ def _answer_blank_parts(table_html: str) -> list[str] | None:
             if re.search(r"<(?:img|table|ol|ul)\b", inner, re.IGNORECASE):
                 return None
             text = re.sub(r"\s+", " ", _cell_plain_text(inner)).strip()
-            if not text or len(text) > 42 or "?" in text or "!" in text or "," in text:
+            if not text or len(text) > 42 or "?" in text or "!" in text:
+                return None
+            if "," in text and not re.search(r"\d,\d", text):
                 return None
             if len(text.split()) > 5:
                 return None

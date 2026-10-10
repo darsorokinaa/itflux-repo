@@ -140,6 +140,22 @@ describe("buildExamTemplateDocument", () => {
     expect(template).toContain("illustration");
   });
 
+  it("prints OGE math tasks 1-5 pictures twice as wide on the worksheet", () => {
+    const doc = buildExamTemplateDocument(
+      [
+        {
+          id: 4,
+          task_number: 4,
+          text: '<p>План участка.</p><p><img src="/media/task_files/plan.png" alt="план"></p>',
+        },
+      ],
+      { title: "Лист", mode: "workbook", level: "oge", subject: "math" }
+    );
+    expect(doc.tasks[0]?.figure).toMatchObject({ widthMm: 84, placement: "right" });
+    const template = readFileSync(templatePath, "utf8");
+    expect(template).toContain("if(width>48)f.style.maxWidth='100%'");
+  });
+
   it("still floats a standalone picture in other tasks", () => {
     const doc = buildExamTemplateDocument(
       [

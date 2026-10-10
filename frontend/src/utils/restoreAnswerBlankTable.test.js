@@ -55,6 +55,39 @@ describe("restoreAnswerBlankTablesHtml", () => {
     expect(table.rows[1].cells).toHaveLength(2);
   });
 
+  it("builds blanks for month numbers and furnace numbers, including decimal gigabytes", () => {
+    const internet = restoreAnswerBlankTablesHtml(`
+      <div class="task-html-block">Мобильный интернет</div>
+      <div class="task-html-block">1 ГБ</div>
+      <div class="task-html-block">3 ГБ</div>
+      <div class="task-html-block">3,25 ГБ</div>
+      <div class="task-html-block">1,5 ГБ</div>
+      <div class="task-html-block">Номер месяца</div>
+    `);
+    const internetTable = blankTable(internet);
+    expect([...internetTable.rows[0].cells].map((cell) => cell.textContent.trim())).toEqual([
+      "Мобильный интернет",
+      "1 ГБ",
+      "3 ГБ",
+      "3,25 ГБ",
+      "1,5 ГБ",
+    ]);
+    expect(internetTable.rows[1].cells[0].textContent.trim()).toBe("Номер месяца");
+    expect(internetTable.rows[1].querySelectorAll(".task-answer-blank__digit")).toHaveLength(4);
+
+    const paper = restoreAnswerBlankTablesHtml(`
+      <p>Масса (кг)</p><p>15</p><p>40</p><p>48</p><p>Номер печи</p>
+    `);
+    const paperTable = blankTable(paper);
+    expect([...paperTable.rows[0].cells].map((cell) => cell.textContent.trim())).toEqual([
+      "Масса (кг)",
+      "15",
+      "40",
+      "48",
+    ]);
+    expect(paperTable.rows[1].cells[0].textContent.trim()).toBe("Номер печи");
+  });
+
   it("pads an existing two-row blank and leaves a price table alone", () => {
     const padded = restoreAnswerBlankTablesHtml(`
       <table>

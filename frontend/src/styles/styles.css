@@ -9325,32 +9325,37 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
     font-weight: 700 !important;
 }
 
-/* ОГЭ математика №1–5: таблица чуть мельче, названия не рвутся посреди слова. */
+/* ОГЭ математика №1–5: таблица остаётся внутри карточки, слова не рвутся посередине. */
+.exam-page .exam-task-card,
+.all-tasks-page .all-tasks-item {
+    max-width: 100%;
+    min-width: 0;
+}
 .exam-page[data-subject="math"] .exam-task-card.task-img-full .exam-task-card__text,
 .all-tasks-page[data-subject="math"] .task-img-full .all-tasks-item__html {
+    max-width: 100%;
+    min-width: 0;
     overflow-x: auto;
+    overflow-wrap: break-word;
 }
 .exam-page[data-subject="math"] .exam-task-card.task-img-full .exam-task-card__text table:not(.wb-layout-table):not(.task-answer-blank),
 .all-tasks-page[data-subject="math"] .task-img-full .all-tasks-item__html table:not(.wb-layout-table):not(.task-answer-blank) {
-    width: max-content !important;
+    width: 100% !important;
     min-width: 0 !important;
-    max-width: none !important;
-    font-size: 0.84rem !important;
+    max-width: 100% !important;
+    table-layout: fixed !important;
+    font-size: 0.78rem !important;
 }
 .exam-page[data-subject="math"] .exam-task-card.task-img-full .exam-task-card__text table:not(.wb-layout-table):not(.task-answer-blank) :is(th, td),
 .all-tasks-page[data-subject="math"] .task-img-full .all-tasks-item__html table:not(.wb-layout-table):not(.task-answer-blank) :is(th, td) {
     word-break: normal !important;
-    overflow-wrap: normal !important;
-    white-space: nowrap !important;
+    overflow-wrap: break-word !important;
+    white-space: normal !important;
     text-align: center !important;
     vertical-align: middle !important;
-    padding: 6px 12px !important;
-}
-.exam-page[data-subject="math"] .exam-task-card.task-img-full .exam-task-card__text table:not(.wb-layout-table):not(.task-answer-blank) :is(th, td):first-child,
-.all-tasks-page[data-subject="math"] .task-img-full .all-tasks-item__html table:not(.wb-layout-table):not(.task-answer-blank) :is(th, td):first-child {
-    white-space: normal !important;
-    text-align: left !important;
-    max-width: 16rem;
+    padding: 6px 8px !important;
+    min-width: 0 !important;
+    max-width: none !important;
 }
 
 /* Бланк ответа: названия столбцов сверху, пустые клетки для цифр снизу. */

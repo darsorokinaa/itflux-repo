@@ -8,7 +8,7 @@ import { prepareBankTaskDisplayHtml } from "../components/MathContent.jsx";
 import { collectTaskFiles } from "../components/TaskFileAttachment.jsx";
 import { examVariantCopy } from "./examVariantCopy";
 import { formatTasksCount } from "./formatTasksCount";
-import { inferExamTaskPart } from "./examTaskPart";
+import { inferExamTaskPart, isOgeMathPictureTask } from "./examTaskPart";
 import {
   examTypeNumber,
   orderVariantDocumentTasks,
@@ -466,9 +466,10 @@ function sanitizeTaskHtml(
       continue;
     }
     if (onlyImage && !figure && parent) {
+      const large = isOgeMathPictureTask(level, subject, taskNumber);
       figure = {
         src,
-        widthMm: 42,
+        widthMm: large ? 84 : 42,
         placement: "right",
         alt,
       };

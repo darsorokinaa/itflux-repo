@@ -5,7 +5,7 @@
  */
 import { parseTaskHtmlFragment } from "./parseTaskHtmlFragment";
 
-const STUB_RE = /^(?:цифр[аы]|букв[аы]|символ[аы]?|код)\s*[:.]?$/i;
+const STUB_RE = /^(?:цифр[аы]|букв[аы]|символ[аы]?|код|номер(?:\s+\S+){1,3})\s*[:.]?$/i;
 const MAX_LABEL = 42;
 const MIN_HEADERS = 2;
 const MAX_HEADERS = 8;
@@ -42,7 +42,8 @@ function isStubText(text) {
 function isShortLabelText(text) {
   const t = String(text || "").trim();
   if (!t || t.length > MAX_LABEL) return false;
-  if (/[?!]/.test(t) || t.includes(",")) return false;
+  if (/[?!]/.test(t)) return false;
+  if (t.includes(",") && !/\d,\d/.test(t)) return false;
   if (t.split(" ").filter(Boolean).length > 5) return false;
   return true;
 }
@@ -279,7 +280,7 @@ function restoreCollapsedTables(root) {
 export function restoreAnswerBlankTablesHtml(html) {
   if (html == null || typeof html !== "string" || !html.trim()) return html;
   if (typeof document === "undefined") return html;
-  if (!/цифр|букв|символ|код/i.test(html)) return html;
+  if (!/цифр|букв|символ|код|номер/i.test(html)) return html;
   const root = parseTaskHtmlFragment(html);
   if (!root) return html;
   restoreCollapsedTables(root);
