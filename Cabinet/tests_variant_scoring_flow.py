@@ -106,7 +106,7 @@ class VariantScoringFlowTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         return response.json()["result"]
 
-    def test_same_attempt_matches_across_pages_and_survives_bank_edits(self):
+    def test_bank_answer_edit_rescores_attempt_without_changing_composition(self):
         visible = self._save_draft(self._answers())
         self.assertNotIn("grading_snapshot", visible)
         self.assertNotIn("НЕ-ТОТ", str(visible))
@@ -137,11 +137,12 @@ class VariantScoringFlowTests(TestCase):
         extra = self._task(4, 1, "4", exam_part=1)
         again = self._save_draft(self._answers())
         self.assertEqual(again["scoring"]["total_tasks"], 3)
-        self.assertEqual(again["scoring"]["earned_points"], 1)
+        self.assertEqual(again["scoring"]["earned_points"], 0)
+        self.assertEqual(again["scoring"]["incorrect_count"], 2)
         self.assertEqual(again["scoring"]["max_points"], 6)
         self.assertNotIn(str(extra.id), {str(row["id"]) for row in again["tasks_snapshot"]})
         submission.refresh_from_db()
-        self.assertEqual(submission.result_payload["grading_snapshot"][0]["answer"], "10")
+        self.assertEqual(submission.result_payload["grading_snapshot"][0]["answer"], "НЕ-ТОТ")
 
         submitted = self.student_api.post(
             f"/api/homework/assignment/{self.homework.id}/submit/",
@@ -156,8 +157,8 @@ class VariantScoringFlowTests(TestCase):
         self.assertTrue(preview.json()["changed"])
         self.assertFalse(preview.json()["applied"])
         submission.refresh_from_db()
-        self.assertEqual(submission.result_payload["scoring"]["earned_points"], 1)
-        self.assertEqual(submission.result_payload["grading_snapshot"][0]["answer"], "10")
+        self.assertEqual(submission.result_payload["scoring"]["earned_points"], 0)
+        self.assertEqual(submission.result_payload["grading_snapshot"][0]["answer"], "НЕ-ТОТ")
 
         refused = self.teacher_api.post(
             f"/api/cabinet/review/{review_id}/scoring-apply/",
@@ -166,7 +167,7 @@ class VariantScoringFlowTests(TestCase):
         )
         self.assertEqual(refused.status_code, 400, refused.content)
         submission.refresh_from_db()
-        self.assertEqual(submission.result_payload["scoring"]["earned_points"], 1)
+        self.assertEqual(submission.result_payload["scoring"]["earned_points"], 0)
 
         zero = self.teacher_api.post(
             f"/api/cabinet/review/{review_id}/check/",
@@ -177,8 +178,8 @@ class VariantScoringFlowTests(TestCase):
         submission.refresh_from_db()
         zero_scoring = submission.result_payload["scoring"]
         self.assertEqual(zero_scoring["pending_review_count"], 0)
-        self.assertEqual(zero_scoring["incorrect_count"], 2)
-        self.assertEqual(zero_scoring["earned_points"], 1)
+        self.assertEqual(zero_scoring["incorrect_count"], 3)
+        self.assertEqual(zero_scoring["earned_points"], 0)
         self.assertEqual(zero_scoring["review_status"], "final")
 
         partial = self.teacher_api.post(
@@ -189,7 +190,7 @@ class VariantScoringFlowTests(TestCase):
         self.assertEqual(partial.status_code, 200, partial.content)
         submission.refresh_from_db()
         self.assertEqual(submission.result_payload["scoring"]["partial_count"], 1)
-        self.assertEqual(submission.result_payload["scoring"]["earned_points"], 2)
+        self.assertEqual(submission.result_payload["scoring"]["earned_points"], 1)
 
         full = self.teacher_api.post(
             f"/api/cabinet/review/{review_id}/check/",
@@ -199,11 +200,11 @@ class VariantScoringFlowTests(TestCase):
         self.assertEqual(full.status_code, 200, full.content)
         submission.refresh_from_db()
         final = submission.result_payload["scoring"]
-        self.assertEqual(final["earned_points"], 4)
+        self.assertEqual(final["earned_points"], 3)
         self.assertEqual(final["max_points"], 6)
-        self.assertEqual(final["correct_count"], 2)
+        self.assertEqual(final["correct_count"], 1)
         self.assertEqual(final["partial_count"], 0)
-        self.assertEqual(final["percentage"], 66.67)
+        self.assertEqual(final["percentage"], 50.0)
 
         same = self.teacher_api.post(
             f"/api/cabinet/review/{review_id}/check/",
@@ -212,8 +213,8 @@ class VariantScoringFlowTests(TestCase):
         )
         self.assertEqual(same.status_code, 200, same.content)
         submission.refresh_from_db()
-        self.assertEqual(submission.result_payload["scoring"]["earned_points"], 4)
-        self.assertEqual(submission.result_payload["grading_snapshot"][0]["answer"], "10")
+        self.assertEqual(submission.result_payload["scoring"]["earned_points"], 3)
+        self.assertEqual(submission.result_payload["grading_snapshot"][0]["answer"], "НЕ-ТОТ")
 
         summary = build_submission_result_summary(submission)
         journal = build_homework_result_payload(
@@ -230,16 +231,16 @@ class VariantScoringFlowTests(TestCase):
         student_result = student_card.json()["result"]
 
         for surface in (summary, review_summary):
-            self.assertEqual(surface["earned_points"], 4)
+            self.assertEqual(surface["earned_points"], 3)
             self.assertEqual(surface["max_points"], 6)
-            self.assertEqual(surface["percentage"], 66.67)
-            self.assertEqual(surface["correct_count"], 2)
+            self.assertEqual(surface["percentage"], 50.0)
+            self.assertEqual(surface["correct_count"], 1)
             self.assertEqual(surface["review_status"], "final")
-        self.assertEqual(journal["earned_points"], 4)
+        self.assertEqual(journal["earned_points"], 3)
         self.assertEqual(journal["max_points"], 6)
-        self.assertEqual(journal["score_percent"], 66.67)
+        self.assertEqual(journal["score_percent"], 50.0)
         self.assertNotIn("grading_snapshot", student_result)
-        self.assertEqual(student_result["scoring"]["earned_points"], 4)
+        self.assertEqual(student_result["scoring"]["earned_points"], 3)
         self.assertEqual(student_result["scoring"]["max_points"], 6)
         self.assertNotIn("НЕ-ТОТ", str(student_result))
         for row in journal["tasks"]:
@@ -251,8 +252,8 @@ class VariantScoringFlowTests(TestCase):
             submission=submission,
             for_student=False,
         )
-        self.assertIn("10", [row.get("correct_answer") for row in teacher_journal["tasks"]])
-        self.assertNotIn("НЕ-ТОТ", [row.get("correct_answer") for row in teacher_journal["tasks"]])
+        self.assertIn("НЕ-ТОТ", [row.get("correct_answer") for row in teacher_journal["tasks"]])
+        self.assertNotIn("10", [row.get("correct_answer") for row in teacher_journal["tasks"]])
 
     def test_return_and_resubmit_keeps_old_attempt_and_frozen_criteria(self):
         self._save_draft(self._answers())
@@ -279,6 +280,9 @@ class VariantScoringFlowTests(TestCase):
 
         self.task_a.answer = "ДРУГОЙ"
         self.task_a.save(update_fields=["answer"])
+        submission.refresh_from_db()
+        self.assertEqual(submission.result_payload["grading_snapshot"][0]["answer"], "ДРУГОЙ")
+        self.assertEqual(submission.result_payload["scoring"]["earned_points"], 3)
         resubmit = self.student_api.post(
             f"/api/homework/assignment/{self.homework.id}/submit/",
             {"result": self._answers()},
@@ -289,10 +293,11 @@ class VariantScoringFlowTests(TestCase):
         self.assertEqual(submission.status, SubmissionStatus.SUBMITTED)
         self.assertNotIn("scores", submission.result_payload)
         self.assertEqual(submission.result_payload["scoring"]["pending_review_count"], 1)
-        self.assertEqual(submission.result_payload["scoring"]["earned_points"], 1)
-        self.assertEqual(submission.result_payload["grading_snapshot"][0]["answer"], "10")
+        self.assertEqual(submission.result_payload["scoring"]["earned_points"], 0)
+        self.assertEqual(submission.result_payload["grading_snapshot"][0]["answer"], "ДРУГОЙ")
         attempt = submission.attempts.order_by("attempt_number").first()
-        self.assertEqual(attempt.result_payload["scoring"]["earned_points"], 4)
+        self.assertEqual(attempt.result_payload["scoring"]["earned_points"], 3)
+        self.assertEqual(attempt.result_payload["grading_snapshot"][0]["answer"], "ДРУГОЙ")
         self.assertIsNone(submission.score)
 
     def test_legacy_checked_score_is_not_rewritten_on_comment_save(self):

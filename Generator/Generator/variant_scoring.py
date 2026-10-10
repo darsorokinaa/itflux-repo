@@ -3,7 +3,8 @@
 Количество верных заданий и набранные баллы считаются отдельно.
 Пропуск и задание без ручной оценки не становятся неправильными.
 Снимок состава хранится в результате попытки и не пересобирается,
-если вариант потом изменили.
+если вариант потом изменили. Эталон задания внутри снимка обновляется,
+когда в банке меняется ответ или текст этой задачи.
 """
 
 from __future__ import annotations
@@ -643,5 +644,82 @@ def attach_variant_scoring(
     data["tasks_snapshot"] = snapshot
     if grading:
         data["grading_snapshot"] = grading
+    data["scoring"] = scoring
+    return data
+
+
+def apply_bank_answer_to_attempt(
+    payload: dict | None,
+    task_id,
+    new_answer: str,
+    *,
+    level: str = "",
+    subject: str = "",
+) -> dict | None:
+    """Подменить эталон одного задания в снимке и пересчитать баллы.
+
+    Состав попытки не меняется: новое задание варианта сюда не попадает,
+    ручные баллы второй части остаются.
+    """
+    if not isinstance(payload, dict) or task_id is None:
+        return None
+    grading = payload.get("grading_snapshot")
+    if not isinstance(grading, list) or not grading:
+        return None
+    key = str(task_id)
+    fresh = str(new_answer or "")
+    found = False
+    changed = False
+    updated_grading: list = []
+    number = None
+    for row in grading:
+        if not isinstance(row, dict):
+            updated_grading.append(row)
+            continue
+        row = dict(row)
+        if str(row.get("id")) == key:
+            found = True
+            number = row.get("number")
+            if str(row.get("answer") or "") != fresh:
+                row["answer"] = fresh
+                changed = True
+        updated_grading.append(row)
+    if not found or not changed:
+        return None
+
+    data = dict(payload)
+    data["grading_snapshot"] = updated_grading
+    scores = data.get("scores") if isinstance(data.get("scores"), dict) else {}
+    checked = dict(data.get("checked") if isinstance(data.get("checked"), dict) else {})
+    scoring = score_variant_attempt(
+        tasks=updated_grading,
+        level=level,
+        subject=subject,
+        answers=_answers_from_payload(data, updated_grading),
+        scores=scores,
+        checked=checked,
+        attachment_ids=_attachment_ids(data),
+    )
+    target = next((row for row in scoring.get("tasks") or [] if str(row.get("id")) == key), None)
+    if isinstance(target, dict) and int(target.get("part") or 1) == 1:
+        keys = [key]
+        if number is not None:
+            num_key = str(number)
+            same_number = sum(
+                1
+                for row in updated_grading
+                if isinstance(row, dict) and str(row.get("number")) == num_key
+            )
+            if same_number == 1 and num_key in checked and num_key != key:
+                keys.append(num_key)
+        status = target.get("status")
+        for item_key in keys:
+            if status == "correct":
+                checked[item_key] = True
+            elif status == "incorrect":
+                checked[item_key] = False
+            else:
+                checked.pop(item_key, None)
+        data["checked"] = checked
     data["scoring"] = scoring
     return data

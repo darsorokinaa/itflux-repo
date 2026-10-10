@@ -2,6 +2,7 @@ from django.contrib.auth.models import User
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
+from Generator.models import Task
 from .models import HomeworkSubmission, Profile, ScheduleEvent, Student
 from .choices import StudentStatus
 
@@ -43,6 +44,37 @@ def sync_billing_account_on_student_status(sender, instance, created, **kwargs):
         BillingAccount.objects.filter(student=instance, teacher_id=instance.teacher_id).update(
             is_active=True
         )
+
+
+@receiver(pre_save, sender=Task)
+def remember_task_content(sender, instance, **kwargs):
+    """Запоминает ответ и текст до сохранения, чтобы разослать правку дальше."""
+    instance._itflux_task_before = None
+    if kwargs.get("raw") or not instance.pk:
+        return
+    update_fields = kwargs.get("update_fields")
+    if update_fields is not None and not {"answer", "task_template"}.intersection(update_fields):
+        return
+    instance._itflux_task_before = (
+        Task.objects.filter(pk=instance.pk).values("answer", "task_template").first()
+    )
+
+
+@receiver(post_save, sender=Task)
+def propagate_task_content_on_save(sender, instance, created, **kwargs):
+    if created or kwargs.get("raw"):
+        return
+    before = getattr(instance, "_itflux_task_before", None)
+    instance._itflux_task_before = None
+    if not before:
+        return
+    answer_changed = str(before.get("answer") or "") != str(instance.answer or "")
+    text_changed = str(before.get("task_template") or "") != str(instance.task_template or "")
+    if not answer_changed and not text_changed:
+        return
+    from .task_answer_sync import propagate_task_content
+
+    propagate_task_content(instance)
 
 
 @receiver(post_save, sender=HomeworkSubmission)
