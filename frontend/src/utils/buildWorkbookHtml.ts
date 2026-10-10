@@ -58,7 +58,7 @@ export type WorkbookOptions = {
   showAnswerKey?: boolean;
   /** ID задач. Шаблон их не показывает. */
   showTaskIds?: boolean;
-  /** Строка ученика. На рабочем листе шаблон рисует её всегда. */
+  /** Строка «Фамилия, имя» на листе. В PDF её можно выключить галочкой «ФИО». */
   showStudentLine?: boolean;
 };
 
@@ -150,6 +150,7 @@ export type ExamTemplateDocument = {
     showWatermark: boolean;
     showAlternatives: boolean;
     showAnswerKey: boolean;
+    showStudentName: boolean;
     solutionLines: number;
     solutionStyle: "lines" | "grid";
   };
@@ -568,6 +569,7 @@ export function buildExamTemplateDocument(tasks: WorkbookTask[], meta: WorkbookM
       showWatermark: false,
       showAlternatives: false,
       showAnswerKey: options.showAnswerKey,
+      showStudentName: options.showStudentLine,
       solutionLines: options.showSolutionSpace ? 8 : 0,
       solutionStyle: options.showSolutionSpace ? "grid" : "lines",
     },

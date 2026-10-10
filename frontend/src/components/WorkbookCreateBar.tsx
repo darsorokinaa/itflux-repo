@@ -127,6 +127,16 @@ export default function WorkbookCreateBar({
             />
             Ответы
           </label>
+          <label className="workbook-create-bar__option">
+            <input
+              type="checkbox"
+              checked={options.showStudentLine}
+              onChange={(e) =>
+                setOptions((prev) => ({ ...prev, showStudentLine: e.target.checked }))
+              }
+            />
+            ФИО
+          </label>
         </div>
       ) : null}
 

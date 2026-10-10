@@ -118,8 +118,9 @@ input[type=number]{background:white;color:#3e4554;padding:6px 9px;border:1px sol
 .answer-cells span:last-child{border-right:.25mm solid #aaa}
 .alternative-label{font-weight:700;color:#ff2626;text-align:center;margin:-2mm 0 4.5mm;line-height:1.1}
 .task.alternative{margin-bottom:6.6mm}
-.task table{width:100%;table-layout:fixed;border-collapse:collapse;margin:2.5mm 0;font-size:inherit;line-height:1.13;break-inside:avoid}
-.task th,.task td{border:.15mm solid #111;padding:1mm .7mm;font-weight:400;text-align:center;overflow-wrap:anywhere}
+.task table{width:100%;max-width:100%;table-layout:fixed;border-collapse:collapse;margin:2.5mm 0;font-size:inherit;line-height:1.13;break-inside:avoid}
+.task th,.task td{border:.15mm solid #111;padding:1mm .7mm;font-weight:400;text-align:center;overflow-wrap:anywhere;min-width:0}
+.task table img{display:block;width:auto !important;max-width:100% !important;height:auto !important;max-height:140mm !important;margin:0 auto;object-fit:contain}
 .task th:first-child,.task td:first-child{text-align:left}
 .task table th:first-child{width:40%}
 .task ol,.task ul{margin:1mm 0;padding-left:4.5mm}
@@ -1258,6 +1259,7 @@ License: CC-BY-4.0
   <label class="field"><input id="watermark" type="checkbox" checked>Водяной знак</label>
   <label class="field"><input id="alternatives" type="checkbox" checked>Примеры «ИЛИ»</label>
   <label class="field"><input id="answers" type="checkbox">Ответы отдельно</label>
+  <label class="field"><input id="student-name" type="checkbox">ФИО</label>
   <span class="field">Место для решения
    <label class="field"><input id="space-grid" type="radio" name="solution-style" value="grid">Клетки</label>
    <label class="field"><input id="space-lines" type="radio" name="solution-style" value="lines" checked>Линейка</label>
@@ -1771,7 +1773,7 @@ function appendTask(article,task,alternative){
   const split=unit.tagName==='TABLE'?splitTable(unit,main):!unit.matches('.figure,.answer-line,.work-rule,.work-grid,.solution-title,.alternative-label,.task-materials')?splitText(unit,main):null;
   if(split){main.append(split[0]);queue.unshift(split[1]);}
   else if(!main.childElementCount){
-   if(unit.matches('.figure')){unit.style.width='95mm';const img=unit.querySelector('img,svg');if(img){img.style.maxHeight='135mm';img.style.objectFit='contain';}main.append(unit);if(!fits(unit))errors.push(`Рисунок в задании ${task.number} не помещается на странице.`);continue;}
+   if(unit.querySelector('img,svg')){const room=Math.max(90,currentPage.body.getBoundingClientRect().height-10);if(unit.matches('.figure'))unit.style.width='95mm';for(const img of unit.querySelectorAll('img,svg')){img.style.maxWidth='100%';img.style.width='auto';img.style.height='auto';img.style.maxHeight=room+'px';img.style.objectFit='contain';}main.append(unit);if(!fits(unit))errors.push(`Рисунок в задании ${task.number} не помещается на странице.`);continue;}
    main.append(unit);errors.push(`Задание ${task.number}: неделимый блок не помещается на странице. Разбейте таблицу или формулу.`);continue;
   }else queue.unshift(unit);
   newPage();continued=true;fragment=articleShell(task,continued,false);main=fragment.querySelector('.task-main');currentPage.body.append(fragment);
@@ -1784,9 +1786,20 @@ function makeSection(part){
  const text=part===1?`Ответом к заданиям ${range} является целое число или конечная десятичная дробь. Во всех заданиях числа предполагаются действительными, если отдельно не указано иное. Запишите число в поле ответа в тексте работы. При работе с экзаменационным бланком перенесите его в БЛАНК ОТВЕТОВ № 1 справа от номера соответствующего задания, начиная с первой клеточки. Каждую цифру, знак «минус» и запятую пишите в отдельной клеточке. Единицы измерений писать не нужно.`:`К заданиям ${range} запишите полное обоснованное решение и ответ. Для записи решений используйте отдельный лист или БЛАНК ОТВЕТОВ № 2. Сначала укажите номер выполняемого задания. Ответы записывайте чётко и разборчиво.`;
  const customPart=current.partInstructions?.[part];const shown=customPart?String(customPart).split('{range}').join(range):text;section.append(node('div','instructions-box',shown));return section;
 }
+function showStudentName(){
+ return typeof current.options.showStudentName==='boolean'?current.options.showStudentName:current.mode==='worksheet';
+}
+function studentNameLine(){
+ const fields=node('div','student-fields');
+ const field=node('span','fill-field','Фамилия, имя');
+ field.append(node('i'));
+ fields.append(field);
+ return fields;
+}
 function makeCover(){
  const cover=node('div','cover');
  const h=node('h2');h.append(node('span','',current.title+(current.variant?' № '+current.variant:'')),node('br'),node('span','','контрольных измерительных материалов'),node('br'),node('span','',`для подготовки к ЕГЭ ${current.year} года`),node('br'),node('span','',`по ${current.subject==='МАТЕМАТИКА'?'МАТЕМАТИКЕ':current.subject}`));cover.append(h);
+ if(showStudentName())cover.append(studentNameLine());
  cover.append(node('h3','level',current.level),node('h3','instruction-heading','Инструкция по выполнению работы'));
  const short=partInfo(1),long=partInfo(2),parts=[...new Set(current.tasks.map(t=>t.part))];
  const customCover=Array.isArray(current.coverParagraphs)?current.coverParagraphs.map(p=>String(p||'').trim()).filter(Boolean):[];
@@ -1808,7 +1821,10 @@ function makeCover(){
 }
 function makeWorksheetTop(){
  const top=node('div','worksheet-top');top.append(node('h2','',current.title||'Рабочий лист'),node('div','meta',`${current.subject}${current.grade?' · '+current.grade+' класс':''}${current.variant?' · Вариант '+current.variant:''}`));
- const fields=node('div','student-fields');for(const [label,cls] of [['Фамилия, имя',''],['Дата','small']]){const field=node('span','fill-field '+cls,label);field.append(node('i'));fields.append(field);}top.append(fields,node('p','worksheet-intro',current.worksheetInstructions||'Внимательно прочитайте условия. Запишите ответы и необходимые решения.'));return top;
+ const fields=node('div','student-fields');
+ const rows=showStudentName()?[['Фамилия, имя',''],['Дата','small']]:[['Дата','small']];
+ for(const [label,cls] of rows){const field=node('span','fill-field '+cls,label);field.append(node('i'));fields.append(field);}
+ top.append(fields,node('p','worksheet-intro',current.worksheetInstructions||'Внимательно прочитайте условия. Запишите ответы и необходимые решения.'));return top;
 }
 async function prepareAssets(elements){
  const holder=node('div','logical-page');holder.style.width='117mm';holder.style.height='auto';for(const e of elements)holder.append(e);$('measure-root').append(holder);
@@ -1860,7 +1876,7 @@ function finalizeSheets(sheetUrl){
  applyZoom();
 }
 function syncControls(){
- $('mode').value=current.mode;$('layout').value=current.options.layout;$('cover').checked=current.options.includeCover;$('cover').disabled=current.mode==='worksheet';$('watermark').checked=current.options.showWatermark;$('answers').checked=current.options.showAnswerKey;$('alternatives').checked=current.options.showAlternatives;
+ $('mode').value=current.mode;$('layout').value=current.options.layout;$('cover').checked=current.options.includeCover;$('cover').disabled=current.mode==='worksheet';$('watermark').checked=current.options.showWatermark;$('answers').checked=current.options.showAnswerKey;$('alternatives').checked=current.options.showAlternatives;$('student-name').checked=showStudentName();
  const lines=Math.floor(clamp(current.options.solutionLines,0,100,0));const preset=['0','4','8','12'].includes(String(lines));$('space-grid').checked=current.options.solutionStyle==='grid';$('space-lines').checked=current.options.solutionStyle!=='grid';$('space').value=preset?String(lines):'custom';$('space-custom').value=String(lines);$('space-custom-wrap').hidden=preset;
  document.title=downloadTitle()+' • Цифровой поток';
 }
@@ -1870,6 +1886,7 @@ async function renderDocument(data){
  pages=[];currentPage=null;$('measure-root').replaceChildren();
  const prepared=[];
  if(current.mode==='exam'&&current.options.includeCover)prepared.push({type:'cover',el:makeCover()});
+ else if(current.mode==='exam'&&showStudentName())prepared.push({type:'worksheet',el:studentNameLine()});
  if(current.mode==='worksheet')prepared.push({type:'worksheet',el:makeWorksheetTop()});
  let activePart=null;
  for(const task of current.tasks){
@@ -1944,7 +1961,7 @@ $('print-button').addEventListener('click',async()=>{await window.ExamTemplate.r
 if($('save-button'))$('save-button').addEventListener('click',saveHtml);
 $('mode').addEventListener('change',()=>{current.mode=$('mode').value;if(current.title===defaults.title||current.title==='Рабочий лист')current.title=current.mode==='worksheet'?'Рабочий лист':defaults.title;if(!current.headerLeft||current.headerLeft===`Тренировочный вариант ЕГЭ ${current.year} г.`||current.headerLeft==='Рабочий лист')current.headerLeft='';if(current.mode==='worksheet'){current.options.includeCover=false;current.options.solutionLines=4;current.options.showAlternatives=false;current.options.showWatermark=false;}else{current.options.solutionLines=0;current.options.includeCover=true;}rerender();});
 $('layout').addEventListener('change',()=>{current.options.layout=$('layout').value;rerender();});
-for(const [id,key] of [['cover','includeCover'],['watermark','showWatermark'],['answers','showAnswerKey'],['alternatives','showAlternatives']])$(id).addEventListener('change',()=>{current.options[key]=$(id).checked;rerender();});
+for(const [id,key] of [['cover','includeCover'],['watermark','showWatermark'],['answers','showAnswerKey'],['alternatives','showAlternatives'],['student-name','showStudentName']])$(id).addEventListener('change',()=>{current.options[key]=$(id).checked;rerender();});
 function applySolutionSpace(){const picked=[...document.querySelectorAll('input[name="solution-style"]')].find(el=>el.checked);current.options.solutionStyle=picked&&picked.value==='grid'?'grid':'lines';const custom=$('space').value==='custom';$('space-custom-wrap').hidden=!custom;current.options.solutionLines=Math.floor(clamp(custom?$('space-custom').value:$('space').value,0,100,0));rerender();}
 for(const el of document.querySelectorAll('input[name="solution-style"]'))el.addEventListener('change',applySolutionSpace);
 $('space').addEventListener('change',()=>{if($('space').value==='custom'){$('space-custom-wrap').hidden=false;$('space-custom').focus();$('space-custom').select();return;}applySolutionSpace();});

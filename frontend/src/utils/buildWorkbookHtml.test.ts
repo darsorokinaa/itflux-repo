@@ -39,9 +39,11 @@ describe("buildExamTemplateDocument", () => {
     expect(buildExamTemplateDocument(ten, { title: "10", mode: "workbook" }).tasks.map((task) => task.number)).toEqual(
       Array.from({ length: 10 }, (_, i) => String(i + 1))
     );
-    expect(
-      buildExamTemplateDocument(thirty, { title: "30", mode: "workbook" }).tasks.map((task) => task.number)
-    ).toEqual(Array.from({ length: 30 }, (_, i) => String(i + 1)));
+    const workbook = buildExamTemplateDocument(thirty, { title: "30", mode: "workbook" });
+    expect(workbook.tasks.map((task) => task.number)).toEqual(
+      Array.from({ length: 30 }, (_, i) => String(i + 1))
+    );
+    expect(workbook.options.showStudentName).toBe(true);
   });
 
   it("uses exam numbers and parts for a variant", () => {
@@ -73,6 +75,7 @@ describe("buildExamTemplateDocument", () => {
     expect(doc.watermark).toBe("");
     expect(doc.options.showWatermark).toBe(false);
     expect(doc.options.showAlternatives).toBe(false);
+    expect(doc.options.showStudentName).toBe(false);
     expect(doc.showAnswerExample).toBe(true);
     expect(doc.partInstructions?.["1"]).toContain("десятичн");
     expect(doc.partInstructions?.["2"]).toContain("решение");
@@ -154,6 +157,7 @@ describe("buildExamTemplateDocument", () => {
     expect(doc.tasks[0]?.figure).toMatchObject({ widthMm: 84, placement: "right" });
     const template = readFileSync(templatePath, "utf8");
     expect(template).toContain("if(width>48)f.style.maxWidth='100%'");
+    expect(template).toContain(".task table img{");
   });
 
   it("still floats a standalone picture in other tasks", () => {
