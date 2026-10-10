@@ -4,6 +4,17 @@ export function isMathLikeSubject(subject) {
   return s === "math" || s === "math_base";
 }
 
+/** ОГЭ математика №1–5: практические рисунки (план, схема, график) в натуральный размер. */
+export function isOgeMathPictureTask(level, subject, taskNumber) {
+  const n = Number(taskNumber);
+  return (
+    String(level || "").toLowerCase() === "oge" &&
+    isMathLikeSubject(subject) &&
+    n >= 1 &&
+    n <= 5
+  );
+}
+
 /**
  * Логическая часть экзамена для UI/проверки:
  * 1 — автопроверка кратких ответов,

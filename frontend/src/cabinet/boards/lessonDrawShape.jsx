@@ -122,6 +122,21 @@ export function lessonDrawShapePath(segments, scaleX, scaleY, closed, isPen) {
   return lessonDrawPath(points, closed);
 }
 
+/**
+ * Чернила идут только по выборке. isClosed у tldraw — это заливка,
+ * когда конец штриха рядом с началом; черта туда не проводится.
+ */
+export function lessonDrawMarkGeometry(shape) {
+  const isPen = Boolean(shape?.isPen);
+  const segments = shape?.segments;
+  const scaleX = shape?.scaleX;
+  const scaleY = shape?.scaleY;
+  const stroke = lessonDrawShapePath(segments, scaleX, scaleY, false, isPen);
+  const wantsFill = Boolean(shape?.isClosed) && shape?.fill && shape.fill !== "none";
+  const fill = wantsFill ? lessonDrawShapePath(segments, scaleX, scaleY, true, isPen) : "";
+  return { stroke, fill };
+}
+
 export function lessonDrawStrokeWidth(baseStrokeWidth, scale) {
   const width = Number(baseStrokeWidth);
   const nextScale = Number(scale);
@@ -146,29 +161,32 @@ function displayValues(util, shape, colorMode) {
 }
 
 function LessonDrawMark({ shape, dv }) {
-  const points = lessonDrawPoints(shape.props.segments, shape.props.scaleX, shape.props.scaleY);
-  const closed = Boolean(shape.props.isClosed && points.length > 2);
-  const d = lessonDrawShapePath(
-    shape.props.segments,
-    shape.props.scaleX,
-    shape.props.scaleY,
-    closed,
-    Boolean(shape.props.isPen),
-  );
-  if (!d) return null;
+  const { stroke, fill } = lessonDrawMarkGeometry({
+    segments: shape.props.segments,
+    scaleX: shape.props.scaleX,
+    scaleY: shape.props.scaleY,
+    isClosed: shape.props.isClosed,
+    isPen: shape.props.isPen,
+    fill: shape.props.fill,
+  });
+  if (!stroke && !fill) return null;
   const strokeWidth = lessonDrawStrokeWidth(dv.strokeWidth, shape.props.scale);
-  const showStroke = shape.props.dash !== "none";
-  const showFill = closed && shape.props.fill !== "none";
+  const showStroke = shape.props.dash !== "none" && Boolean(stroke);
   return (
-    <path
-      d={d}
-      fill={showFill ? dv.fillColor : "none"}
-      stroke={showStroke ? dv.strokeColor : "none"}
-      strokeWidth={showStroke ? strokeWidth : 0}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeDasharray={showStroke ? lessonDrawDashArray(shape.props.dash, strokeWidth) : undefined}
-    />
+    <>
+      {fill ? <path d={fill} fill={dv.fillColor} stroke="none" /> : null}
+      {showStroke ? (
+        <path
+          d={stroke}
+          fill="none"
+          stroke={dv.strokeColor}
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeDasharray={lessonDrawDashArray(shape.props.dash, strokeWidth)}
+        />
+      ) : null}
+    </>
   );
 }
 

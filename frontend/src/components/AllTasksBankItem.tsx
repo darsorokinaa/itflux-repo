@@ -8,6 +8,8 @@ import { TaskFileAttachments } from "./TaskFileAttachment";
 // @ts-ignore JSX module without d.ts
 import TaskNoAnswerBadge from "./TaskNoAnswerBadge";
 import { AllTasksTaskTagsEditor, type TaskTag } from "./AllTasksTagEditor";
+// @ts-ignore JS module without d.ts
+import { isOgeMathPictureTask } from "../utils/examTaskPart";
 import {
   AllTasksStaffEditor,
   type StaffGroupOption,
@@ -290,6 +292,7 @@ export const AllTasksBankItem = memo(function AllTasksBankItem({
           useProgTaskSheet ? "all-tasks-item--prog-sheet" : "",
           task.subdivision === "geom" ? "all-tasks-item--geom" : "",
           task.subdivision === "alg" ? "all-tasks-item--alg" : "",
+          isOgeMathPictureTask(bodyProps.level, bodyProps.subject, task.task_number) ? "task-img-full" : "",
           isFunctionGraphTask(task) ? "all-tasks-item--function-graphs" : "",
           pickMode && inPick ? "all-tasks-item--in-workbook" : "",
           isTeacher && task.source_label === "teacher" ? "all-tasks-item--mine" : "",
@@ -405,6 +408,7 @@ const AllTasksGroupPart = memo(function AllTasksGroupPart({
       className={[
         "all-tasks-item__group-part",
         isFunctionGraphTask(task) ? "all-tasks-item__group-part--function-graphs" : "",
+        isOgeMathPictureTask(bodyProps.level, bodyProps.subject, task.task_number) ? "task-img-full" : "",
       ]
         .filter(Boolean)
         .join(" ")}

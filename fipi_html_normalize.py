@@ -541,6 +541,53 @@ def _is_real_data_table(table_html: str) -> bool:
     return total_rows >= 2 and multi_col_rows >= 2
 
 
+_ANSWER_STUB_RE = re.compile(
+    r"^(?:цифр[аы]|букв[аы]|символ[аы]?|код)\s*[:.]?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _answer_blank_parts(table_html: str) -> list[str] | None:
+    """Короткие подписи столбцов и последняя ячейка «Цифры» — бланк, не список."""
+    parts: list[str] = []
+    for row_m in _RE_TABLE_ROW.finditer(table_html):
+        if _row_is_empty(row_m.group(1)):
+            continue
+        for cell_m in _RE_TABLE_CELL.finditer(row_m.group(1)):
+            inner = cell_m.group(1).strip()
+            if not _cell_has_content(inner):
+                continue
+            if re.search(r"<(?:img|table|ol|ul)\b", inner, re.IGNORECASE):
+                return None
+            text = re.sub(r"\s+", " ", _cell_plain_text(inner)).strip()
+            if not text or len(text) > 42 or "?" in text or "!" in text or "," in text:
+                return None
+            if len(text.split()) > 5:
+                return None
+            parts.append(inner)
+    if not (3 <= len(parts) <= 9):
+        return None
+    stub = re.sub(r"\s+", " ", _cell_plain_text(parts[-1])).strip()
+    if not _ANSWER_STUB_RE.match(stub):
+        return None
+    return parts
+
+
+def _rebuild_answer_blank_table(parts: list[str]) -> str:
+    headers, stub = parts[:-1], parts[-1]
+    head = "".join(f"<th>{cell}</th>" for cell in headers)
+    blanks = "".join(
+        '<td class="task-answer-blank__digit">&nbsp;</td>' for _ in headers[1:]
+    )
+    return (
+        '<div class="task-answer-blank-wrap">'
+        '<table class="task-answer-blank">'
+        f"<tr>{head}</tr>"
+        f"<tr><td>{stub}</td>{blanks}</tr>"
+        "</table></div>"
+    )
+
+
 def _unwrap_one_layout_table(table_html: str) -> str:
     if _is_choice_options_table(table_html):
         return table_html
@@ -548,6 +595,9 @@ def _unwrap_one_layout_table(table_html: str) -> str:
         # Сохраняем структуру: реальная таблица данных, а не layout-обёртка.
         # Стилизуется CSS — в PDF получает синие 20%-границы.
         return table_html
+    blank = _answer_blank_parts(table_html)
+    if blank:
+        return _rebuild_answer_blank_table(blank)
     parts: list[str] = []
     has_any_row = False
     for row_m in _RE_TABLE_ROW.finditer(table_html):

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   lessonDrawDashArray,
+  lessonDrawMarkGeometry,
   lessonDrawPath,
   lessonDrawPoints,
   lessonDrawShapePath,
@@ -130,6 +131,31 @@ describe("lesson draw stroke", () => {
       { type: "free", path: continued },
     ], 1, 1, false, true)).toBe("M 0 0 L 10 0 L 10 6 L 4 6");
     expect(lessonDrawShapePath([{ type: "free", path: free }], 1, 1, true, false)).toBe("M 0 0 L 10 0 L 10 6 Z");
+  });
+
+  it("does not stroke back to the start when tldraw marks the stroke closed", () => {
+    const free = b64Vecs.encodePoints([
+      { x: 0, y: 0, z: 0.5 },
+      { x: 12, y: 0, z: 0.5 },
+      { x: 12, y: 10, z: 0.5 },
+      { x: 0.4, y: 0.4, z: 0.5 },
+    ]);
+    const shape = {
+      segments: [{ type: "free", path: free }],
+      scaleX: 1,
+      scaleY: 1,
+      isPen: true,
+      isClosed: true,
+      fill: "none",
+    };
+    const ink = lessonDrawMarkGeometry(shape);
+    expect(ink.stroke.endsWith("Z")).toBe(false);
+    expect(ink.stroke.startsWith("M 0 0")).toBe(true);
+    expect(ink.stroke.endsWith("L 0.4 0.4")).toBe(true);
+    expect(ink.fill).toBe("");
+    const filled = lessonDrawMarkGeometry({ ...shape, fill: "solid" });
+    expect(filled.stroke).toBe(ink.stroke);
+    expect(filled.fill.endsWith("Z")).toBe(true);
   });
 });
 

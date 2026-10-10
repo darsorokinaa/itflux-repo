@@ -262,6 +262,55 @@ describe("lesson eraser pointer", () => {
     Object.defineProperty(navigator, "userAgent", { configurable: true, value: previousAgent });
     host.remove();
   });
+
+  it("stops a palm touch while the pen is down so tldraw cannot start a second stroke", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const doc = host.ownerDocument;
+    const seen = [];
+    const onBubble = (event) => seen.push(event.pointerType);
+    doc.addEventListener("pointerdown", onBubble);
+    doc.addEventListener("pointermove", onBubble);
+    const editor = {
+      getContainer: () => host,
+      isIn: () => false,
+      getCurrentToolId: () => "draw",
+      dispatch() {},
+    };
+    const previousAgent = navigator.userAgent;
+    Object.defineProperty(navigator, "userAgent", {
+      configurable: true,
+      value: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/17.0 Safari/605.1.15",
+    });
+    const dispose = installCoalescedEraserInput(editor);
+    const fire = (type, pointerType, pointerId) => {
+      const event = new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        clientX: 10,
+        clientY: 10,
+        pointerId,
+        button: 0,
+        buttons: type === "pointerup" ? 0 : 1,
+      });
+      Object.defineProperty(event, "pointerType", { value: pointerType });
+      Object.defineProperty(event, "pressure", { value: pointerType === "pen" ? 0.4 : 1 });
+      doc.dispatchEvent(event);
+    };
+    fire("pointerdown", "pen", 3);
+    fire("pointermove", "pen", 3);
+    fire("pointerdown", "touch", 9);
+    fire("pointermove", "touch", 9);
+    fire("pointerup", "touch", 9);
+    fire("pointerup", "pen", 3);
+    fire("pointerdown", "touch", 9);
+    expect(seen).toEqual(["pen", "pen", "touch"]);
+    dispose();
+    doc.removeEventListener("pointerdown", onBubble);
+    doc.removeEventListener("pointermove", onBubble);
+    Object.defineProperty(navigator, "userAgent", { configurable: true, value: previousAgent });
+    host.remove();
+  });
 });
 
 describe("lesson eraser keeps images", () => {

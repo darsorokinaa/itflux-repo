@@ -37,7 +37,7 @@ import {
   computeAxesTaskScore,
   findAxisLevel,
 } from "../utils/criteriaAxesScore";
-import { inferExamTaskPart, formatPart2SectionTitle } from "../utils/examTaskPart";
+import { inferExamTaskPart, formatPart2SectionTitle, isOgeMathPictureTask } from "../utils/examTaskPart";
 import TaskNoAnswerBadge from "../components/TaskNoAnswerBadge";
 import { getShareablePageUrl } from "../utils/shareablePageUrl";
 import {
@@ -100,6 +100,13 @@ import {
 function isMathLikeSubject(subject) {
   const s = String(subject || "").toLowerCase();
   return s === "math" || s === "math_base";
+}
+
+function taskImgFullClass(level, subject, taskNumber) {
+  const full =
+    isOgeInformaticsTask(level, subject, taskNumber, 13) ||
+    isOgeMathPictureTask(level, subject, taskNumber);
+  return full ? " task-img-full" : "";
 }
 
 /** ОГЭ информатика, задание с номером n (API иногда отдаёт строку). */
@@ -3390,7 +3397,7 @@ function ExamPage() {
                   data-task-id={task.id}
                   data-task-number={task.number}
                   data-display-number={taskDisplayNumber(task)}
-                  className={`exam-task-card tdoc-task task-block exam-task-card--p1${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${level === "ege" && subject === "math" && Number(task.number) === 11 ? " task-function-graphs" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${isEgeInfTruthTableTask(level, subject, task.number) ? " exam-task-card--ege-inf-2" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}${String(task.id) === String(themeCurrentId) ? " is-theme-current" : ""}`}
+                  className={`exam-task-card tdoc-task task-block exam-task-card--p1${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${level === "ege" && subject === "math" && Number(task.number) === 11 ? " task-function-graphs" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${isEgeInfTruthTableTask(level, subject, task.number) ? " exam-task-card--ege-inf-2" : ""}${taskImgFullClass(level, subject, task.number)}${String(task.id) === String(themeCurrentId) ? " is-theme-current" : ""}`}
                   onClick={() => handleTaskFocus(task.id)}
                 >
                   <div className="exam-task-card__top">
@@ -3802,7 +3809,7 @@ function ExamPage() {
                         <section
                           key={task.id}
                           data-task-id={task.id}
-                          className={`exam-task-card tdoc-task task-block exam-task-card--p2 exam-task-card--in-group${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${level === "ege" && subject === "math" && Number(task.number) === 11 ? " task-function-graphs" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${isEgeInfTruthTableTask(level, subject, task.number) ? " exam-task-card--ege-inf-2" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}${String(task.id) === String(themeCurrentId) ? " is-theme-current" : ""}`}
+                          className={`exam-task-card tdoc-task task-block exam-task-card--p2 exam-task-card--in-group${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${level === "ege" && subject === "math" && Number(task.number) === 11 ? " task-function-graphs" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${isEgeInfTruthTableTask(level, subject, task.number) ? " exam-task-card--ege-inf-2" : ""}${taskImgFullClass(level, subject, task.number)}${String(task.id) === String(themeCurrentId) ? " is-theme-current" : ""}`}
                           data-display-number={taskDisplayNumber(task)}
                           onClick={() => handleTaskFocus(task.id)}
                         >
@@ -3914,7 +3921,7 @@ function ExamPage() {
                     <section
                       key={task.id}
                       data-task-id={task.id}
-                      className={`exam-task-card tdoc-task task-block exam-task-card--p2${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${level === "ege" && subject === "math" && Number(task.number) === 11 ? " task-function-graphs" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${isEgeInfTruthTableTask(level, subject, task.number) ? " exam-task-card--ege-inf-2" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}${String(task.id) === String(themeCurrentId) ? " is-theme-current" : ""}`}
+                      className={`exam-task-card tdoc-task task-block exam-task-card--p2${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${level === "ege" && subject === "math" && Number(task.number) === 11 ? " task-function-graphs" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${isEgeInfTruthTableTask(level, subject, task.number) ? " exam-task-card--ege-inf-2" : ""}${taskImgFullClass(level, subject, task.number)}${String(task.id) === String(themeCurrentId) ? " is-theme-current" : ""}`}
                       data-display-number={taskDisplayNumber(task)}
                       onClick={() => handleTaskFocus(task.id)}
                     >

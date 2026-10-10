@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatExamPartLabel, formatPart2SectionTitle, inferExamTaskPart } from "./examTaskPart";
+import { formatExamPartLabel, formatPart2SectionTitle, inferExamTaskPart, isOgeMathPictureTask } from "./examTaskPart";
 
 describe("inferExamTaskPart", () => {
   it("maps part_id 1/2", () => {
@@ -26,6 +26,17 @@ describe("inferExamTaskPart", () => {
   it("maps ege chemistry 1–28 to part 1", () => {
     expect(inferExamTaskPart({ number: 28 }, "ege", "chem")).toBe(1);
     expect(inferExamTaskPart({ number: 29 }, "ege", "chem")).toBe(2);
+  });
+});
+
+describe("isOgeMathPictureTask", () => {
+  it("covers OGE math tasks 1–5 only", () => {
+    expect(isOgeMathPictureTask("oge", "math", 1)).toBe(true);
+    expect(isOgeMathPictureTask("oge", "math_base", 5)).toBe(true);
+    expect(isOgeMathPictureTask("oge", "math", "3")).toBe(true);
+    expect(isOgeMathPictureTask("oge", "math", 6)).toBe(false);
+    expect(isOgeMathPictureTask("ege", "math", 1)).toBe(false);
+    expect(isOgeMathPictureTask("oge", "inf", 1)).toBe(false);
   });
 });
 

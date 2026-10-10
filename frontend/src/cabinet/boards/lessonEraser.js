@@ -137,17 +137,42 @@ export function installCoalescedEraserInput(editor) {
     activePointerId = null;
   };
 
+  const blockForeignPointer = (event) => {
+    if (activePointerId == null || event.pointerId === activePointerId) return false;
+    if (event.pointerType === "pen") return false;
+    // Ладонь не должна дойти до tldraw: при пере не-pen он снимает штрих
+    // и начинает второй от точки касания.
+    event.stopPropagation();
+    if (event.cancelable) event.preventDefault();
+    return true;
+  };
+
+  const notePen = (event) => {
+    if (event.pointerType !== "pen") return;
+    if (event.type === "pointerdown" || event.buttons > 0 || Number(event.pressure) > 0) {
+      activePointerId = event.pointerId;
+    }
+  };
+
+  const onDown = (event) => {
+    if (blockForeignPointer(event)) return;
+    notePen(event);
+  };
+
   const onMove = (event) => {
+    if (blockForeignPointer(event)) return;
     const eraserWants = shouldDensifyEraserMove(event, Boolean(editor.isIn?.("eraser")));
     const drawWants = !eraserWants && shouldFillIosPenDraw(
       event,
       editor.getCurrentToolId?.(),
       iosSkipsCoalesced,
     );
-    if (!eraserWants && !drawWants) return;
+    if (!eraserWants && !drawWants) {
+      notePen(event);
+      return;
+    }
     if (activePointerId != null && event.pointerId !== activePointerId) {
-      // Ладонь не перехватывает перо. Смена id не диспатчится: иначе хорда
-      // соединит последнюю точку пальца с пером.
+      // Смена id пера не диспатчится: иначе хорда соединит два стилуса.
       if (event.pointerType !== "pen") return;
       activePointerId = event.pointerId;
       return;
@@ -176,13 +201,20 @@ export function installCoalescedEraserInput(editor) {
     }
   };
 
+  const onUp = (event) => {
+    if (blockForeignPointer(event)) return;
+    releasePointer(event);
+  };
+
+  doc.addEventListener("pointerdown", onDown, true);
   doc.addEventListener("pointermove", onMove, true);
-  doc.addEventListener("pointerup", releasePointer, true);
-  doc.addEventListener("pointercancel", releasePointer, true);
+  doc.addEventListener("pointerup", onUp, true);
+  doc.addEventListener("pointercancel", onUp, true);
   return () => {
+    doc.removeEventListener("pointerdown", onDown, true);
     doc.removeEventListener("pointermove", onMove, true);
-    doc.removeEventListener("pointerup", releasePointer, true);
-    doc.removeEventListener("pointercancel", releasePointer, true);
+    doc.removeEventListener("pointerup", onUp, true);
+    doc.removeEventListener("pointercancel", onUp, true);
   };
 }
 

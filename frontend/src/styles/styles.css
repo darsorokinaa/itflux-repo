@@ -9008,6 +9008,35 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
     object-fit: contain !important;
 }
 
+/* ОГЭ математика №1–5: рисунок как в условии, без ужатия в 220–300px. */
+.exam-page .exam-task-card.task-img-full .exam-task-card__text img.task-standalone-illustration,
+.exam-page .exam-task-card.task-img-full .exam-task-card__text img.oge-math-fipi-diagram,
+.exam-page .exam-task-card.task-img-full.task-geom .exam-task-card__text img.task-standalone-illustration,
+.exam-page .exam-task-card.task-img-full.task-geom .exam-task-card__text img.oge-math-fipi-diagram,
+.exam-page .exam-task-card.task-img-full.task-alg .exam-task-card__text img.task-standalone-illustration,
+.exam-page .exam-task-card.task-img-full.task-alg .exam-task-card__text img.oge-math-fipi-diagram,
+.exam-page[data-subject="math"] .exam-task-card.task-img-full:not(.task-geom):not(.task-alg) .exam-task-card__text img.task-standalone-illustration,
+.exam-page[data-subject="math"] .exam-task-card.task-img-full:not(.task-geom):not(.task-alg) .exam-task-card__text p:has(> img.task-standalone-illustration:only-child) > img.task-standalone-illustration,
+.exam-page[data-subject="math"] .exam-task-card.task-img-full:not(.task-geom):not(.task-alg) .exam-task-card__text figure:has(> img.task-standalone-illustration:only-child) > img.task-standalone-illustration,
+.all-tasks-page .all-tasks-item.task-img-full .all-tasks-item__html img.task-standalone-illustration,
+.all-tasks-page .all-tasks-item.task-img-full .all-tasks-item__html img.oge-math-fipi-diagram,
+.all-tasks-page .all-tasks-item.all-tasks-item--geom.task-img-full .all-tasks-item__html img.task-standalone-illustration,
+.all-tasks-page .all-tasks-item.all-tasks-item--alg.task-img-full .all-tasks-item__html img.task-standalone-illustration,
+.all-tasks-page .all-tasks-item.task-img-full .all-tasks-item__group-part.task-img-full .all-tasks-item__html img.task-standalone-illustration,
+.all-tasks-page .all-tasks-item.task-img-full .all-tasks-item__group-part.task-img-full .all-tasks-item__html img.oge-math-fipi-diagram,
+.all-tasks-page[data-subject="math"] .all-tasks-item.task-img-full:not(.all-tasks-item--geom):not(.all-tasks-item--alg) .all-tasks-item__html img.task-standalone-illustration,
+.all-tasks-page[data-subject="math"] .all-tasks-item.task-img-full:not(.all-tasks-item--geom):not(.all-tasks-item--alg) .all-tasks-item__html p:has(> img.task-standalone-illustration:only-child) > img.task-standalone-illustration,
+.all-tasks-page .task-img-full .all-tasks-item__html img.task-standalone-illustration,
+.all-tasks-page .task-img-full .all-tasks-item__html img.oge-math-fipi-diagram {
+    display: block !important;
+    width: auto !important;
+    max-width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    margin: 0.65rem auto !important;
+    object-fit: contain !important;
+}
+
 /* Алгебра: ещё компактнее MathJax (раньше казались слишком крупными) */
 .exam-page .task-alg .task-text mjx-container,
 .exam-page .task-alg .task-text mjx-container[display="true"],
@@ -9294,6 +9323,80 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
     background: #f4f7ff !important;
     color: #1f2f4c !important;
     font-weight: 700 !important;
+}
+
+/* ОГЭ математика №1–5: таблица чуть мельче, названия не рвутся посреди слова. */
+.exam-page[data-subject="math"] .exam-task-card.task-img-full .exam-task-card__text,
+.all-tasks-page[data-subject="math"] .task-img-full .all-tasks-item__html {
+    overflow-x: auto;
+}
+.exam-page[data-subject="math"] .exam-task-card.task-img-full .exam-task-card__text table:not(.wb-layout-table):not(.task-answer-blank),
+.all-tasks-page[data-subject="math"] .task-img-full .all-tasks-item__html table:not(.wb-layout-table):not(.task-answer-blank) {
+    width: max-content !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    font-size: 0.84rem !important;
+}
+.exam-page[data-subject="math"] .exam-task-card.task-img-full .exam-task-card__text table:not(.wb-layout-table):not(.task-answer-blank) :is(th, td),
+.all-tasks-page[data-subject="math"] .task-img-full .all-tasks-item__html table:not(.wb-layout-table):not(.task-answer-blank) :is(th, td) {
+    word-break: normal !important;
+    overflow-wrap: normal !important;
+    white-space: nowrap !important;
+    text-align: center !important;
+    vertical-align: middle !important;
+    padding: 6px 12px !important;
+}
+.exam-page[data-subject="math"] .exam-task-card.task-img-full .exam-task-card__text table:not(.wb-layout-table):not(.task-answer-blank) :is(th, td):first-child,
+.all-tasks-page[data-subject="math"] .task-img-full .all-tasks-item__html table:not(.wb-layout-table):not(.task-answer-blank) :is(th, td):first-child {
+    white-space: normal !important;
+    text-align: left !important;
+    max-width: 16rem;
+}
+
+/* Бланк ответа: названия столбцов сверху, пустые клетки для цифр снизу. */
+#root :is(.task-text, .exam-task-card__text, .all-tasks-item__html) .task-answer-blank-wrap {
+    overflow-x: auto;
+    max-width: 100%;
+    margin: 0.85rem 0 0.35rem;
+}
+#root :is(.task-text, .exam-task-card__text, .all-tasks-item__html, .oge-math-choice-question) table.task-answer-blank {
+    display: table !important;
+    width: max-content !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    margin: 0 !important;
+    border-collapse: collapse !important;
+    border: 1px solid #94a3b8 !important;
+    background: #fff !important;
+    font-size: 0.92rem !important;
+    line-height: 1.3 !important;
+}
+#root :is(.task-text, .exam-task-card__text, .all-tasks-item__html, .oge-math-choice-question) table.task-answer-blank tr {
+    display: table-row !important;
+}
+#root :is(.task-text, .exam-task-card__text, .all-tasks-item__html, .oge-math-choice-question) table.task-answer-blank :is(th, td) {
+    display: table-cell !important;
+    border: 1px solid #94a3b8 !important;
+    padding: 8px 14px !important;
+    text-align: center !important;
+    vertical-align: middle !important;
+    white-space: nowrap !important;
+    word-break: normal !important;
+    overflow-wrap: normal !important;
+    background: #fff !important;
+    color: inherit !important;
+    min-width: 4.75rem;
+    max-width: none !important;
+    font-weight: 600 !important;
+}
+#root :is(.task-text, .exam-task-card__text, .all-tasks-item__html, .oge-math-choice-question) table.task-answer-blank tr:first-child :is(th, td) {
+    background: #f8fafc !important;
+}
+#root :is(.task-text, .exam-task-card__text, .all-tasks-item__html, .oge-math-choice-question) table.task-answer-blank td.task-answer-blank__digit {
+    min-width: 5.5rem;
+    height: 2.35rem;
+    background: #fff !important;
+    font-weight: 500 !important;
 }
 
 .exam-page .correct-answer-content,

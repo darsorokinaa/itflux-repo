@@ -12,6 +12,7 @@ import { formatTaskCodeBlocksHtml } from "../utils/formatTaskCodeBlocksHtml";
 import { formatProgTaskSheetHtml, convertLatexTextCommandsHtml } from "../utils/formatProgTaskSheetHtml";
 import { formatFipiUnicodeMathHtml } from "../utils/formatFipiUnicodeMathHtml";
 import { formatTaskProseHtml } from "../utils/formatTaskProseHtml";
+import { restoreAnswerBlankTablesHtml } from "../utils/restoreAnswerBlankTable";
 import { parseTaskHtmlFragment } from "../utils/parseTaskHtmlFragment";
 import { repairOrphanSpanTags } from "../utils/repairTaskHtmlSpans";
 import { ensureSanitizer, sanitizeTaskHtml } from "../utils/sanitizeTaskHtml";
@@ -729,6 +730,7 @@ function preparePlainBankTaskHtml(raw, options = {}) {
     sFinal = choiceFormatted && choiceFormatted.trim() ? choiceFormatted : afterMatch;
   }
   sFinal = pipeTaskHtmlFormatter(sFinal, formatTaskProseHtml);
+  sFinal = pipeTaskHtmlFormatter(sFinal, restoreAnswerBlankTablesHtml);
   return repairOrphanSpanTags(sFinal);
 }
 
@@ -892,6 +894,7 @@ function polishBankTaskTables(root) {
     if (table.closest(".oge-math-matching-answer-table")) continue;
     if (table.closest(".math-inline, .math-display, .math-env")) continue;
     if (table.classList.contains("prog-task-sheet__table") || table.closest(".prog-task-sheet")) continue;
+    if (table.classList.contains("task-answer-blank")) continue;
 
     if (table.classList.contains("cases-table")) {
       table.style.setProperty("border", "none", "important");
