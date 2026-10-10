@@ -14,6 +14,7 @@ const DEFAULT_OPTIONS: Required<WorkbookOptions> = {
   showAnswerKey: false,
   showTaskIds: false,
   showStudentLine: true,
+  showDateLine: true,
 };
 
 type WorkbookCreateBarProps = {
@@ -136,6 +137,16 @@ export default function WorkbookCreateBar({
               }
             />
             ФИО
+          </label>
+          <label className="workbook-create-bar__option">
+            <input
+              type="checkbox"
+              checked={options.showDateLine}
+              onChange={(e) =>
+                setOptions((prev) => ({ ...prev, showDateLine: e.target.checked }))
+              }
+            />
+            Дата
           </label>
         </div>
       ) : null}

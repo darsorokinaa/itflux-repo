@@ -1260,6 +1260,7 @@ License: CC-BY-4.0
   <label class="field"><input id="alternatives" type="checkbox" checked>Примеры «ИЛИ»</label>
   <label class="field"><input id="answers" type="checkbox">Ответы отдельно</label>
   <label class="field"><input id="student-name" type="checkbox">ФИО</label>
+  <label class="field"><input id="student-date" type="checkbox">Дата</label>
   <span class="field">Место для решения
    <label class="field"><input id="space-grid" type="radio" name="solution-style" value="grid">Клетки</label>
    <label class="field"><input id="space-lines" type="radio" name="solution-style" value="lines" checked>Линейка</label>
@@ -1789,17 +1790,22 @@ function makeSection(part){
 function showStudentName(){
  return typeof current.options.showStudentName==='boolean'?current.options.showStudentName:current.mode==='worksheet';
 }
-function studentNameLine(){
+function showStudentDate(){
+ return typeof current.options.showStudentDate==='boolean'?current.options.showStudentDate:current.mode==='worksheet';
+}
+function studentFieldsLine(){
+ const rows=[];
+ if(showStudentName())rows.push(['Фамилия, имя','']);
+ if(showStudentDate())rows.push(['Дата','small']);
+ if(!rows.length)return null;
  const fields=node('div','student-fields');
- const field=node('span','fill-field','Фамилия, имя');
- field.append(node('i'));
- fields.append(field);
+ for(const [label,cls] of rows){const field=node('span','fill-field '+cls,label);field.append(node('i'));fields.append(field);}
  return fields;
 }
 function makeCover(){
  const cover=node('div','cover');
  const h=node('h2');h.append(node('span','',current.title+(current.variant?' № '+current.variant:'')),node('br'),node('span','','контрольных измерительных материалов'),node('br'),node('span','',`для подготовки к ЕГЭ ${current.year} года`),node('br'),node('span','',`по ${current.subject==='МАТЕМАТИКА'?'МАТЕМАТИКЕ':current.subject}`));cover.append(h);
- if(showStudentName())cover.append(studentNameLine());
+ const studentFields=studentFieldsLine();if(studentFields)cover.append(studentFields);
  cover.append(node('h3','level',current.level),node('h3','instruction-heading','Инструкция по выполнению работы'));
  const short=partInfo(1),long=partInfo(2),parts=[...new Set(current.tasks.map(t=>t.part))];
  const customCover=Array.isArray(current.coverParagraphs)?current.coverParagraphs.map(p=>String(p||'').trim()).filter(Boolean):[];
@@ -1821,10 +1827,9 @@ function makeCover(){
 }
 function makeWorksheetTop(){
  const top=node('div','worksheet-top');top.append(node('h2','',current.title||'Рабочий лист'),node('div','meta',`${current.subject}${current.grade?' · '+current.grade+' класс':''}${current.variant?' · Вариант '+current.variant:''}`));
- const fields=node('div','student-fields');
- const rows=showStudentName()?[['Фамилия, имя',''],['Дата','small']]:[['Дата','small']];
- for(const [label,cls] of rows){const field=node('span','fill-field '+cls,label);field.append(node('i'));fields.append(field);}
- top.append(fields,node('p','worksheet-intro',current.worksheetInstructions||'Внимательно прочитайте условия. Запишите ответы и необходимые решения.'));return top;
+ const fields=studentFieldsLine();
+ if(fields)top.append(fields);
+ top.append(node('p','worksheet-intro',current.worksheetInstructions||'Внимательно прочитайте условия. Запишите ответы и необходимые решения.'));return top;
 }
 async function prepareAssets(elements){
  const holder=node('div','logical-page');holder.style.width='117mm';holder.style.height='auto';for(const e of elements)holder.append(e);$('measure-root').append(holder);
@@ -1876,7 +1881,7 @@ function finalizeSheets(sheetUrl){
  applyZoom();
 }
 function syncControls(){
- $('mode').value=current.mode;$('layout').value=current.options.layout;$('cover').checked=current.options.includeCover;$('cover').disabled=current.mode==='worksheet';$('watermark').checked=current.options.showWatermark;$('answers').checked=current.options.showAnswerKey;$('alternatives').checked=current.options.showAlternatives;$('student-name').checked=showStudentName();
+ $('mode').value=current.mode;$('layout').value=current.options.layout;$('cover').checked=current.options.includeCover;$('cover').disabled=current.mode==='worksheet';$('watermark').checked=current.options.showWatermark;$('answers').checked=current.options.showAnswerKey;$('alternatives').checked=current.options.showAlternatives;$('student-name').checked=showStudentName();$('student-date').checked=showStudentDate();
  const lines=Math.floor(clamp(current.options.solutionLines,0,100,0));const preset=['0','4','8','12'].includes(String(lines));$('space-grid').checked=current.options.solutionStyle==='grid';$('space-lines').checked=current.options.solutionStyle!=='grid';$('space').value=preset?String(lines):'custom';$('space-custom').value=String(lines);$('space-custom-wrap').hidden=preset;
  document.title=downloadTitle()+' • Цифровой поток';
 }
@@ -1886,7 +1891,7 @@ async function renderDocument(data){
  pages=[];currentPage=null;$('measure-root').replaceChildren();
  const prepared=[];
  if(current.mode==='exam'&&current.options.includeCover)prepared.push({type:'cover',el:makeCover()});
- else if(current.mode==='exam'&&showStudentName())prepared.push({type:'worksheet',el:studentNameLine()});
+ else if(current.mode==='exam'&&(showStudentName()||showStudentDate())){const fields=studentFieldsLine();if(fields)prepared.push({type:'worksheet',el:fields});}
  if(current.mode==='worksheet')prepared.push({type:'worksheet',el:makeWorksheetTop()});
  let activePart=null;
  for(const task of current.tasks){
@@ -1961,7 +1966,7 @@ $('print-button').addEventListener('click',async()=>{await window.ExamTemplate.r
 if($('save-button'))$('save-button').addEventListener('click',saveHtml);
 $('mode').addEventListener('change',()=>{current.mode=$('mode').value;if(current.title===defaults.title||current.title==='Рабочий лист')current.title=current.mode==='worksheet'?'Рабочий лист':defaults.title;if(!current.headerLeft||current.headerLeft===`Тренировочный вариант ЕГЭ ${current.year} г.`||current.headerLeft==='Рабочий лист')current.headerLeft='';if(current.mode==='worksheet'){current.options.includeCover=false;current.options.solutionLines=4;current.options.showAlternatives=false;current.options.showWatermark=false;}else{current.options.solutionLines=0;current.options.includeCover=true;}rerender();});
 $('layout').addEventListener('change',()=>{current.options.layout=$('layout').value;rerender();});
-for(const [id,key] of [['cover','includeCover'],['watermark','showWatermark'],['answers','showAnswerKey'],['alternatives','showAlternatives'],['student-name','showStudentName']])$(id).addEventListener('change',()=>{current.options[key]=$(id).checked;rerender();});
+for(const [id,key] of [['cover','includeCover'],['watermark','showWatermark'],['answers','showAnswerKey'],['alternatives','showAlternatives'],['student-name','showStudentName'],['student-date','showStudentDate']])$(id).addEventListener('change',()=>{current.options[key]=$(id).checked;rerender();});
 function applySolutionSpace(){const picked=[...document.querySelectorAll('input[name="solution-style"]')].find(el=>el.checked);current.options.solutionStyle=picked&&picked.value==='grid'?'grid':'lines';const custom=$('space').value==='custom';$('space-custom-wrap').hidden=!custom;current.options.solutionLines=Math.floor(clamp(custom?$('space-custom').value:$('space').value,0,100,0));rerender();}
 for(const el of document.querySelectorAll('input[name="solution-style"]'))el.addEventListener('change',applySolutionSpace);
 $('space').addEventListener('change',()=>{if($('space').value==='custom'){$('space-custom-wrap').hidden=false;$('space-custom').focus();$('space-custom').select();return;}applySolutionSpace();});

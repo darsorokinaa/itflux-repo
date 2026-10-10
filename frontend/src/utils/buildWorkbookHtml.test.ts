@@ -44,6 +44,7 @@ describe("buildExamTemplateDocument", () => {
       Array.from({ length: 30 }, (_, i) => String(i + 1))
     );
     expect(workbook.options.showStudentName).toBe(true);
+    expect(workbook.options.showStudentDate).toBe(true);
   });
 
   it("uses exam numbers and parts for a variant", () => {
@@ -76,6 +77,7 @@ describe("buildExamTemplateDocument", () => {
     expect(doc.options.showWatermark).toBe(false);
     expect(doc.options.showAlternatives).toBe(false);
     expect(doc.options.showStudentName).toBe(false);
+    expect(doc.options.showStudentDate).toBe(false);
     expect(doc.showAnswerExample).toBe(true);
     expect(doc.partInstructions?.["1"]).toContain("десятичн");
     expect(doc.partInstructions?.["2"]).toContain("решение");

@@ -60,6 +60,8 @@ export type WorkbookOptions = {
   showTaskIds?: boolean;
   /** Строка «Фамилия, имя» на листе. В PDF её можно выключить галочкой «ФИО». */
   showStudentLine?: boolean;
+  /** Строка «Дата» на листе. В PDF её можно выключить галочкой «Дата». */
+  showDateLine?: boolean;
 };
 
 export type WorkbookMeta = {
@@ -151,6 +153,7 @@ export type ExamTemplateDocument = {
     showAlternatives: boolean;
     showAnswerKey: boolean;
     showStudentName: boolean;
+    showStudentDate: boolean;
     solutionLines: number;
     solutionStyle: "lines" | "grid";
   };
@@ -164,6 +167,7 @@ export const VARIANT_PDF_OPTIONS: Required<WorkbookOptions> = {
   showAnswerKey: true,
   showTaskIds: false,
   showStudentLine: false,
+  showDateLine: false,
 };
 
 const SUBJECT_HEADINGS: Record<string, string> = {
@@ -209,6 +213,7 @@ function normalizeOptions(options?: WorkbookOptions): Required<WorkbookOptions> 
     showAnswerKey: options?.showAnswerKey === true,
     showTaskIds: options?.showTaskIds === true,
     showStudentLine: options?.showStudentLine !== false,
+    showDateLine: options?.showDateLine !== false,
   };
 }
 
@@ -570,6 +575,7 @@ export function buildExamTemplateDocument(tasks: WorkbookTask[], meta: WorkbookM
       showAlternatives: false,
       showAnswerKey: options.showAnswerKey,
       showStudentName: options.showStudentLine,
+      showStudentDate: options.showDateLine,
       solutionLines: options.showSolutionSpace ? 8 : 0,
       solutionStyle: options.showSolutionSpace ? "grid" : "lines",
     },
