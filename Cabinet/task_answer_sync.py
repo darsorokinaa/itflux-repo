@@ -1,7 +1,8 @@
 """После правки задачи в банке обновляет эталон там, где задача уже использована.
 
 Состав варианта и попытки не пересобирается. Меняется ответ в сохранённых
-снимках, и по нему заново считаются баллы.
+снимках, и по нему заново считаются баллы — в том числе у уже проверенных
+домашних заданий и вариантов.
 """
 
 from __future__ import annotations
@@ -63,23 +64,11 @@ def refresh_stored_variant_result(variant_result, task_id, new_answer: str, *, s
             changed = True
         student = str(row.get("student_answer") or "")
         if student.strip() and fresh:
-            auto_old = (
-                answers_equal(student, old_expected, subject=subject)
-                if old_expected.strip()
-                else None
-            )
-            saved_ok = row.get("ok")
-            teacher_override = (
-                auto_old is not None
-                and saved_ok is not None
-                and bool(saved_ok) != bool(auto_old)
-            )
-            if not teacher_override:
-                new_ok = answers_equal(student, new_answer, subject=subject)
-                if saved_ok is None or bool(saved_ok) != bool(new_ok):
-                    row["ok"] = new_ok
-                    verdicts_changed = True
-                    changed = True
+            new_ok = answers_equal(student, new_answer, subject=subject)
+            if row.get("ok") is None or bool(row.get("ok")) != bool(new_ok):
+                row["ok"] = new_ok
+                verdicts_changed = True
+                changed = True
         updated.append(row)
     if not found or not changed:
         return None
@@ -182,6 +171,7 @@ def _sync_homework_attempts(task_id: int, answer: str) -> None:
         submission.result_payload = updated
         submission.score = _score_percent(updated)
         submission.save(update_fields=["result_payload", "score", "updated_at"])
+        _sync_checked_homework_journal(submission)
 
     attempts = HomeworkSubmissionAttempt.objects.filter(match).select_related("submission__homework")
     for attempt in attempts:
@@ -221,12 +211,18 @@ def _sync_journal_variant_results(task_id: int, answer: str, *, subject: str) ->
         fields = ["variant_result", "updated_at"]
         old_percent = (record.variant_result or {}).get("score_percent") if isinstance(record.variant_result, dict) else None
         new_percent = updated.get("score_percent")
+        from_variant = str(record.overall_score_explanation or "").startswith("По варианту")
         if (
-            record.overall_score is not None
-            and old_percent not in (None, "")
-            and new_percent not in (None, "")
-            and _close(record.overall_score, old_percent)
+            new_percent not in (None, "")
             and not _close(old_percent, new_percent)
+            and (
+                from_variant
+                or (
+                    record.overall_score is not None
+                    and old_percent not in (None, "")
+                    and _close(record.overall_score, old_percent)
+                )
+            )
         ):
             record.overall_score = Decimal(str(new_percent))
             correct = updated.get("correct_count") or 0
@@ -235,6 +231,17 @@ def _sync_journal_variant_results(task_id: int, answer: str, *, subject: str) ->
             fields.extend(["overall_score", "overall_score_explanation"])
         record.variant_result = updated
         record.save(update_fields=fields)
+
+
+def _sync_checked_homework_journal(submission) -> None:
+    """Уже проверенное ДЗ остаётся проверенным, но статус в журнале берётся из нового балла."""
+    from .choices import SubmissionStatus
+
+    if getattr(submission, "status", "") != SubmissionStatus.CHECKED:
+        return
+    from .journal_service import sync_previous_homework_status_from_submission
+
+    sync_previous_homework_status_from_submission(submission)
 
 
 def _close(left, right) -> bool:

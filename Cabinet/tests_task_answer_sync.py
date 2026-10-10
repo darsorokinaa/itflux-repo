@@ -33,7 +33,7 @@ class StoredVariantResultTests(SimpleTestCase):
         self.assertFalse(updated["tasks"][0]["ok"])
         self.assertEqual(updated["score_percent"], 0)
 
-    def test_teacher_override_keeps_verdict_but_shows_new_answer(self):
+    def test_checked_verdict_follows_the_new_answer(self):
         updated = refresh_stored_variant_result(
             {
                 "score_percent": 100,
@@ -46,8 +46,8 @@ class StoredVariantResultTests(SimpleTestCase):
             subject="math",
         )
         self.assertEqual(updated["tasks"][0]["correct_answer"], "11")
-        self.assertTrue(updated["tasks"][0]["ok"])
-        self.assertEqual(updated["score_percent"], 100)
+        self.assertFalse(updated["tasks"][0]["ok"])
+        self.assertEqual(updated["score_percent"], 0)
 
 
 class TaskContentPropagationTests(TestCase):
@@ -155,3 +155,93 @@ class TaskContentPropagationTests(TestCase):
         self.assertEqual(submission.result_payload["tasks_snapshot"][0]["id"], self.task.id)
         self.task.refresh_from_db()
         self.assertIn("новое условие", self.task.task_template)
+
+    def test_checked_homework_keeps_status_and_recalculates_score(self):
+        from django.contrib.auth.models import User
+        from django.utils import timezone
+
+        from Cabinet.choices import SubmissionStatus
+        from Cabinet.homework_result import build_submission_result_summary
+        from Cabinet.models import Homework, HomeworkSubmission, HomeworkTask, Profile, Student
+
+        teacher = User.objects.create_user(username="checked_teacher", password="pass")
+        teacher.profile.role = Profile.Role.TEACHER
+        teacher.profile.save(update_fields=["role"])
+        student_user = User.objects.create_user(username="checked_student", password="pass")
+        student_user.profile.role = Profile.Role.STUDENT
+        student_user.profile.save(update_fields=["role"])
+        student = Student.objects.create(
+            teacher=teacher,
+            user=student_user,
+            first_name="Аня",
+            last_name="Проверка",
+            status="active",
+        )
+        homework = Homework.objects.create(teacher=teacher, student=student, title="Проверенное ДЗ", status="assigned")
+        HomeworkTask.objects.create(
+            homework=homework,
+            task_type="external_link",
+            title="Вариант",
+            description=f"/ege/math/variant/{self.variant.id}/",
+            order=0,
+            is_active=True,
+        )
+        submission = HomeworkSubmission.objects.create(
+            homework=homework,
+            student=student,
+            status=SubmissionStatus.CHECKED,
+            submitted_at=timezone.now(),
+            score=100,
+            result_payload={
+                "by_task_id": {str(self.task.id): "10"},
+                "checked": {str(self.task.id): True},
+                "grading_snapshot": [
+                    {
+                        "id": self.task.id,
+                        "number": 1,
+                        "max_score": 1,
+                        "exam_part": 1,
+                        "answer": "10",
+                    }
+                ],
+                "tasks_snapshot": [
+                    {"id": self.task.id, "number": 1, "max_score": 1, "exam_part": 1}
+                ],
+                "scoring": {
+                    "total_tasks": 1,
+                    "correct_count": 1,
+                    "incorrect_count": 0,
+                    "partial_count": 0,
+                    "unanswered_count": 0,
+                    "pending_review_count": 0,
+                    "checked_count": 1,
+                    "earned_points": 1,
+                    "max_points": 1,
+                    "percentage": 100,
+                    "review_status": "final",
+                    "tasks": [
+                        {
+                            "id": self.task.id,
+                            "number": 1,
+                            "part": 1,
+                            "status": "correct",
+                            "points": 1,
+                            "max_points": 1,
+                        }
+                    ],
+                },
+            },
+        )
+        self.task.answer = "11"
+        self.task.save(update_fields=["answer"])
+        submission.refresh_from_db()
+        self.assertEqual(submission.status, SubmissionStatus.CHECKED)
+        self.assertEqual(submission.result_payload["grading_snapshot"][0]["answer"], "11")
+        self.assertEqual(submission.result_payload["scoring"]["earned_points"], 0)
+        self.assertEqual(submission.result_payload["scoring"]["review_status"], "final")
+        self.assertFalse(submission.result_payload["checked"][str(self.task.id)])
+        self.assertEqual(float(submission.score), 0)
+        summary = build_submission_result_summary(submission)
+        self.assertEqual(summary["percentage"], 0)
+        self.assertEqual(summary["earned_points"], 0)
+        self.assertTrue(summary["is_final"])
