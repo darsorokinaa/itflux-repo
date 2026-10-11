@@ -186,6 +186,18 @@ class VideoFailoverTests(TestCase):
         with self.assertRaises(jwt.PyJWTError):
             decode_livekit_jwt(expired)
 
+    def test_leaving_livekit_only_returns_the_lesson_to_primary(self):
+        meeting = self._live()
+        with override_settings(VIDEO_FAILOVER_MODE="livekit_only"):
+            forced = self._join(self.teacher, meeting)
+        self.assertEqual(forced.data["provider"], "livekit")
+        restored = self._join(self.teacher, meeting)
+        self.assertEqual(restored.data["provider"], "meet")
+        self.assertNotIn("livekitUrl", restored.data)
+        route = MeetingCallRoute.objects.get(meeting=meeting)
+        self.assertEqual(route.active_provider, "meet")
+        self.assertEqual(route.switch_reason, "primary_restored")
+
     def test_device_and_local_faults_do_not_switch_the_room(self):
         meeting = self._live()
         self._join(self.teacher, meeting)

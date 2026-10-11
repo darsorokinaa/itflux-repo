@@ -81,6 +81,7 @@ def _reason(code: str) -> str:
         "provider_outage",
         "admin_switch",
         "mode_livekit_only",
+        "primary_restored",
         "lesson_finished",
         "participant_removed",
         "participant_disconnect",
@@ -160,6 +161,48 @@ def annotate_join_config(payload: dict, meeting) -> dict:
     return payload
 
 
+def _forced_livekit(route: MeetingCallRoute) -> bool:
+    if route.active_provider != MeetingCallRoute.Provider.LIVEKIT:
+        return False
+    # Пустая причина — урок создан, пока режим был livekit_only, без отдельного сбоя.
+    return (route.switch_reason or "") in {"", "mode_livekit_only"}
+
+
+def release_forced_livekit(meeting, route: MeetingCallRoute) -> MeetingCallRoute:
+    """Режим livekit_only не оставляет урок на резерве после возврата 8x8 основным."""
+    if failover_mode() == "livekit_only" or not _forced_livekit(route):
+        return route
+    primary = primary_provider()
+    applied = False
+    with transaction.atomic():
+        locked = MeetingCallRoute.objects.select_for_update().get(pk=route.pk)
+        if failover_mode() == "livekit_only" or not _forced_livekit(locked):
+            return locked
+        now = timezone.now()
+        locked.generation = int(locked.generation) + 1
+        locked.active_provider = primary
+        locked.switched_at = now
+        locked.switch_reason = "primary_restored"
+        locked.save()
+        applied = True
+        route = locked
+    if applied:
+        logger.info(
+            "video_provider_restored meeting=%s provider=%s generation=%s",
+            meeting.uuid,
+            route.active_provider,
+            route.generation,
+        )
+        broadcast_material_event(meeting.uuid, {
+            "type": "media.provider_changed",
+            "provider": route.active_provider,
+            "generation": route.generation,
+            "reason": route.switch_reason,
+            "meetingUuid": str(meeting.uuid),
+        })
+    return route
+
+
 def maybe_livekit_credentials(*, meeting, user, is_moderator: bool, request) -> dict | None:
     """None — оставить текущий JaaS/Jitsi. Словарь — все участники идут в LiveKit."""
     if not failover_enabled():
@@ -168,7 +211,7 @@ def maybe_livekit_credentials(*, meeting, user, is_moderator: bool, request) -> 
     from .video_meeting_service import VideoMeetingError
 
     mode = failover_mode()
-    route = ensure_route(meeting)
+    route = release_forced_livekit(meeting, ensure_route(meeting))
     use_livekit = mode == "livekit_only" or route.active_provider == MeetingCallRoute.Provider.LIVEKIT
     if mode == "livekit_only" and route.active_provider != MeetingCallRoute.Provider.LIVEKIT:
         route, _applied = switch_provider(

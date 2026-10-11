@@ -139,15 +139,15 @@ try:
 except ValueError:
     JAAS_TOKEN_TTL_SECONDS = 7200
 
-# Временно уроки идут только в LiveKit. Код Jitsi и 8x8 JaaS не удалён.
-# Откат: VIDEO_FAILOVER_ENABLED=false и перезапуск процесса.
+# 8x8 JaaS — основной звонок. LiveKit только запасной в режиме auto.
+# livekit_only оставляет уроки на резерве. jaas_only отключает автопереход.
 VIDEO_FAILOVER_ENABLED = os.environ.get("VIDEO_FAILOVER_ENABLED", "true").strip().lower() in (
     "1",
     "true",
     "yes",
     "on",
 )
-VIDEO_FAILOVER_MODE = (os.environ.get("VIDEO_FAILOVER_MODE", "livekit_only") or "livekit_only").strip().lower()
+VIDEO_FAILOVER_MODE = (os.environ.get("VIDEO_FAILOVER_MODE", "auto") or "auto").strip().lower()
 LIVEKIT_URL = os.environ.get("LIVEKIT_URL", "").strip()
 LIVEKIT_HTTP_URL = os.environ.get("LIVEKIT_HTTP_URL", "").strip()
 LIVEKIT_API_KEY = os.environ.get("LIVEKIT_API_KEY", "").strip()
