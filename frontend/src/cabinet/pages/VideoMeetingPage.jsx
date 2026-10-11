@@ -16,7 +16,9 @@ import {
   fetchVideoMeetingDetail,
   fetchVideoMeetingJoinConfig,
   fetchVideoMeetingLiveAnswers,
+  fetchVideoMeetingMediaRoute,
   fetchVideoMeetingStatus,
+  reportVideoMeetingMediaFault,
   finishVideoMeeting,
   presentVideoMeetingResource,
   startVideoMeeting,
@@ -159,7 +161,14 @@ import {
   shouldAskIfTheyHear,
 } from "../jitsiLinkMode";
 import { classifyJoinStop, joinMediaIntent } from "../jitsiCallDiagnostics";
-import { probeJaasReachability, loadJaasScriptByFetch } from "../connectionCheck/jaasReachability";
+import { probeJaasReachability, loadJaasScriptByFetch, isIosHomeScreen } from "../connectionCheck/jaasReachability";
+import LiveKitCallView from "../components/LiveKitCallView";
+import {
+  MEDIA_RESTORE_NOTICE,
+  acceptGeneration,
+  classifyClientFault,
+  shouldReportFault,
+} from "../videoFailover";
 import {
   RESUME_STATES,
   classifyResumeUi,
@@ -249,8 +258,13 @@ function mapJoinError(err) {
   ) {
     return "Не удалось подключить видеозвонок.";
   }
-  if (code === "jitsi_script" || code === "jitsi_script_timeout" || code === "jitsi_public_blocked") {
-    return "Видеосервис недоступен с этой сети.";
+  if (code === "jitsi_script_timeout") {
+    return "Не удалось подключить видеозвонок. Страница видеосвязи не успела открыться.";
+  }
+  if (code === "jitsi_script" || code === "jitsi_public_blocked") {
+    return isIosHomeScreen()
+      ? "Видеосервис недоступен с этой сети. Откройте урок в Safari, не с иконки на рабочем столе."
+      : "Видеосервис недоступен с этой сети.";
   }
   if (code === "display_name") {
     return "Не указано имя участника";
@@ -426,12 +440,20 @@ export default function VideoMeetingPage() {
   const intentionalLeaveRef = useRef(false);
   const programmaticDisposeRef = useRef(false);
   const jitsiInitRef = useRef(false);
+  const mediaGenerationRef = useRef(0);
+  const failoverModeRef = useRef("");
+  const recoveringMediaRef = useRef(false);
+  const liveKitActiveRef = useRef(false);
+  const applyMediaRouteRef = useRef(() => {});
+  const reportExhaustedMediaRef = useRef(() => {});
   const jitsiAuthRetryRef = useRef(0);
   const pollTimerRef = useRef(null);
   const lessonTitleRef = useRef("");
 
   const [detail, setDetail] = useState(null);
   const [pageState, setPageState] = useState("loading"); // loading | waiting | camera | live | finished | cancelled | error
+  const [liveKitJoin, setLiveKitJoin] = useState(null);
+  const [failoverWatch, setFailoverWatch] = useState(false);
   const [error, setError] = useState("");
   const [mediaWarning, setMediaWarning] = useState("");
   const [participantCount, setParticipantCount] = useState(null);
@@ -710,6 +732,8 @@ export default function VideoMeetingPage() {
       apiRef.current = null;
     }
     screenShareApiRef.current = null;
+    liveKitActiveRef.current = false;
+    setLiveKitJoin(null);
     lastShareReportRef.current = "";
     const pipHandle = pipHandleRef.current;
     pipHandleRef.current = null;
@@ -865,6 +889,39 @@ export default function VideoMeetingPage() {
 
       if (!config.jwt && config.authMode === "jwt") {
         throw Object.assign(new Error("Backend не вернул JWT для Jitsi"), { code: "jwt_missing" });
+      }
+      if (config.failoverMode) failoverModeRef.current = config.failoverMode;
+      if (config.failoverMode === "auto" || config.failoverMode === "livekit_only") {
+        setFailoverWatch(true);
+      }
+      const incomingGeneration = Number(config.mediaGeneration || 0);
+      if (incomingGeneration && mediaGenerationRef.current && incomingGeneration < mediaGenerationRef.current) {
+        jitsiInitRef.current = false;
+        return false;
+      }
+      if (incomingGeneration) mediaGenerationRef.current = incomingGeneration;
+      if (config.provider === "livekit") {
+        if (!config.livekitUrl || !config.jwt) {
+          throw Object.assign(new Error("Нет конфигурации резервной видеосвязи"), { code: "livekit_config" });
+        }
+        liveKitActiveRef.current = true;
+        setLiveKitJoin({
+          url: config.livekitUrl,
+          token: config.jwt,
+          generation: incomingGeneration,
+          canModerate: moderator,
+          displayName: resolveJitsiDisplayName(config),
+          startWithAudioMuted,
+          startWithVideoMuted,
+          recovering: recoveringMediaRef.current,
+        });
+        recoveringMediaRef.current = false;
+        setPageState("live");
+        setJoinState("joined");
+        setVideoServiceUnreachable(false);
+        claimMeetingCall(meetingUuid, callOwnerIdRef.current);
+        attendanceTracker.cancelPendingLeave();
+        return true;
       }
       if (!containerRef.current) {
         throw new Error("Контейнер конференции недоступен");
@@ -1191,6 +1248,7 @@ export default function VideoMeetingPage() {
       notifyJitsiContainerResize(wrapped);
       claimMeetingCall(meetingUuid, callOwnerIdRef.current);
       setJoinState(wrapped.mode === "external-api" ? "joined" : "embedded");
+      setVideoServiceUnreachable(false);
       try {
         const iframe = wrapped.getIFrame?.();
         ensureIframePictureInPictureAllow(iframe);
@@ -1276,10 +1334,78 @@ export default function VideoMeetingPage() {
       } else {
         setError(mapJoinError(err));
       }
+      if (
+        err?.code === "jitsi_script"
+        || err?.code === "jitsi_script_timeout"
+        || err?.code === "jitsi_public_blocked"
+        || err?.code === "jitsi_connection_failed"
+        || err?.code === "jitsi_conference_failed"
+      ) {
+        void reportExhaustedMediaRef.current?.(err.code);
+      }
       setPageState("error");
       return false;
     }
   }, [attendanceTracker, disposeApi, meetingUuid]);
+
+  useEffect(() => {
+    applyMediaRouteRef.current = (route) => {
+      if (shouldIgnoreReconnect(intentionalLeaveRef.current)) return;
+      const generation = Number(route?.generation || 0);
+      if (!acceptGeneration(mediaGenerationRef.current, generation)) return;
+      if (route?.provider === "livekit" && !route?.switched && route?.roomAction === "local_only") return;
+      mediaGenerationRef.current = generation;
+      recoveringMediaRef.current = true;
+      disposeApi();
+      setConnectionHint(MEDIA_RESTORE_NOTICE);
+      setError("");
+      setPageState("live");
+      void initializeJitsi();
+    };
+    reportExhaustedMediaRef.current = async (code) => {
+      if (failoverModeRef.current !== "auto") return;
+      if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+      const fault = classifyClientFault({ code, online: true, scope: "room" });
+      if (!shouldReportFault({ fault, attempt: 3, maxAttempts: 3 })) return;
+      try {
+        const route = await reportVideoMeetingMediaFault(meetingUuid, {
+          fault,
+          confirmed: true,
+          attemptsExhausted: true,
+          code: String(code || "").slice(0, 64),
+          generation: mediaGenerationRef.current || 0,
+        });
+        if (route?.switched) {
+          applyMediaRouteRef.current(route);
+          return;
+        }
+        if (route?.roomAction === "local_only") {
+          setConnectionHint("Проблема сети на вашем устройстве. Комната урока не переключается.");
+        }
+      } catch {
+        /* отчёт о сбое не должен блокировать урок */
+      }
+    };
+  }, [disposeApi, initializeJitsi, meetingUuid]);
+
+  useEffect(() => {
+    if (!failoverWatch || !meetingUuid || (pageState !== "live" && pageState !== "error")) return undefined;
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const route = await fetchVideoMeetingMediaRoute(meetingUuid);
+        if (stopped || !route?.enabled) return;
+        applyMediaRouteRef.current(route);
+      } catch {
+        /* опрос маршрута не блокирует урок */
+      }
+    };
+    const timer = window.setInterval(tick, 8000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [failoverWatch, meetingUuid, pageState]);
 
   /** Первый вход — спросить про камеру; повторный (док/материалы) — взять сохранённый выбор. */
   const requestJoin = useCallback(async ({ skipCameraPrompt = false } = {}) => {
@@ -1330,6 +1456,7 @@ export default function VideoMeetingPage() {
   }, [disposeApi, requestJoin]);
 
   const performHardReconnect = useCallback(async (payload = {}) => {
+    if (liveKitActiveRef.current) return false;
     const policy = reconnectPolicyRef.current;
     const taken = decideHardReconnect({
       intentionalLeave: shouldIgnoreReconnect(intentionalLeaveRef.current),
@@ -1339,6 +1466,7 @@ export default function VideoMeetingPage() {
     if (taken.action !== "start" || !taken.slot) {
       setCallReconnectNeeded(true);
       setConnectionHint("Не удалось восстановить соединение.");
+      void reportExhaustedMediaRef.current?.("connection_failed");
       void reportMeetingTechnicalEvent(meetingUuid, {
         eventType: "jitsi_hard_reconnect_failed",
         reason: "exhausted",
@@ -1531,11 +1659,7 @@ export default function VideoMeetingPage() {
       loadApi: loadJaasScriptByFetch,
     }).then((result) => {
       if (cancelled || result?.code === "aborted") return;
-      if (result?.code === "script" || result?.code === "offline") {
-        setVideoServiceUnreachable(true);
-        return;
-      }
-      if (result?.code === "script_only") setVideoServiceUnreachable(false);
+      setVideoServiceUnreachable(result?.code === "script" || result?.code === "offline");
     }).catch(() => {});
     return () => {
       cancelled = true;
@@ -2739,6 +2863,9 @@ export default function VideoMeetingPage() {
           return [...map.values()];
         });
       },
+      onMediaProvider: (route) => {
+        applyMediaRouteRef.current(route);
+      },
       onScreensharePointer: (payload) => {
         const point = payload?.payload || payload;
         const authorId = payload?.author_id;
@@ -3670,6 +3797,7 @@ export default function VideoMeetingPage() {
       {videoServiceUnreachable && !showJitsi && pageState !== "error" ? (
         <p className="call-link-note" role="status">
           Видеосервис недоступен с этой сети. Вход в урок не блокируется.
+          {isIosHomeScreen() ? " Откройте урок в Safari, не с иконки на рабочем столе." : null}
         </p>
       ) : null}
       {showJitsi && liveDurationUi.phase !== "ok" ? (
@@ -4069,7 +4197,58 @@ export default function VideoMeetingPage() {
             <div
               id="jitsi-container"
               ref={containerRef}
+              hidden={Boolean(liveKitJoin)}
             />
+            {liveKitJoin ? (
+              <LiveKitCallView
+                meetingUuid={meetingUuid}
+                url={liveKitJoin.url}
+                token={liveKitJoin.token}
+                canModerate={liveKitJoin.canModerate}
+                displayName={liveKitJoin.displayName}
+                startWithAudioMuted={liveKitJoin.startWithAudioMuted}
+                startWithVideoMuted={liveKitJoin.startWithVideoMuted}
+                recovering={liveKitJoin.recovering}
+                refreshCredentials={async () => {
+                  const fresh = await fetchVideoMeetingJoinConfig(meetingUuid, {
+                    browserTabSessionId: tabSessionIdRef.current,
+                    callSessionId: callSessionIdRef.current,
+                  });
+                  if (fresh?.provider !== "livekit" || !fresh.livekitUrl || !fresh.jwt) {
+                    throw new Error("livekit_config");
+                  }
+                  return { url: fresh.livekitUrl, token: fresh.jwt };
+                }}
+                onConnected={() => {
+                  setJoinState("joined");
+                  setVideoServiceUnreachable(false);
+                  if (liveKitJoin.recovering) setConnectionHint("Видеосвязь восстановлена");
+                }}
+                onParticipants={(count) => setParticipantCount(count)}
+                onFault={(info) => {
+                  const fault = classifyClientFault({
+                    code: info?.code,
+                    name: info?.name,
+                    online: typeof navigator === "undefined" ? true : navigator.onLine !== false,
+                    scope: info?.scope === "local" || info?.code === "device_permission" || info?.code === "local_audio"
+                      ? "local"
+                      : "room",
+                  });
+                  if (fault === "device_permission") {
+                    setMediaWarning("Нет доступа к микрофону или камере. Видеосервер из-за этого не переключается.");
+                    return;
+                  }
+                  if (shouldReportFault({ fault, attempt: info?.attempt || 1, maxAttempts: 3 })) {
+                    void reportExhaustedMediaRef.current?.(info?.code || "livekit_signal");
+                  }
+                }}
+                onLeave={() => {
+                  disposeApi();
+                  setCallReconnectNeeded(true);
+                  setConnectionHint("Вы вышли из видеосвязи. Урок и материалы сохранены.");
+                }}
+              />
+            ) : null}
             {showJitsi ? (
               <CallLinkControls
                 title={callLink.title}

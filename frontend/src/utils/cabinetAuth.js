@@ -567,6 +567,24 @@ export function reportVideoMeetingConnectionProbe(payload = {}) {
   }).catch(() => null);
 }
 
+export function fetchVideoMeetingMediaRoute(meetingUuid) {
+  return videoMeetingFetch(`/${meetingUuid}/media-route/`, { method: "GET" });
+}
+
+export function reportVideoMeetingMediaFault(meetingUuid, payload = {}) {
+  return videoMeetingFetch(`/${meetingUuid}/media-route/fault/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function disconnectVideoMeetingParticipant(meetingUuid, payload = {}) {
+  return videoMeetingFetch(`/${meetingUuid}/media-route/disconnect/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function reportVideoMeetingTechnicalEvent(meetingUuid, payload = {}) {
   if (!meetingUuid) return Promise.resolve(null);
   return videoMeetingFetch(`/${meetingUuid}/technical-events/`, {

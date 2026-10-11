@@ -498,7 +498,13 @@ def finish_meeting(*, meeting: VideoMeeting, user: User) -> VideoMeeting:
         except Exception:
             logger.exception("lesson_completed analytics failed meeting=%s", getattr(locked, "pk", None))
 
-        return locked
+    try:
+        from .video_failover import close_livekit_room_if_any
+
+        close_livekit_room_if_any(locked)
+    except Exception:
+        logger.exception("livekit_close_after_finish_failed meeting=%s", locked.uuid)
+    return locked
 
 
 def lesson_journal_next_step(event: ScheduleEvent) -> dict:
@@ -1172,8 +1178,20 @@ def _conference_credentials(
     role: str,
     lesson_id,
     ttl_seconds: int | None,
+    meeting: VideoMeeting | None = None,
 ) -> dict:
     """meet сохраняет текущий JWT/домен. jaas подменяет только видеопровайдера."""
+    if meeting is not None:
+        from .video_failover import maybe_livekit_credentials
+
+        routed = maybe_livekit_credentials(
+            meeting=meeting,
+            user=user,
+            is_moderator=is_moderator,
+            request=request,
+        )
+        if routed is not None:
+            return routed
     if get_video_provider() == "jaas":
         live_ttl = ttl_seconds
         if live_ttl is None:
@@ -1236,6 +1254,9 @@ def _conference_credentials(
 
 def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dict:
     access = assert_can_join_meeting(user, meeting, for_config=True)
+    from .video_failover import reject_if_revoked
+
+    reject_if_revoked(meeting, user)
     # Перечитываем статус: между проверкой и выдачей JWT урок мог завершиться.
     meeting.refresh_from_db(fields=["status", "room_name"])
     if meeting.status != VideoMeeting.Status.LIVE:
@@ -1259,6 +1280,7 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
             role=access.role,
             lesson_id=event.pk,
             ttl_seconds=None,
+            meeting=meeting,
         )
     except JitsiConfigError as exc:
         raise VideoMeetingError(str(exc), code="jwt_config", status=503) from exc
@@ -1308,6 +1330,14 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
                 code="jwt_room_mismatch",
                 status=500,
             )
+        if credentials.get("provider") == "livekit":
+            video_claim = jwt_claims.get("video") if isinstance(jwt_claims.get("video"), dict) else {}
+            if str(video_claim.get("room") or "") != room_name:
+                raise VideoMeetingError(
+                    "JWT room не совпадает с roomName конференции",
+                    code="jwt_room_mismatch",
+                    status=500,
+                )
 
     config_endpoint = f"/api/video-meetings/{meeting.uuid}/join-config/"
     tab_session_id = _session_id_from_request(request, "browserTabSessionId", "browser_tab_session_id")
@@ -1364,7 +1394,7 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
     subject = lesson_meeting_subject(event)
     audience = lesson_meeting_audience(event)
 
-    return {
+    payload = {
         "domain": domain,
         "roomName": meeting.room_name,
         "externalRoomName": credentials["external_room_name"],
@@ -1417,6 +1447,12 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
             "returnUrl": _return_url_for_role(access.role),
         },
     }
+    livekit_join_url = str(credentials.get("livekit_url") or "")
+    if livekit_join_url:
+        payload["livekitUrl"] = livekit_join_url
+    from .video_failover import annotate_join_config
+
+    return annotate_join_config(payload, meeting)
 
 
 # Диагностическая комната Jitsi: не VideoMeeting, не урок, короткий JWT.

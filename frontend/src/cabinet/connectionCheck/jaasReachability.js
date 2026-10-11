@@ -20,29 +20,115 @@ function isOnline() {
   return navigator.onLine !== false;
 }
 
+/** iOS и Safari ломают no-cors fetch с cache: "no-store": TypeError «Load failed» при живом скрипте. */
+export function omitOpaqueFetchCacheMode() {
+  if (typeof navigator === "undefined") return false;
+  const ua = String(navigator.userAgent || "");
+  if (/iPhone|iPad|iPod/i.test(ua)) return true;
+  if (navigator.platform === "MacIntel" && Number(navigator.maxTouchPoints) > 1) return true;
+  return /Safari\//.test(ua) && /AppleWebKit/i.test(ua) && !/Chrome|CriOS|FxiOS|Edg\//.test(ua);
+}
+
+/** Ярлык «На экран Домой»: сторонний скрипт видеосвязи там часто не грузится, в Safari — грузится. */
+export function isIosHomeScreen() {
+  if (typeof navigator === "undefined" || typeof window === "undefined") return false;
+  const ua = String(navigator.userAgent || "");
+  const ios = /iPhone|iPad|iPod/i.test(ua)
+    || (navigator.platform === "MacIntel" && Number(navigator.maxTouchPoints) > 1);
+  if (!ios) return false;
+  try {
+    return window.navigator.standalone === true
+      || window.matchMedia?.("(display-mode: standalone)")?.matches === true;
+  } catch {
+    return false;
+  }
+}
+
+export function isScriptProbeTimeout(error) {
+  const code = String(error?.code || "");
+  return error?.name === "AbortError" || code === "timeout" || code === "jitsi_script_timeout";
+}
+
 async function defaultLoadApi(domain, scriptUrl, timeoutMs) {
   const mod = await import("../jitsiMeet");
   return mod.loadJitsiExternalApi(domain, { scriptUrl, timeoutMs });
 }
 
 /** Не вставляет script в страницу: во время урока тот же файл уже грузит конференция. */
-export async function loadJaasScriptByFetch(domain, scriptUrl, timeoutMs = REACHABILITY_SCRIPT_TIMEOUT_MS) {
+function scriptProbeUrl(domain, scriptUrl) {
   const host = String(domain || "").replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0];
-  const url = String(scriptUrl || "").trim() || (host ? `https://${host}/libs/external_api.min.js` : "");
-  if (!url) {
-    throw new Error("no-script-url");
-  }
+  return String(scriptUrl || "").trim() || (host ? `https://${host}/libs/external_api.min.js` : "");
+}
+
+function timeoutError() {
+  const error = new Error("timeout");
+  error.name = "AbortError";
+  error.code = "timeout";
+  return error;
+}
+
+async function fetchOpaqueScript(url, timeoutMs) {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    await fetch(url, {
+    const init = {
       method: "GET",
       mode: "no-cors",
-      cache: "no-store",
+      credentials: "omit",
+      redirect: "follow",
+      referrerPolicy: "no-referrer",
       signal: controller.signal,
-    });
+    };
+    if (!omitOpaqueFetchCacheMode()) init.cache = "no-store";
+    await fetch(url, init);
   } finally {
     window.clearTimeout(timer);
+  }
+}
+
+/** Не исполняет скрипт. Тот же путь, что у тега конференции: script-src, не connect-src. */
+function probeScriptByPreload(url, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    if (typeof document === "undefined") {
+      reject(new TypeError("Load failed"));
+      return;
+    }
+    const link = document.createElement("link");
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      try {
+        link.remove();
+      } catch {
+        /* ignore */
+      }
+      if (error) reject(error);
+      else resolve();
+    };
+    const timer = window.setTimeout(() => finish(timeoutError()), timeoutMs);
+    link.setAttribute("rel", "preload");
+    link.setAttribute("as", "script");
+    link.href = url;
+    link.addEventListener("load", () => finish(null), { once: true });
+    link.addEventListener("error", () => finish(new TypeError("Load failed")), { once: true });
+    (document.head || document.documentElement).appendChild(link);
+  });
+}
+
+export async function loadJaasScriptByFetch(domain, scriptUrl, timeoutMs = REACHABILITY_SCRIPT_TIMEOUT_MS) {
+  const url = scriptProbeUrl(domain, scriptUrl);
+  if (!url) {
+    throw new Error("no-script-url");
+  }
+  const started = nowMs();
+  try {
+    await fetchOpaqueScript(url, timeoutMs);
+  } catch (error) {
+    if (isScriptProbeTimeout(error)) throw error;
+    const left = Math.max(1000, timeoutMs - (nowMs() - started));
+    await probeScriptByPreload(url, left);
   }
 }
 
@@ -97,6 +183,8 @@ async function defaultQueryPermission(name) {
 export function classifyJaasReachability({
   online = true,
   scriptLoaded = false,
+  scriptTimedOut = false,
+  openedFromIosHomeScreen = false,
   signaling = "skipped",
   microphone = "unknown",
   camera = "unknown",
@@ -123,6 +211,22 @@ export function classifyJaasReachability({
     };
   }
   if (!scriptLoaded) {
+    if (scriptTimedOut) {
+      return {
+        status: "fair",
+        code: "script_timeout",
+        failureClass: "slow",
+        dnsSeparated: false,
+        httpsSeparated: false,
+        label: "Видеосервис отвечает медленно",
+        message: "Страница видеосвязи с этого устройства не успела открыться. Это не доказательство блокировки. Вход в урок не блокируется.",
+        mediaConfirmed: false,
+        conferenceJoined: false,
+      };
+    }
+    const homeScreen = openedFromIosHomeScreen
+      ? " Если урок открыт с иконки на рабочем столе, откройте его в Safari."
+      : "";
     return {
       status: "fail",
       code: "script",
@@ -130,7 +234,7 @@ export function classifyJaasReachability({
       dnsSeparated: false,
       httpsSeparated: false,
       label: "Видеосервис недоступен с этой сети",
-      message: "Страница видеосвязи с этого устройства не открылась. Браузер не сообщает отдельно, DNS это или обрыв HTTPS. Это ещё не список всех операторов и не доказательство блокировки.",
+      message: `Страница видеосвязи с этого устройства не открылась. Браузер не сообщает отдельно, DNS это или обрыв HTTPS. Это ещё не список всех операторов и не доказательство блокировки.${homeScreen}`,
       mediaConfirmed: false,
       conferenceJoined: false,
     };
@@ -200,6 +304,7 @@ export async function probeJaasReachability({
   const domain = String(config?.domain || "").replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0];
   const scriptUrl = String(config?.scriptUrl || "");
   let scriptLoaded = false;
+  let scriptTimedOut = false;
   let scriptMs = null;
   if (domain) {
     try {
@@ -207,8 +312,9 @@ export async function probeJaasReachability({
       await loadApi(domain, scriptUrl, timeoutMs);
       scriptMs = nowMs() - scriptStarted;
       scriptLoaded = true;
-    } catch {
+    } catch (error) {
       scriptLoaded = false;
+      scriptTimedOut = isScriptProbeTimeout(error);
     }
   }
   if (aborted()) {
@@ -231,6 +337,8 @@ export async function probeJaasReachability({
   const classified = classifyJaasReachability({
     online: isOnline(),
     scriptLoaded,
+    scriptTimedOut,
+    openedFromIosHomeScreen: isIosHomeScreen(),
     signaling,
     microphone,
     camera,

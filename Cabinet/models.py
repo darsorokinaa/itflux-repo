@@ -5379,6 +5379,8 @@ from .availability_models import (  # noqa: E402
     TeacherBookingLink,
 )
 
+from .video_failover_models import MeetingCallRoute  # noqa: E402, F401
+
 from .worksheet_ai.models import (  # noqa: E402, F401
     AITaskCandidate,
     AITokenAccount,

@@ -1,0 +1,22 @@
+services:
+  livekit:
+    image: livekit/livekit-server:v1.13.9
+    restart: unless-stopped
+    network_mode: host
+    command: ["--config", "/etc/livekit.yaml"]
+    volumes:
+      # install.sh пишет сюда уже подставленный конфиг. Каталог репозитория не монтировать.
+      - /etc/livekit/livekit.yaml:/etc/livekit.yaml:ro
+      - /etc/livekit/turn.crt:/etc/livekit/turn.crt:ro
+      - /etc/livekit/turn.key:/etc/livekit/turn.key:ro
+    environment:
+      LIVEKIT_KEYS: ${LIVEKIT_KEYS:?set LIVEKIT_KEYS in an untracked env file}
+    # Лимиты cgroup. С network_mode: host порты не публикуются compose'ом,
+    # их открывает firewall. После старта сверить: docker stats livekit.
+    mem_limit: 6g
+    cpus: 4
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"

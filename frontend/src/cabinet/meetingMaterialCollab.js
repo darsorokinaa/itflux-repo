@@ -655,6 +655,10 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
         const opId = data.operation_id || data.operationId;
         if (opId) pendingOps.delete(opId);
         handlers.onScreenshareOperationAck?.(data);
+        return;
+      }
+      if (data.type === "media.provider_changed") {
+        handlers.onMediaProvider?.(data);
       }
     };
 

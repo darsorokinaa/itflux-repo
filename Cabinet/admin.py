@@ -83,6 +83,7 @@ from .models import (
     TeacherAvailability,
     TeacherBooking,
     TeacherBookingLink,
+    MeetingCallRoute,
     VideoMeeting,
     Student,
     StudentGroup,
@@ -788,6 +789,29 @@ class VideoMeetingAdmin(admin.ModelAdmin):
     @admin.display(description="Подключений")
     def attendance_count(self, obj):
         return obj.attendance_sessions.count()
+
+
+@admin.register(MeetingCallRoute)
+class MeetingCallRouteAdmin(admin.ModelAdmin):
+    list_display = ("meeting", "active_provider", "generation", "switch_reason", "switched_at", "auto_switch_count")
+    list_filter = ("active_provider",)
+    search_fields = ("meeting__uuid", "livekit_room")
+    readonly_fields = (
+        "meeting",
+        "active_provider",
+        "generation",
+        "switched_at",
+        "switch_reason",
+        "switched_by",
+        "auto_switch_count",
+        "cooldown_until",
+        "circuit_open_until",
+        "livekit_room",
+        "revoked_user_ids",
+        "failure_reports",
+        "created_at",
+        "updated_at",
+    )
 
 
 @admin.register(MeetingScreenShareSession)

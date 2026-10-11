@@ -23,12 +23,14 @@
     "@codemirror/view": "^6.43.0",
     "@cyntler/react-doc-viewer": "^1.17.1",
     "@excalidraw/excalidraw": "^0.18.1",
-    "@tldraw/sync": "^5.5.1",
+    "@jitsi/electron-sdk": "10.0.6",
     "@lezer/highlight": "^1.2.3",
     "@react-spring/web": "^10.0.3",
+    "@tldraw/sync": "^5.5.1",
     "canvas-confetti": "^1.9.3",
     "dompurify": "^3.4.13",
     "jszip": "^3.10.1",
+    "livekit-client": "^2.22.4",
     "lucide-react": "^0.554.0",
     "mathjax-full": "^3.2.1",
     "pdfjs-dist": "^4.8.69",
@@ -36,8 +38,7 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.18.2",
-    "tldraw": "^5.5.1",
-    "@jitsi/electron-sdk": "10.0.6"
+    "tldraw": "^5.5.1"
   },
   "overrides": {
     "lodash-es": "^4.17.23"

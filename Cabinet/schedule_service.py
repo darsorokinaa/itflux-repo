@@ -1278,6 +1278,17 @@ def remove_participant(participant, *, changed_by, notify=True):
         change_type=ScheduleChangeType.PARTICIPANTS_CHANGED,
         message=f"Удалён: {participant.display_name}",
     )
+    try:
+        from .video_failover import revoke_removed_schedule_participant
+
+        revoke_removed_schedule_participant(participant)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "video_revoke_on_remove_failed event=%s",
+            getattr(event, "pk", None),
+        )
     return participant
 
 

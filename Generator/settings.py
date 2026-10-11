@@ -139,6 +139,46 @@ try:
 except ValueError:
     JAAS_TOKEN_TTL_SECONDS = 7200
 
+# Резервная видеосвязь LiveKit. Пока флаг выключен, join-config не меняется.
+# Откат: VIDEO_FAILOVER_ENABLED=false и перезапуск процесса. JaaS/Jitsi не удаляются.
+VIDEO_FAILOVER_ENABLED = os.environ.get("VIDEO_FAILOVER_ENABLED", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+VIDEO_FAILOVER_MODE = (os.environ.get("VIDEO_FAILOVER_MODE", "jaas_only") or "jaas_only").strip().lower()
+LIVEKIT_URL = os.environ.get("LIVEKIT_URL", "").strip()
+LIVEKIT_HTTP_URL = os.environ.get("LIVEKIT_HTTP_URL", "").strip()
+LIVEKIT_API_KEY = os.environ.get("LIVEKIT_API_KEY", "").strip()
+LIVEKIT_API_SECRET = os.environ.get("LIVEKIT_API_SECRET", "").strip()
+try:
+    LIVEKIT_TOKEN_TTL_SECONDS = int(os.environ.get("LIVEKIT_TOKEN_TTL_SECONDS", "900") or "900")
+except ValueError:
+    LIVEKIT_TOKEN_TTL_SECONDS = 900
+VIDEO_FAILOVER_REQUIRE_HEALTH = os.environ.get("VIDEO_FAILOVER_REQUIRE_HEALTH", "true").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
+try:
+    VIDEO_FAILOVER_FAILURE_WINDOW_SECONDS = int(os.environ.get("VIDEO_FAILOVER_FAILURE_WINDOW_SECONDS", "90") or "90")
+except ValueError:
+    VIDEO_FAILOVER_FAILURE_WINDOW_SECONDS = 90
+try:
+    VIDEO_FAILOVER_SWITCH_COOLDOWN_SECONDS = int(os.environ.get("VIDEO_FAILOVER_SWITCH_COOLDOWN_SECONDS", "120") or "120")
+except ValueError:
+    VIDEO_FAILOVER_SWITCH_COOLDOWN_SECONDS = 120
+try:
+    VIDEO_FAILOVER_MAX_AUTO_SWITCHES = int(os.environ.get("VIDEO_FAILOVER_MAX_AUTO_SWITCHES", "1") or "1")
+except ValueError:
+    VIDEO_FAILOVER_MAX_AUTO_SWITCHES = 1
+try:
+    VIDEO_FAILOVER_MIN_REPORTERS = int(os.environ.get("VIDEO_FAILOVER_MIN_REPORTERS", "2") or "2")
+except ValueError:
+    VIDEO_FAILOVER_MIN_REPORTERS = 2
+
 # VK notifications (optional — mock when token not set)
 VK_ACCESS_TOKEN = os.environ.get("VK_ACCESS_TOKEN", "").strip()
 VK_GROUP_ID = os.environ.get("VK_GROUP_ID", "").strip()

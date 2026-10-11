@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import video_meeting_api
+from . import video_failover_api, video_meeting_api
 
 urlpatterns = [
     path(
@@ -87,6 +87,26 @@ urlpatterns = [
         "<uuid:meeting_uuid>/material-session/interactive/<int:interactive_id>/",
         video_meeting_api.VideoMeetingMaterialInteractiveView.as_view(),
         name="video_meeting_material_interactive",
+    ),
+    path(
+        "<uuid:meeting_uuid>/media-route/fault/",
+        video_failover_api.VideoMeetingMediaFaultView.as_view(),
+        name="video_meeting_media_fault",
+    ),
+    path(
+        "<uuid:meeting_uuid>/media-route/switch/",
+        video_failover_api.VideoMeetingMediaSwitchView.as_view(),
+        name="video_meeting_media_switch",
+    ),
+    path(
+        "<uuid:meeting_uuid>/media-route/disconnect/",
+        video_failover_api.VideoMeetingMediaDisconnectView.as_view(),
+        name="video_meeting_media_disconnect",
+    ),
+    path(
+        "<uuid:meeting_uuid>/media-route/",
+        video_failover_api.VideoMeetingMediaRouteView.as_view(),
+        name="video_meeting_media_route",
     ),
     path(
         "<uuid:meeting_uuid>/",
