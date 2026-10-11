@@ -4249,7 +4249,7 @@ export default function VideoMeetingPage() {
                 }}
               />
             ) : null}
-            {showJitsi ? (
+            {showJitsi && !liveKitJoin ? (
               <CallLinkControls
                 title={callLink.title}
                 indicator={callLink.indicator}
@@ -4269,7 +4269,7 @@ export default function VideoMeetingPage() {
               />
             ) : null}
             <ScreenShareControlBar
-              visible={showJitsi && (screenshareLayout.localSharing || Boolean(screenshareLayout.presenterJitsiId) || screenshareUiActive)}
+              visible={showJitsi && !liveKitJoin && (screenshareLayout.localSharing || Boolean(screenshareLayout.presenterJitsiId) || screenshareUiActive)}
               localSharing={Boolean(screenshareLayout.localSharing)}
               shareActive={Boolean(screenshareLayout.presenterJitsiId || screenshareUiActive)}
               capability={remoteControlCapability}

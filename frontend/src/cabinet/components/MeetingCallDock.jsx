@@ -24,6 +24,7 @@ import {
 } from "../meetingCallOwnership";
 import { useFloatingDrag } from "../useFloatingDrag";
 import FloatingResizeHandles from "../FloatingResizeHandles";
+import LiveKitCallView from "./LiveKitCallView";
 import "../styles/video-meeting.css";
 
 const PRESENT_POLL_MS = 2500;
@@ -70,6 +71,7 @@ export default function MeetingCallDock() {
   const [collapsed, setCollapsed] = useState(false);
   const [callElsewhere, setCallElsewhere] = useState(false);
   const [needManualReconnect, setNeedManualReconnect] = useState(false);
+  const [liveKitJoin, setLiveKitJoin] = useState(null);
   const reconnectPolicyRef = useRef(null);
   if (!reconnectPolicyRef.current) {
     reconnectPolicyRef.current = createHardReconnectPolicy();
@@ -107,6 +109,7 @@ export default function MeetingCallDock() {
         apiRef.current = null;
       }
       if (containerRef.current) containerRef.current.innerHTML = "";
+      setLiveKitJoin(null);
       if (!inIframe) releaseMeetingCall(meetingUuid, ownerIdRef.current);
       setVisible(false);
       setCallElsewhere(false);
@@ -140,6 +143,7 @@ export default function MeetingCallDock() {
         apiRef.current = null;
       }
       if (containerRef.current) containerRef.current.innerHTML = "";
+      setLiveKitJoin(null);
     };
 
     const returnToCall = () => {
@@ -251,11 +255,26 @@ export default function MeetingCallDock() {
         if (!config?.domain || !config?.roomName) {
           throw new Error("Нет конфигурации конференции");
         }
+        const cameraEnabled = getMeetingCameraEnabled(meetingUuid);
+        const micEnabled = getMeetingMicEnabled(meetingUuid);
+        if (config.provider === "livekit") {
+          if (!config.livekitUrl || !config.jwt) {
+            throw new Error("Нет конфигурации видеосвязи");
+          }
+          setLiveKitJoin({
+            url: config.livekitUrl,
+            token: config.jwt,
+            canModerate: Boolean(config.meeting?.isModerator),
+            displayName: resolveJitsiDisplayName(config) || "",
+            startWithAudioMuted: micEnabled !== true,
+            startWithVideoMuted: cameraEnabled !== true,
+          });
+          claimMeetingCall(meetingUuid, ownerIdRef.current);
+          return;
+        }
         const subject = String(
           config.meeting?.title || config.meeting?.subject || "Онлайн-урок",
         ).trim();
-        const cameraEnabled = getMeetingCameraEnabled(meetingUuid);
-        const micEnabled = getMeetingMicEnabled(meetingUuid);
         intendedMediaRef.current = {
           micOn: micEnabled === true,
           camOn: cameraEnabled === true,
@@ -491,8 +510,31 @@ export default function MeetingCallDock() {
       <div
         className="meeting-call-dock__stage"
         ref={containerRef}
-        hidden={collapsed}
+        hidden={collapsed || Boolean(liveKitJoin)}
       />
+      {liveKitJoin && !collapsed ? (
+        <div className="meeting-call-dock__stage">
+          <LiveKitCallView
+            meetingUuid={meetingUuid}
+            url={liveKitJoin.url}
+            token={liveKitJoin.token}
+            canModerate={liveKitJoin.canModerate}
+            displayName={liveKitJoin.displayName}
+            startWithAudioMuted={liveKitJoin.startWithAudioMuted}
+            startWithVideoMuted={liveKitJoin.startWithVideoMuted}
+            refreshCredentials={async () => {
+              const fresh = await fetchVideoMeetingJoinConfig(meetingUuid, {
+                browserTabSessionId: `dock-${ownerIdRef.current}`,
+                callSessionId: callSessionIdRef.current,
+              });
+              if (fresh?.provider !== "livekit" || !fresh.livekitUrl || !fresh.jwt) {
+                throw new Error("livekit_config");
+              }
+              return { url: fresh.livekitUrl, token: fresh.jwt };
+            }}
+          />
+        </div>
+      ) : null}
       {visible && !collapsed ? (
         <FloatingResizeHandles onPointerDown={onDockResizePointerDown} />
       ) : null}

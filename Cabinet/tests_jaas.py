@@ -44,6 +44,7 @@ JAAS_PUBLIC_KEY = _public_pem(JAAS_PRIVATE_KEY)
 
 
 @override_settings(
+    VIDEO_FAILOVER_ENABLED=False,
     VIDEO_PROVIDER="jaas",
     JAAS_APP_ID=JAAS_APP_ID,
     JAAS_API_KEY_ID=JAAS_KEY_ID,
