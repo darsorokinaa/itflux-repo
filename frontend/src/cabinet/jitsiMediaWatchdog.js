@@ -132,6 +132,14 @@ export function detectImpossibleMediaState({
   return issues;
 }
 
+/** ±20% к паузе повтора. Нулевая пауза остаётся немедленной, лимит попыток не меняется. */
+export function withReconnectJitter(delayMs, random = Math.random) {
+  const base = Math.max(0, Number(delayMs) || 0);
+  if (base <= 0) return 0;
+  const ratio = 0.8 + (Number(random()) * 0.4);
+  return Math.round(base * ratio);
+}
+
 export function createHardReconnectPolicy({
   maxAttempts = MAX_HARD_RECONNECT_ATTEMPTS,
   backoffMs = HARD_RECONNECT_BACKOFF_MS,

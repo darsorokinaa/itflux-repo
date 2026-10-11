@@ -3,6 +3,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import {
   applyJitsiCallChrome,
   applyJitsiCameraResolution,
+  ensureJitsiIframeMediaAllow,
   buildJitsiAppData,
   buildJitsiConfigOverwrite,
   buildJitsiEmbedUrl,
@@ -97,6 +98,10 @@ describe("meeting camera preference", () => {
     expect(commands.map((entry) => entry[0])).toEqual(["overwriteConfig", "overwriteConfig"]);
     expect(commands[0][1].toolbarButtons).toContain("chat");
     expect(commands[1][1].toolbarButtons).not.toContain("chat");
+    applyJitsiCallChrome(api, { custom: true });
+    expect(commands[2][1].toolbarButtons).toEqual([]);
+    expect(buildJitsiConfigOverwrite({ customChrome: true }).toolbarButtons).toEqual([]);
+    expect(buildJitsiConfigOverwrite({ customChrome: true }).disableSelfView).not.toBe(true);
     expect(commands[1][1].toolbarConfig.alwaysVisible).toBe(true);
   });
 
@@ -253,6 +258,16 @@ describe("E: Jitsi appData.localStorageContent", () => {
     expect(stripNullJitsiLocalStorageContentFromUrl(
       "https://meet.example.test/room#appData.localStorageContent=%22null%22",
     )).not.toContain("localStorageContent");
+  });
+
+  it("adds camera, microphone and autoplay to the conference iframe", () => {
+    const iframe = document.createElement("iframe");
+    iframe.allow = "fullscreen";
+    ensureJitsiIframeMediaAllow(iframe);
+    expect(iframe.allow).toContain("camera");
+    expect(iframe.allow).toContain("microphone");
+    expect(iframe.allow).toContain("autoplay");
+    expect(iframe.allow).toContain("fullscreen");
   });
 
   it("sanitizes iframe src before the first navigation", () => {

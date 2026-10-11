@@ -7,6 +7,7 @@ import {
   attachMediaWatchdog,
   createHardReconnectPolicy,
   decideHardReconnect,
+  withReconnectJitter,
   shouldRecoverFromJitsiEvent,
   syncJitsiAudioDevices,
   audioDeviceStillPresent,
@@ -159,6 +160,15 @@ describe("syncJitsiAudioDevices", () => {
     await expect(syncJitsiAudioDevices({
       getCurrentDevices: async () => ({}),
     })).resolves.toMatchObject({ unsupported: true });
+  });
+});
+
+describe("withReconnectJitter", () => {
+  it("keeps an immediate retry and spreads later delays", () => {
+    expect(withReconnectJitter(0, () => 0)).toBe(0);
+    expect(withReconnectJitter(3000, () => 0)).toBe(2400);
+    expect(withReconnectJitter(3000, () => 1)).toBe(3600);
+    expect(withReconnectJitter(8000, () => 0.5)).toBe(8000);
   });
 });
 

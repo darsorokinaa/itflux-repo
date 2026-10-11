@@ -52,6 +52,25 @@ import {
 import { stopAllConnectionCheckStreams } from "../connectionCheck/mediaCleanup";
 import { clearPrimedMedia } from "../connectionCheck/mediaDevices";
 import ConfirmActionModal from "../components/ConfirmActionModal";
+import {
+  ConferenceControls,
+  ConferenceSide,
+  ConferenceTimer,
+} from "../components/ConferenceChrome";
+import {
+  loadConferenceDevices,
+  readMuteState,
+  runConferenceCommand,
+  screenShareSupported,
+  setConferenceDevice,
+} from "../conferenceCommands";
+import {
+  classifyConferenceFault,
+  conferenceStatusView,
+  describeConferenceClient,
+  isMobileConferenceClient,
+  logConferenceStage,
+} from "../conferenceDiagnostics";
 import { lessonJournalFromMeetingPath, openLessonSummaryTab } from "../journal/openLessonSummary";
 import { classifyLiveDurationUi } from "../meetingLiveDuration";
 import { getMeetingAttendanceTracker } from "../meetingAttendance";
@@ -149,17 +168,9 @@ import {
   shouldIgnoreReconnect,
   shouldStudentLeaveOnJitsiHangup,
 } from "../jitsiLeave";
-import { createHardReconnectPolicy, decideHardReconnect } from "../jitsiMediaWatchdog";
+import { createHardReconnectPolicy, decideHardReconnect, withReconnectJitter } from "../jitsiMediaWatchdog";
 import ConnectionRecoveryBanner from "../components/ConnectionRecoveryBanner";
-import CallLinkControls from "../components/CallLinkControls";
-import {
-  applyAudioOnlyMode,
-  applyStoredLinkPreferences,
-  applyWeakVideo,
-  describeCallLink,
-  inspectCallMicrophone,
-  shouldAskIfTheyHear,
-} from "../jitsiLinkMode";
+import { describeCallLink } from "../jitsiLinkMode";
 import { classifyJoinStop, joinMediaIntent } from "../jitsiCallDiagnostics";
 import { probeJaasReachability, loadJaasScriptByFetch, isIosHomeScreen } from "../connectionCheck/jaasReachability";
 import LiveKitCallView from "../components/LiveKitCallView";
@@ -571,11 +582,6 @@ export default function VideoMeetingPage() {
   });
   const [mediaChannelOpen, setMediaChannelOpen] = useState(false);
   const [videoServiceUnreachable, setVideoServiceUnreachable] = useState(false);
-  const [audioOnly, setAudioOnly] = useState(false);
-  const [weakLink, setWeakLink] = useState(false);
-  const [micNote, setMicNote] = useState("");
-  const [hearAnswer, setHearAnswer] = useState("");
-  const linkPrefsRef = useRef({ audioOnly: false, weak: false, videoMutedBefore: null });
   const callStateRef = useRef(null);
   if (!callStateRef.current) {
     callStateRef.current = createCallStateMachine({
@@ -599,6 +605,15 @@ export default function VideoMeetingPage() {
   const [moderatorLoginHint, setModeratorLoginHint] = useState("");
   const [moderatorToast, setModeratorToast] = useState("");
   const [joinState, setJoinState] = useState("");
+  const [conferenceBound, setConferenceBound] = useState(0);
+  const [conferenceSide, setConferenceSide] = useState("");
+  const [chatMessages, setChatMessages] = useState([]);
+  const [unreadChat, setUnreadChat] = useState(0);
+  const [handRaised, setHandRaised] = useState(false);
+  const [dominantSpeakerId, setDominantSpeakerId] = useState("");
+  const [tileWide, setTileWide] = useState(false);
+  const [soundPrompt, setSoundPrompt] = useState(false);
+  const conferenceSideRef = useRef("");
   const [copied, setCopied] = useState(false);
   const [copyHint, setCopyHint] = useState("");
   const [connectionHint, setConnectionHint] = useState("");
@@ -820,6 +835,10 @@ export default function VideoMeetingPage() {
     const cameraEnabled = intent.camOn;
     const startWithVideoMuted = intent.startWithVideoMuted;
     const startWithAudioMuted = intent.startWithAudioMuted;
+    logConferenceStage("connect_start", {
+      diagId: callSessionIdRef.current,
+      ...describeConferenceClient(),
+    });
     jitsiInitRef.current = true;
     programmaticDisposeRef.current = false;
     joinStartedAtRef.current = Date.now();
@@ -952,6 +971,7 @@ export default function VideoMeetingPage() {
         ...config,
         startWithVideoMuted,
         startWithAudioMuted,
+        customChrome: true,
         diagnostics: {
           ...(config.diagnostics || {}),
           browserTabSessionId: tabSessionIdRef.current,
@@ -1238,11 +1258,21 @@ export default function VideoMeetingPage() {
       }
       apiRef.current = wrapped;
       screenShareApiRef.current = wrapped.screenShare || null;
-      void applyStoredLinkPreferences(wrapped.api || wrapped, linkPrefsRef.current).then((next) => {
+      setConferenceBound((value) => value + 1);
+      void readMuteState(wrapped).then((state) => {
         if (initGenRef.current !== initGen) return;
-        linkPrefsRef.current = next;
-        setAudioOnly(Boolean(next.audioOnly));
-        setWeakLink(Boolean(next.weak));
+        if (typeof state.audioMuted === "boolean") {
+          const on = !state.audioMuted;
+          setMeetingMicEnabled(meetingUuid, on);
+          setLocalMicOn(on);
+          intendedMediaRef.current = { ...intendedMediaRef.current, micOn: on };
+        }
+        if (typeof state.videoMuted === "boolean") {
+          const on = !state.videoMuted;
+          setMeetingCameraEnabled(meetingUuid, on);
+          setLocalCamOn(on);
+          intendedMediaRef.current = { ...intendedMediaRef.current, camOn: on };
+        }
       });
       applyConferenceHint();
       notifyJitsiContainerResize(wrapped);
@@ -1277,6 +1307,15 @@ export default function VideoMeetingPage() {
         return false;
       }
       jitsiInitRef.current = false;
+      logConferenceStage("connect_error", {
+        diagId: callSessionIdRef.current,
+        fault: classifyConferenceFault({
+          code: err?.code || err?.category || "",
+          status: err?.status || 0,
+          online: typeof navigator === "undefined" ? true : navigator.onLine !== false,
+        }),
+        code: String(err?.code || err?.category || "").slice(0, 48),
+      });
       if (err?.code === "jitsi_auth" && jitsiAuthRetryRef.current < 1) {
         jitsiAuthRetryRef.current += 1;
         const retryGen = initGenRef.current;
@@ -1483,9 +1522,16 @@ export default function VideoMeetingPage() {
       return false;
     }
     const slot = taken.slot;
-    if (slot.delayMs > 0) {
+    const waitMs = withReconnectJitter(slot.delayMs);
+    logConferenceStage("recovery_start", {
+      diagId: callSessionIdRef.current,
+      attempt: slot.attempt,
+      waitMs,
+      reason: String(payload.reason || "").slice(0, 48),
+    });
+    if (waitMs > 0) {
       await new Promise((resolve) => {
-        hardReconnectTimerRef.current = window.setTimeout(resolve, slot.delayMs);
+        hardReconnectTimerRef.current = window.setTimeout(resolve, waitMs);
       });
       hardReconnectTimerRef.current = null;
     }
@@ -1521,6 +1567,11 @@ export default function VideoMeetingPage() {
       },
     });
     const ok = await remountJitsi({ rotateSession: false });
+    logConferenceStage("recovery_result", {
+      diagId: callSessionIdRef.current,
+      ok: Boolean(ok),
+      attempt: slot.attempt,
+    });
     if (shouldIgnoreReconnect(intentionalLeaveRef.current)) {
       policy.markAttemptFailed();
       recoveryRemountRef.current = false;
@@ -2570,18 +2621,18 @@ export default function VideoMeetingPage() {
     reconnectCount: callMachine.reconnectCount,
     mediaChannelOpen,
     videoServiceUnreachable,
-    hearingConfirmed: hearAnswer === "yes",
+    hearingConfirmed: false,
   });
   const videoJoinFailed = String(error || "").includes("видеозвонок")
     || String(error || "").includes("Видеосервис");
   const callControlsReady = joinState === "joined" || joinState === "embedded";
-  const askHearing = shouldAskIfTheyHear({
-    mediaChannelOpen,
-    remoteCount: callRoster.remotes?.length || 0,
-    answer: hearAnswer,
-    callState: callMachine.state,
+  const conferenceStatus = conferenceStatusView({
+    connectionHint,
+    mediaWarning,
+    callReconnectNeeded,
+    joinState,
+    online: typeof navigator === "undefined" ? true : navigator.onLine !== false,
   });
-
   const showMaterialsToast = useCallback((text) => {
     setMaterialsToast(text);
     window.setTimeout(() => setMaterialsToast(""), 2200);
@@ -3256,12 +3307,199 @@ export default function VideoMeetingPage() {
   }, []);
 
   const onToggleScreenShare = useCallback(() => {
+    if (!screenShareSupported()) {
+      setMediaWarning("Демонстрация экрана недоступна в этом браузере.");
+      return;
+    }
+    if (!runConferenceCommand(apiRef.current, "toggleShareScreen")) {
+      setMediaWarning("Не удалось переключить демонстрацию экрана.");
+    }
+  }, []);
+
+  const syncMuteFromApi = useCallback(async () => {
+    const state = await readMuteState(apiRef.current);
+    if (typeof state.audioMuted === "boolean") {
+      const on = !state.audioMuted;
+      setMeetingMicEnabled(meetingUuid, on);
+      setLocalMicOn(on);
+      intendedMediaRef.current = { ...intendedMediaRef.current, micOn: on };
+    }
+    if (typeof state.videoMuted === "boolean") {
+      const on = !state.videoMuted;
+      setMeetingCameraEnabled(meetingUuid, on);
+      setLocalCamOn(on);
+      intendedMediaRef.current = { ...intendedMediaRef.current, camOn: on };
+    }
+  }, [meetingUuid]);
+
+  const onToggleConferenceMic = useCallback(() => {
+    if (!runConferenceCommand(apiRef.current, "toggleAudio")) {
+      setMediaWarning("Не удалось переключить микрофон.");
+      return;
+    }
+    window.setTimeout(() => { void syncMuteFromApi(); }, 400);
+  }, [syncMuteFromApi]);
+
+  const onToggleConferenceCam = useCallback(() => {
+    if (!runConferenceCommand(apiRef.current, "toggleVideo")) {
+      setMediaWarning("Не удалось переключить камеру.");
+      return;
+    }
+    window.setTimeout(() => { void syncMuteFromApi(); }, 400);
+  }, [syncMuteFromApi]);
+
+  const onToggleConferenceHand = useCallback(() => {
+    if (!runConferenceCommand(apiRef.current, "toggleRaiseHand")) {
+      setMediaWarning("Поднять руку в этой сборке видеосвязи недоступно.");
+    }
+  }, []);
+
+  const onToggleConferenceLayout = useCallback(() => {
+    const next = !tileWide;
+    if (!runConferenceCommand(apiRef.current, "setTileView", next)) {
+      setMediaWarning("Смена вида в этой сборке видеосвязи недоступна.");
+      return;
+    }
+    setTileWide(next);
+  }, [tileWide]);
+
+  const onConferenceHangup = useCallback(() => {
+    if (canManageRef.current) {
+      setFinishConfirm(true);
+      return;
+    }
+    if (!runConferenceCommand(apiRef.current, "hangup")) {
+      runStudentHangupRef.current?.();
+    }
+  }, []);
+
+  const onEnableConferenceSound = useCallback(() => {
+    const session = apiRef.current;
     try {
-      apiRef.current?.executeCommand?.("toggleShareScreen");
+      session?.watchdog?.handleLifecycleEvent?.("sound-gesture");
     } catch {
       /* ignore */
     }
+    try {
+      session?.getIFrame?.()?.focus?.();
+    } catch {
+      /* ignore */
+    }
+    setSoundPrompt(false);
+    logConferenceStage("sound_unlock_gesture", { diagId: callSessionIdRef.current });
   }, []);
+
+  const onSendConferenceChat = useCallback((text) => {
+    const body = String(text || "").slice(0, 500);
+    if (!body) return;
+    if (!runConferenceCommand(apiRef.current, "sendChatMessage", body)) {
+      setMediaWarning("Чат конференции сейчас недоступен.");
+      return;
+    }
+    setChatMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (last?.mine && last.text === body) return prev;
+      return [...prev.slice(-99), {
+        id: `${Date.now()}-local`,
+        author: "Вы",
+        text: body,
+        mine: true,
+      }];
+    });
+  }, []);
+
+  useEffect(() => {
+    conferenceSideRef.current = conferenceSide;
+    if (conferenceSide === "chat") setUnreadChat(0);
+  }, [conferenceSide]);
+
+  useEffect(() => {
+    setTileWide(Boolean(screenshareLayout.tileView));
+  }, [screenshareLayout.tileView]);
+
+  useEffect(() => {
+    if (!isMobileConferenceClient()) return undefined;
+    let hidden = document.visibilityState === "hidden";
+    const onVis = () => {
+      if (
+        document.visibilityState === "visible"
+        && hidden
+        && (joinState === "joined" || joinState === "embedded")
+      ) {
+        setSoundPrompt(true);
+      }
+      hidden = document.visibilityState === "hidden";
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [joinState]);
+
+  useEffect(() => {
+    const session = apiRef.current;
+    const api = session?.api || session;
+    if (!api?.addListener || (joinState !== "joined" && joinState !== "embedded")) return undefined;
+    const onIncoming = (event) => {
+      const text = String(event?.message || "").slice(0, 500);
+      if (!text) return;
+      setChatMessages((prev) => [...prev.slice(-99), {
+        id: `${Date.now()}-${prev.length}`,
+        author: String(event?.nick || event?.from || "Участник").slice(0, 80),
+        text,
+        mine: false,
+      }]);
+      if (conferenceSideRef.current !== "chat") setUnreadChat((count) => Math.min(99, count + 1));
+    };
+    const onOutgoing = (event) => {
+      const text = String(event?.message || "").slice(0, 500);
+      if (!text) return;
+      setChatMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last?.mine && last.text === text) return prev;
+        return [...prev.slice(-99), {
+          id: `${Date.now()}-out-${prev.length}`,
+          author: "Вы",
+          text,
+          mine: true,
+        }];
+      });
+    };
+    const onSpeaker = (event) => {
+      setDominantSpeakerId(String(event?.id || ""));
+    };
+    const onHand = (event) => {
+      const localId = String(callRosterRef.current?.local?.id || "");
+      if (localId && event?.id && String(event.id) !== localId) return;
+      if (typeof event?.handRaised === "boolean") setHandRaised(event.handRaised);
+    };
+    const names = [
+      ["incomingMessage", onIncoming],
+      ["outgoingMessage", onOutgoing],
+      ["dominantSpeakerChanged", onSpeaker],
+      ["raiseHandUpdated", onHand],
+    ];
+    const bound = [];
+    for (const [name, handler] of names) {
+      try {
+        api.addListener(name, handler);
+        bound.push([name, handler]);
+      } catch {
+        /* событие этой сборки External API может отсутствовать */
+      }
+    }
+    logConferenceStage("media_events_bound", {
+      diagId: callSessionIdRef.current,
+      events: bound.map(([name]) => name).join(","),
+    });
+    return () => {
+      for (const [name, handler] of bound) {
+        try {
+          api.removeListener?.(name, handler);
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+  }, [conferenceBound, joinState]);
 
   const screenshareActive = Boolean(screenshareSession?.active || screenshareSession?.sessionId);
   const screenshareUiActive = Boolean(screenshareActive || screenshareLayout.localSharing);
@@ -3481,8 +3719,9 @@ export default function VideoMeetingPage() {
   useEffect(() => {
     applyJitsiCallChrome(apiRef.current, {
       expanded: Boolean(compactCall && callView === "expanded"),
+      custom: !compactCall,
     });
-  }, [compactCall, callView, joinState]);
+  }, [compactCall, callView, joinState, conferenceBound]);
 
   const toggleRoomFullscreen = useCallback(async () => {
     const frame = callFrameRef.current;
@@ -3584,48 +3823,6 @@ export default function VideoMeetingPage() {
     setConnectionHint("Соединение восстанавливается…");
     void remountJitsi();
   }, [remountJitsi]);
-
-  const onToggleAudioOnly = useCallback(async () => {
-    const next = !linkPrefsRef.current.audioOnly;
-    const session = apiRef.current;
-    if (!session) {
-      linkPrefsRef.current = { ...linkPrefsRef.current, audioOnly: next };
-      setAudioOnly(next);
-      return;
-    }
-    const result = await applyAudioOnlyMode(session, next, {
-      videoMutedBefore: linkPrefsRef.current.videoMutedBefore,
-    });
-    if (!result.applied) {
-      setMicNote("Режим «Только звук» в этой сборке видеосвязи недоступен.");
-      return;
-    }
-    linkPrefsRef.current = {
-      ...linkPrefsRef.current,
-      audioOnly: result.audioOnly,
-      videoMutedBefore: result.videoMutedBefore,
-    };
-    setAudioOnly(result.audioOnly);
-    if (result.applied && !result.audioOnly) {
-      applyWeakVideo(session, linkPrefsRef.current.weak);
-    }
-  }, []);
-
-  const onToggleWeakLink = useCallback(() => {
-    if (linkPrefsRef.current.audioOnly) return;
-    const next = !linkPrefsRef.current.weak;
-    if (apiRef.current && !applyWeakVideo(apiRef.current, next)) {
-      setMicNote("Снижение качества видео в этой сборке недоступно.");
-      return;
-    }
-    linkPrefsRef.current = { ...linkPrefsRef.current, weak: next };
-    setWeakLink(next);
-  }, []);
-
-  const onCheckCallMic = useCallback(async () => {
-    const result = await inspectCallMicrophone(apiRef.current);
-    setMicNote(result.message || "");
-  }, []);
 
   const onManualRoomReload = useCallback(() => {
     resumeControllerRef.current?.manualReload?.();
@@ -3741,6 +3938,16 @@ export default function VideoMeetingPage() {
         </div>
 
         <div className="video-lesson-header__actions">
+          {showJitsi ? <ConferenceTimer startedAt={meeting?.actualStartedAt || ""} active={pageState === "live"} /> : null}
+          {showJitsi ? (
+            <button
+              type="button"
+              className="video-lesson-btn video-lesson-btn--ghost video-lesson-header__materials-btn"
+              onClick={() => void onCopyLink()}
+            >
+              {copied ? "Скопировано" : "Ссылка"}
+            </button>
+          ) : null}
           {roomActions}
         </div>
       </header>
@@ -4167,7 +4374,7 @@ export default function VideoMeetingPage() {
             className="video-lesson-jitsi-host"
             hidden={!showJitsi || (compactCall && callView === "minimized" && !minimizedShowsVideo)}
           >
-            {connectionHint
+            {compactCall && connectionHint
               && connectionHint !== "Ждём ученика"
               && connectionHint !== "Ждём учителя"
               && !(
@@ -4188,7 +4395,7 @@ export default function VideoMeetingPage() {
                 ) : null}
               </div>
             ) : null}
-            {mediaWarning ? (
+            {mediaWarning && (compactCall || !conferenceStatus.title) ? (
               <div className="video-lesson-media-warning" role="status">
                 <span>{mediaWarning}</span>
                 <button type="button" aria-label="Закрыть" onClick={() => setMediaWarning("")}>×</button>
@@ -4247,25 +4454,6 @@ export default function VideoMeetingPage() {
                   setCallReconnectNeeded(true);
                   setConnectionHint("Вы вышли из видеосвязи. Урок и материалы сохранены.");
                 }}
-              />
-            ) : null}
-            {showJitsi && !liveKitJoin ? (
-              <CallLinkControls
-                title={callLink.title}
-                indicator={callLink.indicator}
-                showReconnect={callLink.showReconnect}
-                audioOnly={audioOnly}
-                weakLink={weakLink}
-                micNote={micNote}
-                askHearing={askHearing}
-                hearNo={hearAnswer === "no" && callMachine.state === "joined"}
-                controlsEnabled={callControlsReady}
-                onReconnect={onManualJitsiReconnect}
-                onToggleAudioOnly={() => void onToggleAudioOnly()}
-                onToggleWeak={onToggleWeakLink}
-                onCheckMic={() => void onCheckCallMic()}
-                onHearYes={() => setHearAnswer("yes")}
-                onHearNo={() => setHearAnswer("no")}
               />
             ) : null}
             <ScreenShareControlBar
@@ -4415,7 +4603,56 @@ export default function VideoMeetingPage() {
               />
             )}
           </div>
+          {showJitsi && !compactCall && !liveKitJoin ? (
+            <ConferenceControls
+              disabled={!callControlsReady}
+              micOn={localMicOn}
+              camOn={localCamOn}
+              sharing={Boolean(screenshareLayout.localSharing)}
+              handRaised={handRaised}
+              tileWide={tileWide}
+              peopleOpen={conferenceSide === "people"}
+              chatOpen={conferenceSide === "chat"}
+              participantCount={(callRoster.local ? 1 : 0) + (callRoster.remotes?.length || 0)}
+              unreadChat={unreadChat}
+              soundPrompt={soundPrompt}
+              statusPhase={conferenceStatus.phase}
+              statusTitle={conferenceStatus.title}
+              screenShareAvailable={screenShareSupported()}
+              showReconnect={Boolean(callLink.showReconnect || callReconnectNeeded)}
+              onToggleMic={onToggleConferenceMic}
+              onToggleCam={onToggleConferenceCam}
+              onToggleShare={onToggleScreenShare}
+              onToggleHand={onToggleConferenceHand}
+              onToggleLayout={onToggleConferenceLayout}
+              onTogglePeople={() => setConferenceSide((current) => (current === "people" ? "" : "people"))}
+              onToggleChat={() => setConferenceSide((current) => (current === "chat" ? "" : "chat"))}
+              onHangup={onConferenceHangup}
+              onEnableSound={onEnableConferenceSound}
+              onLoadDevices={() => loadConferenceDevices(apiRef.current)}
+              onSelectDevice={(kind, device) => {
+                if (!setConferenceDevice(apiRef.current, kind, device)) {
+                  setMediaWarning("Не удалось переключить устройство.");
+                }
+              }}
+              onReconnect={onManualJitsiReconnect}
+            />
+          ) : null}
         </main>
+
+        {showJitsi && !compactCall && !liveKitJoin ? (
+          <ConferenceSide
+            open={Boolean(conferenceSide)}
+            tab={conferenceSide === "chat" ? "chat" : "people"}
+            local={callRoster.local ? { ...callRoster.local, audioMuted: !localMicOn, roleLabel } : null}
+            remotes={callRoster.remotes || []}
+            dominantId={dominantSpeakerId}
+            messages={chatMessages}
+            onTab={(tab) => setConferenceSide(tab)}
+            onClose={() => setConferenceSide("")}
+            onSend={onSendConferenceChat}
+          />
+        ) : null}
 
         {showAside ? (
           <VideoLessonMaterialsPanel

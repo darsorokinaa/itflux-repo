@@ -47,6 +47,14 @@ function MediaTile({ track, muted = false, label, audio = false }) {
 
 const AUDIO_CONFIRM_MS = 8000;
 
+/**
+ * События LiveKit вызывают слушатель с публикацией трека.
+ * Такой объект нельзя принимать за флаг «только звук»: иначе пропадают чужие камеры.
+ */
+export function audioOnlyForTileRefresh(argument, current = false) {
+  return typeof argument === "boolean" ? argument : current === true;
+}
+
 export function collectTiles(room, { audioOnly }) {
   const tiles = [];
   const audios = [];
@@ -114,10 +122,12 @@ export default function LiveKitCallView({
   const [remotes, setRemotes] = useState([]);
   const [busy, setBusy] = useState("");
 
-  const refreshTiles = (audioOnlyOverride = audioOnly) => {
+  const refreshTiles = (maybeFlag) => {
     const room = roomRef.current;
     if (!room) return;
-    const next = collectTiles(room, { audioOnly: audioOnlyOverride });
+    const next = collectTiles(room, {
+      audioOnly: audioOnlyForTileRefresh(maybeFlag, audioOnlyRef.current),
+    });
     setTiles(next.tiles);
     setAudios(next.audios);
     const people = [];
@@ -440,24 +450,6 @@ export default function LiveKitCallView({
     }
   };
 
-  const enableAudioOnly = async () => {
-    setAudioOnly(true);
-    audioOnlyRef.current = true;
-    intentRef.current = { ...intentRef.current, camOn: false };
-    setCamOn(false);
-    try {
-      await roomRef.current?.localParticipant.setCameraEnabled(false);
-      roomRef.current?.remoteParticipants?.forEach?.((participant) => {
-        participant.trackPublications?.forEach?.((publication) => {
-          if (publication.kind === Track.Kind.Video) publication.setSubscribed(false);
-        });
-      });
-      refreshTiles(true);
-    } catch {
-      /* звук остаётся, даже если видео уже выключено */
-    }
-  };
-
   const selectDevice = async (kind, deviceId) => {
     if (!deviceId) return;
     try {
@@ -512,7 +504,6 @@ export default function LiveKitCallView({
         <button type="button" onClick={toggleMic} aria-pressed={!micOn}>{micOn ? "Выключить микрофон" : "Включить микрофон"}</button>
         <button type="button" onClick={toggleCam} aria-pressed={!camOn}>{camOn ? "Выключить камеру" : "Включить камеру"}</button>
         <button type="button" onClick={toggleShare} disabled={busy === "share"}>{sharing ? "Остановить демонстрацию" : "Демонстрация экрана"}</button>
-        <button type="button" onClick={enableAudioOnly}>Только звук</button>
         <button type="button" onClick={onLeave}>Завершить участие</button>
       </div>
       <div className="lk-fallback-devices">

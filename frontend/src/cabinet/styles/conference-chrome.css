@@ -1,0 +1,495 @@
+.video-lesson-page {
+  --vl-blue: #4268e9;
+  --vl-surface: #f4f7fc;
+  --vl-border: #e7ebf3;
+  --vl-text: #16233e;
+  --vl-muted: #8a97ae;
+}
+
+.cf-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #16233e;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.cf-live__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #3cc38a;
+}
+
+.cf-pill {
+  background: transparent;
+  border: 1px solid #e7ebf3;
+  padding: 8px 12px;
+  border-radius: 11px;
+  color: #344463;
+  font-weight: 700;
+  font: inherit;
+  cursor: pointer;
+}
+
+.cf-pill:hover {
+  background: #eaf0ff;
+}
+
+.video-lesson-page:not(.video-lesson-page--compact) .video-lesson-header {
+  background: transparent;
+  border-bottom: 0;
+  min-height: 54px;
+  height: auto;
+  padding: 10px 22px 0;
+}
+
+.video-lesson-page:not(.video-lesson-page--compact) .video-lesson-content {
+  background: #f4f7fc;
+  padding: 8px 16px 12px;
+  gap: 12px;
+}
+
+.video-lesson-page:not(.video-lesson-page--compact) .video-lesson-jitsi-host {
+  border-radius: 23px;
+  background: #1d293c;
+  height: auto;
+}
+
+.video-lesson-page:not(.video-lesson-page--compact) #jitsi-container {
+  background: #1d293c;
+  border-radius: 23px;
+}
+
+.video-lesson-page:not(.video-lesson-page--compact) #jitsi-container > iframe {
+  border-radius: 23px;
+}
+
+.cf-dock {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+  z-index: 3;
+}
+
+.cf-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid #e7ebf3;
+  color: #344463;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.cf-status--reconnecting,
+.cf-status--connecting {
+  background: #edf2ff;
+  border-color: #d9e3ff;
+  color: #2d4cb5;
+}
+
+.cf-status--failed,
+.cf-status--permission {
+  background: #fff6f6;
+  border-color: #ffd7dc;
+  color: #9d3d4c;
+}
+
+.cf-status button,
+.cf-settings__actions button {
+  border: 0;
+  background: #4268e9;
+  color: #fff;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cf-settings__actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.cf-controls {
+  min-height: 74px;
+  border: 1px solid #e7ebf3;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 16px 40px rgba(38, 65, 120, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  gap: 10px;
+}
+
+.cf-controls__group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cf-ctrl {
+  position: relative;
+  min-width: 48px;
+  height: 48px;
+  border: 0;
+  background: #f2f5fa;
+  color: #384866;
+  border-radius: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+.cf-ctrl:hover:not(:disabled) {
+  background: #eaf0ff;
+}
+
+.cf-ctrl:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.cf-ctrl.is-on {
+  background: #e9eeff;
+  color: #4268e9;
+}
+
+.cf-ctrl.is-off {
+  background: #fff0f1;
+  color: #cf5363;
+}
+
+.cf-ctrl.is-end {
+  background: #ed5368;
+  color: #fff;
+  min-width: 56px;
+}
+
+.cf-ctrl.is-end:hover:not(:disabled) {
+  background: #d93f54;
+}
+
+.cf-ctrl svg {
+  width: 20px;
+  height: 20px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.cf-ctrl__badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 99px;
+  background: #4268e9;
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  font-weight: 800;
+}
+
+.cf-settings {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: min(360px, 100%);
+  background: #fff;
+  border: 1px solid #e7ebf3;
+  border-radius: 16px;
+  box-shadow: 0 16px 40px rgba(38, 65, 120, 0.12);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cf-settings__note {
+  margin: 0;
+  color: #7c8ba6;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.cf-settings__row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #53617d;
+}
+
+.cf-settings__row select {
+  font: inherit;
+  font-weight: 600;
+  border: 1px solid #e7ebf3;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #f5f7fc;
+  color: #16233e;
+}
+
+.cf-settings__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cf-side {
+  width: 344px;
+  flex: 0 0 344px;
+  min-height: 0;
+  margin: 8px 16px 12px 0;
+  background: #fff;
+  border: 1px solid #e7ebf3;
+  border-radius: 23px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 16px 40px rgba(38, 65, 120, 0.08);
+}
+
+.cf-side__head {
+  padding: 18px 18px 0;
+}
+
+.cf-side__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cf-side__title {
+  font-size: 17px;
+  letter-spacing: -0.03em;
+  font-weight: 800;
+}
+
+.cf-tabs {
+  display: flex;
+  gap: 6px;
+  border-bottom: 1px solid #e7ebf3;
+  margin-top: 14px;
+}
+
+.cf-tabs button {
+  position: relative;
+  border: 0;
+  background: none;
+  padding: 0 12px 12px;
+  color: #93a0b5;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.cf-tabs button.is-selected {
+  color: #4268e9;
+}
+
+.cf-tabs button.is-selected::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: #4268e9;
+}
+
+.cf-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 18px 18px;
+}
+
+.cf-people {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cf-person {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cf-person.is-speaking .cf-person__avatar {
+  box-shadow: 0 0 0 2px #4268e9;
+}
+
+.cf-person__avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  background: #e7edff;
+  color: #5b70c0;
+  font-weight: 800;
+  font-size: 13px;
+}
+
+.cf-person__avatar.is-peer {
+  background: #f1e9fb;
+  color: #9775bb;
+}
+
+.cf-person__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.cf-person__name {
+  font-weight: 750;
+  font-size: 13px;
+}
+
+.cf-person__role,
+.cf-person__mic {
+  font-size: 11px;
+  margin-top: 3px;
+  color: #98a4b8;
+}
+
+.cf-person__mic.is-off {
+  color: #cf5363;
+}
+
+.cf-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cf-message {
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.cf-message b {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.cf-bubble {
+  padding: 12px;
+  background: #f3f6fc;
+  border-radius: 4px 13px 13px;
+  color: #52617f;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cf-message.is-me .cf-bubble {
+  background: #eaf0ff;
+  border-radius: 13px 4px 13px 13px;
+}
+
+.cf-send {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid #e7ebf3;
+}
+
+.cf-send input {
+  flex: 1;
+  min-width: 0;
+  background: #f5f7fc;
+  border: 1px solid #edf0f6;
+  border-radius: 11px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.cf-send button {
+  border: 0;
+  background: #4268e9;
+  color: #fff;
+  width: 40px;
+  border-radius: 11px;
+  cursor: pointer;
+}
+
+@media (max-width: 760px) {
+  .video-lesson-page:not(.video-lesson-page--compact) .video-lesson-content {
+    padding: 6px 8px calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .video-lesson-page:not(.video-lesson-page--compact) .video-lesson-jitsi-host,
+  .video-lesson-page:not(.video-lesson-page--compact) #jitsi-container,
+  .video-lesson-page:not(.video-lesson-page--compact) #jitsi-container > iframe {
+    border-radius: 17px;
+  }
+
+  .cf-controls {
+    min-height: 68px;
+    border-radius: 16px;
+    padding: 8px;
+    justify-content: center;
+  }
+
+  .cf-controls__group {
+    gap: 6px;
+  }
+
+  .cf-ctrl {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    padding: 0;
+  }
+
+  .cf-side {
+    display: flex;
+    position: fixed;
+    z-index: 16;
+    left: 8px;
+    right: 8px;
+    bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+    width: auto;
+    flex: none;
+    height: 48dvh;
+    max-height: 440px;
+    margin: 0;
+  }
+}
+
+@media (max-width: 390px) {
+  .cf-ctrl {
+    width: 40px;
+    min-width: 40px;
+  }
+
+  .cf-controls__group {
+    gap: 4px;
+  }
+}

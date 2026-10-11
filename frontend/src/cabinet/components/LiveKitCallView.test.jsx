@@ -60,7 +60,7 @@ vi.mock("livekit-client", () => {
   };
 });
 
-import LiveKitCallView, { collectTiles } from "./LiveKitCallView";
+import LiveKitCallView, { audioOnlyForTileRefresh, collectTiles } from "./LiveKitCallView";
 
 describe("LiveKitCallView", () => {
   beforeEach(() => {
@@ -83,6 +83,29 @@ describe("LiveKitCallView", () => {
     expect(await screen.findByRole("button", { name: "Включить микрофон" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Включить камеру" })).toBeTruthy();
     expect(room.connect).toHaveBeenCalledWith("wss://video.example.test", "header.payload.sig");
+  });
+
+  it("keeps other participants visible when a local camera or microphone is published", () => {
+    const remoteCamera = { id: "remote-cam" };
+    const localCamera = { id: "local-cam" };
+    const sample = {
+      localParticipant: {
+        name: "Вы",
+        getTrackPublication: (source) => (source === "camera" ? { track: localCamera } : null),
+      },
+      remoteParticipants: new Map([
+        ["p2", {
+          identity: "p2",
+          name: "Ученик",
+          getTrackPublication: (source) => (source === "camera" ? { track: remoteCamera } : null),
+        }],
+      ]),
+    };
+    const publishedTrack = { kind: "video", source: "camera" };
+    const audioOnly = audioOnlyForTileRefresh(publishedTrack, false);
+    const { tiles } = collectTiles(sample, { audioOnly });
+    expect(audioOnly).toBe(false);
+    expect(tiles.map((tile) => tile.key)).toEqual(["local-camera", "p2-camera"]);
   });
 
   it("does not play the local microphone back into the room", () => {

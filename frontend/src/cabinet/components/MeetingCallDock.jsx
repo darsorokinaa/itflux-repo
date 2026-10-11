@@ -14,7 +14,7 @@ import {
   setMeetingCameraEnabled,
   setMeetingMicEnabled,
 } from "../jitsiMeet";
-import { createHardReconnectPolicy } from "../jitsiMediaWatchdog";
+import { createHardReconnectPolicy, withReconnectJitter } from "../jitsiMediaWatchdog";
 import { getMeetingAttendanceTracker } from "../meetingAttendance";
 import {
   claimMeetingCall,
@@ -364,9 +364,10 @@ export default function MeetingCallDock() {
         setError("Не удалось восстановить соединение.");
         return;
       }
-      if (slot.delayMs > 0) {
+      const waitMs = withReconnectJitter(slot.delayMs);
+      if (waitMs > 0) {
         await new Promise((resolve) => {
-          window.setTimeout(resolve, slot.delayMs);
+          window.setTimeout(resolve, waitMs);
         });
       }
       if (cancelled || returning) {

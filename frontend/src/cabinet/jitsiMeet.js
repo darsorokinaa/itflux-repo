@@ -23,6 +23,7 @@ import {
   reportMeetingTechnicalEvent,
 } from "./jitsiTelemetry";
 import { reportClientEvent } from "../utils/clientTelemetry";
+import { describeConferenceClient, logConferenceStage } from "./conferenceDiagnostics";
 import {
   logLifecycle,
   registerJitsiSession,
@@ -361,7 +362,13 @@ export const JITSI_EXPANDED_TOOLBAR = [
 /** Панель видна сразу и в компактном окне: на планшете нет hover, автоскрытие прячет кнопки. */
 export const JITSI_TOOLBAR_VISIBLE = { alwaysVisible: true, initialTimeout: 0, timeout: 0 };
 
-export function jitsiCallChromeConfig(expanded) {
+export function jitsiCallChromeConfig(expanded, { custom = false } = {}) {
+  if (custom && !expanded) {
+    return {
+      toolbarButtons: [],
+      toolbarConfig: { alwaysVisible: false, initialTimeout: 0, timeout: 0 },
+    };
+  }
   return {
     toolbarButtons: expanded ? JITSI_EXPANDED_TOOLBAR : JITSI_COMPACT_TOOLBAR,
     toolbarConfig: JITSI_TOOLBAR_VISIBLE,
@@ -385,9 +392,10 @@ export function notifyJitsiContainerResize(api) {
 }
 
 /** Меняет панель Jitsi без переподключения. В компактном виде остаётся короткий набор. */
-export function applyJitsiCallChrome(api, { expanded = false } = {}) {
-  if (!api || typeof api.executeCommand !== "function") return;
-  api.executeCommand("overwriteConfig", jitsiCallChromeConfig(expanded));
+export function applyJitsiCallChrome(api, { expanded = false, custom = false } = {}) {
+  const session = api?.api || api;
+  if (!session || typeof session.executeCommand !== "function") return;
+  session.executeCommand("overwriteConfig", jitsiCallChromeConfig(expanded, { custom }));
 }
 
 /**
@@ -400,6 +408,7 @@ export function buildJitsiConfigOverwrite({
   startWithVideoMuted = false,
   startWithAudioMuted = true,
   domain,
+  customChrome = false,
 } = {}) {
   const title = String(subject || "").trim() || "Урок";
   const hosts = buildJitsiHostsOverwrite(domain);
@@ -423,8 +432,10 @@ export function buildJitsiConfigOverwrite({
     hideConferenceTimer: true,
     disableModeratorIndicator: false,
     enableClosePage: false,
-    toolbarButtons: JITSI_COMPACT_TOOLBAR,
-    toolbarConfig: JITSI_TOOLBAR_VISIBLE,
+    toolbarButtons: customChrome ? [] : JITSI_COMPACT_TOOLBAR,
+    toolbarConfig: customChrome
+      ? { alwaysVisible: false, initialTimeout: 0, timeout: 0 }
+      : JITSI_TOOLBAR_VISIBLE,
     // 1:1 режим Jitsi оставляет один крупный кадр. Выключение локальной камеры
     // переносит аватар ученика на сцену и прячет учителя в обрезанный filmstrip.
     disable1On1Mode: true,
@@ -488,7 +499,7 @@ export function buildJitsiInterfaceConfigOverwrite() {
     VIDEO_LAYOUT_FIT: "both",
     VERTICAL_FILMSTRIP: true,
     FILM_STRIP_MAX_HEIGHT: 80,
-    DEFAULT_BACKGROUND: "#0f172a",
+    DEFAULT_BACKGROUND: "#1d293c",
   };
 }
 
@@ -575,8 +586,40 @@ export function stripNullJitsiLocalStorageContentFromUrl(url) {
   return kept.length ? `${base}#${kept.join("&")}` : base;
 }
 
+const JITSI_IFRAME_ALLOW = [
+  "camera",
+  "microphone",
+  "display-capture",
+  "autoplay",
+  "clipboard-write",
+  "fullscreen",
+  "picture-in-picture",
+];
+
+/** Дописывает разрешения iframe до загрузки конференции. Не запрашивает устройства само. */
+export function ensureJitsiIframeMediaAllow(iframe) {
+  if (!iframe) return iframe;
+  try {
+    const current = String(iframe.allow || iframe.getAttribute?.("allow") || "");
+    const parts = current.split(/;\s*/).map((part) => part.trim()).filter(Boolean);
+    const have = new Set(parts.map((part) => part.toLowerCase()));
+    for (const token of JITSI_IFRAME_ALLOW) {
+      if (!have.has(token)) parts.push(token);
+    }
+    const next = parts.join("; ");
+    if (next !== current) {
+      iframe.allow = next;
+      iframe.setAttribute?.("allow", next);
+    }
+  } catch {
+    /* ignore */
+  }
+  return iframe;
+}
+
 export function sanitizeJitsiIframeElement(iframe) {
   if (!iframe) return iframe;
+  ensureJitsiIframeMediaAllow(iframe);
   try {
     const src = iframe.src || iframe.getAttribute?.("src") || "";
     const next = stripNullJitsiLocalStorageContentFromUrl(src);
@@ -635,6 +678,7 @@ export function hookContainerForJitsiIframeSanitize(container) {
     if (node && String(node.tagName || "").toUpperCase() === "IFRAME") {
       interceptIframeSrc(node);
       sanitizeJitsiIframeElement(node);
+      ensureJitsiIframeMediaAllow(node);
     }
     return originalAppend.call(this, node);
   };
@@ -1223,6 +1267,10 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
   });
 
   const JitsiMeetExternalAPI = await loadJitsiExternalApi(domain, { scriptUrl: config.scriptUrl || "" });
+  logConferenceStage("script_ready", {
+    diagId: String(config.diagnostics?.callSessionId || ""),
+    ...describeConferenceClient(),
+  });
   if (hooks.signal?.aborted) {
     const err = new Error("Подключение к конференции отменено");
     err.code = "jitsi_aborted";
@@ -1244,6 +1292,7 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
       startWithVideoMuted,
       startWithAudioMuted,
       domain,
+      customChrome: Boolean(config.customChrome),
     }),
     interfaceConfigOverwrite: buildJitsiInterfaceConfigOverwrite(),
     userInfo: {
@@ -1296,9 +1345,14 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
   }
   try {
     sanitizeJitsiIframeElement(api.getIFrame?.());
+    ensureJitsiIframeMediaAllow(api.getIFrame?.());
   } catch {
     /* ignore */
   }
+  logConferenceStage("conference_created", {
+    diagId: String(diagnostics.callSessionId || ""),
+    hasIframe: Boolean(api.getIFrame?.()),
+  });
   logJitsiDiagnostic("jitsi_iframe_created", {
     meetingUuid: diagnostics.meetingUuid,
     roomSuffix: roomName.slice(-8),
@@ -1322,6 +1376,10 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
     if (activeSessionDispose === disposeSession) activeSessionDispose = null;
     unregisterJitsiSession(sessionHolder.current);
     unhookAppend();
+    logConferenceStage("disconnect", {
+      diagId: String(diagnostics.callSessionId || ""),
+      reason: String(reason || "").slice(0, 32),
+    });
     logJitsiDiagnostic("jitsi_disposed", {
       reason,
       meetingUuid: diagnostics.meetingUuid,
@@ -1449,6 +1507,9 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
   };
   sessionHolder.current = session;
   registerJitsiSession(session);
+  logConferenceStage("room_joined", {
+    diagId: String(diagnostics.callSessionId || ""),
+  });
   logLifecycle("JITSI_INIT", { roomSuffix: roomName.slice(-8) });
   return session;
 }
