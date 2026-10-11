@@ -131,6 +131,16 @@ export default function WorkbookCreateBar({
           <label className="workbook-create-bar__option">
             <input
               type="checkbox"
+              checked={options.showTaskIds}
+              onChange={(e) =>
+                setOptions((prev) => ({ ...prev, showTaskIds: e.target.checked }))
+              }
+            />
+            ID задач
+          </label>
+          <label className="workbook-create-bar__option">
+            <input
+              type="checkbox"
               checked={options.showStudentLine}
               onChange={(e) =>
                 setOptions((prev) => ({ ...prev, showStudentLine: e.target.checked }))

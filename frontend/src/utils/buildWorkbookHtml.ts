@@ -56,7 +56,7 @@ export type WorkbookOptions = {
   showAnswers?: boolean;
   /** Отдельный лист ответов. */
   showAnswerKey?: boolean;
-  /** ID задач. Шаблон их не показывает. */
+  /** Номер задания из банка рядом с номером на листе. */
   showTaskIds?: boolean;
   /** Строка «Фамилия, имя» на листе. В PDF её можно выключить галочкой «ФИО». */
   showStudentLine?: boolean;
@@ -123,6 +123,8 @@ export type ExamTemplateTask = {
   materials?: ExamTemplateMaterial[];
   answer?: string;
   answerStyle?: "none";
+  /** ID задания в банке. На листе виден, только если включена галочка. */
+  id?: number;
 };
 
 export type ExamTemplateDocument = {
@@ -152,6 +154,7 @@ export type ExamTemplateDocument = {
     showWatermark: boolean;
     showAlternatives: boolean;
     showAnswerKey: boolean;
+    showTaskIds: boolean;
     showStudentName: boolean;
     showStudentDate: boolean;
     solutionLines: number;
@@ -389,6 +392,119 @@ function figureAlt(value: string | null | undefined): string {
   return alt;
 }
 
+function normalizedLabel(value: string): string {
+  return value.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function listStart(ol: Element): number {
+  const start = Number(ol.getAttribute("start"));
+  return Number.isInteger(start) && start >= 1 ? start : 1;
+}
+
+function isBareIndexLabel(value: string, n: number): boolean {
+  const text = normalizedLabel(value);
+  return text === String(n) || text === `${n}.` || text === `${n})`;
+}
+
+function hasVisibleRemainder(el: HTMLElement): boolean {
+  return Boolean(normalizedLabel(el.textContent || "") || el.querySelector("img, svg, math, table"));
+}
+
+/** Печатный лист сам ставит «1.» у <ol>. Бейдж варианта и «1)» в тексте дают второй номер. */
+function dedupePrintedListNumbers(root: HTMLElement): void {
+  for (const ol of [...root.querySelectorAll("ol")]) {
+    const items = [...ol.children].filter((el): el is HTMLElement => el.localName === "li");
+    if (items.length < 2) continue;
+    const start = listStart(ol);
+    const choice = ol.classList.contains("oge-math-choice-options");
+
+    for (const li of items) {
+      const badges = [...li.querySelectorAll(".oge-math-choice-option__num")];
+      if (!badges.length) continue;
+      const rest = li.cloneNode(true) as HTMLElement;
+      rest.querySelectorAll(".oge-math-choice-option__num").forEach((el) => el.remove());
+      if (hasVisibleRemainder(rest)) badges.forEach((el) => el.remove());
+    }
+
+    const plainBadges = items.map((li, index) => plainIndexBadge(li, start + index));
+    if (plainBadges.every(Boolean)) plainBadges.forEach((badge) => badge?.remove());
+
+    items.forEach((li, index) => {
+      if (choice) unwrapSoleFlow(li);
+      stripLeadingPunctuatedIndex(li, start + index);
+      if (choice) inlineDisplayMath(li);
+    });
+  }
+}
+
+function plainIndexBadge(li: HTMLElement, n: number): Element | null {
+  const first = [...li.childNodes].find((node) => {
+    if (node.nodeType === Node.TEXT_NODE) return Boolean(normalizedLabel(node.textContent || ""));
+    return node.nodeType === Node.ELEMENT_NODE;
+  });
+  if (!first || first.nodeType !== Node.ELEMENT_NODE) return null;
+  const el = first as Element;
+  if (!["span", "b", "strong"].includes(el.localName)) return null;
+  if (!isBareIndexLabel(el.textContent || "", n)) return null;
+  const rest = li.cloneNode(true) as HTMLElement;
+  const same = [...rest.childNodes].find((node) => node.nodeType === Node.ELEMENT_NODE);
+  same?.remove();
+  return hasVisibleRemainder(rest) ? el : null;
+}
+
+function unwrapSoleFlow(li: HTMLElement): void {
+  let guard = 0;
+  while (guard < 6 && li.children.length === 1) {
+    const only = li.children[0];
+    if (!only || !["p", "div", "span"].includes(only.localName)) break;
+    if (only.querySelector("table, ul, ol")) break;
+    while (only.firstChild) li.insertBefore(only.firstChild, only);
+    only.remove();
+    guard += 1;
+  }
+}
+
+function stripLeadingPunctuatedIndex(li: HTMLElement, n: number): void {
+  const walker = document.createTreeWalker(li, NodeFilter.SHOW_TEXT);
+  const texts: Text[] = [];
+  while (walker.nextNode()) texts.push(walker.currentNode as Text);
+  const index = texts.findIndex((node) => normalizedLabel(node.data));
+  if (index < 0) return;
+  const node = texts[index];
+  const original = node.data;
+  const next = texts[index + 1];
+  const nextOriginal = next?.data;
+  const inline = new RegExp(`^\\s*${n}[.)]\\s+`);
+  const alone = new RegExp(`^\\s*${n}[.)]\\s*$`);
+  if (inline.test(original)) {
+    node.data = original.replace(inline, "");
+  } else if (alone.test(original)) {
+    node.data = "";
+    if (next && /^\s+/.test(next.data)) next.data = next.data.replace(/^\s+/, "");
+  } else {
+    return;
+  }
+  if (!hasVisibleRemainder(li)) {
+    node.data = original;
+    if (next && nextOriginal != null) next.data = nextOriginal;
+  }
+}
+
+function inlineDisplayMath(root: ParentNode): void {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  let current = walker.nextNode();
+  while (current) {
+    nodes.push(current as Text);
+    current = walker.nextNode();
+  }
+  for (const node of nodes) {
+    node.data = node.data
+      .replace(/\$\$([\s\S]+?)\$\$/g, (_match, tex: string) => `$${tex}$`)
+      .replace(/\\\[([\s\S]+?)\\\]/g, (_match, tex: string) => `\\(${tex}\\)`);
+  }
+}
+
 function convertDollarMathIn(root: ParentNode): void {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const nodes: Text[] = [];
@@ -486,6 +602,7 @@ function sanitizeTaskHtml(
     img.setAttribute("alt", figureAlt(img.getAttribute("alt")));
   }
 
+  dedupePrintedListNumbers(root);
   convertDollarMathIn(root);
 
   for (const el of [...root.querySelectorAll("*")]) {
@@ -526,6 +643,8 @@ function buildTemplateTask(
   const materials = taskMaterials(task);
   const answer = dollarToKatex(plainText(task.answer || "", subject, level));
   const result: ExamTemplateTask = { number, part };
+  const taskId = Number(task.id);
+  if (Number.isInteger(taskId) && taskId > 0) result.id = taskId;
   if (materials.length) result.materials = materials;
   if (html) result.html = html;
   else if (!body.figure) result.text = plainText(task.text || "", subject, level) || " ";
@@ -574,6 +693,7 @@ export function buildExamTemplateDocument(tasks: WorkbookTask[], meta: WorkbookM
       showWatermark: false,
       showAlternatives: false,
       showAnswerKey: options.showAnswerKey,
+      showTaskIds: options.showTaskIds,
       showStudentName: options.showStudentLine,
       showStudentDate: options.showDateLine,
       solutionLines: options.showSolutionSpace ? 8 : 0,

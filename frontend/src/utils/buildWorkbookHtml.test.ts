@@ -29,6 +29,8 @@ describe("buildExamTemplateDocument", () => {
     expect(doc.tasks.map((task) => task.number)).toEqual(["1"]);
     expect(doc.tasks[0]?.html || doc.tasks[0]?.text).toContain("Условие");
     expect(doc.options.includeCover).toBe(false);
+    expect(doc.options.showTaskIds).toBe(false);
+    expect(doc.tasks[0]?.id).toBe(10);
     expect(doc.options.showWatermark).toBe(false);
     expect(doc.options.layout).toBe("spread");
   });
@@ -143,6 +145,79 @@ describe("buildExamTemplateDocument", () => {
     const template = readFileSync(templatePath, "utf8");
     expect(template).toContain(".prompt-text img.illustration{");
     expect(template).toContain("illustration");
+  });
+
+  it("keeps the bank id and turns it on with the task-id checkbox", () => {
+    const tasks = [{ id: 1842, task_number: 6, text: "Какое из чисел принадлежит промежутку?" }];
+    const hidden = buildExamTemplateDocument(tasks, { title: "Лист", mode: "workbook", subject: "math" });
+    expect(hidden.tasks[0]?.id).toBe(1842);
+    expect(hidden.options.showTaskIds).toBe(false);
+    const shown = buildExamTemplateDocument(tasks, {
+      title: "Вариант",
+      mode: "variant",
+      subject: "math",
+      level: "ege",
+      options: { ...VARIANT_PDF_OPTIONS, showTaskIds: true },
+    });
+    expect(shown.options.showTaskIds).toBe(true);
+    expect(shown.tasks[0]?.id).toBe(1842);
+    const template = readFileSync(templatePath, "utf8");
+    expect(template).toContain('id="task-ids"');
+    expect(template).toContain("task-id-note");
+    expect(template).toContain("showTaskIds");
+  });
+
+  it("prints a choice option once, with the formula on the same line", () => {
+    const doc = buildExamTemplateDocument(
+      [
+        {
+          id: 6,
+          task_number: 6,
+          text: `<table>
+            <tr><td colspan="2">Какое из чисел принадлежит промежутку [7; 8]?</td></tr>
+            <tr><td><b>1)</b></td><td>$$\\sqrt{7}$$</td></tr>
+            <tr><td><b>2)</b></td><td>$$\\sqrt{8}$$</td></tr>
+            <tr><td><b>3)</b></td><td>$$\\sqrt{48}$$</td></tr>
+            <tr><td><b>4)</b></td><td>$$\\sqrt{56}$$</td></tr>
+          </table>`,
+        },
+      ],
+      { title: "Лист", mode: "workbook", subject: "math", level: "oge" }
+    );
+    const html = doc.tasks[0]?.html || "";
+    const holder = document.createElement("div");
+    holder.innerHTML = html;
+    const items = [...holder.querySelectorAll("ol.oge-math-choice-options > li")];
+    expect(items).toHaveLength(4);
+    expect(html).not.toContain("oge-math-choice-option__num");
+    expect(items.map((li) => (li.textContent || "").replace(/\s+/g, " ").trim())).toEqual([
+      "\\(\\sqrt{7}\\)",
+      "\\(\\sqrt{8}\\)",
+      "\\(\\sqrt{48}\\)",
+      "\\(\\sqrt{56}\\)",
+    ]);
+    expect(holder.textContent || "").toContain("промежутку");
+  });
+
+  it("drops a repeated index that is already inside an ordered list", () => {
+    const doc = buildExamTemplateDocument(
+      [
+        {
+          id: 2,
+          task_number: 2,
+          text: `<ol><li><b>1)</b> $$\\sqrt{7}$$</li><li><b>2)</b> $$\\sqrt{8}$$</li></ol>`,
+        },
+      ],
+      { title: "Вариант", mode: "variant", subject: "math", level: "oge" }
+    );
+    const holder = document.createElement("div");
+    holder.innerHTML = doc.tasks[0]?.html || "";
+    const items = [...holder.querySelectorAll("ol > li")];
+    expect(items.map((li) => (li.textContent || "").replace(/\s+/g, " ").trim())).toEqual([
+      "\\[\\sqrt{7}\\]",
+      "\\[\\sqrt{8}\\]",
+    ]);
+    expect(items.some((li) => /^\s*1\)/.test(li.textContent || ""))).toBe(false);
   });
 
   it("prints OGE math tasks 1-5 pictures twice as wide on the worksheet", () => {

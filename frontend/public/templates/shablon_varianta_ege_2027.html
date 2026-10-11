@@ -87,7 +87,8 @@ input[type=number]{background:white;color:#3e4554;padding:6px 9px;border:1px sol
 .task{position:relative;margin:0 0 6.8mm;break-inside:avoid;page-break-inside:avoid;min-height:5mm}
 .task-number{position:absolute;left:-11.4mm;top:-.6mm;min-width:9.3mm;height:4.9mm;border:.15mm solid #000;display:flex;justify-content:center;align-items:center;padding:0 .5mm;font-size:9.66pt;font-weight:700;line-height:1.1}
 .task-number.continued{font-size:8pt}
-.task-number .continue-note{position:absolute;top:5.1mm;font-size:5.3pt;font-weight:400;white-space:nowrap}
+.task-number .continue-note,.task-number .task-id-note{position:absolute;top:5.1mm;left:0;font-size:5.3pt;font-weight:400;line-height:1.1;white-space:nowrap}
+.task-number .task-id-note{font-weight:600}
 .task-main{display:flow-root}
 .prompt{display:flow-root}
 .prompt-text{text-align:justify;overflow-wrap:break-word}
@@ -124,6 +125,8 @@ input[type=number]{background:white;color:#3e4554;padding:6px 9px;border:1px sol
 .task th:first-child,.task td:first-child{text-align:left}
 .task table th:first-child{width:40%}
 .task ol,.task ul{margin:1mm 0;padding-left:4.5mm}
+.task ol .katex-display{display:inline;margin:0}
+.task ol .katex-display>.katex{display:inline-block;white-space:nowrap}
 .solution-title{font-style:italic;margin-top:4mm;margin-bottom:1.5mm}
 .work-rule{height:6mm;border-bottom:.13mm solid #b6b6b6}
 .work-grid{height:5mm;background-image:linear-gradient(to right,#ddd .13mm,transparent .13mm),linear-gradient(to bottom,#ddd .13mm,transparent .13mm);background-size:5mm 5mm;border-right:.13mm solid #ddd;border-bottom:.13mm solid #ddd}
@@ -1261,6 +1264,7 @@ License: CC-BY-4.0
   <label class="field"><input id="answers" type="checkbox">Ответы отдельно</label>
   <label class="field"><input id="student-name" type="checkbox">ФИО</label>
   <label class="field"><input id="student-date" type="checkbox">Дата</label>
+  <label class="field"><input id="task-ids" type="checkbox">ID задач</label>
   <span class="field">Место для решения
    <label class="field"><input id="space-grid" type="radio" name="solution-style" value="grid">Клетки</label>
    <label class="field"><input id="space-lines" type="radio" name="solution-style" value="lines" checked>Линейка</label>
@@ -1520,7 +1524,7 @@ await page.pdf({ preferCSSPageSize: true,
 'use strict';
 const $ = id => document.getElementById(id);
 const clone = value => JSON.parse(JSON.stringify(value));
-const defaults = {mode:'exam', title:'Тренировочный вариант', subject:'МАТЕМАТИКА', grade:'11', year:'2027', level:'Профильный уровень', variant:'1', duration:235, startPage:1, headerLeft:'', footer:'Цифровой поток • Учебные материалы', watermark:'ПРОЕКТ ЕГЭ 2027', options:{layout:'spread',includeCover:true,showWatermark:true,showAlternatives:true,showAnswerKey:false,solutionLines:0,solutionStyle:'lines'}};
+const defaults = {mode:'exam', title:'Тренировочный вариант', subject:'МАТЕМАТИКА', grade:'11', year:'2027', level:'Профильный уровень', variant:'1', duration:235, startPage:1, headerLeft:'', footer:'Цифровой поток • Учебные материалы', watermark:'ПРОЕКТ ЕГЭ 2027', options:{layout:'spread',includeCover:true,showWatermark:true,showAlternatives:true,showAnswerKey:false,showTaskIds:false,solutionLines:0,solutionStyle:'lines'}};
 let current, renderSerial=0, lastResult=null, isRendering=false;
 let initialized=false;
 const originalData=JSON.parse($('document-data').textContent);
@@ -1620,10 +1624,15 @@ function appendSimple(el){
  if(!fits(el))errors.push('Блок документа превышает высоту страницы. Сократите его или разделите на абзацы.');
  return el;
 }
-function makeNumber(number,continued=false){const box=node('div','task-number'+(continued?' continued':''),number);if(continued)box.append(node('span','continue-note','продолжение'));return box;}
+function taskIdLabel(task){
+ const text=String(task&&task.id!=null?task.id:'').trim();
+ return /^\d{1,12}$/.test(text)&&text!=='0'?text:'';
+}
+function showTaskIds(){return current.options.showTaskIds===true;}
+function makeNumber(number,continued=false,task){const box=node('div','task-number'+(continued?' continued':''),number);if(continued)box.append(node('span','continue-note','продолжение'));else if(showTaskIds()){const id=taskIdLabel(task);if(id)box.append(node('span','task-id-note',id));}return box;}
 function articleShell(task,continued=false,alternative=false){
  const article=node('article','task'+(alternative?' alternative':''));article.dataset.number=task.number;article.dataset.part=task.part;
- if(!alternative||continued)article.append(makeNumber(task.number,continued));
+ if(!alternative||continued)article.append(makeNumber(task.number,continued,task));
  const main=node('div','task-main');article.append(main);return article;
 }
 function makeFigure(fig){
@@ -1881,7 +1890,7 @@ function finalizeSheets(sheetUrl){
  applyZoom();
 }
 function syncControls(){
- $('mode').value=current.mode;$('layout').value=current.options.layout;$('cover').checked=current.options.includeCover;$('cover').disabled=current.mode==='worksheet';$('watermark').checked=current.options.showWatermark;$('answers').checked=current.options.showAnswerKey;$('alternatives').checked=current.options.showAlternatives;$('student-name').checked=showStudentName();$('student-date').checked=showStudentDate();
+ $('mode').value=current.mode;$('layout').value=current.options.layout;$('cover').checked=current.options.includeCover;$('cover').disabled=current.mode==='worksheet';$('watermark').checked=current.options.showWatermark;$('answers').checked=current.options.showAnswerKey;$('alternatives').checked=current.options.showAlternatives;$('student-name').checked=showStudentName();$('student-date').checked=showStudentDate();$('task-ids').checked=showTaskIds();
  const lines=Math.floor(clamp(current.options.solutionLines,0,100,0));const preset=['0','4','8','12'].includes(String(lines));$('space-grid').checked=current.options.solutionStyle==='grid';$('space-lines').checked=current.options.solutionStyle!=='grid';$('space').value=preset?String(lines):'custom';$('space-custom').value=String(lines);$('space-custom-wrap').hidden=preset;
  document.title=downloadTitle()+' • Цифровой поток';
 }
@@ -1966,7 +1975,7 @@ $('print-button').addEventListener('click',async()=>{await window.ExamTemplate.r
 if($('save-button'))$('save-button').addEventListener('click',saveHtml);
 $('mode').addEventListener('change',()=>{current.mode=$('mode').value;if(current.title===defaults.title||current.title==='Рабочий лист')current.title=current.mode==='worksheet'?'Рабочий лист':defaults.title;if(!current.headerLeft||current.headerLeft===`Тренировочный вариант ЕГЭ ${current.year} г.`||current.headerLeft==='Рабочий лист')current.headerLeft='';if(current.mode==='worksheet'){current.options.includeCover=false;current.options.solutionLines=4;current.options.showAlternatives=false;current.options.showWatermark=false;}else{current.options.solutionLines=0;current.options.includeCover=true;}rerender();});
 $('layout').addEventListener('change',()=>{current.options.layout=$('layout').value;rerender();});
-for(const [id,key] of [['cover','includeCover'],['watermark','showWatermark'],['answers','showAnswerKey'],['alternatives','showAlternatives'],['student-name','showStudentName'],['student-date','showStudentDate']])$(id).addEventListener('change',()=>{current.options[key]=$(id).checked;rerender();});
+for(const [id,key] of [['cover','includeCover'],['watermark','showWatermark'],['answers','showAnswerKey'],['alternatives','showAlternatives'],['student-name','showStudentName'],['student-date','showStudentDate'],['task-ids','showTaskIds']])$(id).addEventListener('change',()=>{current.options[key]=$(id).checked;rerender();});
 function applySolutionSpace(){const picked=[...document.querySelectorAll('input[name="solution-style"]')].find(el=>el.checked);current.options.solutionStyle=picked&&picked.value==='grid'?'grid':'lines';const custom=$('space').value==='custom';$('space-custom-wrap').hidden=!custom;current.options.solutionLines=Math.floor(clamp(custom?$('space-custom').value:$('space').value,0,100,0));rerender();}
 for(const el of document.querySelectorAll('input[name="solution-style"]'))el.addEventListener('change',applySolutionSpace);
 $('space').addEventListener('change',()=>{if($('space').value==='custom'){$('space-custom-wrap').hidden=false;$('space-custom').focus();$('space-custom').select();return;}applySolutionSpace();});

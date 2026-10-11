@@ -52,6 +52,19 @@ describe("formatNumberedTaskBlocksHtml", () => {
     expect(out).toContain("Для файла A:");
   });
 
+  it("strips a number that sits alone inside a tag", () => {
+    const html = `
+      <p><b>1.</b> Определите центр.</p>
+      <p><b>2.</b> Найдите расстояние.</p>
+    `;
+    const out = formatNumberedTaskBlocksHtml(html);
+    expect(out).toContain("<ol");
+    expect(out).not.toMatch(/<b>\s*1\./);
+    expect(out).not.toMatch(/<b>\s*2\./);
+    expect(out).toContain("Определите центр");
+    expect(out).toContain("Найдите расстояние");
+  });
+
   it("does not wrap a single numbered paragraph", () => {
     const html = "<p>1. Введение в тему кластеров.</p>";
     const out = formatNumberedTaskBlocksHtml(html);

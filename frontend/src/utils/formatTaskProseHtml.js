@@ -98,11 +98,22 @@ function isProseBlock(el) {
 
 function stripLeadingItemNumber(el) {
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-  while (walker.nextNode()) {
-    const node = walker.currentNode;
-    if (!(node.nodeValue || "").trim()) continue;
-    node.nodeValue = node.nodeValue.replace(/^\s*\d+\.\s+/, "");
-    break;
+  const texts = [];
+  while (walker.nextNode()) texts.push(walker.currentNode);
+  const index = texts.findIndex((node) => (node.nodeValue || "").trim());
+  if (index < 0) return;
+  const node = texts[index];
+  const value = node.nodeValue || "";
+  if (/^\s*\d+\.\s+/.test(value)) {
+    node.nodeValue = value.replace(/^\s*\d+\.\s+/, "");
+    return;
+  }
+  // «<b>1.</b> текст» — номер в своём узле, пробел уже в следующем.
+  if (!/^\s*\d+[.)]\s*$/.test(value)) return;
+  node.nodeValue = "";
+  const next = texts[index + 1];
+  if (next && /^\s+/.test(next.nodeValue || "")) {
+    next.nodeValue = (next.nodeValue || "").replace(/^\s+/, "");
   }
 }
 
@@ -232,7 +243,9 @@ function promoteNumberedBrLines(el) {
 
 export function formatNumberedTaskBlocksHtml(html) {
   if (html == null || typeof html !== "string") return html;
-  if (!/(?:^|>)\s*\d+\.\s+\S/m.test(html) && !/\d+\.\s+\S/.test(html)) return html;
+  const hasNumberedLine = /(?:^|>)\s*\d+\.\s+\S/m.test(html) || /\d+\.\s+\S/.test(html);
+  const hasTaggedNumber = /\d+[.)]\s*<\/(?:b|strong)>\s*\S/i.test(html);
+  if (!hasNumberedLine && !hasTaggedNumber) return html;
   if (typeof document === "undefined") return html;
   const root = parseTaskHtmlFragment(html);
   if (!root) return html;
