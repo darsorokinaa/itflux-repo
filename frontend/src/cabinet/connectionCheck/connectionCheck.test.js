@@ -100,7 +100,9 @@ describe("probeConnectionQuality", () => {
     const fetchImpl = vi.fn(async () => ({ ok: true, status: 200 }));
     const result = await probeConnectionQuality({ fetchImpl });
     expect(result.status).toBe("good");
-    expect(result.label).not.toMatch(/packet loss|ICE|WebRTC/i);
+    expect(result.label).toBe("Платформа отвечает");
+    expect(result.label).not.toMatch(/хорошее соединение/i);
+    expect(result.detail).toMatch(/не проверка звука/i);
   });
 
   it("classifies total failure as poor without using only navigator.onLine", async () => {

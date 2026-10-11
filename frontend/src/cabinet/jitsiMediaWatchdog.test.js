@@ -6,6 +6,7 @@ import {
   detectImpossibleMediaState,
   attachMediaWatchdog,
   createHardReconnectPolicy,
+  decideHardReconnect,
   shouldRecoverFromJitsiEvent,
   syncJitsiAudioDevices,
   audioDeviceStillPresent,
@@ -42,6 +43,8 @@ describe("classifyMediaError", () => {
     expect(classifyMediaError({ message: "Could not start video source" }, "camera").code).toBe("device_busy");
     expect(classifyMediaError({ message: "ended" }, "mic").code).toBe("track_ended");
     expect(classifyMediaError({ name: "NotAllowedError" }, "mic").message).toMatch(/микрофон/i);
+    expect(classifyMediaError({ name: "AbortError" }, "mic").code).toBe("capture_aborted");
+    expect(classifyMediaError({ name: "AbortError" }, "camera").message).toMatch(/камер/i);
   });
 });
 
@@ -179,6 +182,33 @@ describe("createHardReconnectPolicy", () => {
     expect(policy.consumeAttempt()).toEqual({ attempt: 1, delayMs: 0 });
     expect(policy.consumeAttempt()).toBeNull();
   });
+
+  it("keeps the in-flight attempt when a duplicate failure arrives", () => {
+    const policy = createHardReconnectPolicy({ stableMs: 0 });
+    const first = decideHardReconnect({ intentionalLeave: false, policy });
+    const second = decideHardReconnect({ intentionalLeave: false, policy });
+    expect(first.action).toBe("start");
+    expect(second.action).toBe("wait");
+    expect(policy.snapshot().inFlight).toBe(true);
+    expect(policy.snapshot().attempts).toBe(1);
+  });
+
+  it("stops recovery when the user is leaving", () => {
+    const policy = createHardReconnectPolicy({ stableMs: 0 });
+    const decision = decideHardReconnect({ intentionalLeave: true, policy });
+    expect(decision.action).toBe("stop");
+    expect(policy.snapshot().attempts).toBe(0);
+    expect(policy.snapshot().inFlight).toBe(false);
+  });
+
+  it("reports exhaustion only after the attempts are used", () => {
+    const policy = createHardReconnectPolicy({ stableMs: 0 });
+    for (let i = 0; i < 3; i += 1) {
+      expect(decideHardReconnect({ policy }).action).toBe("start");
+      policy.markAttemptFailed();
+    }
+    expect(decideHardReconnect({ policy }).action).toBe("exhausted");
+  });
 });
 
 describe("attachMediaWatchdog", () => {
@@ -207,6 +237,75 @@ describe("attachMediaWatchdog", () => {
     });
     handle.inspect();
     expect(api.executeCommand).not.toHaveBeenCalled();
+    handle.dispose();
+  });
+
+  it("does not toggle audio twice while the first unmute is still in flight", async () => {
+    const api = createApi({
+      isAudioMuted: vi.fn(async () => true),
+    });
+    const handle = attachMediaWatchdog(api, {
+      getIntended: () => ({ micOn: true, camOn: false }),
+    });
+    api.emit("audioMuteStatusChanged", { muted: true });
+    handle.inspect();
+    handle.inspect();
+    await Promise.resolve();
+    await Promise.resolve();
+    const toggles = api.executeCommand.mock.calls.filter((call) => call[0] === "toggleAudio");
+    expect(toggles).toHaveLength(1);
+    handle.dispose();
+  });
+
+  it("does not unmute after AbortError", () => {
+    const api = createApi({
+      isAudioMuted: vi.fn(async () => true),
+    });
+    const handle = attachMediaWatchdog(api, {
+      getIntended: () => ({ micOn: true, camOn: false }),
+    });
+    api.emit("audioMuteStatusChanged", { muted: true });
+    api.emit("micError", { name: "AbortError" });
+    expect(api.executeCommand).not.toHaveBeenCalled();
+    handle.dispose();
+  });
+
+  it("asks for one hard reconnect after a second unrecovered peer connection failure", () => {
+    vi.useFakeTimers();
+    const api = createApi();
+    const onReconnectRequired = vi.fn();
+    const handle = attachMediaWatchdog(api, { onReconnectRequired });
+    api.emit("videoConferenceJoined", { id: "local" });
+    api.emit("peerConnectionFailure");
+    vi.advanceTimersByTime(NETWORK_RECOVERY_GRACE_MS);
+    expect(onReconnectRequired).not.toHaveBeenCalled();
+    api.emit("peerConnectionFailure");
+    vi.advanceTimersByTime(NETWORK_RECOVERY_GRACE_MS);
+    expect(onReconnectRequired).toHaveBeenCalledTimes(1);
+    expect(onReconnectRequired).toHaveBeenCalledWith({
+      reason: "peerConnectionFailure",
+      preserveMediaState: true,
+    });
+    handle.dispose();
+  });
+
+  it("does not hard-reconnect a peer glitch that the data channel already recovered", () => {
+    vi.useFakeTimers();
+    const api = createApi();
+    const onReconnectRequired = vi.fn();
+    const handle = attachMediaWatchdog(api, { onReconnectRequired });
+    api.emit("videoConferenceJoined", { id: "local" });
+    api.emit("peerConnectionFailure");
+    vi.advanceTimersByTime(NETWORK_RECOVERY_GRACE_MS);
+    expect(onReconnectRequired).not.toHaveBeenCalled();
+    api.emit("peerConnectionFailure");
+    api.emit("dataChannelOpened");
+    api.emit("peerConnectionFailure");
+    vi.advanceTimersByTime(NETWORK_RECOVERY_GRACE_MS);
+    expect(onReconnectRequired).not.toHaveBeenCalled();
+    api.emit("peerConnectionFailure");
+    vi.advanceTimersByTime(NETWORK_RECOVERY_GRACE_MS);
+    expect(onReconnectRequired).toHaveBeenCalledTimes(1);
     handle.dispose();
   });
 

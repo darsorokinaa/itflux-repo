@@ -17,7 +17,9 @@
 ## 2. Переменные окружения
 
 ```env
-JITSI_DOMAIN=meet.jit.si
+# В production пустой JITSI_DOMAIN не открывает meet.jit.si.
+# Публичный хост остаётся только при DEBUG или JITSI_ALLOW_PUBLIC_MEET=true.
+JITSI_DOMAIN=
 JITSI_AUTH_MODE=none
 
 JITSI_APP_ID=
@@ -33,7 +35,7 @@ JITSI_EMBED_EXTRA_HOSTS=
 
 Секрет `JITSI_APP_SECRET` читается только на сервере. Он не попадает в HTML, JS и ответы API.
 
-Сейчас отдельного Jitsi-домена у проекта **нет**. Рабочий режим по умолчанию — `meet.jit.si` без JWT.
+В production пустой `JITSI_DOMAIN` и значение `meet.jit.si` не открывают публичную комнату: `join-config` отвечает 503. В DEBUG пустой домен по-прежнему резолвится в `meet.jit.si` для локальной проверки.
 
 Когда появится свой хост (DNS A-запись + установленный Jitsi):
 

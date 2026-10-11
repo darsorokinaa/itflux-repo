@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import CabinetModal from "../components/CabinetModal";
-let jitsiProbePromise = null;
+let reachabilityPromise = null;
 
-function loadJitsiProbe() {
-  if (!jitsiProbePromise) {
-    jitsiProbePromise = import("./jitsiProbe");
+function loadReachability() {
+  if (!reachabilityPromise) {
+    reachabilityPromise = import("./jaasReachability");
   }
-  return jitsiProbePromise;
+  return reachabilityPromise;
 }
 import { probeConnectionQuality } from "./connectionProbe";
 import {
@@ -32,7 +32,7 @@ const STEP_LABELS = {
   microphone: "Микрофон",
   speaker: "Звук",
   connection: "Интернет",
-  jitsi: "Комната урока",
+  jitsi: "Видеосервис",
   summary: "Итог",
 };
 
@@ -40,7 +40,7 @@ const EMPTY_ITEM = { status: "idle", label: "", message: "" };
 
 function statusClass(status) {
   if (status === "ok" || status === "good") return "ok";
-  if (status === "fair" || status === "warn") return "warn";
+  if (status === "fair" || status === "warn" || status === "partial") return "warn";
   if (status === "fail" || status === "poor") return "fail";
   return "";
 }
@@ -62,6 +62,7 @@ export default function ConnectionCheckModal({
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const meterRef = useRef(null);
+  const reachabilityAbortRef = useRef(null);
   const [step, setStep] = useState("camera");
   const [busy, setBusy] = useState(false);
   const [cameraDevices, setCameraDevices] = useState([]);
@@ -77,9 +78,8 @@ export default function ConnectionCheckModal({
   const [jitsi, setJitsi] = useState(EMPTY_ITEM);
 
   const cleanupMedia = useCallback(() => {
-    if (jitsiProbePromise) {
-      jitsiProbePromise.then((mod) => mod.abortJitsiConnectionProbe()).catch(() => {});
-    }
+    reachabilityAbortRef.current?.abort();
+    reachabilityAbortRef.current = null;
     meterRef.current?.stop?.();
     meterRef.current = null;
     detachVideoPreview(videoRef.current);
@@ -224,22 +224,25 @@ export default function ConnectionCheckModal({
 
   const startJitsi = useCallback(async () => {
     cleanupMedia();
+    const controller = new AbortController();
+    reachabilityAbortRef.current = controller;
     setBusy(true);
-    setJitsi({ status: "checking", label: "Проверяем комнату урока…", message: "" });
+    setJitsi({ status: "checking", label: "Проверяем видеосервис…", message: "" });
     try {
-      const { probeJitsiInfrastructure } = await loadJitsiProbe();
-      const result = await probeJitsiInfrastructure();
-      if (result?.aborted) return;
+      const { probeJaasReachability } = await loadReachability();
+      const result = await probeJaasReachability({ signal: controller.signal });
+      if (controller.signal.aborted || result?.code === "aborted") return;
       setJitsi({
-        status: result.status === "ok" ? "ok" : result.status,
+        status: result.status === "ok" ? "partial" : result.status,
         label: result.label,
         message: result.message,
       });
     } catch {
+      if (controller.signal.aborted) return;
       setJitsi({
         status: "fail",
-        label: "Не удалось подключиться к серверу видеосвязи",
-        message: "Повторите проверку. Если ошибка повторяется, обновите страницу.",
+        label: "Видеосервис недоступен с этой сети",
+        message: "Повторите проверку. Вход в урок этим не блокируется.",
       });
     } finally {
       setBusy(false);
@@ -531,7 +534,7 @@ export default function ConnectionCheckModal({
 
       {step === "speaker" ? (
         <>
-          <p className="cc-lead">Включим короткий тестовый звук. Подтвердите, если его слышно.</p>
+          <p className="cc-lead">Включим короткий тестовый звук устройства. Это не голос собеседника. Подтвердите, если тон слышно.</p>
           <div className="cc-actions" style={{ marginBottom: 12 }}>
             <button
               type="button"
@@ -609,9 +612,9 @@ export default function ConnectionCheckModal({
 
       {step === "jitsi" ? (
         <>
-          <p className="cc-lead">Проверяем, открывается ли комната урока на сервере видеосвязи.</p>
+          <p className="cc-lead">Проверяем, отвечает ли сервер видеосвязи с этого устройства. Звонок не создаётся.</p>
           {jitsi.status === "checking" || jitsi.status === "idle" ? (
-            <p className="cc-hint">Загружаем комнату урока… Это может занять до 15 секунд.</p>
+            <p className="cc-hint">Это займёт несколько секунд и не мешает входу в урок.</p>
           ) : (
             <div className={`cc-status cc-status--${statusClass(jitsi.status)}`}>
               <div>
@@ -627,9 +630,9 @@ export default function ConnectionCheckModal({
         <>
           <p className="cc-lead">
             {camera.status === "ok" && microphone.status === "ok" && speaker.status === "ok"
-              && (connection.status === "good" || connection.status === "fair")
-              && (jitsi.status === "ok" || jitsi.status === "fair")
-              ? "Всё готово к уроку"
+              && connection.status !== "poor"
+              && jitsi.status !== "fail"
+              ? "Устройства готовы. Звук и видео подтверждаются уже в уроке."
               : "Проверка завершена. Можно подключаться, даже если что-то не сработало."}
           </p>
           <div className="cc-summary">
@@ -637,8 +640,8 @@ export default function ConnectionCheckModal({
               ["Камера", camera, "Камера работает ✓"],
               ["Микрофон", microphone, "Микрофон работает ✓"],
               ["Звук", speaker, "Динамики работают ✓"],
-              ["Интернет", connection, "Соединение хорошее ✓"],
-              ["Комната урока", jitsi, "Комната урока загружается быстро ✓"],
+              ["Интернет", connection, "Платформа отвечает"],
+              ["Видеосервис", jitsi, "Сервер видеосвязи отвечает"],
             ].map(([name, item, okLabel]) => (
               <div key={name} className={`cc-summary__row is-${statusClass(item.status) || "warn"}`}>
                 <span className="cc-summary__name">{name}</span>
@@ -657,7 +660,7 @@ export default function ConnectionCheckModal({
               ].filter(Boolean).join(" ")}
             </p>
           ) : (
-            <p className="cc-hint">Результат сохранён только на этом устройстве и не гарантирует качество звонка.</p>
+            <p className="cc-hint">Результат сохранён только на этом устройстве. Ответ сервера не подтверждает звук и видео.</p>
           )}
           {canJoin ? null : (
             <p className="cc-hint">Когда учитель откроет комнату, подключайтесь кнопкой урока — как обычно.</p>

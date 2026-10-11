@@ -124,23 +124,91 @@ export function classifyConferencePresence({
 
 const lastSent = new Map();
 
+/** Типы, которые backend реально сохраняет. Остальные он молча отбрасывает. */
+const STORED_EVENT_TYPES = new Set([
+  "conference_joined",
+  "conference_left",
+  "participant_joined",
+  "participant_left",
+  "conference_failed",
+  "connection_failed",
+  "peer_connection_failure",
+  "ready_to_close",
+  "room_mismatch",
+  "connection_reconnecting",
+  "connection_restored",
+  "participant_count",
+  "join_config_issued",
+]);
+
+const EVENT_ALIASES = {
+  jitsi_hard_reconnect_started: { eventType: "connection_reconnecting", reason: "hard_reconnect" },
+  jitsi_hard_reconnect_succeeded: { eventType: "connection_restored", reason: "hard_reconnect" },
+  jitsi_hard_reconnect_failed: { eventType: "connection_failed", reason: "hard_reconnect_failed" },
+  media_recovery_started: { eventType: "connection_reconnecting", reason: "media_recovery" },
+  media_recovery_succeeded: { eventType: "connection_restored", reason: "media_recovery" },
+  media_recovery_failed: { eventType: "peer_connection_failure", reason: "media_recovery_failed" },
+  audio_device_lost: { eventType: "connection_failed", reason: "audio_device_lost" },
+  audio_device_recovered: { eventType: "connection_restored", reason: "audio_device_recovered" },
+  mic_error: { eventType: "connection_failed", reason: "mic_error" },
+  camera_error: { eventType: "connection_failed", reason: "camera_error" },
+  call_stage: { eventType: "connection_failed", reason: "call_stage" },
+};
+
+export function toPersistableTechnicalEvent(eventType, reason = "") {
+  const raw = String(eventType || "").trim();
+  const alias = EVENT_ALIASES[raw];
+  if (alias) {
+    return {
+      eventType: alias.eventType,
+      reason: String(reason || alias.reason || "").slice(0, 128),
+      clientEvent: raw,
+    };
+  }
+  if (STORED_EVENT_TYPES.has(raw)) {
+    return { eventType: raw, reason: String(reason || "").slice(0, 128), clientEvent: raw };
+  }
+  return {
+    eventType: "connection_failed",
+    reason: String(reason || raw || "unmapped").slice(0, 128),
+    clientEvent: raw || "unmapped",
+  };
+}
+
+/** Повторный вход обязан остаться в комнате этого урока. */
+export function roomGuardDecision(lockedRoom, nextRoom) {
+  const locked = String(lockedRoom || "").trim();
+  const next = String(nextRoom || "").trim();
+  if (!locked) return { ok: Boolean(next), lock: next, reason: next ? "" : "room_missing" };
+  if (!next) return { ok: false, lock: locked, reason: "room_missing" };
+  if (!jitsiRoomsMatch(locked, next)) return { ok: false, lock: locked, reason: "room_changed" };
+  return { ok: true, lock: locked, reason: "" };
+}
+
 export function reportMeetingTechnicalEvent(meetingUuid, payload = {}) {
   if (!meetingUuid) return Promise.resolve(null);
-  const eventType = String(payload.eventType || payload.event_type || "").trim();
-  if (!eventType) return Promise.resolve(null);
+  const mapped = toPersistableTechnicalEvent(
+    payload.eventType || payload.event_type,
+    payload.reason || payload.code || "",
+  );
+  if (!mapped.eventType) return Promise.resolve(null);
+  const metadata = sanitizeTelemetryMetadata({
+    ...(payload.metadata || {}),
+    clientEvent: mapped.clientEvent,
+  });
   const body = {
-    eventType,
+    eventType: mapped.eventType,
     role: String(payload.role || "").slice(0, 32),
-    reason: String(payload.reason || payload.code || "").slice(0, 128),
+    reason: mapped.reason,
     jitsiParticipantId: String(payload.jitsiParticipantId || payload.jitsi_participant_id || "").slice(0, 255),
     browserTabSessionId: String(payload.browserTabSessionId || payload.browser_tab_session_id || "").slice(0, 64),
     callSessionId: String(payload.callSessionId || payload.call_session_id || "").slice(0, 64),
-    metadata: sanitizeTelemetryMetadata(payload.metadata || {}),
+    metadata,
   };
-  const key = `${meetingUuid}:${eventType}:${body.reason}:${body.jitsiParticipantId}:${body.metadata?.participantCount ?? ""}`;
+  const key = `${meetingUuid}:${body.eventType}:${body.reason}:${body.jitsiParticipantId}:${body.metadata?.participantCount ?? ""}`;
   const now = Date.now();
   const prev = lastSent.get(key) || 0;
-  if (now - prev < 1500 && eventType === "participant_count") {
+  if (now - prev < 1500 && body.eventType === "participant_count") {
     return Promise.resolve(null);
   }
   lastSent.set(key, now);

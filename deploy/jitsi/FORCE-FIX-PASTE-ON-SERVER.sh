@@ -83,11 +83,11 @@ def upsert(body: str, key: str, value: str) -> str:
 body = upsert(body, "app_id", app_id)
 body = upsert(body, "app_secret", app_secret)
 if re.search(r'(?m)^\s*allow_empty_token\s*=', body):
-    body = re.sub(r'(?m)^\s*allow_empty_token\s*=\s*\w+', '    allow_empty_token = true', body, count=1)
+    body = re.sub(r'(?m)^\s*allow_empty_token\s*=\s*\w+', '    allow_empty_token = false', body, count=1)
 else:
     body = re.sub(
         r'(?m)^(\s*app_secret\s*=\s*["\'][^"\']*["\']\s*\n)',
-        r'\1    allow_empty_token = true\n',
+        r'\1    allow_empty_token = false\n',
         body,
         count=1,
     )

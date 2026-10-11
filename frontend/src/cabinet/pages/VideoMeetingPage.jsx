@@ -57,6 +57,7 @@ import {
   classifyConferencePresence,
   jitsiRoomsMatch,
   reportMeetingTechnicalEvent,
+  roomGuardDecision,
 } from "../jitsiTelemetry";
 import PlanItemResourcesPicker from "../components/PlanItemResourcesPicker";
 import VideoLessonMaterialsPanel from "../components/VideoLessonMaterialsPanel";
@@ -146,8 +147,19 @@ import {
   shouldIgnoreReconnect,
   shouldStudentLeaveOnJitsiHangup,
 } from "../jitsiLeave";
-import { createHardReconnectPolicy } from "../jitsiMediaWatchdog";
+import { createHardReconnectPolicy, decideHardReconnect } from "../jitsiMediaWatchdog";
 import ConnectionRecoveryBanner from "../components/ConnectionRecoveryBanner";
+import CallLinkControls from "../components/CallLinkControls";
+import {
+  applyAudioOnlyMode,
+  applyStoredLinkPreferences,
+  applyWeakVideo,
+  describeCallLink,
+  inspectCallMicrophone,
+  shouldAskIfTheyHear,
+} from "../jitsiLinkMode";
+import { classifyJoinStop, joinMediaIntent } from "../jitsiCallDiagnostics";
+import { probeJaasReachability, loadJaasScriptByFetch } from "../connectionCheck/jaasReachability";
 import {
   RESUME_STATES,
   classifyResumeUi,
@@ -223,6 +235,9 @@ function mapJoinError(err) {
   if (code === "jwt_missing" || code === "jwt_config") {
     return "Сервер отклонил доступ (конфигурация входа)";
   }
+  if (code === "room_mismatch") {
+    return "Комната урока не совпала. Обновите страницу у обоих участников.";
+  }
   if (code === "jitsi_auth") {
     return "Не удалось подключить видеозвонок.";
   }
@@ -235,7 +250,7 @@ function mapJoinError(err) {
     return "Не удалось подключить видеозвонок.";
   }
   if (code === "jitsi_script" || code === "jitsi_script_timeout" || code === "jitsi_public_blocked") {
-    return "Не удалось подключить видеозвонок.";
+    return "Видеосервис недоступен с этой сети.";
   }
   if (code === "display_name") {
     return "Не указано имя участника";
@@ -521,14 +536,29 @@ export default function VideoMeetingPage() {
     reconnectPolicyRef.current = createHardReconnectPolicy();
   }
   const recoveryRemountRef = useRef(false);
+  const lockedRoomRef = useRef("");
+  const joinStartedAtRef = useRef(0);
   const hardReconnectMetaRef = useRef(null);
   const hardReconnectTimerRef = useRef(null);
   const onReconnectRequiredRef = useRef(() => {});
   const [callReconnectNeeded, setCallReconnectNeeded] = useState(false);
+  const [callMachine, setCallMachine] = useState({
+    state: CALL_STATES.idle,
+    reason: "",
+    reconnectCount: 0,
+  });
+  const [mediaChannelOpen, setMediaChannelOpen] = useState(false);
+  const [videoServiceUnreachable, setVideoServiceUnreachable] = useState(false);
+  const [audioOnly, setAudioOnly] = useState(false);
+  const [weakLink, setWeakLink] = useState(false);
+  const [micNote, setMicNote] = useState("");
+  const [hearAnswer, setHearAnswer] = useState("");
+  const linkPrefsRef = useRef({ audioOnly: false, weak: false, videoMutedBefore: null });
   const callStateRef = useRef(null);
   if (!callStateRef.current) {
     callStateRef.current = createCallStateMachine({
       diagnostics: { browserTabSessionId: tabSessionIdRef.current },
+      onChange: (snap) => setCallMachine(snap),
     });
   }
   const intendedMediaRef = useRef({ micOn: false, camOn: false, screenSharing: false, screenTrackActive: null });
@@ -756,16 +786,19 @@ export default function VideoMeetingPage() {
     if (!meetingUuid || jitsiInitRef.current || apiRef.current) {
       return Boolean(apiRef.current);
     }
-    const cameraEnabled = cameraPrefRef.current === true
-      || (cameraPrefRef.current == null && getMeetingCameraEnabled(meetingUuid) === true)
-      || (recoveryRemountRef.current && intendedMediaRef.current.camOn === true);
-    const startWithVideoMuted = !cameraEnabled;
-    // Первый вход — с muted mic; если пользователь уже включал микрофон в этом звонке — не глушим снова.
-    const micWasEnabled = getMeetingMicEnabled(meetingUuid) === true
-      || (recoveryRemountRef.current && intendedMediaRef.current.micOn === true);
-    const startWithAudioMuted = !micWasEnabled;
+    const intent = joinMediaIntent({
+      storedMic: getMeetingMicEnabled(meetingUuid),
+      storedCam: cameraPrefRef.current == null ? getMeetingCameraEnabled(meetingUuid) : cameraPrefRef.current,
+      recovering: recoveryRemountRef.current,
+      intendedMicOn: intendedMediaRef.current.micOn,
+      intendedCamOn: intendedMediaRef.current.camOn,
+    });
+    const cameraEnabled = intent.camOn;
+    const startWithVideoMuted = intent.startWithVideoMuted;
+    const startWithAudioMuted = intent.startWithAudioMuted;
     jitsiInitRef.current = true;
     programmaticDisposeRef.current = false;
+    joinStartedAtRef.current = Date.now();
     const initGen = initGenRef.current + 1;
     initGenRef.current = initGen;
     const abort = new AbortController();
@@ -775,6 +808,7 @@ export default function VideoMeetingPage() {
     setMediaWarning("");
     setConnectionHint("Подключаем видеозвонок…");
     setPageState("live");
+    setMediaChannelOpen(false);
     callStateRef.current?.transition(CALL_STATES.initializing, "init");
     intendedMediaRef.current = {
       micOn: !startWithAudioMuted,
@@ -804,6 +838,11 @@ export default function VideoMeetingPage() {
       if (!config?.domain || !config?.roomName) {
         throw Object.assign(new Error("Backend не смог создать конфигурацию"), { code: "config" });
       }
+      const roomDecision = roomGuardDecision(lockedRoomRef.current, config.roomName);
+      if (!roomDecision.ok) {
+        throw Object.assign(new Error("Комната урока не совпала"), { code: "room_mismatch" });
+      }
+      lockedRoomRef.current = roomDecision.lock;
 
       returnUrlRef.current = config.meeting?.returnUrl || returnUrlRef.current;
       const moderator = Boolean(config.meeting?.isModerator);
@@ -951,6 +990,7 @@ export default function VideoMeetingPage() {
           jitsiAuthRetryRef.current = 0;
           setJoinState("joined");
           conferencePresenceRef.current.joined = true;
+          setVideoServiceUnreachable(false);
           applyConferenceHint();
           window.dispatchEvent(new Event("resize"));
           resumeControllerRef.current?.succeed?.();
@@ -1013,16 +1053,21 @@ export default function VideoMeetingPage() {
             conferencePresenceRef.current.reconnecting = false;
             conferencePresenceRef.current.mediaFailed = false;
             // Local videoConferenceJoined is not proof the peer is in the call.
-            if (why === "dataChannelOpened") {
-              conferencePresenceRef.current.mediaUp = true;
-            }
+          if (why === "dataChannelOpened") {
+            conferencePresenceRef.current.mediaUp = true;
+            setMediaChannelOpen(true);
+            setVideoServiceUnreachable(false);
+          }
             resumeControllerRef.current?.succeed?.();
             callStateRef.current?.transition(CALL_STATES.joined, why);
             applyConferenceHint();
           } else if (next === "peer_glitch") {
+            conferencePresenceRef.current.mediaUp = false;
+            setMediaChannelOpen(false);
             return;
           } else if (next === "reconnecting") {
             conferencePresenceRef.current.reconnecting = true;
+            setMediaChannelOpen(false);
             callStateRef.current?.transition(CALL_STATES.reconnecting, why);
             setConnectionHint("Соединение восстанавливается…");
             attendanceTracker.cancelPendingLeave();
@@ -1032,6 +1077,7 @@ export default function VideoMeetingPage() {
               return;
             }
             conferencePresenceRef.current.mediaFailed = true;
+            setMediaChannelOpen(false);
             callStateRef.current?.transition(CALL_STATES.degraded, why);
             setConnectionHint(
               "Не удалось установить медиасоединение. Попробуйте переподключиться.",
@@ -1135,6 +1181,12 @@ export default function VideoMeetingPage() {
       }
       apiRef.current = wrapped;
       screenShareApiRef.current = wrapped.screenShare || null;
+      void applyStoredLinkPreferences(wrapped.api || wrapped, linkPrefsRef.current).then((next) => {
+        if (initGenRef.current !== initGen) return;
+        linkPrefsRef.current = next;
+        setAudioOnly(Boolean(next.audioOnly));
+        setWeakLink(Boolean(next.weak));
+      });
       applyConferenceHint();
       notifyJitsiContainerResize(wrapped);
       claimMeetingCall(meetingUuid, callOwnerIdRef.current);
@@ -1195,6 +1247,28 @@ export default function VideoMeetingPage() {
         return false;
       }
       callStateRef.current?.transition(CALL_STATES.failed, err?.code || "init-error");
+      const stage = classifyJoinStop({
+        online: typeof navigator === "undefined" ? true : navigator.onLine !== false,
+        scriptLoaded: err?.code !== "jitsi_script" && err?.code !== "jitsi_script_timeout",
+        iframeCreated: Boolean(apiRef.current?.getIFrame?.()),
+        conferenceJoined: Boolean(conferencePresenceRef.current.joined),
+        mediaChannelOpen: Boolean(conferencePresenceRef.current.mediaUp),
+        code: err?.code || "",
+      });
+      void reportMeetingTechnicalEvent(meetingUuid, {
+        eventType: "call_stage",
+        reason: stage.failureClass,
+        browserTabSessionId: tabSessionIdRef.current,
+        callSessionId: callSessionIdRef.current,
+        metadata: {
+          stage: stage.stage,
+          failureClass: stage.failureClass,
+          dnsSeparated: false,
+          mediaConfirmed: false,
+          durationMs: joinStartedAtRef.current ? Date.now() - joinStartedAtRef.current : null,
+          code: String(err?.code || "").slice(0, 64),
+        },
+      });
       if (err?.code === "jitsi_script" || err?.code === "jitsi_script_timeout" || err?.message === "Не удалось загрузить Jitsi Meet") {
         setError(mapJoinError({ ...err, code: err?.code || "jitsi_script" }));
       } else if (err?.message === "jitsi_join_timeout" || err?.code === "jitsi_join_timeout") {
@@ -1256,11 +1330,13 @@ export default function VideoMeetingPage() {
   }, [disposeApi, requestJoin]);
 
   const performHardReconnect = useCallback(async (payload = {}) => {
-    if (shouldIgnoreReconnect(intentionalLeaveRef.current)) return false;
     const policy = reconnectPolicyRef.current;
-    const slot = policy?.consumeAttempt?.();
-    if (!slot) {
-      policy?.markAttemptFailed?.();
+    const taken = decideHardReconnect({
+      intentionalLeave: shouldIgnoreReconnect(intentionalLeaveRef.current),
+      policy,
+    });
+    if (taken.action === "stop" || taken.action === "wait") return false;
+    if (taken.action !== "start" || !taken.slot) {
       setCallReconnectNeeded(true);
       setConnectionHint("Не удалось восстановить соединение.");
       void reportMeetingTechnicalEvent(meetingUuid, {
@@ -1278,6 +1354,7 @@ export default function VideoMeetingPage() {
       });
       return false;
     }
+    const slot = taken.slot;
     if (slot.delayMs > 0) {
       await new Promise((resolve) => {
         hardReconnectTimerRef.current = window.setTimeout(resolve, slot.delayMs);
@@ -1443,6 +1520,28 @@ export default function VideoMeetingPage() {
       reconnectPolicyRef.current?.dispose?.();
     };
   }, [bootstrap, disposeApi, sendLeave, stopPolling]);
+
+  useEffect(() => {
+    if (!meetingUuid) return undefined;
+    const controller = new AbortController();
+    let cancelled = false;
+    void probeJaasReachability({
+      signal: controller.signal,
+      checkSignaling: false,
+      loadApi: loadJaasScriptByFetch,
+    }).then((result) => {
+      if (cancelled || result?.code === "aborted") return;
+      if (result?.code === "script" || result?.code === "offline") {
+        setVideoServiceUnreachable(true);
+        return;
+      }
+      if (result?.code === "script_only") setVideoServiceUnreachable(false);
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [meetingUuid]);
 
   useEffect(() => {
     if (pageState !== "waiting" || !meetingUuid) {
@@ -2342,6 +2441,22 @@ export default function VideoMeetingPage() {
   }, [canManage, ensurePlanItem, event, refreshMeetingDetail]);
 
   const showJitsi = pageState === "live" && attendance == null;
+  const callLink = describeCallLink({
+    callState: callMachine.state,
+    reconnectCount: callMachine.reconnectCount,
+    mediaChannelOpen,
+    videoServiceUnreachable,
+    hearingConfirmed: hearAnswer === "yes",
+  });
+  const videoJoinFailed = String(error || "").includes("видеозвонок")
+    || String(error || "").includes("Видеосервис");
+  const callControlsReady = joinState === "joined" || joinState === "embedded";
+  const askHearing = shouldAskIfTheyHear({
+    mediaChannelOpen,
+    remoteCount: callRoster.remotes?.length || 0,
+    answer: hearAnswer,
+    callState: callMachine.state,
+  });
 
   const showMaterialsToast = useCallback((text) => {
     setMaterialsToast(text);
@@ -3343,6 +3458,48 @@ export default function VideoMeetingPage() {
     void remountJitsi();
   }, [remountJitsi]);
 
+  const onToggleAudioOnly = useCallback(async () => {
+    const next = !linkPrefsRef.current.audioOnly;
+    const session = apiRef.current;
+    if (!session) {
+      linkPrefsRef.current = { ...linkPrefsRef.current, audioOnly: next };
+      setAudioOnly(next);
+      return;
+    }
+    const result = await applyAudioOnlyMode(session, next, {
+      videoMutedBefore: linkPrefsRef.current.videoMutedBefore,
+    });
+    if (!result.applied) {
+      setMicNote("Режим «Только звук» в этой сборке видеосвязи недоступен.");
+      return;
+    }
+    linkPrefsRef.current = {
+      ...linkPrefsRef.current,
+      audioOnly: result.audioOnly,
+      videoMutedBefore: result.videoMutedBefore,
+    };
+    setAudioOnly(result.audioOnly);
+    if (result.applied && !result.audioOnly) {
+      applyWeakVideo(session, linkPrefsRef.current.weak);
+    }
+  }, []);
+
+  const onToggleWeakLink = useCallback(() => {
+    if (linkPrefsRef.current.audioOnly) return;
+    const next = !linkPrefsRef.current.weak;
+    if (apiRef.current && !applyWeakVideo(apiRef.current, next)) {
+      setMicNote("Снижение качества видео в этой сборке недоступно.");
+      return;
+    }
+    linkPrefsRef.current = { ...linkPrefsRef.current, weak: next };
+    setWeakLink(next);
+  }, []);
+
+  const onCheckCallMic = useCallback(async () => {
+    const result = await inspectCallMicrophone(apiRef.current);
+    setMicNote(result.message || "");
+  }, []);
+
   const onManualRoomReload = useCallback(() => {
     resumeControllerRef.current?.manualReload?.();
   }, []);
@@ -3509,6 +3666,11 @@ export default function VideoMeetingPage() {
           onReconnect={onManualJitsiReconnect}
           testId="jitsi-call-reconnect"
         />
+      ) : null}
+      {videoServiceUnreachable && !showJitsi && pageState !== "error" ? (
+        <p className="call-link-note" role="status">
+          Видеосервис недоступен с этой сети. Вход в урок не блокируется.
+        </p>
       ) : null}
       {showJitsi && liveDurationUi.phase !== "ok" ? (
         <div
@@ -3793,13 +3955,15 @@ export default function VideoMeetingPage() {
           {pageState === "error" ? (
             <div className="video-lesson-state" data-testid="room-error-fallback">
               <p className="video-lesson-state__title">
-                {String(error || "").includes("видеозвонок")
-                  ? "Не удалось подключить видеозвонок."
+                {videoJoinFailed
+                  ? (String(error || "").includes("Видеосервис")
+                    ? "Видеосервис недоступен с этой сети."
+                    : "Не удалось подключить видеозвонок.")
                   : "Не удалось открыть урок."}
               </p>
               <p className="video-lesson-state__text">
-                {String(error || "").includes("видеозвонок")
-                  ? "Проверьте сеть и повторите подключение."
+                {videoJoinFailed
+                  ? "Урок и доска сохраняются. Комната видеосвязи не меняется. Повторите подключение."
                   : (error || "Комната не загрузилась. Можно переподключиться или вернуться в кабинет.")}
               </p>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
@@ -3808,7 +3972,7 @@ export default function VideoMeetingPage() {
                   className="video-lesson-btn video-lesson-btn--primary"
                   onClick={() => void bootstrap()}
                 >
-                  {String(error || "").includes("видеозвонок") ? "Повторить" : "Переподключиться"}
+                  {videoJoinFailed ? "Повторить" : "Переподключиться"}
                 </button>
                 <Link to={returnUrl} className="video-lesson-btn">
                   Вернуться в кабинет
@@ -3906,6 +4070,25 @@ export default function VideoMeetingPage() {
               id="jitsi-container"
               ref={containerRef}
             />
+            {showJitsi ? (
+              <CallLinkControls
+                title={callLink.title}
+                indicator={callLink.indicator}
+                showReconnect={callLink.showReconnect}
+                audioOnly={audioOnly}
+                weakLink={weakLink}
+                micNote={micNote}
+                askHearing={askHearing}
+                hearNo={hearAnswer === "no" && callMachine.state === "joined"}
+                controlsEnabled={callControlsReady}
+                onReconnect={onManualJitsiReconnect}
+                onToggleAudioOnly={() => void onToggleAudioOnly()}
+                onToggleWeak={onToggleWeakLink}
+                onCheckMic={() => void onCheckCallMic()}
+                onHearYes={() => setHearAnswer("yes")}
+                onHearNo={() => setHearAnswer("no")}
+              />
+            ) : null}
             <ScreenShareControlBar
               visible={showJitsi && (screenshareLayout.localSharing || Boolean(screenshareLayout.presenterJitsiId) || screenshareUiActive)}
               localSharing={Boolean(screenshareLayout.localSharing)}

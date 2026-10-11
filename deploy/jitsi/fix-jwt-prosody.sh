@@ -15,10 +15,10 @@ DOMAIN="${1:-lesson.itflux-academy.ru}"
 CFG="/etc/prosody/conf.d/${DOMAIN}.cfg.lua"
 ALLOW_EMPTY_TOKEN="${ALLOW_EMPTY_TOKEN:-0}"
 if [[ "$ALLOW_EMPTY_TOKEN" == "1" || "$ALLOW_EMPTY_TOKEN" == "true" ]]; then
-  ALLOW_EMPTY_LUA="true"
-else
-  ALLOW_EMPTY_LUA="false"
+  echo "ERROR: allow_empty_token на ${DOMAIN} не включается. Анонимный вход в комнату закрыт."
+  exit 1
 fi
+ALLOW_EMPTY_LUA="false"
 
 # Ищем Generator/.env рядом с репозиторием или в типовых путях.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

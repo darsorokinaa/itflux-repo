@@ -58,8 +58,23 @@ def normalize_jitsi_host(value: str | None) -> str:
     return host.lower()
 
 
+def public_meet_fallback_allowed() -> bool:
+    """Публичный meet.jit.si только в DEBUG или при явном JITSI_ALLOW_PUBLIC_MEET.
+
+    В production пустой JITSI_DOMAIN не подменяется публичной комнатой.
+    """
+    if getattr(settings, "JITSI_ALLOW_PUBLIC_MEET", False):
+        return True
+    return bool(getattr(settings, "DEBUG", False))
+
+
 def get_jitsi_domain() -> str:
-    return normalize_jitsi_host(getattr(settings, "JITSI_DOMAIN", "") or "") or "meet.jit.si"
+    host = normalize_jitsi_host(getattr(settings, "JITSI_DOMAIN", "") or "")
+    if host in {"", "meet.jit.si"}:
+        if public_meet_fallback_allowed():
+            return host or "meet.jit.si"
+        return ""
+    return host
 
 
 def get_jitsi_sub() -> str:
@@ -220,6 +235,57 @@ def generate_jitsi_jwt(
 def decode_jitsi_jwt_unsafe_for_tests(token: str) -> dict[str, Any]:
     """Декодирование без проверки подписи — только для unit-тестов claims."""
     return jwt.decode(token, options={"verify_signature": False})
+
+
+def inspect_jitsi_access_token(
+    token: str,
+    *,
+    secret: str,
+    room_name: str,
+    expect_moderator: bool,
+    now: datetime | None = None,
+) -> str:
+    """Проверка JWT комнаты без записи токена в лог.
+
+    Коды: ok, malformed, bad_signature, missing_claims, wrong_room, expired, role_mismatch.
+    Это проверка выпуска платформы. Живой Prosody она не заменяет.
+    """
+    raw = str(token or "").strip()
+    if raw.count(".") != 2:
+        return "malformed"
+    try:
+        claims = jwt.decode(
+            raw,
+            secret,
+            algorithms=["HS256"],
+            options={"verify_aud": False, "verify_exp": False},
+        )
+    except jwt.InvalidSignatureError:
+        return "bad_signature"
+    except jwt.PyJWTError:
+        return "malformed"
+    if not isinstance(claims, dict):
+        return "malformed"
+    room = str(claims.get("room") or "").strip()
+    user = claims.get("context") if isinstance(claims.get("context"), dict) else {}
+    profile = user.get("user") if isinstance(user, dict) and isinstance(user.get("user"), dict) else {}
+    moderator = profile.get("moderator") if isinstance(profile, dict) else None
+    exp = claims.get("exp")
+    if not room or exp is None or moderator is None or not claims.get("iss") or not claims.get("sub"):
+        return "missing_claims"
+    if room == "*" or room != str(room_name or "").strip():
+        return "wrong_room"
+    moment = now or datetime.now(dt_timezone.utc)
+    try:
+        exp_dt = datetime.fromtimestamp(int(exp), tz=dt_timezone.utc)
+    except (TypeError, ValueError, OSError):
+        return "missing_claims"
+    if exp_dt <= moment:
+        return "expired"
+    is_moderator = moderator in (True, "true", "True", 1, "1")
+    if bool(expect_moderator) != is_moderator:
+        return "role_mismatch"
+    return "ok"
 
 
 def jwt_expires_at(token: str) -> datetime | None:

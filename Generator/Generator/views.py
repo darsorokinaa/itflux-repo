@@ -6758,7 +6758,11 @@ def lesson_video_context_from_jwt(payload: dict, lesson_type: str = "teacher") -
     if not direct and role_jitsi_room:
         slug = role_jitsi_room.strip()
         if slug:
-            direct = "https://meet.jit.si/" + quote(slug, safe="")
+            from Cabinet.jitsi_service import get_jitsi_domain
+
+            host = get_jitsi_domain()
+            if host:
+                direct = f"https://{host}/" + quote(slug, safe="")
     if direct:
         direct = _merge_jitsi_jwt_query(direct, p, lesson_type)
     # Если ЛК не передал Jitsi JWT, но у нас есть JITSI_APP_ID+SECRET — генерируем сами.

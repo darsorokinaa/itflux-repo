@@ -47,18 +47,35 @@ jicofo {
     enabled: false
   }
   conference: {
-    enable-auto-owner: true
+    enable-auto-owner: false
   }
 }
 EOF
 
-echo "===== AFTER jicofo.conf ====="
-cat "$JICOFO"
+echo "===== AFTER jicofo.conf (пароль focus не печатаем) ====="
+grep -nE 'authentication|enable-auto-owner|username|xmpp-domain' "$JICOFO" || true
 
-# Prosody: allow empty token + JWT app
+# authentication.enabled=false — штатный режим focus-компонента, не вход ученика.
+# Участников пускает Prosody. Пустой токен здесь не включаем.
 if [[ -f "$PROSODY" ]]; then
   cp -a "$PROSODY" "${PROSODY}.bak-joinloop-$(date +%Y%m%d%H%M%S)"
-  sed -i -E 's/^([[:space:]]*)allow_empty_token[[:space:]]*=.*/\1allow_empty_token = true/' "$PROSODY" || true
+  python3 - "$PROSODY" <<'PY'
+from pathlib import Path
+import re, sys
+path = Path(sys.argv[1])
+text = path.read_text()
+if re.search(r'(?m)^\s*allow_empty_token\s*=', text):
+    text = re.sub(r'(?m)^(\s*)allow_empty_token\s*=\s*\w+', r'\1allow_empty_token = false', text, count=1)
+elif re.search(r'(?m)^\s*authentication\s*=\s*"token"', text):
+    text = re.sub(
+        r'(?m)^(\s*authentication\s*=\s*"token"\s*\n)',
+        r'\1    allow_empty_token = false\n',
+        text,
+        count=1,
+    )
+path.write_text(text)
+print("allow_empty_token=false")
+PY
 fi
 
 # config.js: deep link / prejoin off

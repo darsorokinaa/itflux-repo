@@ -718,7 +718,12 @@ class VideoMeetingConnectionProbeView(APIView):
         if not rate_limit_check(request, "jitsi_probe", 12, 300):
             return rate_limit_drf_response()
         try:
-            payload = build_connection_probe_config(user=request.user, request=request)
+            issue_jwt = str(request.query_params.get("credentials", "1") or "1").strip() != "0"
+            payload = build_connection_probe_config(
+                user=request.user,
+                request=request,
+                issue_jwt=issue_jwt,
+            )
         except Exception:
             logger.exception("jitsi_connection_probe_failed user_id=%s", request.user.pk)
             return Response(

@@ -1,6 +1,12 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 
-import { jitsiExternalApiScriptUrl, loadJitsiExternalApi, resolveJitsiApiRoomName } from "./jitsiMeet";
+import {
+  JITSI_SCRIPT_LOAD_TIMEOUT_MS,
+  JOIN_SLOW_THRESHOLD_MS,
+  jitsiExternalApiScriptUrl,
+  loadJitsiExternalApi,
+  resolveJitsiApiRoomName,
+} from "./jitsiMeet";
 
 describe("loadJitsiExternalApi", () => {
   beforeEach(() => {
@@ -38,6 +44,11 @@ describe("loadJitsiExternalApi", () => {
     expect(jitsiExternalApiScriptUrl("8x8.vc", "https://evil.example/external_api.js")).toBe(
       "https://8x8.vc/libs/external_api.min.js",
     );
+  });
+
+  it("gives the JaaS script longer than the 15s join hint", () => {
+    expect(JITSI_SCRIPT_LOAD_TIMEOUT_MS).toBeGreaterThan(JOIN_SLOW_THRESHOLD_MS);
+    expect(JITSI_SCRIPT_LOAD_TIMEOUT_MS).toBeLessThanOrEqual(60000);
   });
 
   it("keeps the lesson room and prefixes it for JaaS", () => {

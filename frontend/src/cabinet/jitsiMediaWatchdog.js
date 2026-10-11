@@ -66,12 +66,19 @@ export function classifyMediaError(event, kind = "media") {
       message: kind === "mic" ? "Микрофон не найден" : "Камера не найдена",
     };
   }
+  if (blob.includes("aborterror") || blob.includes("abort")) {
+    return {
+      code: "capture_aborted",
+      message: kind === "mic"
+        ? "Запрос к микрофону прерван. Включите микрофон ещё раз."
+        : "Запрос к камере прерван. Включите камеру ещё раз.",
+    };
+  }
   if (
     blob.includes("notreadable")
     || blob.includes("trackstart")
     || blob.includes("in use")
     || blob.includes("busy")
-    || blob.includes("aborterror")
     || blob.includes("could not start")
   ) {
     return {
@@ -186,6 +193,26 @@ export function createHardReconnectPolicy({
       inFlight = false;
     },
   };
+}
+
+/**
+ * Вторая ошибка во время уже идущего входа не должна сбрасывать inFlight
+ * и не должна открывать ещё один iframe.
+ */
+export function takeReconnectSlot(policy) {
+  if (!policy || typeof policy.consumeAttempt !== "function") {
+    return { action: "exhausted", slot: null };
+  }
+  const before = typeof policy.snapshot === "function" ? policy.snapshot() : null;
+  const slot = policy.consumeAttempt();
+  if (slot) return { action: "start", slot };
+  if (before?.inFlight) return { action: "wait", slot: null };
+  return { action: "exhausted", slot: null };
+}
+
+export function decideHardReconnect({ intentionalLeave = false, policy } = {}) {
+  if (intentionalLeave) return { action: "stop", slot: null };
+  return takeReconnectSlot(policy);
 }
 
 function listen(api, eventName, handler, bucket) {
@@ -385,6 +412,12 @@ export function attachMediaWatchdog(api, {
   let videoMuted = null;
   let audioRecoveries = 0;
   let videoRecoveries = 0;
+  let audioRecoveryInFlight = false;
+  let videoRecoveryInFlight = false;
+  let audioRecoveryGen = 0;
+  let videoRecoveryGen = 0;
+  let peerGlitchesWithoutRecovery = 0;
+  let cycleSawMediaRecovery = false;
   let lastHintAt = 0;
   let state = WATCHDOG_STATES.healthy;
   let cycleOpen = false;
@@ -462,6 +495,8 @@ export function attachMediaWatchdog(api, {
     hardRequestedThisCycle = false;
     quietCycle = false;
     lastNetworkReason = "";
+    cycleSawMediaRecovery = false;
+    peerGlitchesWithoutRecovery = 0;
     state = WATCHDOG_STATES.healthy;
     if (hadCycle && recoveryTelemetrySent) {
       telemetry("media_recovery_succeeded", { reason: why, jitsiParticipantId: localParticipantId });
@@ -486,15 +521,32 @@ export function attachMediaWatchdog(api, {
     graceTimer = null;
     if (disposed || intentionalClose || !cycleOpen) return;
     if (quietCycle && (lastNetworkReason === "peerConnectionFailure") && iframeConnected()) {
+      const sawRecovery = cycleSawMediaRecovery;
       const hadCycle = cycleOpen;
       cycleOpen = false;
       quietCycle = false;
       lastNetworkReason = "";
-      state = WATCHDOG_STATES.healthy;
-      if (hadCycle && recoveryTelemetrySent) {
-        telemetry("media_recovery_succeeded", { reason: "peer_glitch_settled" });
+      cycleSawMediaRecovery = false;
+      if (sawRecovery) {
+        peerGlitchesWithoutRecovery = 0;
+        state = WATCHDOG_STATES.healthy;
+        if (hadCycle && recoveryTelemetrySent) {
+          telemetry("media_recovery_succeeded", { reason: "peer_glitch_settled" });
+        }
+        recoveryTelemetrySent = false;
+        return;
       }
+      peerGlitchesWithoutRecovery += 1;
+      // Первый ICE-сбой оставляем JaaS: enableIceRestart внутри клиента.
+      // Повтор без dataChannelOpened — медиа так и не вернулось.
+      if (peerGlitchesWithoutRecovery < 2) {
+        state = WATCHDOG_STATES.healthy;
+        recoveryTelemetrySent = false;
+        return;
+      }
+      peerGlitchesWithoutRecovery = 0;
       recoveryTelemetrySent = false;
+      requestHardReconnect("peerConnectionFailure");
       return;
     }
     if (quietCycle && !recoveryTelemetrySent) {
@@ -536,6 +588,7 @@ export function attachMediaWatchdog(api, {
     cycleOpen = true;
     hardRequestedThisCycle = false;
     quietCycle = nextQuiet;
+    cycleSawMediaRecovery = false;
     lastNetworkReason = reason;
     state = quietCycle ? WATCHDOG_STATES.media_glitch : WATCHDOG_STATES.reconnecting;
     if (!quietCycle) beginLoudRecovery(reason);
@@ -543,60 +596,71 @@ export function attachMediaWatchdog(api, {
     graceTimer = setTimeout(finishGrace, NETWORK_RECOVERY_GRACE_MS);
   };
 
-  const resolveAudioMuted = async () => {
-    if (audioMuted !== null) return audioMuted;
-    if (typeof api.isAudioMuted !== "function") return null;
-    try {
-      const muted = await api.isAudioMuted();
-      if (disposed) return null;
-      audioMuted = Boolean(muted);
-      return audioMuted;
-    } catch {
-      return null;
+  const releaseTrackRecovery = (kind, generation) => {
+    if (kind === "audio") {
+      if (generation != null && generation !== audioRecoveryGen) return;
+      audioRecoveryInFlight = false;
+      return;
     }
+    if (generation != null && generation !== videoRecoveryGen) return;
+    videoRecoveryInFlight = false;
   };
 
-  const resolveVideoMuted = async () => {
-    if (videoMuted !== null) return videoMuted;
-    if (typeof api.isVideoMuted !== "function") return null;
+  const readFreshMuted = async (kind) => {
+    const read = kind === "audio" ? api.isAudioMuted : api.isVideoMuted;
+    if (typeof read !== "function") return kind === "audio" ? audioMuted : videoMuted;
     try {
-      const muted = await api.isVideoMuted();
+      const muted = await read.call(api);
       if (disposed) return null;
-      videoMuted = Boolean(muted);
-      return videoMuted;
+      const value = Boolean(muted);
+      if (kind === "audio") audioMuted = value;
+      else videoMuted = value;
+      return value;
     } catch {
-      return null;
+      return kind === "audio" ? audioMuted : videoMuted;
     }
   };
 
   const recoverTrack = async (kind) => {
     if (disposed || intentionalClose) return;
+    const audio = kind === "audio";
     const intended = getIntended() || {};
-    if (kind === "audio") {
-      if (!intended.micOn || audioRecoveries >= MAX_TRACK_RECOVERIES) return;
-      const muted = await resolveAudioMuted();
-      if (muted !== true) return;
-      audioRecoveries += 1;
-      state = WATCHDOG_STATES.media_glitch;
-      log("JITSI_MEDIA_RECOVER", { kind: "audio", attempt: audioRecoveries });
-      try {
-        api.executeCommand("toggleAudio");
-      } catch {
-        /* ignore */
-      }
+    let generation = 0;
+    if (audio) {
+      if (!intended.micOn || audioRecoveries >= MAX_TRACK_RECOVERIES || audioRecoveryInFlight) return;
+      audioRecoveryInFlight = true;
+      generation = ++audioRecoveryGen;
+    } else if (!intended.camOn || videoRecoveries >= MAX_TRACK_RECOVERIES || videoRecoveryInFlight) {
       return;
+    } else {
+      videoRecoveryInFlight = true;
+      generation = ++videoRecoveryGen;
     }
-    if (!intended.camOn || videoRecoveries >= MAX_TRACK_RECOVERIES) return;
-    const muted = await resolveVideoMuted();
-    if (muted !== true) return;
-    videoRecoveries += 1;
-    state = WATCHDOG_STATES.media_glitch;
-    log("JITSI_MEDIA_RECOVER", { kind: "video", attempt: videoRecoveries });
+    let toggled = false;
     try {
-      api.executeCommand("toggleVideo");
+      const muted = await readFreshMuted(kind);
+      if (audio ? generation !== audioRecoveryGen : generation !== videoRecoveryGen) return;
+      const still = getIntended() || {};
+      if (disposed || intentionalClose || muted !== true) return;
+      if (audio) {
+        if (!still.micOn || audioRecoveries >= MAX_TRACK_RECOVERIES) return;
+        audioRecoveries += 1;
+      } else if (!still.camOn || videoRecoveries >= MAX_TRACK_RECOVERIES) {
+        return;
+      } else {
+        videoRecoveries += 1;
+      }
+      toggled = true;
+      state = WATCHDOG_STATES.media_glitch;
+      log("JITSI_MEDIA_RECOVER", { kind, attempt: audio ? audioRecoveries : videoRecoveries });
+      api.executeCommand(audio ? "toggleAudio" : "toggleVideo");
     } catch {
       /* ignore */
+    } finally {
+      if (!toggled) releaseTrackRecovery(kind, generation);
     }
+    if (!toggled || disposed) return;
+    window.setTimeout(() => releaseTrackRecovery(kind, generation), 1500);
   };
 
   const runDeviceSync = async (source = "deviceListChanged") => {
@@ -664,6 +728,8 @@ export function attachMediaWatchdog(api, {
   listen(api, "audioMuteStatusChanged", (event) => {
     if (disposed) return;
     audioMuted = Boolean(event?.muted);
+    audioRecoveryGen += 1;
+    audioRecoveryInFlight = false;
     onAudioMuteStatusChanged?.(event);
     log("JITSI_AUDIO", { muted: audioMuted });
   }, listeners);
@@ -671,6 +737,8 @@ export function attachMediaWatchdog(api, {
   listen(api, "videoMuteStatusChanged", (event) => {
     if (disposed) return;
     videoMuted = Boolean(event?.muted);
+    videoRecoveryGen += 1;
+    videoRecoveryInFlight = false;
     onVideoMuteStatusChanged?.(event);
     log("JITSI_VIDEO", { muted: videoMuted });
   }, listeners);
@@ -679,6 +747,7 @@ export function attachMediaWatchdog(api, {
     if (disposed) return;
     const classified = classifyMediaError(event, "camera");
     log("JITSI_CAMERA_ERROR", { code: classified.code });
+    telemetry("camera_error", { reason: classified.code });
     onWarning?.(classified.message);
     if (classified.code === "track_ended" || classified.code === "device_busy") {
       void recoverTrack("video");
@@ -689,6 +758,7 @@ export function attachMediaWatchdog(api, {
     if (disposed) return;
     const classified = classifyMediaError(event, "mic");
     log("JITSI_MIC_ERROR", { code: classified.code });
+    telemetry("mic_error", { reason: classified.code });
     onWarning?.(classified.message);
     if (classified.code === "device_missing" || classified.code === "track_ended") {
       scheduleDeviceSync("micError");
@@ -735,6 +805,7 @@ export function attachMediaWatchdog(api, {
 
   listen(api, "dataChannelOpened", () => {
     if (disposed) return;
+    cycleSawMediaRecovery = true;
     onConnectionState?.("joined", "dataChannelOpened");
     if (cycleOpen) markRecovered("dataChannelOpened");
   }, listeners);

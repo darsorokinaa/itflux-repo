@@ -135,6 +135,8 @@ class JaasVideoTokenTests(TestCase):
         self.assertNotEqual(claims["room"], "*")
         self.assertEqual(claims["context"]["user"]["moderator"], "true")
         self.assertEqual(claims["context"]["user"]["id"], str(self.teacher.pk))
+        self.assertGreaterEqual(claims["exp"] - claims["iat"], 4 * 3600 - 5)
+        self.assertLessEqual(claims["exp"] - claims["iat"], 4 * 3600 + 5)
         self.assertNotIn("PRIVATE KEY", str(res.data))
         self.assertNotIn(JAAS_PRIVATE_KEY, str(res.data))
         self.assertTrue(any("JaaS token issued" in line and f"user_id={self.teacher.pk}" in line for line in logs.output))

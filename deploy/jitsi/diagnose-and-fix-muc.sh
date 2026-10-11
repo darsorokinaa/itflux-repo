@@ -69,7 +69,7 @@ else
 fi
 
 echo
-echo "=== 7) Авто-правки (guest + allow_empty_token) ==="
+echo "=== 7) Авто-правки (guest VirtualHost; allow_empty_token остаётся false) ==="
 if [[ "${APPLY_FIX:-0}" != "1" ]]; then
   echo "Только диагностика. Чтобы применить правки:"
   echo "  sudo APPLY_FIX=1 bash deploy/jitsi/diagnose-and-fix-muc.sh"
@@ -85,9 +85,9 @@ import re
 path = Path("$PROSODY_CFG")
 text = path.read_text()
 
-# allow_empty_token для диагностики
+# Пустой токен не включаем: иначе аноним входит в комнату мимо JWT.
 if re.search(r'^\s*allow_empty_token\s*=', text, flags=re.M):
-    text = re.sub(r'^\s*allow_empty_token\s*=\s*\w+', '    allow_empty_token = true', text, count=1, flags=re.M)
+    text = re.sub(r'^\s*allow_empty_token\s*=\s*\w+', '    allow_empty_token = false', text, count=1, flags=re.M)
 
 # Комментируем guest VirtualHost целиком (частая причина «по одному»).
 def comment_guest_block(src: str) -> str:

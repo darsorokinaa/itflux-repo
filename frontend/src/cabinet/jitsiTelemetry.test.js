@@ -4,7 +4,9 @@ import {
   canonicalJitsiRoomName,
   classifyConferencePresence,
   jitsiRoomsMatch,
+  roomGuardDecision,
   sanitizeTelemetryMetadata,
+  toPersistableTechnicalEvent,
 } from "./jitsiTelemetry";
 
 describe("jitsi conference identity", () => {
@@ -26,6 +28,32 @@ describe("jitsi conference identity", () => {
     expect(cleaned.configuredRoomName).toBe("room1");
   });
 
+  it("stores reconnect and device events under types the backend accepts", () => {
+    expect(toPersistableTechnicalEvent("jitsi_hard_reconnect_started", "peerConnectionFailure")).toMatchObject({
+      eventType: "connection_reconnecting",
+      reason: "peerConnectionFailure",
+      clientEvent: "jitsi_hard_reconnect_started",
+    });
+    expect(toPersistableTechnicalEvent("jitsi_hard_reconnect_succeeded").eventType).toBe("connection_restored");
+    expect(toPersistableTechnicalEvent("mic_error", "permission_denied")).toMatchObject({
+      eventType: "connection_failed",
+      reason: "permission_denied",
+      clientEvent: "mic_error",
+    });
+    expect(toPersistableTechnicalEvent("conference_joined", "").eventType).toBe("conference_joined");
+    const mapped = toPersistableTechnicalEvent("jitsi_hard_reconnect_failed", "exhausted");
+    expect(JSON.stringify(mapped)).not.toMatch(/eyJ|PRIVATE KEY|jwt/i);
+  });
+
+  it("refuses a reconnect into a different room", () => {
+    expect(roomGuardDecision("", "room-a")).toEqual({ ok: true, lock: "room-a", reason: "" });
+    expect(roomGuardDecision("room-a", "room-a").ok).toBe(true);
+    expect(roomGuardDecision("room-a", "room-a@conference.example").ok).toBe(true);
+    expect(roomGuardDecision("room-a", "room-b")).toMatchObject({ ok: false, reason: "room_changed", lock: "room-a" });
+  });
+});
+
+describe("presence classification", () => {
   it("classifies scenario A vs media failure", () => {
     expect(classifyConferencePresence({ conferenceJoined: true, participantCount: 1 }).scenario).toBe("A");
     expect(classifyConferencePresence({

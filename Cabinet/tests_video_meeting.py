@@ -642,7 +642,9 @@ class VideoMeetingApiTests(TestCase):
         self.assertEqual(res.status_code, 403)
 
     @override_settings(
+        DEBUG=True,
         JITSI_DOMAIN="meet.jit.si",
+        JITSI_ALLOW_PUBLIC_MEET=False,
         JITSI_AUTH_MODE="none",
         JITSI_APP_ID="",
         JITSI_APP_SECRET="",
@@ -656,6 +658,34 @@ class VideoMeetingApiTests(TestCase):
         self.assertIsNone(res.data["jwt"])
         self.assertTrue(res.data["requiresModeratorLogin"])
         self.assertTrue(str(res.data["userInfo"]["displayName"]).strip())
+
+    @override_settings(DEBUG=False, JITSI_DOMAIN="", JITSI_ALLOW_PUBLIC_MEET=False, JITSI_AUTH_MODE="none")
+    def test_production_without_jitsi_domain_does_not_open_public_room(self):
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        self.client.force_login(self.teacher)
+        res = self.client.post(f"/api/video-meetings/{meeting.uuid}/join-config/")
+        self.assertEqual(res.status_code, 503)
+        self.assertEqual(res.data.get("code"), "jwt_config")
+        body = str(res.data)
+        self.assertNotIn("https://meet.jit.si", body)
+        self.assertNotIn("eyJ", body)
+
+    @override_settings(
+        DEBUG=False,
+        JITSI_DOMAIN="meet.jit.si",
+        JITSI_ALLOW_PUBLIC_MEET=False,
+        JITSI_AUTH_MODE="none",
+        JITSI_APP_ID="",
+        JITSI_APP_SECRET="",
+    )
+    def test_production_public_jitsi_host_is_rejected(self):
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        self.client.force_login(self.teacher)
+        res = self.client.post(f"/api/video-meetings/{meeting.uuid}/join-config/")
+        self.assertEqual(res.status_code, 503)
+        self.assertNotIn("https://meet.jit.si", str(res.data))
 
     @override_settings(JITSI_AUTH_MODE="none")
     def test_custom_domain_auto_enables_jwt_when_secrets_set(self):
@@ -954,6 +984,19 @@ class VideoMeetingApiTests(TestCase):
         self.assertEqual(claims["context"]["user"]["moderator"], "true")
         self.assertNotIn("schedule_event", res.data)
         self.assertNotIn("meetingUuid", res.data)
+
+    def test_connection_probe_without_credentials_does_not_issue_jwt(self):
+        self.client.force_login(self.teacher)
+        before = VideoMeeting.objects.count()
+        res = self.client.get("/api/video-meetings/connection-probe/?credentials=0")
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(VideoMeeting.objects.count(), before)
+        self.assertEqual(res.data["roomName"], "")
+        self.assertIsNone(res.data["jwt"])
+        self.assertFalse(res.data["credentialsIssued"])
+        self.assertFalse(res.data["mediaConfirmed"])
+        self.assertEqual(res.data["domain"], "meet.example.test")
+        self.assertTrue(str(res.data["scriptUrl"]).startswith("https://meet.example.test/"))
 
     def test_connection_probe_does_not_start_existing_meeting(self):
         meeting = self._create_meeting()

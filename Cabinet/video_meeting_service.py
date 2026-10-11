@@ -20,8 +20,10 @@ from .choices import MeetingProvider, ParticipantRole, ParticipantStatus
 from .jaas_service import (
     JAAS_DOMAIN,
     generate_jaas_jwt,
+    get_jaas_app_id,
     get_video_provider,
     jaas_client_config,
+    jaas_script_url,
 )
 from .jitsi_service import (
     JitsiConfigError,
@@ -1173,6 +1175,15 @@ def _conference_credentials(
 ) -> dict:
     """meet сохраняет текущий JWT/домен. jaas подменяет только видеопровайдера."""
     if get_video_provider() == "jaas":
+        live_ttl = ttl_seconds
+        if live_ttl is None:
+            try:
+                configured_ttl = int(getattr(settings, "JAAS_TOKEN_TTL_SECONDS", 7200) or 7200)
+            except (TypeError, ValueError):
+                configured_ttl = 7200
+            # Тот же пол, что у собственного Jitsi: повторный XMPP-вход в длинном
+            # уроке не должен упираться в exp. Потолок jaas_ttl_seconds — 4 часа.
+            live_ttl = max(configured_ttl, 4 * 3600)
         token = generate_jaas_jwt(
             room_name=room_name,
             user=user,
@@ -1180,7 +1191,7 @@ def _conference_credentials(
             request=request,
             role=role,
             lesson_id=lesson_id,
-            ttl_seconds=ttl_seconds,
+            ttl_seconds=live_ttl,
         )
         client = jaas_client_config(room_name)
         return {
@@ -1199,6 +1210,12 @@ def _conference_credentials(
         live_ttl = max(configured_ttl, 4 * 3600)
     else:
         live_ttl = ttl_seconds
+    domain = get_jitsi_domain()
+    if not domain:
+        raise JitsiConfigError(
+            "Свой Jitsi не настроен. Публичная комната meet.jit.si не открывается. "
+            "Укажите JITSI_DOMAIN своего сервера и JWT."
+        )
     token = generate_jitsi_jwt(
         room_name=room_name,
         user=user,
@@ -1206,7 +1223,6 @@ def _conference_credentials(
         request=request,
         ttl_seconds=live_ttl,
     )
-    domain = get_jitsi_domain()
     return {
         "provider": "meet",
         "jwt": token,
@@ -1408,24 +1424,79 @@ DIAGNOSTIC_ROOM_PREFIX = "diag"
 DIAGNOSTIC_JWT_TTL_SECONDS = 180
 
 
-def build_connection_probe_config(*, user: User, request=None) -> dict:
+def build_connection_probe_config(*, user: User, request=None, issue_jwt: bool = True) -> dict:
     """
     Конфиг проверки Jitsi без создания VideoMeeting и без побочных эффектов урока.
 
-    Комната diagnostic_* живёт только на сервере Jitsi (если клиент её откроет)
-    и не попадает в расписание, посещаемость, журнал и биллинг.
+    issue_jwt=False не выпускает JWT и не называет комнату: клиент только
+    проверяет доступность скрипта. Комната diagnostic_* появляется лишь если
+    клиент сам откроет конференцию по выданному JWT.
     """
-    room_name = f"{DIAGNOSTIC_ROOM_PREFIX}{secrets.token_hex(16)}"
     user_info = build_user_info(user, request)
     display_name = str(user_info.get("displayName") or "").strip() or f"Пользователь {user.pk}"
     provider = get_video_provider()
-
-    jwt_token = None
     auth_mode = "jwt" if provider == "jaas" else get_jitsi_auth_mode()
     domain = JAAS_DOMAIN if provider == "jaas" else get_jitsi_domain()
-    script_url = jaas_client_config(room_name)["scriptUrl"] if provider == "jaas" else f"https://{domain}/libs/external_api.min.js"
+    if provider == "jaas":
+        script_url = jaas_script_url()
+        app_id = get_jaas_app_id()
+    elif not domain:
+        script_url = ""
+        app_id = ""
+    else:
+        script_url = f"https://{domain}/libs/external_api.min.js"
+        app_id = ""
+
+    if provider != "jaas" and not domain:
+        logger.info("jitsi_connection_probe_blocked user_id=%s reason=public_meet", user.pk)
+        return {
+            "domain": "",
+            "roomName": "",
+            "externalRoomName": "",
+            "scriptUrl": "",
+            "appId": "",
+            "provider": provider,
+            "jwt": None,
+            "authMode": auth_mode,
+            "userInfo": {"displayName": display_name},
+            "jwtReady": False,
+            "probe": True,
+            "credentialsIssued": False,
+            "mediaConfirmed": False,
+            "publicMeetBlocked": True,
+            "ttlSeconds": None,
+        }
+
+    if not issue_jwt:
+        logger.info(
+            "jitsi_connection_probe_reachability user_id=%s domain=%s provider=%s",
+            user.pk,
+            domain,
+            provider,
+        )
+        return {
+            "domain": domain,
+            "roomName": "",
+            "externalRoomName": "",
+            "scriptUrl": script_url,
+            "appId": app_id,
+            "provider": provider,
+            "jwt": None,
+            "authMode": auth_mode,
+            "userInfo": {"displayName": display_name},
+            "jwtReady": False,
+            "probe": True,
+            "credentialsIssued": False,
+            "mediaConfirmed": False,
+            "ttlSeconds": None,
+        }
+
+    room_name = f"{DIAGNOSTIC_ROOM_PREFIX}{secrets.token_hex(16)}"
+    jwt_token = None
     external_room = jaas_client_config(room_name)["externalRoomName"] if provider == "jaas" else room_name
-    app_id = jaas_client_config(room_name)["appId"] if provider == "jaas" else ""
+    if provider == "jaas":
+        script_url = jaas_client_config(room_name)["scriptUrl"]
+        app_id = jaas_client_config(room_name)["appId"]
     jwt_ready = auth_mode != "jwt"
     if auth_mode == "jwt":
         try:

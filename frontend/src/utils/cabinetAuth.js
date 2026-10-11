@@ -555,6 +555,11 @@ export function fetchVideoMeetingConnectionProbe() {
   return videoMeetingFetch("/connection-probe/", { method: "GET" });
 }
 
+/** Домен и script URL без JWT и без комнаты. Не открывает конференцию. */
+export function fetchVideoMeetingReachabilityConfig() {
+  return videoMeetingFetch("/connection-probe/?credentials=0", { method: "GET" });
+}
+
 export function reportVideoMeetingConnectionProbe(payload = {}) {
   return videoMeetingFetch("/connection-probe/", {
     method: "POST",

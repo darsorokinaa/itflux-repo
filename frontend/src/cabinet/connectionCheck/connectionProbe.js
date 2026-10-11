@@ -41,8 +41,8 @@ function classify(samples, failures) {
   if (failures === 0 && avg <= GOOD_RTT_MS && jitter <= GOOD_JITTER_MS) {
     return {
       status: "good",
-      label: "Соединение хорошее",
-      detail: "Базовая проверка прошла успешно. Это не гарантирует качество звонка, но сейчас связь выглядит стабильной.",
+      label: "Платформа отвечает",
+      detail: "Сайт открывается. Это не проверка звука и видео и не означает, что звонок уже установлен.",
     };
   }
   if (failures <= 1 && avg <= FAIR_RTT_MS && jitter <= FAIR_JITTER_MS) {

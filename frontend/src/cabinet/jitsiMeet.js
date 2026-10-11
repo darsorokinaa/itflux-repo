@@ -47,16 +47,31 @@ export const JOIN_SLOW_THRESHOLD_MS = 15000;
 /** Safety watchdog: только если join так и не состоялся. */
 export const JOIN_FATAL_TIMEOUT_MS = 60000;
 export const JOIN_SLOW_HINT = "Подключение занимает больше времени…";
-/** Историческое имя: мягкий порог join и лимит пробы/загрузки скрипта. Не fatal для урока. */
+/** Историческое имя: мягкий порог join и лимит пробы связи. Не fatal для урока. */
 export const JOIN_TIMEOUT_MS = JOIN_SLOW_THRESHOLD_MS;
-export const JITSI_SCRIPT_LOAD_TIMEOUT_MS = JOIN_SLOW_THRESHOLD_MS;
+/**
+ * Загрузка external_api.js с 8x8.vc. Не равна hint в 15 с:
+ * на медленном канале скрипт легитимно идёт дольше, fatal join — 60 с.
+ */
+export const JITSI_SCRIPT_LOAD_TIMEOUT_MS = 45000;
 
 let sessionInitializing = false;
 let activeExternalApi = null;
+let activeSessionDispose = null;
 
 function disposeActiveExternalApi() {
+  const disposeSession = activeSessionDispose;
+  activeSessionDispose = null;
   const current = activeExternalApi;
   activeExternalApi = null;
+  if (typeof disposeSession === "function") {
+    try {
+      disposeSession("replaced");
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
   if (!current) return;
   try {
     current.dispose();
@@ -922,17 +937,22 @@ export function showCallTilesSideBySide(api) {
 function wireParticipantListeners(api, hooks) {
   const placeTiles = () => showCallTilesSideBySide(api);
   const selectMaxCamera = () => applyJitsiCameraResolution(api);
-  try {
-    api.addListener?.("videoConferenceJoined", placeTiles);
-    api.addListener?.("videoConferenceJoined", selectMaxCamera);
-    api.addListener?.("participantJoined", placeTiles);
-    api.addListener?.("participantLeft", placeTiles);
-    // Mute меняет дорожку, не состав участников. Без повторной раскладки
-    // сцена остаётся на локальном аватаре и прячет remote.
-    api.addListener?.("videoMuteStatusChanged", placeTiles);
-  } catch {
-    /* ignore */
-  }
+  const extraListeners = [];
+  const listenExtra = (name, handler) => {
+    try {
+      api.addListener?.(name, handler);
+      extraListeners.push([name, handler]);
+    } catch {
+      /* ignore */
+    }
+  };
+  listenExtra("videoConferenceJoined", placeTiles);
+  listenExtra("videoConferenceJoined", selectMaxCamera);
+  listenExtra("participantJoined", placeTiles);
+  listenExtra("participantLeft", placeTiles);
+  // Mute меняет дорожку, не состав участников. Без повторной раскладки
+  // сцена остаётся на локальном аватаре и прячет remote.
+  listenExtra("videoMuteStatusChanged", placeTiles);
   const presence = attachConferencePresence(api, hooks);
   const screenShare = attachScreenSharePresence(api, {
     onChange: hooks.onScreenShare,
@@ -974,7 +994,21 @@ function wireParticipantListeners(api, hooks) {
     onMediaWarning: hooks.onMediaWarning,
     diagnostics: hooks.diagnostics,
   });
-  return { presence, screenShare, watchdog };
+  return {
+    presence,
+    screenShare,
+    watchdog,
+    dispose() {
+      for (const [name, handler] of extraListeners) {
+        try {
+          api.removeListener?.(name, handler);
+        } catch {
+          /* ignore */
+        }
+      }
+      extraListeners.length = 0;
+    },
+  };
 }
 
 export function createJitsiIframeEmbed(config, container, {
@@ -1271,7 +1305,7 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
     hasIframe: Boolean(api.getIFrame?.()),
   });
 
-  const { presence, screenShare, watchdog } = wireParticipantListeners(api, {
+  const { presence, screenShare, watchdog, dispose: disposeParticipantListeners } = wireParticipantListeners(api, {
     ...hooks,
     subject,
     diagnostics,
@@ -1280,9 +1314,12 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
 
   let disposed = false;
   const sessionHolder = { current: null };
-  const disposeOnce = (reason) => {
+  let disposeOnce = () => {};
+  const disposeSession = (reason) => disposeOnce(reason);
+  disposeOnce = (reason) => {
     if (disposed) return;
     disposed = true;
+    if (activeSessionDispose === disposeSession) activeSessionDispose = null;
     unregisterJitsiSession(sessionHolder.current);
     unhookAppend();
     logJitsiDiagnostic("jitsi_disposed", {
@@ -1291,6 +1328,11 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
       roomSuffix: roomName.slice(-8),
     });
     logLifecycle("JITSI_DISPOSE", { reason: String(reason || "").slice(0, 32) });
+    try {
+      disposeParticipantListeners?.();
+    } catch {
+      /* ignore */
+    }
     try {
       watchdog.dispose?.();
     } catch {
@@ -1324,6 +1366,7 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
       /* ignore */
     }
   };
+  activeSessionDispose = disposeSession;
 
   // participants>=1 — не доказательство входа. Ждём videoConferenceJoined.
   // 15 с без join ≠ fatal: только hint. Dispose только на explicit failure / abort / fatal watchdog.

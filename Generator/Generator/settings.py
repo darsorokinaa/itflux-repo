@@ -60,7 +60,15 @@ JITSI_EMBED_EXTRA_HOSTS = tuple(
     if h.strip()
 )
 # Видеоуроки в кабинете + JWT для собственного Jitsi (см. docs/JITSI_INTEGRATION.md).
-JITSI_DOMAIN = os.environ.get("JITSI_DOMAIN", "meet.jit.si").strip() or "meet.jit.si"
+# Пустой домен в production не становится meet.jit.si. Публичный хост — только DEBUG
+# или JITSI_ALLOW_PUBLIC_MEET=true (см. Cabinet/jitsi_service.py).
+JITSI_DOMAIN = os.environ.get("JITSI_DOMAIN", "").strip()
+JITSI_ALLOW_PUBLIC_MEET = os.environ.get("JITSI_ALLOW_PUBLIC_MEET", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
 JITSI_AUTH_MODE = (os.environ.get("JITSI_AUTH_MODE", "none") or "none").strip().lower()
 JITSI_APP_ID = os.environ.get("JITSI_APP_ID", "").strip()
 JITSI_APP_SECRET = os.environ.get("JITSI_APP_SECRET", "").strip()
