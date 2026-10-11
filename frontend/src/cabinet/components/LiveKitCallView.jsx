@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import {
   ConnectionQuality,
   ConnectionState,
@@ -10,6 +10,9 @@ import {
 } from "livekit-client";
 
 import { disconnectVideoMeetingParticipant } from "../../utils/cabinetAuth";
+import { ConferenceControls, ConferenceSide } from "./ConferenceChrome";
+import { screenShareSupported } from "../conferenceCommands";
+import { participantInitials } from "../participantVideo";
 import {
   MEDIA_RESTORE_NOTICE,
   MEDIA_RESTORED_NOTICE,
@@ -32,10 +35,18 @@ function useAttachedTrack(track) {
   return ref;
 }
 
-function MediaTile({ track, muted = false, label, audio = false }) {
-  const ref = useAttachedTrack(track);
+function MediaTile({ track, muted = false, label, audio = false, avatar = false }) {
+  const ref = useAttachedTrack(avatar ? null : track);
   if (audio) {
     return <audio ref={ref} autoPlay playsInline />;
+  }
+  if (avatar) {
+    return (
+      <figure className="lk-fallback-tile lk-fallback-tile--avatar">
+        <div className="lk-fallback-avatar">{participantInitials(label)}</div>
+        <figcaption>{label}</figcaption>
+      </figure>
+    );
   }
   return (
     <figure className="lk-fallback-tile">
@@ -62,12 +73,10 @@ export function collectTiles(room, { audioOnly }) {
   if (local) {
     const camera = local.getTrackPublication?.(Track.Source.Camera)?.track;
     const screen = local.getTrackPublication?.(Track.Source.ScreenShare)?.track;
-    if (camera && !audioOnly) {
-      tiles.push({ key: "local-camera", track: camera, label: local.name || "Вы", muted: true });
-    }
-    if (screen && !audioOnly) {
-      tiles.push({ key: "local-screen", track: screen, label: "Ваш экран", muted: true });
-    }
+    const label = local.name || "Вы";
+    if (camera && !audioOnly) tiles.push({ key: "local-camera", track: camera, label, muted: true });
+    else tiles.push({ key: "local-avatar", avatar: true, label });
+    if (screen && !audioOnly) tiles.push({ key: "local-screen", track: screen, label: "Ваш экран", muted: true });
     // Свой микрофон в <audio> не вставляем: браузер проигрывает его обратно.
   }
   room?.remoteParticipants?.forEach?.((participant) => {
@@ -76,13 +85,49 @@ export function collectTiles(room, { audioOnly }) {
     const screen = participant.getTrackPublication?.(Track.Source.ScreenShare)?.track;
     const label = participant.name || "Участник";
     if (camera && !audioOnly) tiles.push({ key: `${participant.identity}-camera`, track: camera, label, muted: false });
+    else tiles.push({ key: `${participant.identity}-avatar`, avatar: true, label });
     if (screen && !audioOnly) tiles.push({ key: `${participant.identity}-screen`, track: screen, label: `${label}: экран`, muted: false });
     if (mic) audios.push({ key: `${participant.identity}-mic`, track: mic });
   });
   return { tiles, audios };
 }
 
-export default function LiveKitCallView({
+const DEVICE_KIND = {
+  audioInput: "audioinput",
+  audioOutput: "audiooutput",
+  videoInput: "videoinput",
+};
+
+export function liveKitConferenceStatus(status, notice = "") {
+  if (status === "reconnecting") {
+    return { phase: "reconnecting", title: "Восстанавливаем соединение", showReconnect: false, ready: false };
+  }
+  if (status === "failed" || status === "disconnected") {
+    return {
+      phase: "failed",
+      title: notice || "Не удалось подключить видеосвязь",
+      showReconnect: true,
+      ready: true,
+    };
+  }
+  if (status === "removed") {
+    return { phase: "failed", title: notice || "Видеосвязь отключена", showReconnect: false, ready: true };
+  }
+  if (status === "connecting" || status === "checking") {
+    return { phase: "connecting", title: "Подключаемся к занятию", showReconnect: false, ready: status === "checking" };
+  }
+  if (notice) return { phase: "info", title: notice, showReconnect: false, ready: true };
+  return { phase: "", title: "", showReconnect: false, ready: true };
+}
+
+function mapDevices(list) {
+  return (Array.isArray(list) ? list : []).map((device) => ({
+    deviceId: device.deviceId,
+    label: device.label || "",
+  }));
+}
+
+const LiveKitCallView = forwardRef(function LiveKitCallView({
   meetingUuid,
   url,
   token,
@@ -91,17 +136,26 @@ export default function LiveKitCallView({
   startWithAudioMuted = false,
   startWithVideoMuted = false,
   recovering = false,
+  controls = true,
   refreshCredentials,
   onConnected,
   onParticipants,
   onFault,
   onLeave,
-}) {
+  onStateChange,
+}, ref) {
   const roomRef = useRef(null);
   const intentRef = useRef({ micOn: !startWithAudioMuted, camOn: !startWithVideoMuted, screenSharing: false });
   const attemptRef = useRef(0);
   const goneRef = useRef(false);
   const audioOnlyRef = useRef(false);
+  const handsRef = useRef(new Map());
+  const handRaisedRef = useRef(false);
+  const actionsRef = useRef({});
+  const onStateChangeRef = useRef(onStateChange);
+  const onLeaveRef = useRef(onLeave);
+  onStateChangeRef.current = onStateChange;
+  onLeaveRef.current = onLeave;
   const [status, setStatus] = useState("connecting");
   const [notice, setNotice] = useState(recovering ? MEDIA_RESTORE_NOTICE : "");
   const recoveringRef = useRef(recovering);
@@ -114,13 +168,23 @@ export default function LiveKitCallView({
   onFaultRef.current = onFault;
   const [tiles, setTiles] = useState([]);
   const [audios, setAudios] = useState([]);
-  const [audioOnly, setAudioOnly] = useState(false);
-  const [devices, setDevices] = useState({ audio: [], video: [] });
+  const [, setAudioOnly] = useState(false);
   const [micOn, setMicOn] = useState(!startWithAudioMuted);
   const [camOn, setCamOn] = useState(!startWithVideoMuted);
   const [sharing, setSharing] = useState(false);
+  const [handRaised, setHandRaised] = useState(false);
+  const [tileWide, setTileWide] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [dominantId, setDominantId] = useState("");
+  const [handVersion, setHandVersion] = useState(0);
+  const [sideTab, setSideTab] = useState("");
+  const [unreadChat, setUnreadChat] = useState(0);
+  const [retryTick, setRetryTick] = useState(0);
   const [remotes, setRemotes] = useState([]);
   const [busy, setBusy] = useState("");
+  const sideTabRef = useRef("");
+  sideTabRef.current = sideTab;
+  handRaisedRef.current = handRaised;
 
   const refreshTiles = (maybeFlag) => {
     const room = roomRef.current;
@@ -132,9 +196,11 @@ export default function LiveKitCallView({
     setAudios(next.audios);
     const people = [];
     room.remoteParticipants?.forEach?.((participant) => {
+      const micPub = participant.getTrackPublication?.(Track.Source.Microphone);
       people.push({
         identity: participant.identity,
         name: participant.name || "Участник",
+        audioMuted: micPub ? micPub.isMuted === true : true,
       });
     });
     setRemotes(people);
@@ -290,6 +356,41 @@ export default function LiveKitCallView({
     room.on(RoomEvent.LocalTrackUnpublished, refreshTiles);
     room.on(RoomEvent.TrackMuted, refreshTiles);
     room.on(RoomEvent.TrackUnmuted, refreshTiles);
+    room.on(RoomEvent.DataReceived || "dataReceived", (payload, participant) => {
+      let message = null;
+      try {
+        message = JSON.parse(new TextDecoder().decode(payload));
+      } catch {
+        message = null;
+      }
+      if (!message || typeof message !== "object") return;
+      const identity = participant?.identity || "";
+      const mine = Boolean(identity && identity === room.localParticipant?.identity);
+      if (message.type === "chat") {
+        const text = String(message.text || "").trim().slice(0, 500);
+        if (!text) return;
+        const id = String(message.id || `${Date.now()}-${identity}`);
+        setMessages((prev) => {
+          if (prev.some((item) => item.id === id)) return prev;
+          return [...prev.slice(-99), {
+            id,
+            author: mine ? "Вы" : (participant?.name || message.from || "Участник"),
+            text,
+            mine,
+          }];
+        });
+        return;
+      }
+      if (message.type === "hand" && identity) {
+        handsRef.current.set(identity, message.raised === true);
+        setHandVersion((value) => value + 1);
+        if (mine) setHandRaised(message.raised === true);
+      }
+    });
+    room.on(RoomEvent.ActiveSpeakersChanged || "activeSpeakersChanged", (speakers) => {
+      const first = Array.isArray(speakers) ? speakers[0] : null;
+      setDominantId(first?.identity || "");
+    });
     room.on(RoomEvent.MediaDevicesError, (error) => {
       fail({ code: "device_permission", name: error?.name || "NotAllowedError" });
     });
@@ -374,13 +475,6 @@ export default function LiveKitCallView({
         sampler = window.setInterval(() => {
           void samplePackets().then(evaluate);
         }, 1000);
-        try {
-          const audio = await Room.getLocalDevices("audioinput");
-          const video = await Room.getLocalDevices("videoinput");
-          if (!goneRef.current) setDevices({ audio: audio || [], video: video || [] });
-        } catch {
-          /* список устройств недоступен в этом браузере */
-        }
       } catch (error) {
         if (goneRef.current) return;
         setStatus("failed");
@@ -406,7 +500,15 @@ export default function LiveKitCallView({
     };
     // Намерение микрофона хранится в ref и не пересоздаёт комнату.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url, token]);
+  }, [url, token, retryTick]);
+
+  const publishSignal = async (payload) => {
+    const participant = roomRef.current?.localParticipant;
+    if (typeof participant?.publishData !== "function") return false;
+    const bytes = new TextEncoder().encode(JSON.stringify(payload));
+    await participant.publishData(bytes, { reliable: true, topic: "itflux" });
+    return true;
+  };
 
   const toggleMic = async () => {
     const next = !intentRef.current.micOn;
@@ -414,7 +516,10 @@ export default function LiveKitCallView({
     setMicOn(next);
     try {
       await roomRef.current?.localParticipant.setMicrophoneEnabled(next);
+      refreshTiles();
     } catch (error) {
+      intentRef.current = { ...intentRef.current, micOn: !next };
+      setMicOn(!next);
       onFault?.({ code: "device_permission", name: error?.name || "NotAllowedError", attempt: 1 });
     }
   };
@@ -429,11 +534,14 @@ export default function LiveKitCallView({
       await roomRef.current?.localParticipant.setCameraEnabled(next);
       refreshTiles();
     } catch (error) {
+      intentRef.current = { ...intentRef.current, camOn: !next };
+      setCamOn(!next);
       onFault?.({ code: "device_permission", name: error?.name || "NotAllowedError", attempt: 1 });
     }
   };
 
   const toggleShare = async () => {
+    if (busy === "share") return;
     const next = !sharing;
     setBusy("share");
     try {
@@ -450,16 +558,85 @@ export default function LiveKitCallView({
     }
   };
 
-  const selectDevice = async (kind, deviceId) => {
-    if (!deviceId) return;
+  const toggleHand = async () => {
+    const next = !handRaisedRef.current;
+    handRaisedRef.current = next;
+    setHandRaised(next);
+    const identity = roomRef.current?.localParticipant?.identity;
+    if (identity) {
+      handsRef.current.set(identity, next);
+      setHandVersion((value) => value + 1);
+    }
     try {
-      await roomRef.current?.switchActiveDevice(kind, deviceId);
+      await publishSignal({ type: "hand", raised: next });
+    } catch {
+      setNotice("Поднять руку сейчас не удалось.");
+    }
+  };
+
+  const toggleLayout = () => setTileWide((value) => !value);
+
+  const loadDevices = async () => {
+    try {
+      const [audioInput, audioOutput, videoInput] = await Promise.all([
+        Room.getLocalDevices("audioinput"),
+        Room.getLocalDevices("audiooutput"),
+        Room.getLocalDevices("videoinput"),
+      ]);
+      return {
+        audioInput: mapDevices(audioInput),
+        audioOutput: mapDevices(audioOutput),
+        videoInput: mapDevices(videoInput),
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const selectDevice = async (kind, device) => {
+    const deviceId = device?.deviceId || device;
+    const liveKitKind = DEVICE_KIND[kind] || kind;
+    if (!deviceId || !liveKitKind) return;
+    try {
+      await roomRef.current?.switchActiveDevice(liveKitKind, deviceId);
     } catch {
       setNotice("Это устройство выбрать не удалось.");
     }
   };
 
+  const sendChat = async (text) => {
+    const body = String(text || "").trim().slice(0, 500);
+    if (!body) return;
+    const id = `${Date.now()}-local`;
+    setMessages((prev) => [...prev.slice(-99), { id, author: "Вы", text: body, mine: true }]);
+    try {
+      await publishSignal({ type: "chat", id, text: body, from: displayName || "Вы" });
+    } catch {
+      setNotice("Чат конференции сейчас недоступен.");
+    }
+  };
+
+  const hangup = () => {
+    try {
+      roomRef.current?.disconnect?.(true);
+    } catch {
+      /* комната уже закрыта */
+    }
+    onLeaveRef.current?.();
+  };
+
+  const startAudio = async () => {
+    try {
+      await roomRef.current?.startAudio?.();
+    } catch {
+      setNotice("Звук не включился. Нажмите ещё раз.");
+    }
+  };
+
+  const retry = () => setRetryTick((value) => value + 1);
+
   const removeRemote = async (identity) => {
+    if (!canModerate) return;
     const match = /^p(\d+)$/.exec(String(identity || ""));
     if (!match) return;
     setBusy(identity);
@@ -477,67 +654,165 @@ export default function LiveKitCallView({
     }
   };
 
-  const statusLabel = {
-    connecting: "Подключаем видеосвязь…",
-    checking: "Проверяем передачу звука…",
-    connected: "Видеосвязь подключена",
-    reconnecting: "Восстанавливаем видеосвязь. Урок и материалы сохранены",
-    disconnected: "Видеосвязь прервана",
-    failed: "Не удалось подключить видеосвязь",
-    removed: "Видеосвязь отключена",
-  }[status] || "Видеосвязь";
+  actionsRef.current = {
+    toggleMic,
+    toggleCam,
+    toggleShare,
+    toggleHand,
+    toggleLayout,
+    loadDevices,
+    selectDevice,
+    sendChat,
+    hangup,
+    startAudio,
+    retry,
+    removeRemote,
+  };
+  useImperativeHandle(ref, () => ({
+    toggleMic: () => actionsRef.current.toggleMic(),
+    toggleCam: () => actionsRef.current.toggleCam(),
+    toggleShare: () => actionsRef.current.toggleShare(),
+    toggleHand: () => actionsRef.current.toggleHand(),
+    toggleLayout: () => actionsRef.current.toggleLayout(),
+    loadDevices: () => actionsRef.current.loadDevices(),
+    selectDevice: (kind, device) => actionsRef.current.selectDevice(kind, device),
+    sendChat: (text) => actionsRef.current.sendChat(text),
+    hangup: () => actionsRef.current.hangup(),
+    startAudio: () => actionsRef.current.startAudio(),
+    retry: () => actionsRef.current.retry(),
+    removeRemote: (identity) => actionsRef.current.removeRemote(identity),
+  }), []);
+
+  const conferenceStatus = liveKitConferenceStatus(status, notice);
+  const localPerson = {
+    id: roomRef.current?.localParticipant?.identity || "local",
+    displayName: roomRef.current?.localParticipant?.name || displayName || "Вы",
+    audioMuted: !micOn,
+    roleLabel: handRaised ? "Рука поднята" : "",
+  };
+  const remotePeople = remotes.map((person) => ({
+    id: person.identity,
+    displayName: person.name,
+    audioMuted: person.audioMuted === true,
+    roleLabel: handsRef.current.get(person.identity) ? "Рука поднята" : "Участник",
+  }));
+
+  useEffect(() => {
+    onStateChangeRef.current?.({
+      micOn,
+      camOn,
+      sharing,
+      handRaised,
+      tileWide,
+      ready: conferenceStatus.ready,
+      statusPhase: conferenceStatus.phase,
+      statusTitle: conferenceStatus.title,
+      showReconnect: conferenceStatus.showReconnect,
+      local: localPerson,
+      remotes: remotePeople,
+      messages,
+      dominantId,
+      participantCount: 1 + remotePeople.length,
+    });
+    // Список участников собирается из полей выше. Сам объект каждый рендер новый.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    micOn,
+    camOn,
+    sharing,
+    handRaised,
+    tileWide,
+    status,
+    notice,
+    messages,
+    remotes,
+    dominantId,
+    handVersion,
+    displayName,
+    conferenceStatus.ready,
+    conferenceStatus.phase,
+    conferenceStatus.title,
+    conferenceStatus.showReconnect,
+  ]);
+
+  useEffect(() => {
+    if (!controls) return undefined;
+    if (sideTab === "chat") setUnreadChat(0);
+    return undefined;
+  }, [controls, sideTab]);
+
+  const seenMessagesRef = useRef(0);
+  useEffect(() => {
+    if (!controls) {
+      seenMessagesRef.current = messages.length;
+      return;
+    }
+    const previous = seenMessagesRef.current;
+    seenMessagesRef.current = messages.length;
+    if (messages.length <= previous || sideTabRef.current === "chat") return;
+    const added = messages.slice(previous).filter((item) => !item.mine).length;
+    if (added) setUnreadChat((count) => count + added);
+  }, [controls, messages]);
 
   return (
-    <section className="lk-fallback" aria-label="Видеосвязь">
-      <p className={`lk-fallback-status lk-fallback-status--${status}`} role="status">{statusLabel}</p>
-      {notice ? <p className="lk-fallback-notice" role="status">{notice}</p> : null}
-      {recovering ? <p className="lk-fallback-notice">{MEDIA_SCREEN_NOTE}</p> : null}
-      <div className="lk-fallback-stage">
-        {tiles.length ? tiles.map((tile) => (
-          <MediaTile key={tile.key} track={tile.track} label={tile.label} muted={tile.muted} />
-        )) : <p className="lk-fallback-wait">Камера выключена. Голос можно оставить включённым.</p>}
-        {audios.map((item) => (
-          <MediaTile key={item.key} track={item.track} audio />
-        ))}
-      </div>
-      <div className="lk-fallback-controls">
-        <button type="button" onClick={toggleMic} aria-pressed={!micOn}>{micOn ? "Выключить микрофон" : "Включить микрофон"}</button>
-        <button type="button" onClick={toggleCam} aria-pressed={!camOn}>{camOn ? "Выключить камеру" : "Включить камеру"}</button>
-        <button type="button" onClick={toggleShare} disabled={busy === "share"}>{sharing ? "Остановить демонстрацию" : "Демонстрация экрана"}</button>
-        <button type="button" onClick={onLeave}>Завершить участие</button>
-      </div>
-      <div className="lk-fallback-devices">
-        <label>
-          Микрофон
-          <select onChange={(event) => selectDevice("audioinput", event.target.value)} defaultValue="">
-            <option value="">Системный</option>
-            {devices.audio.map((device) => (
-              <option key={device.deviceId} value={device.deviceId}>{device.label || "Микрофон"}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Камера
-          <select onChange={(event) => selectDevice("videoinput", event.target.value)} defaultValue="">
-            <option value="">Системная</option>
-            {devices.video.map((device) => (
-              <option key={device.deviceId} value={device.deviceId}>{device.label || "Камера"}</option>
-            ))}
-          </select>
-        </label>
-      </div>
-      {canModerate && remotes.length ? (
-        <ul className="lk-fallback-people">
-          {remotes.map((person) => (
-            <li key={person.identity}>
-              <span>{person.name}</span>
-              <button type="button" onClick={() => removeRemote(person.identity)} disabled={busy === person.identity}>
-                Отключить
-              </button>
-            </li>
+    <div className="lk-call">
+      <section className="lk-fallback" aria-label="Видеосвязь">
+        <div className={`lk-fallback-stage${tileWide ? " lk-fallback-stage--tiles" : ""}`}>
+          {tiles.length ? tiles.map((tile) => (
+            <MediaTile key={tile.key} track={tile.track} label={tile.label} muted={tile.muted} avatar={tile.avatar} />
+          )) : conferenceStatus.ready ? (
+            <p className="lk-fallback-wait">Камера выключена. Голос можно оставить включённым.</p>
+          ) : null}
+          {audios.map((item) => (
+            <MediaTile key={item.key} track={item.track} audio />
           ))}
-        </ul>
+        </div>
+      </section>
+      {controls ? (
+        <ConferenceControls
+          disabled={!conferenceStatus.ready}
+          micOn={micOn}
+          camOn={camOn}
+          sharing={sharing}
+          handRaised={handRaised}
+          tileWide={tileWide}
+          peopleOpen={sideTab === "people"}
+          chatOpen={sideTab === "chat"}
+          participantCount={1 + remotePeople.length}
+          unreadChat={unreadChat}
+          statusPhase={conferenceStatus.phase}
+          statusTitle={conferenceStatus.title}
+          screenShareAvailable={screenShareSupported()}
+          showReconnect={conferenceStatus.showReconnect}
+          onToggleMic={() => { void toggleMic(); }}
+          onToggleCam={() => { void toggleCam(); }}
+          onToggleShare={() => { void toggleShare(); }}
+          onToggleHand={() => { void toggleHand(); }}
+          onToggleLayout={toggleLayout}
+          onTogglePeople={() => setSideTab((current) => (current === "people" ? "" : "people"))}
+          onToggleChat={() => setSideTab((current) => (current === "chat" ? "" : "chat"))}
+          onHangup={hangup}
+          onEnableSound={() => { void startAudio(); }}
+          onLoadDevices={loadDevices}
+          onSelectDevice={(kind, device) => { void selectDevice(kind, device); }}
+          onReconnect={retry}
+        />
       ) : null}
-    </section>
+      {controls ? (
+        <ConferenceSide
+          open={Boolean(sideTab)}
+          tab={sideTab === "chat" ? "chat" : "people"}
+          local={localPerson}
+          remotes={remotePeople}
+          dominantId={dominantId}
+          messages={messages}
+          onTab={setSideTab}
+          onClose={() => setSideTab("")}
+          onSend={(text) => { void sendChat(text); }}
+        />
+      ) : null}
+    </div>
   );
-}
+});
+
+export default LiveKitCallView;

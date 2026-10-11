@@ -44,6 +44,8 @@ vi.mock("livekit-client", () => {
     MediaDevicesError: "MediaDevicesError",
     ConnectionQualityChanged: "ConnectionQualityChanged",
     Disconnected: "Disconnected",
+    DataReceived: "dataReceived",
+    ActiveSpeakersChanged: "activeSpeakersChanged",
   },
   Track: {
     Source: { Camera: "camera", Microphone: "microphone", ScreenShare: "screen_share" },
@@ -60,7 +62,7 @@ vi.mock("livekit-client", () => {
   };
 });
 
-import LiveKitCallView, { audioOnlyForTileRefresh, collectTiles } from "./LiveKitCallView";
+import LiveKitCallView, { audioOnlyForTileRefresh, collectTiles, liveKitConferenceStatus } from "./LiveKitCallView";
 
 describe("LiveKitCallView", () => {
   beforeEach(() => {
@@ -82,6 +84,11 @@ describe("LiveKitCallView", () => {
     );
     expect(await screen.findByRole("button", { name: "Включить микрофон" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Включить камеру" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Поднять руку" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Чат" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Завершить звонок" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Завершить участие" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Только звук" })).toBeNull();
     expect(room.connect).toHaveBeenCalledWith("wss://video.example.test", "header.payload.sig");
   });
 
@@ -106,6 +113,31 @@ describe("LiveKitCallView", () => {
     const { tiles } = collectTiles(sample, { audioOnly });
     expect(audioOnly).toBe(false);
     expect(tiles.map((tile) => tile.key)).toEqual(["local-camera", "p2-camera"]);
+  });
+
+  it("keeps a participant on screen as an avatar when the camera is off", () => {
+    const sample = {
+      localParticipant: {
+        name: "Вы",
+        getTrackPublication: () => null,
+      },
+      remoteParticipants: new Map([
+        ["p2", {
+          identity: "p2",
+          name: "Ученик",
+          getTrackPublication: () => null,
+        }],
+      ]),
+    };
+    const { tiles } = collectTiles(sample, { audioOnly: false });
+    expect(tiles.map((tile) => tile.key)).toEqual(["local-avatar", "p2-avatar"]);
+    expect(tiles.every((tile) => tile.avatar)).toBe(true);
+  });
+
+  it("uses the same connection phrases as the lesson conference", () => {
+    expect(liveKitConferenceStatus("reconnecting").title).toBe("Восстанавливаем соединение");
+    expect(liveKitConferenceStatus("connecting").title).toBe("Подключаемся к занятию");
+    expect(liveKitConferenceStatus("connected").title).toBe("");
   });
 
   it("does not play the local microphone back into the room", () => {

@@ -455,6 +455,8 @@ export default function VideoMeetingPage() {
   const failoverModeRef = useRef("");
   const recoveringMediaRef = useRef(false);
   const liveKitActiveRef = useRef(false);
+  const liveKitApiRef = useRef(null);
+  const liveKitSeenRef = useRef(0);
   const applyMediaRouteRef = useRef(() => {});
   const reportExhaustedMediaRef = useRef(() => {});
   const jitsiAuthRetryRef = useRef(0);
@@ -464,6 +466,7 @@ export default function VideoMeetingPage() {
   const [detail, setDetail] = useState(null);
   const [pageState, setPageState] = useState("loading"); // loading | waiting | camera | live | finished | cancelled | error
   const [liveKitJoin, setLiveKitJoin] = useState(null);
+  const [liveKitUi, setLiveKitUi] = useState(null);
   const [failoverWatch, setFailoverWatch] = useState(false);
   const [error, setError] = useState("");
   const [mediaWarning, setMediaWarning] = useState("");
@@ -749,6 +752,7 @@ export default function VideoMeetingPage() {
     screenShareApiRef.current = null;
     liveKitActiveRef.current = false;
     setLiveKitJoin(null);
+    setLiveKitUi(null);
     lastShareReportRef.current = "";
     const pipHandle = pipHandleRef.current;
     pipHandleRef.current = null;
@@ -3311,6 +3315,10 @@ export default function VideoMeetingPage() {
       setMediaWarning("Демонстрация экрана недоступна в этом браузере.");
       return;
     }
+    if (liveKitActiveRef.current) {
+      void liveKitApiRef.current?.toggleShare();
+      return;
+    }
     if (!runConferenceCommand(apiRef.current, "toggleShareScreen")) {
       setMediaWarning("Не удалось переключить демонстрацию экрана.");
     }
@@ -3333,6 +3341,10 @@ export default function VideoMeetingPage() {
   }, [meetingUuid]);
 
   const onToggleConferenceMic = useCallback(() => {
+    if (liveKitActiveRef.current) {
+      void liveKitApiRef.current?.toggleMic();
+      return;
+    }
     if (!runConferenceCommand(apiRef.current, "toggleAudio")) {
       setMediaWarning("Не удалось переключить микрофон.");
       return;
@@ -3341,6 +3353,10 @@ export default function VideoMeetingPage() {
   }, [syncMuteFromApi]);
 
   const onToggleConferenceCam = useCallback(() => {
+    if (liveKitActiveRef.current) {
+      void liveKitApiRef.current?.toggleCam();
+      return;
+    }
     if (!runConferenceCommand(apiRef.current, "toggleVideo")) {
       setMediaWarning("Не удалось переключить камеру.");
       return;
@@ -3349,12 +3365,20 @@ export default function VideoMeetingPage() {
   }, [syncMuteFromApi]);
 
   const onToggleConferenceHand = useCallback(() => {
+    if (liveKitActiveRef.current) {
+      void liveKitApiRef.current?.toggleHand();
+      return;
+    }
     if (!runConferenceCommand(apiRef.current, "toggleRaiseHand")) {
       setMediaWarning("Поднять руку в этой сборке видеосвязи недоступно.");
     }
   }, []);
 
   const onToggleConferenceLayout = useCallback(() => {
+    if (liveKitActiveRef.current) {
+      liveKitApiRef.current?.toggleLayout();
+      return;
+    }
     const next = !tileWide;
     if (!runConferenceCommand(apiRef.current, "setTileView", next)) {
       setMediaWarning("Смена вида в этой сборке видеосвязи недоступна.");
@@ -3368,12 +3392,22 @@ export default function VideoMeetingPage() {
       setFinishConfirm(true);
       return;
     }
+    if (liveKitActiveRef.current) {
+      liveKitApiRef.current?.hangup();
+      runStudentHangupRef.current?.();
+      return;
+    }
     if (!runConferenceCommand(apiRef.current, "hangup")) {
       runStudentHangupRef.current?.();
     }
   }, []);
 
   const onEnableConferenceSound = useCallback(() => {
+    if (liveKitActiveRef.current) {
+      void liveKitApiRef.current?.startAudio();
+      setSoundPrompt(false);
+      return;
+    }
     const session = apiRef.current;
     try {
       session?.watchdog?.handleLifecycleEvent?.("sound-gesture");
@@ -3392,6 +3426,10 @@ export default function VideoMeetingPage() {
   const onSendConferenceChat = useCallback((text) => {
     const body = String(text || "").slice(0, 500);
     if (!body) return;
+    if (liveKitActiveRef.current) {
+      void liveKitApiRef.current?.sendChat(body);
+      return;
+    }
     if (!runConferenceCommand(apiRef.current, "sendChatMessage", body)) {
       setMediaWarning("Чат конференции сейчас недоступен.");
       return;
@@ -3412,6 +3450,20 @@ export default function VideoMeetingPage() {
     conferenceSideRef.current = conferenceSide;
     if (conferenceSide === "chat") setUnreadChat(0);
   }, [conferenceSide]);
+
+  const onLiveKitState = useCallback((snapshot) => {
+    setLiveKitUi(snapshot);
+    if (typeof snapshot?.micOn === "boolean") {
+      setMeetingMicEnabled(meetingUuid, snapshot.micOn);
+      setLocalMicOn(snapshot.micOn);
+      intendedMediaRef.current = { ...intendedMediaRef.current, micOn: snapshot.micOn };
+    }
+    if (typeof snapshot?.camOn === "boolean") {
+      setMeetingCameraEnabled(meetingUuid, snapshot.camOn);
+      setLocalCamOn(snapshot.camOn);
+      intendedMediaRef.current = { ...intendedMediaRef.current, camOn: snapshot.camOn };
+    }
+  }, [meetingUuid]);
 
   useEffect(() => {
     setTileWide(Boolean(screenshareLayout.tileView));
@@ -3636,6 +3688,20 @@ export default function VideoMeetingPage() {
   });
   // Материал открыт или идёт демонстрация — звонок сворачивается в плавающее окно.
   const compactCall = Boolean(showJitsi && (workspaceOpen || shareMiniCall));
+  const showConferenceChrome = Boolean(showJitsi && !compactCall);
+  const liveKitMessages = liveKitUi?.messages;
+  useEffect(() => {
+    if (!liveKitJoin || compactCall) {
+      liveKitSeenRef.current = liveKitMessages?.length || 0;
+      return;
+    }
+    const messages = liveKitMessages || [];
+    const previous = liveKitSeenRef.current;
+    liveKitSeenRef.current = messages.length;
+    if (messages.length <= previous || conferenceSideRef.current === "chat") return;
+    const added = messages.slice(previous).filter((item) => !item.mine).length;
+    if (added) setUnreadChat((count) => count + added);
+  }, [liveKitJoin, compactCall, liveKitMessages]);
   // Панель материалов рядом со звонком; у учителя — и при открытом workspace.
   const showAside = showJitsi && asideOpen && (
     !workspaceOpen || liveVariantAnswers || canManage
@@ -4408,6 +4474,9 @@ export default function VideoMeetingPage() {
             />
             {liveKitJoin ? (
               <LiveKitCallView
+                ref={liveKitApiRef}
+                controls={compactCall}
+                onStateChange={onLiveKitState}
                 meetingUuid={meetingUuid}
                 url={liveKitJoin.url}
                 token={liveKitJoin.token}
@@ -4603,23 +4672,27 @@ export default function VideoMeetingPage() {
               />
             )}
           </div>
-          {showJitsi && !compactCall && !liveKitJoin ? (
+          {showConferenceChrome ? (
             <ConferenceControls
-              disabled={!callControlsReady}
-              micOn={localMicOn}
-              camOn={localCamOn}
-              sharing={Boolean(screenshareLayout.localSharing)}
-              handRaised={handRaised}
-              tileWide={tileWide}
+              disabled={liveKitJoin ? !liveKitUi?.ready : !callControlsReady}
+              micOn={liveKitJoin ? Boolean(liveKitUi?.micOn) : localMicOn}
+              camOn={liveKitJoin ? Boolean(liveKitUi?.camOn) : localCamOn}
+              sharing={liveKitJoin ? Boolean(liveKitUi?.sharing) : Boolean(screenshareLayout.localSharing)}
+              handRaised={liveKitJoin ? Boolean(liveKitUi?.handRaised) : handRaised}
+              tileWide={liveKitJoin ? Boolean(liveKitUi?.tileWide) : tileWide}
               peopleOpen={conferenceSide === "people"}
               chatOpen={conferenceSide === "chat"}
-              participantCount={(callRoster.local ? 1 : 0) + (callRoster.remotes?.length || 0)}
+              participantCount={liveKitJoin
+                ? (liveKitUi?.participantCount || 0)
+                : (callRoster.local ? 1 : 0) + (callRoster.remotes?.length || 0)}
               unreadChat={unreadChat}
               soundPrompt={soundPrompt}
-              statusPhase={conferenceStatus.phase}
-              statusTitle={conferenceStatus.title}
+              statusPhase={liveKitJoin ? (liveKitUi?.statusPhase || "connecting") : conferenceStatus.phase}
+              statusTitle={liveKitJoin ? (liveKitUi ? liveKitUi.statusTitle : "Подключаемся к занятию") : conferenceStatus.title}
               screenShareAvailable={screenShareSupported()}
-              showReconnect={Boolean(callLink.showReconnect || callReconnectNeeded)}
+              showReconnect={liveKitJoin
+                ? Boolean(liveKitUi?.showReconnect)
+                : Boolean(callLink.showReconnect || callReconnectNeeded)}
               onToggleMic={onToggleConferenceMic}
               onToggleCam={onToggleConferenceCam}
               onToggleShare={onToggleScreenShare}
@@ -4629,25 +4702,39 @@ export default function VideoMeetingPage() {
               onToggleChat={() => setConferenceSide((current) => (current === "chat" ? "" : "chat"))}
               onHangup={onConferenceHangup}
               onEnableSound={onEnableConferenceSound}
-              onLoadDevices={() => loadConferenceDevices(apiRef.current)}
+              onLoadDevices={() => (
+                liveKitJoin ? liveKitApiRef.current?.loadDevices() : loadConferenceDevices(apiRef.current)
+              )}
               onSelectDevice={(kind, device) => {
+                if (liveKitJoin) {
+                  void liveKitApiRef.current?.selectDevice(kind, device);
+                  return;
+                }
                 if (!setConferenceDevice(apiRef.current, kind, device)) {
                   setMediaWarning("Не удалось переключить устройство.");
                 }
               }}
-              onReconnect={onManualJitsiReconnect}
+              onReconnect={() => {
+                if (liveKitJoin) {
+                  liveKitApiRef.current?.retry();
+                  return;
+                }
+                onManualJitsiReconnect();
+              }}
             />
           ) : null}
         </main>
 
-        {showJitsi && !compactCall && !liveKitJoin ? (
+        {showConferenceChrome ? (
           <ConferenceSide
             open={Boolean(conferenceSide)}
             tab={conferenceSide === "chat" ? "chat" : "people"}
-            local={callRoster.local ? { ...callRoster.local, audioMuted: !localMicOn, roleLabel } : null}
-            remotes={callRoster.remotes || []}
-            dominantId={dominantSpeakerId}
-            messages={chatMessages}
+            local={liveKitJoin
+              ? (liveKitUi?.local || null)
+              : (callRoster.local ? { ...callRoster.local, audioMuted: !localMicOn, roleLabel } : null)}
+            remotes={liveKitJoin ? (liveKitUi?.remotes || []) : (callRoster.remotes || [])}
+            dominantId={liveKitJoin ? (liveKitUi?.dominantId || "") : dominantSpeakerId}
+            messages={liveKitJoin ? (liveKitUi?.messages || []) : chatMessages}
             onTab={(tab) => setConferenceSide(tab)}
             onClose={() => setConferenceSide("")}
             onSend={onSendConferenceChat}
