@@ -4,7 +4,10 @@ import {
   acceptGeneration,
   classifyClientFault,
   describeCallReadiness,
+  finishWithin,
+  nextProviderSwitch,
   nextPublishIntent,
+  providerSwitchStillCurrent,
   reconnectDelayMs,
   shouldReportFault,
 } from "./videoFailover";
@@ -34,6 +37,30 @@ describe("failover guards", () => {
     expect(shouldReportFault({ fault: "provider_outage", attempt: 2, maxAttempts: 3 })).toBe(false);
     expect(shouldReportFault({ fault: "provider_outage", attempt: 3, maxAttempts: 3 })).toBe(true);
     expect(shouldReportFault({ fault: "device_permission", attempt: 5 })).toBe(false);
+  });
+
+  it("keeps a single in-flight provider switch", () => {
+    expect(nextProviderSwitch({ activeOp: 0, currentKind: "jaas", targetKind: "livekit" })).toEqual({ target: "livekit" });
+    for (let i = 0; i < 10; i += 1) {
+      expect(nextProviderSwitch({ activeOp: 1, currentKind: "jaas", targetKind: "livekit" })).toBeNull();
+      expect(nextProviderSwitch({ activeOp: 1, currentKind: "jaas", targetKind: "jaas" })).toBeNull();
+    }
+    expect(nextProviderSwitch({ activeOp: 0, currentKind: "livekit", targetKind: "livekit" })).toBeNull();
+    expect(nextProviderSwitch({ activeOp: 0, currentKind: "livekit", targetKind: "jaas" })).toEqual({ target: "jaas" });
+    expect(providerSwitchStillCurrent(4, 4)).toBe(true);
+    expect(providerSwitchStillCurrent(5, 4)).toBe(false);
+    expect(providerSwitchStillCurrent(0, 4)).toBe(false);
+  });
+
+  it("stops waiting when a disconnect does not finish", async () => {
+    let finished = false;
+    await finishWithin(async () => {
+      finished = true;
+    }, 1000);
+    expect(finished).toBe(true);
+    const started = Date.now();
+    await finishWithin(() => new Promise(() => {}), 40);
+    expect(Date.now() - started).toBeLessThan(1000);
   });
 
   it("ignores a stale provider generation", () => {

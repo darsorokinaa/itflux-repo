@@ -53,6 +53,7 @@ export default function MiniCallBar({
   onShow,
   onExpand,
   onCompact,
+  callSwitch = null,
 }) {
   const minimized = view === "minimized";
   const expanded = view === "expanded";
@@ -86,6 +87,7 @@ export default function MiniCallBar({
           ) : null}
         </div>
         <div className="mini-call-bar__actions">
+          {callSwitch}
           {minimized ? (
             <WindowButton label="Показать видеозвонок" icon="video" onClick={onShow} />
           ) : null}

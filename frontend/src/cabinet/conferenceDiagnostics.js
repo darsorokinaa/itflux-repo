@@ -148,6 +148,12 @@ export function conferenceStatusView({
     return { phase: "info", title: hint };
   }
   const joined = joinState === "joined" || joinState === "embedded";
+  if (!joined && (hint === "Подключение…" || hint.startsWith("Переключаем связь"))) {
+    return {
+      phase: "connecting",
+      title: hint.startsWith("Переключаем связь") ? "Переключаем связь…" : "Подключение…",
+    };
+  }
   if (!joined && (hint.includes("Подключа") || hint.includes("занимает больше"))) {
     return { phase: "connecting", title: "Подключаемся к занятию" };
   }

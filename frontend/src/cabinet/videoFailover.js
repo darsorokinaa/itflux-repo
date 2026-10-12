@@ -73,6 +73,48 @@ export function acceptGeneration(current, incoming) {
   return Number.isFinite(next) && next > prev;
 }
 
+export const CALL_SWITCH_NOTICE = "Переключаем связь…";
+export const CALL_SWITCH_DETAIL = "Переключаем связь… Звук и видео могут ненадолго прерваться. Ученик перейдёт сам.";
+export const CALL_CONNECTING_NOTICE = "Подключение…";
+export const CALL_READY_NOTICE = "Связь установлена";
+export const CALL_SWITCH_FAILED = "Не удалось переключить связь";
+export const CALL_SWITCH_RETRY = "Попробовать снова";
+export const CALL_SWITCH_OFFLINE = "Нет соединения. Связь не переключена.";
+
+/** Одна операция: повторный клик и тот же провайдер не запускают второй переход. */
+export function nextProviderSwitch({ activeOp = 0, currentKind = "jaas", targetKind = "jaas" } = {}) {
+  if (activeOp) return null;
+  const target = targetKind === "livekit" ? "livekit" : "jaas";
+  const current = currentKind === "livekit" ? "livekit" : "jaas";
+  if (target === current) return null;
+  return { target };
+}
+
+/** Снимать блокировку и применять ответ может только операция, которая ещё текущая. */
+export function providerSwitchStillCurrent(activeOp, op) {
+  return Boolean(op) && activeOp === op;
+}
+
+/**
+ * Дождаться завершения или крайнего срока.
+ * Срок нужен, чтобы зависший disconnect не оставлял экран в бесконечной загрузке.
+ */
+export function finishWithin(work, ms, schedule = setTimeout, cancel = clearTimeout) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      cancel(timer);
+      resolve();
+    };
+    const timer = schedule(done, ms);
+    Promise.resolve()
+      .then(() => (typeof work === "function" ? work() : undefined))
+      .then(done, done);
+  });
+}
+
 /**
  * Сигнал без медиапути — ещё не «подключено».
  * Выключенный микрофон и тишина собеседника не считаются обрывом.

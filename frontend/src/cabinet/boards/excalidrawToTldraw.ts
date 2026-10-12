@@ -7,6 +7,7 @@ import { getIndicesBetween, getIndicesBelow } from "@tldraw/utils";
 import type { TLRecord } from "tldraw";
 
 import { stableUrlOf } from "./boardFiles";
+import { cameraFromExcalidrawScroll } from "./boardOpenFrame";
 
 const PAGE_ID = "page:page";
 const EXCALIDRAW_TYPES = new Set([
@@ -659,11 +660,11 @@ function placeLegacyRecords(editor: LegacyEditor, scene: unknown, records: TLRec
       const zoomValue = typeof zoom === "number" ? zoom : Number(isRecord(zoom) ? zoom.value : Number.NaN);
       try {
         if (Number.isFinite(scrollX) && Number.isFinite(scrollY)) {
-          editor.setCamera?.({
-            x: -scrollX,
-            y: -scrollY,
-            z: Number.isFinite(zoomValue) && zoomValue > 0 ? zoomValue : 1,
-          });
+          editor.setCamera?.(cameraFromExcalidrawScroll(
+            scrollX,
+            scrollY,
+            Number.isFinite(zoomValue) && zoomValue > 0 ? zoomValue : 1,
+          ));
         } else {
           editor.zoomToFit?.();
         }

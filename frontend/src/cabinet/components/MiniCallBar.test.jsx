@@ -71,6 +71,18 @@ describe("MiniCallBar", () => {
     expect(screen.queryByRole("button", { name: "Показать видеозвонок" })).toBeNull();
   });
 
+  it("keeps the call switch inside the window bar", () => {
+    render(
+      <MiniCallBar
+        view="normal"
+        statusLabel="Алиса"
+        callSwitch={<button type="button">Основная связь</button>}
+        onMinimize={() => {}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Основная связь" })).toBeTruthy();
+  });
+
   it("does not cover the video with a waiting plaque", () => {
     render(<MiniCallBar view="normal" waiting participantCount={1} onMinimize={() => {}} onExpand={() => {}} />);
     expect(screen.getByText("Ждём ученика")).toBeTruthy();

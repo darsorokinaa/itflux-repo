@@ -571,6 +571,14 @@ export function fetchVideoMeetingMediaRoute(meetingUuid) {
   return videoMeetingFetch(`/${meetingUuid}/media-route/`, { method: "GET" });
 }
 
+export function switchVideoMeetingMedia(meetingUuid, payload = {}, options = {}) {
+  return videoMeetingFetch(`/${meetingUuid}/media-route/switch/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal: options.signal,
+  });
+}
+
 export function reportVideoMeetingMediaFault(meetingUuid, payload = {}) {
   return videoMeetingFetch(`/${meetingUuid}/media-route/fault/`, {
     method: "POST",

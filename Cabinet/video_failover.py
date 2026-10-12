@@ -472,8 +472,6 @@ def admin_switch(*, meeting, user, target: str, expected_generation: int | None)
 
     if not failover_enabled():
         raise VideoMeetingError("Резервная видеосвязь выключена", code="failover_disabled", status=409)
-    if not (user.is_staff or user.is_superuser):
-        raise VideoMeetingError("Переключать провайдер может только администратор", code="forbidden", status=403)
     assert_can_manage_meeting(user, meeting)
     ensure_route(meeting)
     route, applied = switch_provider(

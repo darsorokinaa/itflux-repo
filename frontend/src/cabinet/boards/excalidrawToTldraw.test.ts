@@ -252,7 +252,7 @@ describe("loadLegacyExcalidrawScene", () => {
     const { editor, put, setCamera } = editorWith();
     expect(loadLegacyExcalidrawScene(editor, scene())).toBe(true);
     expect(put.some((record) => (record as { id?: string }).id === "shape:excalidraw-note")).toBe(true);
-    expect(setCamera).toHaveBeenCalledWith({ x: 120, y: -30, z: 1.25 });
+    expect(setCamera).toHaveBeenCalledWith({ x: -120, y: 30, z: 1.25 });
   });
 
   it("leaves a tldraw document and an empty excalidraw scene untouched", () => {

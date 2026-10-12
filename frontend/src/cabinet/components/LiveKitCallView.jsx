@@ -654,6 +654,22 @@ const LiveKitCallView = forwardRef(function LiveKitCallView({
     }
   };
 
+  const releaseMedia = async () => {
+    goneRef.current = true;
+    const room = roomRef.current;
+    if (!room) return;
+    try {
+      room.removeAllListeners();
+    } catch {
+      /* ignore */
+    }
+    try {
+      await room.disconnect(true);
+    } catch {
+      /* старая сессия уже могла завершиться */
+    }
+  };
+
   actionsRef.current = {
     toggleMic,
     toggleCam,
@@ -667,6 +683,7 @@ const LiveKitCallView = forwardRef(function LiveKitCallView({
     startAudio,
     retry,
     removeRemote,
+    releaseMedia,
   };
   useImperativeHandle(ref, () => ({
     toggleMic: () => actionsRef.current.toggleMic(),
@@ -681,6 +698,7 @@ const LiveKitCallView = forwardRef(function LiveKitCallView({
     startAudio: () => actionsRef.current.startAudio(),
     retry: () => actionsRef.current.retry(),
     removeRemote: (identity) => actionsRef.current.removeRemote(identity),
+    releaseMedia: () => actionsRef.current.releaseMedia(),
   }), []);
 
   const conferenceStatus = liveKitConferenceStatus(status, notice);

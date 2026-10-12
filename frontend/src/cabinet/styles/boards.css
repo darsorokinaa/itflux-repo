@@ -2141,11 +2141,20 @@ html.cb-board-editor-open body {
   content-visibility: visible;
 }
 
-/* Глобальный `svg, canvas { max-width: 100% }` сжимает штрих и оставляет обрезки. */
+/* Глобальные img/svg/canvas { max-width: 100%; height: auto } сжимают фигуры
+   внутри слоя tldraw размером 1×1. Штрих обрезается, картинка материала схлопывается. */
 .lesson-board .tl-canvas svg,
-.lesson-board .tl-canvas canvas {
+.lesson-board .tl-canvas canvas,
+.lesson-board .tl-canvas img,
+.lesson-board .tl-canvas video {
   max-width: none;
   max-height: none;
+}
+
+.lesson-board .tl-canvas img.tl-image,
+.lesson-board .tl-canvas video.tl-video {
+  width: 100%;
+  height: 100%;
 }
 
 .lesson-board .tl-container {

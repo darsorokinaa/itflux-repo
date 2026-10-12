@@ -170,7 +170,8 @@ class VideoFailoverTests(TestCase):
         self.assertEqual(student_claims["video"]["room"], meeting.room_name)
         self.assertTrue(teacher_claims["video"]["roomAdmin"])
         self.assertFalse(student_claims["video"]["roomAdmin"])
-        self.assertFalse(student_claims["video"]["canPublishData"])
+        self.assertTrue(teacher_claims["video"]["canPublishData"])
+        self.assertTrue(student_claims["video"]["canPublishData"])
         self.assertEqual(student_claims["sub"], f"p{self.student_user.pk}")
         self.assertNotIn("name", student_claims)
         self.assertNotIn("email", student_claims)
@@ -261,6 +262,31 @@ class VideoFailoverTests(TestCase):
         self.assertEqual(teacher.data["provider"], "livekit")
         self.assertEqual(pupil.data["provider"], "livekit")
         self.assertEqual(teacher.data["roomName"], pupil.data["roomName"])
+        self.assertEqual(teacher.data["mediaGeneration"], pupil.data["mediaGeneration"])
+
+    def test_teacher_switches_the_room_between_call_kinds(self):
+        meeting = self._live()
+        self.client.force_login(self.teacher)
+        to_livekit = self.client.post(
+            f"/api/video-meetings/{meeting.uuid}/media-route/switch/",
+            {"provider": "livekit", "expectedGeneration": 1},
+            format="json",
+        )
+        self.assertEqual(to_livekit.status_code, 200)
+        self.assertTrue(to_livekit.data["switched"])
+        self.assertEqual(to_livekit.data["provider"], "livekit")
+        generation = to_livekit.data["generation"]
+        back = self.client.post(
+            f"/api/video-meetings/{meeting.uuid}/media-route/switch/",
+            {"provider": "primary", "expectedGeneration": generation},
+            format="json",
+        )
+        self.assertEqual(back.status_code, 200)
+        self.assertEqual(back.data["provider"], "meet")
+        teacher = self._join(self.teacher, meeting)
+        pupil = self._join(self.student_user, meeting)
+        self.assertEqual(teacher.data["provider"], "meet")
+        self.assertEqual(pupil.data["provider"], "meet")
         self.assertEqual(teacher.data["mediaGeneration"], pupil.data["mediaGeneration"])
 
     def test_student_cannot_switch_or_disconnect_teacher(self):

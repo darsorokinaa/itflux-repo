@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { createRef } from "react";
+import { act, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const room = {
@@ -68,6 +69,7 @@ describe("LiveKitCallView", () => {
   beforeEach(() => {
     room.connect.mockClear();
     room.disconnect.mockClear();
+    room.removeAllListeners.mockClear();
     room.localParticipant.setMicrophoneEnabled.mockClear();
   });
 
@@ -90,6 +92,24 @@ describe("LiveKitCallView", () => {
     expect(screen.queryByRole("button", { name: "Завершить участие" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Только звук" })).toBeNull();
     expect(room.connect).toHaveBeenCalledWith("wss://video.example.test", "header.payload.sig");
+  });
+
+  it("releases the room before another provider starts", async () => {
+    const ref = createRef();
+    const view = render(
+      <LiveKitCallView
+        ref={ref}
+        meetingUuid="meet-1"
+        url="wss://video.example.test"
+        token="header.payload.sig"
+      />,
+    );
+    await act(async () => {
+      await ref.current.releaseMedia();
+    });
+    expect(room.removeAllListeners).toHaveBeenCalled();
+    expect(room.disconnect).toHaveBeenCalledWith(true);
+    view.unmount();
   });
 
   it("keeps other participants visible when a local camera or microphone is published", () => {

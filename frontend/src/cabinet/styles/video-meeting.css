@@ -58,6 +58,47 @@
   flex: 0 0 auto;
 }
 
+.video-lesson-call-kind {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  background: transparent;
+}
+
+.video-lesson-call-kind__note {
+  margin: 0;
+  flex: 1 0 100%;
+  background: transparent;
+  color: var(--vl-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.video-lesson-call-kind__short {
+  display: none;
+}
+
+.mini-call-bar .video-lesson-call-kind {
+  flex-wrap: nowrap;
+}
+
+.mini-call-bar .video-lesson-call-kind .video-lesson-btn {
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .video-lesson-call-kind__full {
+    display: none;
+  }
+
+  .video-lesson-call-kind__short {
+    display: inline;
+  }
+}
+
 .video-lesson-header__divider {
   width: 1px;
   height: 22px;

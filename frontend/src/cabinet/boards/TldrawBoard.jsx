@@ -37,6 +37,7 @@ import {
   nextCanvasGeometry,
 } from "./boardDocumentTelemetry";
 import { createLessonBoardAssetStore } from "./lessonBoardAssetStore";
+import { frameBoardIfContentIsOffscreen, revealBoardContent } from "./boardOpenFrame";
 import BoardV2ErrorBoundary from "./BoardV2ErrorBoundary";
 import LessonBoardMessage from "./LessonBoardMessage";
 import "../styles/boards.css";
@@ -152,6 +153,7 @@ function restoreLegacyScene(editor, sceneData) {
       return;
     }
     if (attached.restored) installSavedCustomColors(editor);
+    frameBoardIfContentIsOffscreen(editor);
   }).catch((error) => {
     console.error("failed to restore excalidraw board", error);
   });
@@ -270,6 +272,7 @@ function TldrawBoardSynced({
           boardId,
           storage: window.localStorage,
         });
+        const stopReveal = revealBoardContent(editor);
         const disposeEraserInput = installCoalescedEraserInput(editor);
         const disposeThickness = installLessonThickness(editor);
         if (typeof editor.registerExternalContentHandler === "function") {
@@ -279,6 +282,7 @@ function TldrawBoardSynced({
         }
         const disposeLegacy = restoreLegacyScene(editor, sceneData);
         return () => {
+          stopReveal();
           disposePdfNotice(editor);
           disposeThickness();
           disposeEraserInput();

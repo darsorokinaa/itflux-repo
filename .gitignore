@@ -45,6 +45,9 @@ import_tasks_universal.py
 # User/media files
 Generator/media/
 
+# Isolated video E2E stand: runtime secrets, certs, screenshots
+e2e-video/.run/
+
 # Playwright real-device E2E artifacts
 e2e-real-devices/test-results/
 e2e-real-devices/playwright-report/

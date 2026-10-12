@@ -122,7 +122,9 @@ def _video_grant(*, room: str, is_moderator: bool, server: bool = False) -> dict
         "roomAdmin": bool(is_moderator),
         "canPublish": True,
         "canSubscribe": True,
-        "canPublishData": False,
+        # Чат и поднятая рука идут data-сообщениями этой комнаты.
+        # roomAdmin остаётся только у ведущего.
+        "canPublishData": True,
         "canUpdateOwnMetadata": True,
         "canPublishSources": ["camera", "microphone", "screen_share", "screen_share_audio"],
         "hidden": False,

@@ -39,6 +39,18 @@ describe("conferenceStatusView", () => {
       connectionHint: "Подключаем видеозвонок…",
       joinState: "joined",
     }).phase).toBe("");
+    expect(conferenceStatusView({
+      connectionHint: "Переключаем связь…",
+      joinState: "",
+    })).toEqual({ phase: "connecting", title: "Переключаем связь…" });
+    expect(conferenceStatusView({
+      connectionHint: "Подключение…",
+      joinState: "",
+    })).toEqual({ phase: "connecting", title: "Подключение…" });
+    expect(conferenceStatusView({
+      connectionHint: "Подключение…",
+      joinState: "joined",
+    }).phase).toBe("");
   });
 });
 

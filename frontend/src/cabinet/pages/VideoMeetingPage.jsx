@@ -17,6 +17,7 @@ import {
   fetchVideoMeetingJoinConfig,
   fetchVideoMeetingLiveAnswers,
   fetchVideoMeetingMediaRoute,
+  switchVideoMeetingMedia,
   fetchVideoMeetingStatus,
   reportVideoMeetingMediaFault,
   finishVideoMeeting,
@@ -175,9 +176,18 @@ import { classifyJoinStop, joinMediaIntent } from "../jitsiCallDiagnostics";
 import { probeJaasReachability, loadJaasScriptByFetch, isIosHomeScreen } from "../connectionCheck/jaasReachability";
 import LiveKitCallView from "../components/LiveKitCallView";
 import {
-  MEDIA_RESTORE_NOTICE,
+  CALL_CONNECTING_NOTICE,
+  CALL_READY_NOTICE,
+  CALL_SWITCH_DETAIL,
+  CALL_SWITCH_FAILED,
+  CALL_SWITCH_NOTICE,
+  CALL_SWITCH_OFFLINE,
+  CALL_SWITCH_RETRY,
   acceptGeneration,
   classifyClientFault,
+  finishWithin,
+  nextProviderSwitch,
+  providerSwitchStillCurrent,
   shouldReportFault,
 } from "../videoFailover";
 import {
@@ -442,6 +452,64 @@ function LessonRoomActions({
   );
 }
 
+// Ручной переход на резервную связь скрыт: в уроке остаётся 8x8.
+const SHOW_CALL_KIND_SWITCH = false;
+
+function CallKindSwitch({ kind, busy, phase, compact = false, onRetry, onSelect }) {
+  const options = [
+    ["jaas", "Основная связь", "Основная", "Основная связь, 8x8"],
+    ["livekit", "Резервная связь", "Резервная", "Резервная связь, LiveKit"],
+  ];
+  const note = compact ? "" : (
+    phase === "switching"
+      ? CALL_SWITCH_DETAIL
+      : phase === "connecting"
+        ? CALL_CONNECTING_NOTICE
+        : phase === "ready"
+          ? CALL_READY_NOTICE
+          : phase === "failed"
+            ? CALL_SWITCH_FAILED
+            : ""
+  );
+  return (
+    <div
+      className="video-lesson-call-kind"
+      role="group"
+      aria-label="Вид связи"
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      {options.map(([value, label, short, title]) => (
+        <button
+          key={value}
+          type="button"
+          className={`video-lesson-btn video-lesson-btn--ghost${kind === value ? " is-active" : ""}`}
+          aria-pressed={kind === value}
+          title={title}
+          disabled={busy}
+          onClick={() => { void onSelect(value); }}
+        >
+          {compact ? short : (
+            <>
+              <span className="video-lesson-call-kind__full">{label}</span>
+              <span className="video-lesson-call-kind__short">{short}</span>
+            </>
+          )}
+        </button>
+      ))}
+      {note ? <p className="video-lesson-call-kind__note" role="status">{note}</p> : null}
+      {phase === "failed" ? (
+        <button
+          type="button"
+          className="video-lesson-btn video-lesson-btn--ghost"
+          onClick={() => { void onRetry(); }}
+        >
+          {CALL_SWITCH_RETRY}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export default function VideoMeetingPage() {
   const { meetingUuid } = useParams();
   const navigate = useNavigate();
@@ -458,6 +526,11 @@ export default function VideoMeetingPage() {
   const liveKitApiRef = useRef(null);
   const liveKitSeenRef = useRef(0);
   const applyMediaRouteRef = useRef(() => {});
+  const reconcileMediaRouteRef = useRef(() => {});
+  const callSwitchActiveRef = useRef(0);
+  const callSwitchSeqRef = useRef(0);
+  const callSwitchTargetRef = useRef("");
+  const markCallMediaReadyRef = useRef(() => {});
   const reportExhaustedMediaRef = useRef(() => {});
   const jitsiAuthRetryRef = useRef(0);
   const pollTimerRef = useRef(null);
@@ -620,6 +693,25 @@ export default function VideoMeetingPage() {
   const [copied, setCopied] = useState(false);
   const [copyHint, setCopyHint] = useState("");
   const [connectionHint, setConnectionHint] = useState("");
+  const [callLinkPhase, setCallLinkPhase] = useState("");
+  markCallMediaReadyRef.current = () => {
+    setCallLinkPhase((current) => (
+      current === "connecting" || current === "switching" ? "ready" : current
+    ));
+    setConnectionHint((current) => (
+      current === CALL_CONNECTING_NOTICE || String(current).startsWith("Переключаем связь")
+        ? CALL_READY_NOTICE
+        : current
+    ));
+  };
+  useEffect(() => {
+    if (callLinkPhase !== "ready") return undefined;
+    const timer = window.setTimeout(() => {
+      setCallLinkPhase("");
+      setConnectionHint((current) => (current === CALL_READY_NOTICE ? "" : current));
+    }, 4000);
+    return () => window.clearTimeout(timer);
+  }, [callLinkPhase]);
   const [liveClockMs, setLiveClockMs] = useState(() => Date.now());
   const [resumeState, setResumeState] = useState(RESUME_STATES.ACTIVE);
   const [resumeElapsedMs, setResumeElapsedMs] = useState(0);
@@ -914,7 +1006,11 @@ export default function VideoMeetingPage() {
         throw Object.assign(new Error("Backend не вернул JWT для Jitsi"), { code: "jwt_missing" });
       }
       if (config.failoverMode) failoverModeRef.current = config.failoverMode;
-      if (config.failoverMode === "auto" || config.failoverMode === "livekit_only") {
+      if (
+        config.failoverMode === "auto"
+        || config.failoverMode === "livekit_only"
+        || config.failoverMode === "jaas_only"
+      ) {
         setFailoverWatch(true);
       }
       const incomingGeneration = Number(config.mediaGeneration || 0);
@@ -1070,6 +1166,7 @@ export default function VideoMeetingPage() {
         onJoined: (event) => {
           jitsiAuthRetryRef.current = 0;
           setJoinState("joined");
+          markCallMediaReadyRef.current();
           conferencePresenceRef.current.joined = true;
           setVideoServiceUnreachable(false);
           applyConferenceHint();
@@ -1394,16 +1491,30 @@ export default function VideoMeetingPage() {
   useEffect(() => {
     applyMediaRouteRef.current = (route) => {
       if (shouldIgnoreReconnect(intentionalLeaveRef.current)) return;
+      if (callSwitchActiveRef.current) return;
       const generation = Number(route?.generation || 0);
       if (!acceptGeneration(mediaGenerationRef.current, generation)) return;
       if (route?.provider === "livekit" && !route?.switched && route?.roomAction === "local_only") return;
       mediaGenerationRef.current = generation;
       recoveringMediaRef.current = true;
+      setMediaWarning("");
+      setCallLinkPhase("switching");
       disposeApi();
-      setConnectionHint(MEDIA_RESTORE_NOTICE);
+      setConnectionHint(CALL_SWITCH_NOTICE);
       setError("");
       setPageState("live");
-      void initializeJitsi();
+      void initializeJitsi().then((ok) => {
+        if (callSwitchActiveRef.current) return;
+        if (!ok) {
+          setCallLinkPhase("failed");
+          setError(CALL_SWITCH_FAILED);
+          setPageState("error");
+          setConnectionHint("");
+          return;
+        }
+        setCallLinkPhase("connecting");
+        setConnectionHint(CALL_CONNECTING_NOTICE);
+      });
     };
     reportExhaustedMediaRef.current = async (code) => {
       if (failoverModeRef.current !== "auto") return;
@@ -1432,9 +1543,14 @@ export default function VideoMeetingPage() {
   }, [disposeApi, initializeJitsi, meetingUuid]);
 
   useEffect(() => {
-    if (!failoverWatch || !meetingUuid || (pageState !== "live" && pageState !== "error")) return undefined;
+    if (!failoverWatch || !meetingUuid || (pageState !== "live" && pageState !== "error")) {
+      reconcileMediaRouteRef.current = () => {};
+      return undefined;
+    }
     let stopped = false;
     const tick = async () => {
+      if (stopped) return;
+      if (typeof navigator !== "undefined" && navigator.onLine === false) return;
       try {
         const route = await fetchVideoMeetingMediaRoute(meetingUuid);
         if (stopped || !route?.enabled) return;
@@ -1443,10 +1559,21 @@ export default function VideoMeetingPage() {
         /* опрос маршрута не блокирует урок */
       }
     };
-    const timer = window.setInterval(tick, 8000);
+    reconcileMediaRouteRef.current = () => { void tick(); };
+    void tick();
+    const timer = window.setInterval(() => { void tick(); }, 8000);
+    const onOnline = () => { void tick(); };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void tick();
+    };
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       stopped = true;
+      reconcileMediaRouteRef.current = () => {};
       window.clearInterval(timer);
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [failoverWatch, meetingUuid, pageState]);
 
@@ -2346,6 +2473,90 @@ export default function VideoMeetingPage() {
   const meeting = detail?.videoMeeting;
   const canManage = Boolean(detail?.canManage);
   canManageRef.current = canManage;
+  const [callSwitchBusy, setCallSwitchBusy] = useState(false);
+  const [pendingCallKind, setPendingCallKind] = useState("");
+  const onSwitchCallKind = useCallback(async (target) => {
+    if (!canManageRef.current || !meetingUuid) return;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      setCallLinkPhase("failed");
+      setMediaWarning(CALL_SWITCH_OFFLINE);
+      return;
+    }
+    const decision = nextProviderSwitch({
+      activeOp: callSwitchActiveRef.current,
+      currentKind: liveKitActiveRef.current ? "livekit" : "jaas",
+      targetKind: target,
+    });
+    if (!decision) return;
+    const op = callSwitchSeqRef.current + 1;
+    callSwitchSeqRef.current = op;
+    callSwitchActiveRef.current = op;
+    callSwitchTargetRef.current = decision.target;
+    const current = () => providerSwitchStillCurrent(callSwitchActiveRef.current, op);
+    setCallSwitchBusy(true);
+    setCallLinkPhase("switching");
+    setMediaWarning("");
+    let released = false;
+    const abort = new AbortController();
+    const abortTimer = window.setTimeout(() => abort.abort(), 20000);
+    try {
+      const generation = mediaGenerationRef.current || null;
+      const route = await switchVideoMeetingMedia(meetingUuid, {
+        provider: decision.target === "livekit" ? "livekit" : "primary",
+        ...(generation ? { expectedGeneration: generation } : {}),
+      }, { signal: abort.signal });
+      if (!current()) return;
+      if (route?.generation) mediaGenerationRef.current = Number(route.generation);
+      if (route?.switched === false) {
+        setCallLinkPhase("");
+        return;
+      }
+      setPendingCallKind(decision.target);
+      setCallLinkPhase("connecting");
+      recoveringMediaRef.current = true;
+      await finishWithin(() => liveKitApiRef.current?.releaseMedia?.(), 4000);
+      if (!current()) return;
+      released = true;
+      disposeApi();
+      setError("");
+      setPageState("live");
+      const joined = await initializeJitsi();
+      if (!current()) return;
+      if (!joined) {
+        setCallLinkPhase("failed");
+        setError(CALL_SWITCH_FAILED);
+        setPageState("error");
+        setConnectionHint("");
+        return;
+      }
+      setCallLinkPhase("connecting");
+      setConnectionHint(CALL_CONNECTING_NOTICE);
+    } catch (err) {
+      if (!current()) return;
+      const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+      const aborted = err?.name === "AbortError";
+      setCallLinkPhase("failed");
+      if (released) {
+        setError(CALL_SWITCH_FAILED);
+        setPageState("error");
+        setConnectionHint("");
+      } else {
+        setMediaWarning(offline || aborted
+          ? (offline ? CALL_SWITCH_OFFLINE : CALL_SWITCH_FAILED)
+          : (err?.message || CALL_SWITCH_FAILED));
+      }
+    } finally {
+      window.clearTimeout(abortTimer);
+      if (current()) {
+        callSwitchActiveRef.current = 0;
+        setCallSwitchBusy(false);
+        setPendingCallKind("");
+      }
+    }
+  }, [disposeApi, initializeJitsi, meetingUuid]);
+  useEffect(() => () => {
+    callSwitchActiveRef.current = 0;
+  }, []);
   const status = meeting?.status || "scheduled";
   const returnUrl = returnUrlRef.current || (canManage ? "/cabinet/schedule" : "/cabinet/student/lessons");
   const scheduleUrl = "/cabinet/schedule";
@@ -2677,6 +2888,7 @@ export default function VideoMeetingPage() {
           materialSyncStatusRef.current = "synced";
           setMaterialSyncStatus("synced");
           setScreenshareAnnUnavailable(false);
+          reconcileMediaRouteRef.current();
           return;
         }
         if (status === "failed") {
@@ -4005,6 +4217,15 @@ export default function VideoMeetingPage() {
 
         <div className="video-lesson-header__actions">
           {showJitsi ? <ConferenceTimer startedAt={meeting?.actualStartedAt || ""} active={pageState === "live"} /> : null}
+          {SHOW_CALL_KIND_SWITCH && showJitsi && canManage ? (
+            <CallKindSwitch
+              kind={pendingCallKind || (liveKitJoin ? "livekit" : "jaas")}
+              busy={callSwitchBusy}
+              phase={callLinkPhase}
+              onSelect={onSwitchCallKind}
+              onRetry={() => { void onSwitchCallKind(callSwitchTargetRef.current); }}
+            />
+          ) : null}
           {showJitsi ? (
             <button
               type="button"
@@ -4356,16 +4577,20 @@ export default function VideoMeetingPage() {
           {pageState === "error" ? (
             <div className="video-lesson-state" data-testid="room-error-fallback">
               <p className="video-lesson-state__title">
-                {videoJoinFailed
-                  ? (String(error || "").includes("Видеосервис")
-                    ? "Видеосервис недоступен с этой сети."
-                    : "Не удалось подключить видеозвонок.")
-                  : "Не удалось открыть урок."}
+                {callLinkPhase === "failed"
+                  ? CALL_SWITCH_FAILED
+                  : videoJoinFailed
+                    ? (String(error || "").includes("Видеосервис")
+                      ? "Видеосервис недоступен с этой сети."
+                      : "Не удалось подключить видеозвонок.")
+                    : "Не удалось открыть урок."}
               </p>
               <p className="video-lesson-state__text">
-                {videoJoinFailed
-                  ? "Урок и доска сохраняются. Комната видеосвязи не меняется. Повторите подключение."
-                  : (error || "Комната не загрузилась. Можно переподключиться или вернуться в кабинет.")}
+                {callLinkPhase === "failed"
+                  ? "Звук и видео не переключились. Урок и доска на месте."
+                  : videoJoinFailed
+                    ? "Урок и доска сохраняются. Повторите подключение."
+                    : (error || "Комната не загрузилась. Можно переподключиться или вернуться в кабинет.")}
               </p>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
                 <button
@@ -4373,7 +4598,7 @@ export default function VideoMeetingPage() {
                   className="video-lesson-btn video-lesson-btn--primary"
                   onClick={() => void bootstrap()}
                 >
-                  {videoJoinFailed ? "Повторить" : "Переподключиться"}
+                  {callLinkPhase === "failed" ? CALL_SWITCH_RETRY : (videoJoinFailed ? "Повторить" : "Переподключиться")}
                 </button>
                 <Link to={returnUrl} className="video-lesson-btn">
                   Вернуться в кабинет
@@ -4427,6 +4652,16 @@ export default function VideoMeetingPage() {
               onShow={() => setCallView("normal")}
               onExpand={() => setCallView("expanded")}
               onCompact={() => setCallView("normal")}
+              callSwitch={SHOW_CALL_KIND_SWITCH && boardChromeOpen && canManage ? (
+                <CallKindSwitch
+                  compact
+                  kind={pendingCallKind || (liveKitJoin ? "livekit" : "jaas")}
+                  busy={callSwitchBusy}
+                  phase={callLinkPhase}
+                  onSelect={onSwitchCallKind}
+                  onRetry={() => { void onSwitchCallKind(callSwitchTargetRef.current); }}
+                />
+              ) : null}
             />
           ) : null}
           {compactCall ? (
@@ -4498,7 +4733,12 @@ export default function VideoMeetingPage() {
                 onConnected={() => {
                   setJoinState("joined");
                   setVideoServiceUnreachable(false);
-                  if (liveKitJoin.recovering) setConnectionHint("Видеосвязь восстановлена");
+                  markCallMediaReadyRef.current();
+                  if (liveKitJoin.recovering) {
+                    setConnectionHint((current) => (
+                      current === CALL_READY_NOTICE ? current : "Видеосвязь восстановлена"
+                    ));
+                  }
                 }}
                 onParticipants={(count) => setParticipantCount(count)}
                 onFault={(info) => {
