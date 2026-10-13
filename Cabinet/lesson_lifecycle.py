@@ -163,6 +163,19 @@ def sync_plan_item_date_to_event(item, *, changed_by):
     return {"moved": True, "event_id": event.pk, "reason": ""}
 
 
+def sync_plan_dates_to_linked_events(plan, *, changed_by):
+    """После смены дат плана переносит уже связанные будущие занятия.
+
+    Новые карточки не создаёт. Проведённые и отменённые остаются на своей дате.
+    """
+    moved = []
+    for item in plan.items.order_by("order", "id"):
+        result = sync_plan_item_date_to_event(item, changed_by=changed_by)
+        if result.get("moved") and result.get("event_id"):
+            moved.append(result["event_id"])
+    return {"moved": moved}
+
+
 def _lock_event(event):
     return (
         ScheduleEvent.objects.select_for_update(of=("self",))
@@ -464,7 +477,6 @@ def materialize_plan_calendar(plan, *, teacher, enrollment=None, slots=None, not
         ScheduleEvent.Status.COMPLETED,
         ScheduleEvent.Status.CANCELLED,
         ScheduleEvent.Status.SKIPPED,
-        ScheduleEvent.Status.MOVED,
     }
     for item in plan.items.order_by("order", "id"):
         if not item.scheduled_date:
@@ -473,7 +485,17 @@ def materialize_plan_calendar(plan, *, teacher, enrollment=None, slots=None, not
         if event is None:
             event = item.schedule_events_linked.order_by("starts_at").first()
         starts_at, ends_at, slot_for_bounds = _bounds_for_item(item, normalized, counters, zone)
-        if event is not None and (event.status in protected or event.original_start_at):
+        if event is not None and event.status in protected:
+            kept.append(event.pk)
+            continue
+        # original_start_at есть у каждого экземпляра серии, а MOVED — у любого
+        # переноса. Это не повод оставлять карточку на старой дате плана.
+        # Исключение по времени сохраняем только пока дата плана совпадает с карточкой.
+        if (
+            event is not None
+            and event_local_date(event) == item.scheduled_date
+            and (event.status == ScheduleEvent.Status.MOVED or event.original_start_at)
+        ):
             kept.append(event.pk)
             continue
         hits = check_conflicts(

@@ -1479,10 +1479,16 @@ export default function CabinetLessonPlanEditorPage() {
         return;
       }
       const createdCount = Array.isArray(calendar?.created) ? calendar.created.length : 0;
-      if (createdCount) {
+      const movedCount = Array.isArray(calendar?.updated) ? calendar.updated.length : 0;
+      const conflictCount = Array.isArray(calendar?.conflicts) ? calendar.conflicts.length : 0;
+      if (conflictCount) {
+        showToast(`Не удалось перенести занятий: ${conflictCount}. Новое время уже занято, карточка осталась на прежней дате.`);
+      } else if (movedCount) {
+        showToast(`В календаре обновлено занятий: ${movedCount}.`);
+      } else if (createdCount) {
         showToast(`В календарь добавлено занятий: ${createdCount}. Повторное создание не добавляет копии.`);
       } else {
-        showToast("Занятия уже стоят в календаре. Новых копий нет.");
+        showToast("Занятия уже стоят в календаре на этих датах.");
       }
     } catch (err) {
       showToast(err?.message || "Не удалось поставить занятия в календарь.");

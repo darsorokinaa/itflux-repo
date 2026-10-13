@@ -71,6 +71,31 @@ describe("MiniCallBar", () => {
     expect(screen.queryByRole("button", { name: "Показать видеозвонок" })).toBeNull();
   });
 
+  it("toggles the microphone from the compact bar and shows the real state", () => {
+    const onToggleMic = vi.fn();
+    const { rerender } = render(
+      <MiniCallBar
+        view="minimized"
+        statusLabel="Алиса"
+        micOn={false}
+        onToggleMic={onToggleMic}
+        onShow={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Включить микрофон" }));
+    expect(onToggleMic).toHaveBeenCalledTimes(1);
+    rerender(
+      <MiniCallBar
+        view="minimized"
+        statusLabel="Алиса"
+        micOn
+        onToggleMic={onToggleMic}
+        onShow={() => {}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Выключить микрофон" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("keeps the call switch inside the window bar", () => {
     render(
       <MiniCallBar

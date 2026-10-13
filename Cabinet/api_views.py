@@ -1559,8 +1559,14 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
             if not calendar.get("ok"):
                 payload["calendar_warning"] = calendar.get("detail")
             return Response(payload)
+        from .lesson_lifecycle import sync_plan_dates_to_linked_events
+
+        moves = sync_plan_dates_to_linked_events(plan, changed_by=self.get_teacher())
         plan = self.get_queryset().filter(pk=plan.pk).first() or plan
-        return Response(LessonPlanDetailSerializer(plan).data)
+        payload = LessonPlanDetailSerializer(plan).data
+        if moves["moved"]:
+            payload["calendar_moves"] = moves
+        return Response(payload)
 
     def _plan_excel_settings(self, request, plan=None):
         data = getattr(request, "data", {}) or {}

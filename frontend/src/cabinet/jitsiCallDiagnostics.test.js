@@ -45,6 +45,45 @@ describe("classifyJoinStop", () => {
     expect(stage.mediaConfirmed).toBe(false);
   });
 
+  it("does not call a script timeout, WebRTC or a Safari capture error dns_or_https", () => {
+    expect(classifyJoinStop({
+      online: true,
+      scriptLoaded: false,
+      iframeCreated: false,
+      code: "jitsi_script_timeout",
+    })).toMatchObject({ stage: "script", failureClass: "script_timeout", eventType: "connection_failed" });
+    expect(classifyJoinStop({
+      scriptLoaded: false,
+      iframeCreated: false,
+      code: "jitsi_join_timeout",
+    })).toMatchObject({ stage: "signaling", failureClass: "signaling" });
+    expect(classifyJoinStop({
+      scriptLoaded: false,
+      iframeCreated: false,
+      code: "jitsi_connection_failed",
+    }).failureClass).toBe("signaling");
+    expect(classifyJoinStop({
+      scriptLoaded: false,
+      iframeCreated: false,
+      code: "jitsi_conference_failed",
+    }).failureClass).toBe("ice");
+    expect(classifyJoinStop({
+      scriptLoaded: false,
+      iframeCreated: false,
+      code: "peerConnectionFailure",
+    }).failureClass).toBe("ice");
+    expect(classifyJoinStop({
+      scriptLoaded: false,
+      iframeCreated: false,
+      code: "NotAllowedError",
+    }).failureClass).toBe("device");
+    expect(classifyJoinStop({
+      scriptLoaded: false,
+      iframeCreated: false,
+      eventName: "Activating capture must be called from a user gesture handler",
+    }).failureClass).toBe("device");
+  });
+
   it("separates signaling, ICE, missing media and an already open call that dropped", () => {
     expect(classifyJoinStop({
       scriptLoaded: true,

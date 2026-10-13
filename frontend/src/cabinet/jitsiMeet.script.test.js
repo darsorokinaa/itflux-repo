@@ -59,12 +59,42 @@ describe("loadJitsiExternalApi", () => {
     expect(resolveJitsiApiRoomName({ roomName: "digitalstreamroom" })).toBe("digitalstreamroom");
   });
 
-  it("times out instead of waiting forever", async () => {
+  it("times out instead of waiting forever and does not call that a DNS failure", async () => {
     vi.useFakeTimers();
     const pending = loadJitsiExternalApi("meet.example.test", { timeoutMs: 50 });
-    const assertion = expect(pending).rejects.toMatchObject({ code: "jitsi_script_timeout" });
+    const assertion = expect(pending).rejects.toMatchObject({
+      code: "jitsi_script_timeout",
+      scriptLoadEvent: false,
+      scriptErrorEvent: false,
+      apiGlobal: false,
+      iframeCreated: false,
+    });
     await vi.advanceTimersByTimeAsync(60);
     await assertion;
+    expect(document.getElementById("jitsi-external-api-script")).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("does not attach a second wait to a script element that never loaded", async () => {
+    const stuck = document.createElement("script");
+    stuck.id = "jitsi-external-api-script";
+    stuck.src = "https://meet.example.test/libs/external_api.min.js";
+    document.head.appendChild(stuck);
+    vi.useFakeTimers();
+    const pending = loadJitsiExternalApi("meet.example.test", { timeoutMs: 5000 });
+    window.JitsiMeetExternalAPI = function JitsiMeetExternalAPI() {};
+    await vi.advanceTimersByTimeAsync(200);
+    await expect(pending).resolves.toBe(window.JitsiMeetExternalAPI);
+    expect(document.getElementById("jitsi-external-api-script")).not.toBe(stuck);
+    vi.useRealTimers();
+  });
+
+  it("resolves when the script runs but Safari does not fire load", async () => {
+    vi.useFakeTimers();
+    const pending = loadJitsiExternalApi("meet.example.test", { timeoutMs: 5000 });
+    window.JitsiMeetExternalAPI = function JitsiMeetExternalAPI() {};
+    await vi.advanceTimersByTimeAsync(200);
+    await expect(pending).resolves.toBe(window.JitsiMeetExternalAPI);
     vi.useRealTimers();
   });
 });

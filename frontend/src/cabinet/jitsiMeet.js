@@ -152,18 +152,39 @@ export function loadJitsiExternalApi(domain, { timeoutMs = JITSI_SCRIPT_LOAD_TIM
   }
   return new Promise((resolve, reject) => {
     let settled = false;
+    let poll = 0;
+    let sawLoad = false;
+    let sawError = false;
+    let inserted = null;
     const finish = (error) => {
       if (settled) return;
       settled = true;
       window.clearTimeout(timer);
-      if (error) {
-        reject(error);
+      window.clearInterval(poll);
+      const apiGlobal = Boolean(window.JitsiMeetExternalAPI);
+      if (apiGlobal) {
+        resolve(window.JitsiMeetExternalAPI);
         return;
       }
-      if (window.JitsiMeetExternalAPI) resolve(window.JitsiMeetExternalAPI);
-      else reject(jitsiScriptError());
+      const failure = error || jitsiScriptError();
+      failure.scriptLoadEvent = sawLoad;
+      failure.scriptErrorEvent = sawError;
+      failure.apiGlobal = false;
+      failure.iframeCreated = false;
+      if (failure.code === "jitsi_script_timeout" && inserted?.isConnected) {
+        try {
+          inserted.remove();
+        } catch {
+          /* повтор не должен ждать тот же элемент без load/error */
+        }
+      }
+      reject(failure);
     };
     const timer = window.setTimeout(() => finish(jitsiScriptTimeoutError()), timeoutMs);
+    // iPad Safari может выполнить external_api.js и не прислать load. Это не DNS.
+    poll = window.setInterval(() => {
+      if (window.JitsiMeetExternalAPI) finish(null);
+    }, 200);
 
     const attach = (script) => {
       if (window.JitsiMeetExternalAPI) {
@@ -171,26 +192,33 @@ export function loadJitsiExternalApi(domain, { timeoutMs = JITSI_SCRIPT_LOAD_TIM
         return;
       }
       if (script.dataset.jitsiError === "1") {
+        sawError = true;
         finish(jitsiScriptError());
         return;
       }
       const ready = script.readyState;
       if (script.dataset.jitsiReady === "1" || ready === "complete" || ready === "loaded") {
+        sawLoad = true;
         finish(null);
         return;
       }
       script.addEventListener("load", () => {
+        sawLoad = true;
         script.dataset.jitsiReady = "1";
         finish(null);
       }, { once: true });
       script.addEventListener("error", () => {
+        sawError = true;
         script.dataset.jitsiError = "1";
         finish(jitsiScriptError());
       }, { once: true });
     };
 
     const existing = document.getElementById(SCRIPT_ID);
-    if (existing && existing.getAttribute("src") === src) {
+    const existingUsable = existing
+      && existing.getAttribute("src") === src
+      && (existing.dataset.jitsiReady === "1" || window.JitsiMeetExternalAPI);
+    if (existingUsable) {
       attach(existing);
       return;
     }
@@ -198,10 +226,12 @@ export function loadJitsiExternalApi(domain, { timeoutMs = JITSI_SCRIPT_LOAD_TIM
     const script = document.createElement("script");
     script.id = SCRIPT_ID;
     script.async = true;
-    // Свой Jitsi (lesson.itflux-academy.ru) — без VPN. meet.jit.si в РФ часто недоступен.
-    script.src = src;
+    // Слушатели раньше src: у кэшированного файла Safari иначе теряет load и ждёт 45 с.
     attach(script);
+    script.src = src;
+    inserted = script;
     document.head.appendChild(script);
+    if (window.JitsiMeetExternalAPI) finish(null);
   });
 }
 
@@ -362,11 +392,19 @@ export const JITSI_EXPANDED_TOOLBAR = [
 /** Панель видна сразу и в компактном окне: на планшете нет hover, автоскрытие прячет кнопки. */
 export const JITSI_TOOLBAR_VISIBLE = { alwaysVisible: true, initialTimeout: 0, timeout: 0 };
 
+/**
+ * В обычном окне урока свои кнопки снаружи iframe.
+ * Микрофон Jitsi всё равно остаётся: клик по нему идёт внутри 8x8.vc
+ * и может выдать разрешение. Пустой toolbar и alwaysVisible:false
+ * оставляли микрофон выключенным навсегда.
+ */
+export const JITSI_CUSTOM_TOOLBAR = ["microphone"];
+
 export function jitsiCallChromeConfig(expanded, { custom = false } = {}) {
   if (custom && !expanded) {
     return {
-      toolbarButtons: [],
-      toolbarConfig: { alwaysVisible: false, initialTimeout: 0, timeout: 0 },
+      toolbarButtons: JITSI_CUSTOM_TOOLBAR,
+      toolbarConfig: JITSI_TOOLBAR_VISIBLE,
     };
   }
   return {
@@ -419,6 +457,9 @@ export function buildJitsiConfigOverwrite({
     disableDeepLinking: true,
     startWithAudioMuted: Boolean(startWithAudioMuted),
     startWithVideoMuted: Boolean(startWithVideoMuted),
+    // prejoin выключен. Без этого Jitsi может не создать аудиотрек до unmute,
+    // а unmute из родительской страницы не является жестом внутри iframe.
+    disableInitialGUM: false,
     disableLobbyMode: true,
     lobby: { enabled: false },
     autoKnockLobby: false,
@@ -432,10 +473,8 @@ export function buildJitsiConfigOverwrite({
     hideConferenceTimer: true,
     disableModeratorIndicator: false,
     enableClosePage: false,
-    toolbarButtons: customChrome ? [] : JITSI_COMPACT_TOOLBAR,
-    toolbarConfig: customChrome
-      ? { alwaysVisible: false, initialTimeout: 0, timeout: 0 }
-      : JITSI_TOOLBAR_VISIBLE,
+    toolbarButtons: customChrome ? JITSI_CUSTOM_TOOLBAR : JITSI_COMPACT_TOOLBAR,
+    toolbarConfig: JITSI_TOOLBAR_VISIBLE,
     // 1:1 режим Jitsi оставляет один крупный кадр. Выключение локальной камеры
     // переносит аватар ученика на сцену и прячет учителя в обрезанный filmstrip.
     disable1On1Mode: true,
@@ -893,6 +932,7 @@ export function buildJitsiEmbedUrl(config) {
     "config.autoKnockLobby=false",
     `config.startWithAudioMuted=${startWithAudioMuted ? "true" : "false"}`,
     `config.startWithVideoMuted=${startWithVideoMuted ? "true" : "false"}`,
+    "config.disableInitialGUM=false",
     "config.hideLoginButton=true",
     "config.hideConferenceSubject=true",
     "config.hideConferenceTimer=true",
@@ -1222,8 +1262,9 @@ function waitForConferenceJoined(api, {
   });
 }
 
-function joinFailureFromOutcome(outcome, { signal } = {}) {
+function joinFailureFromOutcome(outcome, { signal, iframeCreated = false } = {}) {
   const err = new Error("Не удалось войти во встречу");
+  err.iframeCreated = Boolean(iframeCreated);
   if (outcome === JOIN_OUTCOME.aborted || signal?.aborted) {
     err.message = "Подключение к конференции отменено";
     err.code = "jitsi_aborted";
@@ -1459,6 +1500,7 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
         });
       }
     }
+    const iframeCreated = Boolean(api.getIFrame?.());
     disposeOnce(
       outcome === JOIN_OUTCOME.aborted
         ? "aborted"
@@ -1466,7 +1508,7 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
           ? "fatal_timeout"
           : outcome,
     );
-    throw joinFailureFromOutcome(outcome, { signal: hooks.signal });
+    throw joinFailureFromOutcome(outcome, { signal: hooks.signal, iframeCreated });
   }
 
   unhookAppend();

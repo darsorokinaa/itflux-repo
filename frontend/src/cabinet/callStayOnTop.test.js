@@ -122,9 +122,20 @@ describe("callStayOnTop", () => {
       mediaSession: { setActionHandler, setCameraActive, setMicrophoneActive },
     });
     setMeetingMediaSessionActive({ camera: true, microphone: true });
-    const unbind = bindMeetingAutoPip(onEnter);
+    expect(setCameraActive).not.toHaveBeenCalled();
+    expect(setMicrophoneActive).not.toHaveBeenCalled();
+    setMeetingMediaSessionActive({ camera: true, microphone: false, userGesture: true });
     expect(setCameraActive).toHaveBeenCalledWith(true);
-    expect(setMicrophoneActive).toHaveBeenCalledWith(true);
+    expect(setMicrophoneActive).toHaveBeenCalledWith(false);
+    setCameraActive.mockImplementation(() => {
+      throw new DOMException("Activating capture must be called from a user gesture handler", "InvalidStateError");
+    });
+    expect(() => setMeetingMediaSessionActive({
+      camera: true,
+      microphone: true,
+      userGesture: true,
+    })).not.toThrow();
+    const unbind = bindMeetingAutoPip(onEnter);
     const handler = setActionHandler.mock.calls.find((call) => call[0] === "enterpictureinpicture")?.[1];
     handler();
     expect(onEnter).toHaveBeenCalledTimes(1);

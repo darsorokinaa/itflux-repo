@@ -32,6 +32,7 @@ from .meeting_present import (
     serialize_presented,
 )
 from .student_api import _interactive_to_player_payload
+from .kontur_talk import issue_kontur_talk_link, kontur_talk_public_status
 from .video_meeting_service import (
     VideoMeetingError,
     build_connection_probe_config,
@@ -172,6 +173,7 @@ class VideoMeetingDetailView(APIView):
             "joinState": state,
             "joinStateLabel": ui_state_message(state),
             "canManage": can_manage,
+            "konturTalk": kontur_talk_public_status(),
             "viewerUserId": request.user.pk,
             "viewerRole": access.role,
             "canControlMaterial": bool(getattr(access, "can_control_material", can_manage)),
@@ -224,6 +226,24 @@ class VideoMeetingStatusView(APIView):
                 include_state=True,
             ),
         })
+
+
+class VideoMeetingKonturTalkView(APIView):
+    """Ссылка Контур.Толк. Не заменяет join-config Jitsi, 8x8 и LiveKit."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, meeting_uuid):
+        meeting = None
+        try:
+            meeting = get_meeting_by_uuid(meeting_uuid)
+            payload = issue_kontur_talk_link(meeting=meeting, user=request.user)
+        except VideoMeetingError as exc:
+            return _error_response(exc, meeting=meeting)
+        response = Response(payload)
+        response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response["Pragma"] = "no-cache"
+        return response
 
 
 class VideoMeetingJoinConfigView(APIView):

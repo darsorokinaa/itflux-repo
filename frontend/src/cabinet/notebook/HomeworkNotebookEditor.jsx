@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { CircleHelp, Maximize, Minus, Plus, X } from "lucide-react";
+import { ArrowLeft, CircleHelp, Maximize, MessageSquare, Minus, PanelLeft, Plus, X } from "lucide-react";
 import { openMaterialPdf } from "../materials/collab/pdfjsLoader";
 import EducationalLoading, { LOADING_MESSAGES } from "../../components/EducationalLoading";
 import NotebookCanvas from "./NotebookCanvas";
 import NotebookPagesDrawer from "./NotebookPagesDrawer";
+import NotebookReviewPanel from "./NotebookReviewPanel";
 import NotebookToolbar from "./NotebookToolbar";
 import { createHistory, pagesCommand, replaceAnnotationsCommand } from "./notebookHistory";
 import {
   ERASER_MODE,
   TOOL,
   cloneAnnotation,
+  createAnnotation,
   normalizeAnnotation,
   pageAnnotations,
   setPageAnnotations,
@@ -94,7 +96,8 @@ export default function HomeworkNotebookEditor({
   const [error, setError] = useState("");
   const [conflict, setConflict] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [pagesOpen, setPagesOpen] = useState(false);
+  const [pagesOpen, setPagesOpen] = useState(true);
+  const [commentsOpen, setCommentsOpen] = useState(true);
   const [helpOpen, setHelpOpen] = useState(false);
   const [hint, setHint] = useState(() => {
     try { return localStorage.getItem(HINT_KEY) !== "1"; } catch { return false; }
@@ -620,15 +623,96 @@ export default function HomeworkNotebookEditor({
     }
   };
 
+  const showReview = Boolean(doc && doc.owner_role !== "student");
+  const pageFeedback = objects.find((obj) => obj?.type === "page_feedback") || null;
+  const withPageMeta = (list, index) => (list || [])
+    .filter((obj) => obj?.type === "comment")
+    .map((obj) => ({ ...obj, pageIndex: index, pageLabel: `Страница ${index + 1}` }));
+  const pageComments = withPageMeta(objects, pageIndex);
+  const allComments = pages.flatMap((item, index) => withPageMeta(
+    pageAnnotations(item).map((obj) => normalizeAnnotation(obj, item.id)).filter(Boolean),
+    index,
+  ));
+  const objectsOn = (targetPage) => (
+    targetPage?.id === page?.id
+      ? objects
+      : pageAnnotations(targetPage).map((obj) => normalizeAnnotation(obj, targetPage.id)).filter(Boolean)
+  );
+  const replacePageObjects = (targetPage, next, historyType) => {
+    if (!targetPage) return;
+    const current = objectsOn(targetPage);
+    const nextDoc = setPageAnnotations(docRef.current || doc, targetPage.id, next);
+    applyDoc(nextDoc, { history: replaceAnnotationsCommand(targetPage.id, current, next, historyType) });
+  };
+  const savePageFeedback = (text) => {
+    if (readOnly || !page) return;
+    const value = String(text || "");
+    if (pageFeedback) {
+      const next = value.trim()
+        ? objects.map((obj) => (obj.id === pageFeedback.id ? { ...obj, text: value } : obj))
+        : objects.filter((obj) => obj.id !== pageFeedback.id);
+      commitObjects(next, "UPDATE_ANNOTATION");
+      return;
+    }
+    if (!value.trim()) return;
+    commitObjects([...objects, createAnnotation("page_feedback", { text: value }, page.id)], "ADD_ANNOTATION");
+  };
+  const addReviewComment = (text) => {
+    if (readOnly || !page) return;
+    const value = String(text || "").trim();
+    if (!value) return;
+    commitObjects([...objects, createAnnotation("comment", { text: value }, page.id)], "ADD_ANNOTATION");
+  };
+  const resolveReviewComment = (comment) => {
+    if (readOnly || !comment) return;
+    const targetPage = pages[comment.pageIndex] || page;
+    const current = objectsOn(targetPage);
+    replacePageObjects(
+      targetPage,
+      current.map((obj) => (obj.id === comment.id ? { ...obj, resolved: !obj.resolved } : obj)),
+      "UPDATE_ANNOTATION",
+    );
+  };
+  const deleteReviewComment = (comment) => {
+    if (readOnly || !comment) return;
+    const targetPage = pages[comment.pageIndex] || page;
+    replacePageObjects(
+      targetPage,
+      objectsOn(targetPage).filter((obj) => obj.id !== comment.id),
+      "DELETE_ANNOTATION",
+    );
+  };
+  const addStamp = (kind) => {
+    if (readOnly || !page) return;
+    const mark = kind === "cross" ? "✗" : "✓";
+    const ink = kind === "cross" ? "#E25E66" : "#28886A";
+    const placed = objects.filter((obj) => obj.type === "text" && (obj.text === "✓" || obj.text === "✗")).length;
+    commitObjects([
+      ...objects,
+      createAnnotation("text", {
+        text: mark,
+        x: 72 + (placed % 8) * 56,
+        y: 72 + Math.floor(placed / 8) * 56,
+        fontSize: 42,
+        stroke: ink,
+        color: ink,
+      }, page.id),
+    ], "ADD_ANNOTATION");
+  };
+
   const shortcuts = useMemo(() => ([
-    ["Инструменты", [["P", "Ручка"], ["M", "Маркер"], ["E", "Ластик"], ["T", "Текст"], ["V", "Выбор"], ["H", "Рука"]]],
+    ["Инструменты", [["P", "Перо"], ["M", "Маркер"], ["E", "Ластик"], ["T", "Текст"], ["V", "Выделить"], ["H", "Перемещение"]]],
     ["Навигация", [["Space", "Перемещение"], [shortcutLabel("Mod +/-"), "Масштаб"], [shortcutLabel("Mod+0"), "По странице"]]],
     ["Редактирование", [[shortcutLabel("Mod+Z"), "Отмена"], [shortcutLabel("Mod+Shift+Z"), "Повтор"], ["Delete", "Удалить"], [shortcutLabel("Mod+D"), "Дублировать"]]],
   ]), []);
 
   if (!doc) {
     return createPortal(
-      <div className="hw-notebook">
+      <div className="hw-notebook hw-notebook--loading">
+        <button type="button" className="hw-nb-back" onClick={handleClose}>
+          <ArrowLeft size={16} />
+          Назад
+        </button>
         {error ? (
           <p className="hw-notebook__status">{error}</p>
         ) : (
@@ -640,47 +724,10 @@ export default function HomeworkNotebookEditor({
   }
 
   return createPortal(
-    <div className="hw-notebook">
-      <header className="hw-notebook__bar">
-        <button type="button" className="hw-nb-ghost" onClick={handleClose} aria-label="Закрыть">
-          <X size={18} />
-        </button>
-        <strong className="hw-notebook__title">Тетрадь проверки</strong>
-        <span className={`hw-notebook__status is-${saveState}`}>{saveStatus}</span>
-        <div className="hw-notebook__bar-actions">
-          <button type="button" className="hw-nb-ghost" onClick={() => setPagesOpen((v) => !v)}>
-            Страницы {pages.length}
-          </button>
-          <button
-            type="button"
-            className={`hw-nb-ghost${helpOpen ? " is-active" : ""}`}
-            aria-label="Горячие клавиши"
-            aria-pressed={helpOpen}
-            onClick={() => setHelpOpen((v) => !v)}
-          >
-            <CircleHelp size={18} />
-          </button>
-          {!readOnly ? (
-            <button type="button" className="hw-nb-done" disabled={busy} onClick={handleDone}>
-              {busy ? "Готовим…" : "Готово"}
-            </button>
-          ) : null}
-        </div>
-      </header>
-      {error ? (
-        <div className="hw-notebook__error" role="alert">
-          <p>{error}</p>
-          {conflict ? (
-            <div className="hw-notebook__conflict-actions">
-              <button type="button" onClick={saveLocalSeparately}>Сохранить пометки отдельно</button>
-              <button type="button" onClick={reloadServerNotebook} disabled={busy}>Обновить тетрадь</button>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      <div className="hw-notebook__workspace">
-        <NotebookPagesDrawer
+    <div className={`hw-notebook${pagesOpen ? "" : " is-pages-hidden"}${showReview && commentsOpen ? "" : " is-comments-hidden"}`}>
+      <button type="button" className="hw-nb-shade hw-nb-shade--pages" aria-label="Скрыть страницы" onClick={() => setPagesOpen(false)} />
+      <button type="button" className="hw-nb-shade hw-nb-shade--comments" aria-label="Закрыть комментарии" onClick={() => setCommentsOpen(false)} />
+      <NotebookPagesDrawer
         open={pagesOpen}
         onClose={() => setPagesOpen(false)}
         pages={pages}
@@ -695,6 +742,18 @@ export default function HomeworkNotebookEditor({
         }}
         readOnly={readOnly}
         />
+      <section className="hw-notebook__workspace" aria-label="Лист и инструменты">
+        {error ? (
+          <div className="hw-notebook__error" role="alert">
+            <p>{error}</p>
+            {conflict ? (
+              <div className="hw-notebook__conflict-actions">
+                <button type="button" onClick={saveLocalSeparately}>Сохранить пометки отдельно</button>
+                <button type="button" onClick={reloadServerNotebook} disabled={busy}>Обновить тетрадь</button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <div
         className="hw-notebook__stage"
         ref={stageRef}
@@ -755,42 +814,69 @@ export default function HomeworkNotebookEditor({
           ) : <p>Нет страниц</p>}
         </div>
         </div>
-        {helpOpen ? (
-          <div className="hw-nb-help" role="dialog" aria-label="Горячие клавиши">
-            <header>
-              <strong>Клавиши</strong>
-              <button type="button" className="hw-nb-ghost" onClick={() => setHelpOpen(false)} aria-label="Закрыть">✕</button>
-            </header>
-            {shortcuts.map(([title, rows]) => (
-              <section key={title}>
-                <h3>{title}</h3>
-                {rows.map(([k, label]) => (
-                  <p key={k}><kbd>{k}</kbd> {label}</p>
-                ))}
-              </section>
-            ))}
+        <div className="hw-nb-float hw-nb-float--left">
+          {!pagesOpen ? (
+            <button type="button" className="hw-nb-icon-btn hw-nb-float-square" aria-label="Показать страницы" onClick={() => setPagesOpen(true)}>
+              <PanelLeft size={18} />
+            </button>
+          ) : null}
+          <button type="button" className="hw-nb-back" onClick={handleClose}>
+            <ArrowLeft size={16} />
+            Назад
+          </button>
+          <div className="hw-nb-capsule" aria-label="Текущая страница">
+            <strong>Страница {pages.length ? pageIndex + 1 : 1}</strong>
+            <span>А4</span>
           </div>
-        ) : null}
-      </div>
-
-      {hint ? (
-        <div className="hw-nb-hint">
-          Совет: удерживайте Space, чтобы перемещать страницу
+        </div>
+        <div className="hw-nb-float hw-nb-float--right">
+          <span className={`hw-nb-save is-${saveState}`}>{saveStatus}</span>
+          {showReview && !commentsOpen ? (
+            <button type="button" className="hw-nb-icon-btn hw-nb-float-square" aria-label="Комментарии" onClick={() => setCommentsOpen(true)}>
+              <MessageSquare size={18} />
+            </button>
+          ) : null}
           <button
             type="button"
-            className="hw-nb-ghost"
-            onClick={() => {
-              localStorage.setItem(HINT_KEY, "1");
-              setHint(false);
-            }}
+            className={`hw-nb-icon-btn hw-nb-float-square${helpOpen ? " is-active" : ""}`}
+            aria-label="Горячие клавиши"
+            aria-pressed={helpOpen}
+            onClick={() => setHelpOpen((value) => !value)}
           >
-            Понятно
+            <CircleHelp size={18} />
+          </button>
+          {!readOnly ? (
+            <button type="button" className="hw-nb-done" disabled={busy} onClick={handleDone}>
+              {busy ? "Готовим…" : "Готово"}
+            </button>
+          ) : null}
+        </div>
+        <div className="hw-nb-zoom" aria-label="Масштаб страницы">
+          <button type="button" className="hw-nb-icon-btn" aria-label="Уменьшить" onClick={() => zoomBy(0.9)}><Minus size={15} /></button>
+          <button type="button" className="hw-nb-zoom-value" onClick={fitPage}>{Math.round((fit ? 1 : zoom) * 100)}%</button>
+          <button type="button" className="hw-nb-icon-btn" aria-label="Увеличить" onClick={() => zoomBy(1.1)}><Plus size={15} /></button>
+          <span className="hw-nb-zoom-sep" />
+          <button type="button" className="hw-nb-icon-btn" aria-label="На весь экран" onClick={() => document.querySelector(".hw-notebook")?.requestFullscreen?.()}>
+            <Maximize size={15} />
           </button>
         </div>
-      ) : null}
-
-      <div className="hw-notebook__dock">
+        {hint ? (
+          <div className="hw-nb-hint">
+            <span><kbd>Space</kbd> переместить лист</span>
+            <button
+              type="button"
+              className="hw-nb-ghost"
+              onClick={() => {
+                localStorage.setItem(HINT_KEY, "1");
+                setHint(false);
+              }}
+            >
+              Понятно
+            </button>
+          </div>
+        ) : null}
         {!readOnly ? (
+        <div className="hw-notebook__dock">
         <NotebookToolbar
           tool={tool}
           onTool={setToolSafe}
@@ -834,16 +920,46 @@ export default function HomeworkNotebookEditor({
           readOnly={readOnly}
           selected={selected}
         />
-        ) : null}
-        <div className="hw-nb-zoom">
-          <button type="button" className="hw-nb-ghost" aria-label="Уменьшить" onClick={() => zoomBy(0.9)}><Minus size={16} /></button>
-          <button type="button" className="hw-nb-ghost" onClick={fitPage}>{Math.round((fit ? 1 : zoom) * 100)}%</button>
-          <button type="button" className="hw-nb-ghost" aria-label="Увеличить" onClick={() => zoomBy(1.1)}><Plus size={16} /></button>
-          <button type="button" className="hw-nb-ghost" aria-label="На весь экран" onClick={() => document.querySelector(".hw-notebook")?.requestFullscreen?.()}>
-            <Maximize size={16} />
-          </button>
         </div>
-      </div>
+        ) : null}
+        {helpOpen ? (
+          <div className="hw-nb-help-backdrop" onClick={() => setHelpOpen(false)}>
+            <div className="hw-nb-help" role="dialog" aria-label="Горячие клавиши" onClick={(event) => event.stopPropagation()}>
+              <header>
+                <strong>Клавиши</strong>
+                <button type="button" className="hw-nb-icon-btn" onClick={() => setHelpOpen(false)} aria-label="Закрыть">
+                  <X size={16} />
+                </button>
+              </header>
+              {shortcuts.map(([title, rows]) => (
+                <section key={title}>
+                  <h3>{title}</h3>
+                  {rows.map(([k, label]) => (
+                    <p key={k}><kbd>{k}</kbd> {label}</p>
+                  ))}
+                </section>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </section>
+      {showReview ? (
+        <NotebookReviewPanel
+          open={commentsOpen}
+          onClose={() => setCommentsOpen(false)}
+          readOnly={readOnly}
+          pageLabel={`Страница ${pageIndex + 1}`}
+          pageComments={pageComments}
+          allComments={allComments}
+          feedback={pageFeedback?.text || ""}
+          onFeedback={savePageFeedback}
+          onAddComment={addReviewComment}
+          onResolve={resolveReviewComment}
+          onDelete={deleteReviewComment}
+          onOpenPage={setPageIndex}
+          onStamp={addStamp}
+        />
+      ) : null}
     </div>,
     document.body,
   );
@@ -851,10 +967,9 @@ export default function HomeworkNotebookEditor({
 
 function NotebookPageBackground({ page, url, isPdf, isImage, pdfCache }) {
   const canvasRef = useRef(null);
-  const [broken, setBroken] = useState(false);
-  useEffect(() => {
-    setBroken(false);
-  }, [url, page?.id]);
+  const sourceKey = `${page?.id || ""}:${url || ""}`;
+  const [brokenKey, setBrokenKey] = useState("");
+  const broken = Boolean(url) && brokenKey === sourceKey;
   useEffect(() => {
     if (!isPdf || !url || !page) return undefined;
     let cancelled = false;
@@ -892,7 +1007,7 @@ function NotebookPageBackground({ page, url, isPdf, isImage, pdfCache }) {
         src={url}
         alt=""
         className="hw-notebook-bg"
-        onError={() => setBroken(true)}
+        onError={() => setBrokenKey(sourceKey)}
       />
     );
   }

@@ -127,6 +127,10 @@ export async function loadJaasScriptByFetch(domain, scriptUrl, timeoutMs = REACH
     await fetchOpaqueScript(url, timeoutMs);
   } catch (error) {
     if (isScriptProbeTimeout(error)) throw error;
+    // iOS/Safari: no-cors fetch бросает Load failed при живом скрипте.
+    // <link rel=preload as=script> на тот же URL конференция тоже грузит тегом.
+    // Снятие preload обрывает общий запрос WebKit, и урок получает ложный таймаут скрипта.
+    if (omitOpaqueFetchCacheMode()) return;
     const left = Math.max(1000, timeoutMs - (nowMs() - started));
     await probeScriptByPreload(url, left);
   }

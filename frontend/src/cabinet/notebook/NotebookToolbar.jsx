@@ -17,9 +17,9 @@ import { ERASER_MODE, QUICK_COLORS, TOOL } from "./notebookModel";
 import { isMacPlatform, shortcutLabel } from "./useEditorShortcuts";
 
 const TOOL_META = [
-  { id: TOOL.HAND, icon: Hand, label: "Рука", shortcut: "H" },
-  { id: TOOL.SELECT, icon: MousePointer2, label: "Выбор", shortcut: "V" },
-  { id: TOOL.PEN, icon: Pencil, label: "Ручка", shortcut: "P" },
+  { id: TOOL.SELECT, icon: MousePointer2, label: "Выделить", shortcut: "V" },
+  { id: TOOL.HAND, icon: Hand, label: "Перемещение", shortcut: "H" },
+  { id: TOOL.PEN, icon: Pencil, label: "Перо", shortcut: "P" },
   { id: TOOL.MARKER, icon: Highlighter, label: "Маркер", shortcut: "M" },
   { id: TOOL.ERASER, icon: Eraser, label: "Ластик", shortcut: "E" },
   { id: TOOL.TEXT, icon: Type, label: "Текст", shortcut: "T" },

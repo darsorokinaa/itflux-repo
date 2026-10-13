@@ -98,7 +98,7 @@ describe("probeJaasReachability", () => {
     vi.unstubAllGlobals();
   });
 
-  it("does not use cache no-store on iPhone and falls back without executing the script", async () => {
+  it("does not preload external_api.js on iPhone after a false Load failed", async () => {
     const fetchImpl = vi.fn(async () => {
       throw new TypeError("Load failed");
     });
@@ -110,15 +110,8 @@ describe("probeJaasReachability", () => {
       maxTouchPoints: 5,
     });
     expect(omitOpaqueFetchCacheMode()).toBe(true);
-    const pending = loadJaasScriptByFetch("8x8.vc", "https://8x8.vc/app/external_api.js", 1000);
-    const link = await vi.waitFor(() => {
-      const node = document.querySelector('link[rel="preload"][as="script"]');
-      expect(node).toBeTruthy();
-      return node;
-    });
+    await loadJaasScriptByFetch("8x8.vc", "https://8x8.vc/app/external_api.js", 1000);
     expect(fetchImpl.mock.calls[0][1].cache).toBeUndefined();
-    link.dispatchEvent(new Event("load"));
-    await pending;
     expect(document.getElementById("jitsi-external-api-script")).toBeNull();
     expect(document.querySelector('link[rel="preload"]')).toBeNull();
     vi.unstubAllGlobals();

@@ -540,6 +540,13 @@ export function fetchVideoMeetingStatus(meetingUuid) {
   return videoMeetingFetch(`/${meetingUuid}/status/`, { method: "GET" });
 }
 
+export function fetchKonturTalkJoin(meetingUuid) {
+  return videoMeetingFetch(`/${meetingUuid}/kontur-talk/`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
 export function fetchVideoMeetingJoinConfig(meetingUuid, extra = {}) {
   const body = {
     browserTabSessionId: extra.browserTabSessionId || extra.browser_tab_session_id || "",

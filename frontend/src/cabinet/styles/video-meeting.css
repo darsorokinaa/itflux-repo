@@ -1294,20 +1294,11 @@
   font-weight: 600;
 }
 
-.mini-call-bar__mic {
-  display: inline-flex;
-  width: 16px;
-  height: 16px;
+.mini-call-bar__iconbtn.mini-call-bar__mic {
   color: #86efac;
-  flex-shrink: 0;
 }
 
-.mini-call-bar__mic svg {
-  width: 14px;
-  height: 14px;
-}
-
-.mini-call-bar__mic.is-off {
+.mini-call-bar__iconbtn.mini-call-bar__mic.is-off {
   color: #fecaca;
 }
 
@@ -1470,8 +1461,15 @@
   color: #991b1b;
 }
 
-.video-lesson-content--call-collapsed:not(.video-lesson-content--call-sized) #jitsi-container {
-  display: none !important;
+.video-lesson-content--call-collapsed:not(.video-lesson-content--call-sized) #jitsi-container,
+.video-lesson-jitsi-host.is-audio-kept #jitsi-container {
+  display: block !important;
+  width: 8px !important;
+  height: 8px !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .video-lesson-material-chip {
@@ -1700,8 +1698,17 @@
   overflow: hidden;
 }
 
-.video-lesson-content--call-collapsed:not(.video-lesson-content--call-sized) .video-lesson-jitsi-host {
-  display: none !important;
+.video-lesson-content--call-collapsed:not(.video-lesson-content--call-sized) .video-lesson-jitsi-host,
+.video-lesson-jitsi-host.is-audio-kept {
+  position: absolute !important;
+  width: 8px !important;
+  height: 8px !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  display: block !important;
 }
 
 #jitsi-container {
@@ -2542,7 +2549,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 48px;
+  min-height: 48px;
+  height: auto;
   max-width: calc(100% - 180px);
   padding: 0 8px 0 10px;
   background: #f5f6f8;
@@ -2550,6 +2558,23 @@
   border-left: 2px solid #fff;
   border-bottom-left-radius: 12px;
   pointer-events: auto;
+}
+
+.video-lesson-kontur {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.video-lesson-kontur__error {
+  flex: 1 0 100%;
+  margin: 0;
+  background: transparent;
+  color: #b91c1c;
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .video-lesson-workspace__text {

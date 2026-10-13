@@ -63,6 +63,7 @@ import {
   readMuteState,
   runConferenceCommand,
   screenShareSupported,
+  setConferenceAudioMuted,
   setConferenceDevice,
 } from "../conferenceCommands";
 import {
@@ -173,8 +174,14 @@ import { createHardReconnectPolicy, decideHardReconnect, withReconnectJitter } f
 import ConnectionRecoveryBanner from "../components/ConnectionRecoveryBanner";
 import { describeCallLink } from "../jitsiLinkMode";
 import { classifyJoinStop, joinMediaIntent } from "../jitsiCallDiagnostics";
-import { probeJaasReachability, loadJaasScriptByFetch, isIosHomeScreen } from "../connectionCheck/jaasReachability";
+import {
+  probeJaasReachability,
+  loadJaasScriptByFetch,
+  omitOpaqueFetchCacheMode,
+  isIosHomeScreen,
+} from "../connectionCheck/jaasReachability";
 import LiveKitCallView from "../components/LiveKitCallView";
+import KonturTalkLaunch from "../components/KonturTalkLaunch";
 import {
   CALL_CONNECTING_NOTICE,
   CALL_READY_NOTICE,
@@ -615,6 +622,7 @@ export default function VideoMeetingPage() {
   const [focusCall, setFocusCall] = useState(false);
   const [shareMiniDismissed, setShareMiniDismissed] = useState(false);
   const [localMicOn, setLocalMicOn] = useState(false);
+  const audioToggleLockRef = useRef(false);
   const [localCamOn, setLocalCamOn] = useState(false);
   const [callRoster, setCallRoster] = useState({ remotes: [], local: null });
   const [stayOnTopActive, setStayOnTopActive] = useState(false);
@@ -798,7 +806,6 @@ export default function VideoMeetingPage() {
 
   useEffect(() => {
     if (pageState !== "live") return undefined;
-    setMeetingMediaSessionActive({ camera: true, microphone: true });
     const unbind = bindMeetingAutoPip(() => {
       if (!screenshareLayoutRef.current?.localSharing) {
         void participantPipRef.current?.requestPip?.(participantPipContext());
@@ -1435,6 +1442,12 @@ export default function VideoMeetingPage() {
         setConnectionHint("Соединение восстанавливается…");
         return false;
       }
+      const joinCode = String(err?.code || err?.name || "").slice(0, 64);
+      const iframeCreated = Boolean(err?.iframeCreated) || Boolean(apiRef.current?.getIFrame?.());
+      const conferenceJoined = Boolean(conferencePresenceRef.current.joined);
+      const mediaChannelOpen = Boolean(conferencePresenceRef.current.mediaUp);
+      const scriptLoaded = joinCode !== "jitsi_script" && joinCode !== "jitsi_script_timeout";
+      const online = typeof navigator === "undefined" ? true : navigator.onLine !== false;
       disposeApi();
       if (err?.code === "not_live" || err?.status === 409) {
         callStateRef.current?.transition(CALL_STATES.ended, err?.code || "not-live");
@@ -1446,12 +1459,12 @@ export default function VideoMeetingPage() {
       }
       callStateRef.current?.transition(CALL_STATES.failed, err?.code || "init-error");
       const stage = classifyJoinStop({
-        online: typeof navigator === "undefined" ? true : navigator.onLine !== false,
-        scriptLoaded: err?.code !== "jitsi_script" && err?.code !== "jitsi_script_timeout",
-        iframeCreated: Boolean(apiRef.current?.getIFrame?.()),
-        conferenceJoined: Boolean(conferencePresenceRef.current.joined),
-        mediaChannelOpen: Boolean(conferencePresenceRef.current.mediaUp),
-        code: err?.code || "",
+        online,
+        scriptLoaded,
+        iframeCreated,
+        conferenceJoined,
+        mediaChannelOpen,
+        code: joinCode,
       });
       void reportMeetingTechnicalEvent(meetingUuid, {
         eventType: "call_stage",
@@ -1462,9 +1475,18 @@ export default function VideoMeetingPage() {
           stage: stage.stage,
           failureClass: stage.failureClass,
           dnsSeparated: false,
+          httpsSeparated: false,
           mediaConfirmed: false,
+          scriptLoaded,
+          iframeCreated,
+          conferenceJoined,
+          mediaChannelOpen,
+          online,
           durationMs: joinStartedAtRef.current ? Date.now() - joinStartedAtRef.current : null,
-          code: String(err?.code || "").slice(0, 64),
+          code: joinCode,
+          ...(typeof err?.scriptLoadEvent === "boolean" ? { scriptLoadEvent: err.scriptLoadEvent } : {}),
+          ...(typeof err?.scriptErrorEvent === "boolean" ? { scriptErrorEvent: err.scriptErrorEvent } : {}),
+          ...(typeof err?.apiGlobal === "boolean" ? { apiGlobal: err.apiGlobal } : {}),
         },
       });
       if (err?.code === "jitsi_script" || err?.code === "jitsi_script_timeout" || err?.message === "Не удалось загрузить Jitsi Meet") {
@@ -1738,6 +1760,11 @@ export default function VideoMeetingPage() {
 
   const onCameraChoice = useCallback((enabled) => {
     if (!meetingUuid) return;
+    setMeetingMediaSessionActive({
+      camera: enabled === true,
+      microphone: getMeetingMicEnabled(meetingUuid) === true,
+      userGesture: true,
+    });
     setMeetingCameraEnabled(meetingUuid, enabled);
     cameraPrefRef.current = enabled;
     void initializeJitsi();
@@ -1838,7 +1865,9 @@ export default function VideoMeetingPage() {
     void probeJaasReachability({
       signal: controller.signal,
       checkSignaling: false,
-      loadApi: loadJaasScriptByFetch,
+      // Safari: параллельный fetch/preload того же external_api.js обрывает тег конференции.
+      // load и error тогда не приходят, и через 45 с срабатывает ложный dns_or_https.
+      loadApi: omitOpaqueFetchCacheMode() ? async () => {} : loadJaasScriptByFetch,
     }).then((result) => {
       if (cancelled || result?.code === "aborted") return;
       setVideoServiceUnreachable(result?.code === "script" || result?.code === "offline");
@@ -3557,11 +3586,23 @@ export default function VideoMeetingPage() {
       void liveKitApiRef.current?.toggleMic();
       return;
     }
-    if (!runConferenceCommand(apiRef.current, "toggleAudio")) {
-      setMediaWarning("Не удалось переключить микрофон.");
-      return;
-    }
-    window.setTimeout(() => { void syncMuteFromApi(); }, 400);
+    if (audioToggleLockRef.current) return;
+    audioToggleLockRef.current = true;
+    void (async () => {
+      try {
+        const state = await readMuteState(apiRef.current);
+        const turnOff = state.audioMuted === false;
+        if (!await setConferenceAudioMuted(apiRef.current, turnOff)) {
+          setMediaWarning("Не удалось переключить микрофон.");
+          return;
+        }
+        window.setTimeout(() => { void syncMuteFromApi(); }, 400);
+      } finally {
+        window.setTimeout(() => {
+          audioToggleLockRef.current = false;
+        }, 700);
+      }
+    })();
   }, [syncMuteFromApi]);
 
   const onToggleConferenceCam = useCallback(() => {
@@ -4197,7 +4238,13 @@ export default function VideoMeetingPage() {
         boardChromeOpen ? "video-lesson-page--board" : "",
       ].filter(Boolean).join(" ")}
     >
-      {boardChromeOpen ? null : (
+      {boardChromeOpen ? (
+        detail?.konturTalk?.available && status === "live" ? (
+          <div className="video-lesson-board-dock">
+            <KonturTalkLaunch available meetingUuid={meetingUuid} />
+          </div>
+        ) : null
+      ) : (
       <header className="video-lesson-header">
         <div className="video-lesson-header__left">
           <div className="video-lesson-header__meta">
@@ -4236,6 +4283,10 @@ export default function VideoMeetingPage() {
             </button>
           ) : null}
           {roomActions}
+          <KonturTalkLaunch
+            available={Boolean(detail?.konturTalk?.available) && status === "live"}
+            meetingUuid={meetingUuid}
+          />
         </div>
       </header>
       )}
@@ -4596,7 +4647,14 @@ export default function VideoMeetingPage() {
                 <button
                   type="button"
                   className="video-lesson-btn video-lesson-btn--primary"
-                  onClick={() => void bootstrap()}
+                  onClick={() => {
+                    setMeetingMediaSessionActive({
+                      camera: getMeetingCameraEnabled(meetingUuid) === true,
+                      microphone: getMeetingMicEnabled(meetingUuid) === true,
+                      userGesture: true,
+                    });
+                    void bootstrap();
+                  }}
                 >
                   {callLinkPhase === "failed" ? CALL_SWITCH_RETRY : (videoJoinFailed ? "Повторить" : "Переподключиться")}
                 </button>
@@ -4636,6 +4694,9 @@ export default function VideoMeetingPage() {
           {compactCall ? (
             <MiniCallBar
               view={callView}
+              micOn={liveKitJoin ? Boolean(liveKitUi?.micOn) : localMicOn}
+              micDisabled={liveKitJoin ? !liveKitUi?.ready : !callControlsReady}
+              onToggleMic={onToggleConferenceMic}
               waiting={!callRoster.remotes?.length}
               statusLabel={callStatusLabel({
                 waiting: !callRoster.remotes?.length,
@@ -4672,8 +4733,11 @@ export default function VideoMeetingPage() {
           ) : null}
 
           <div
-            className="video-lesson-jitsi-host"
-            hidden={!showJitsi || (compactCall && callView === "minimized" && !minimizedShowsVideo)}
+            className={[
+              "video-lesson-jitsi-host",
+              compactCall && callView === "minimized" && !minimizedShowsVideo ? "is-audio-kept" : "",
+            ].filter(Boolean).join(" ")}
+            hidden={!showJitsi}
           >
             {compactCall && connectionHint
               && connectionHint !== "Ждём ученика"

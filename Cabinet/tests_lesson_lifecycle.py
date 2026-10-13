@@ -380,6 +380,50 @@ class LessonLifecycleTests(TestCase):
         self.assertEqual(list(monday.series.recurrence_weekdays), [0])
         self.assertNotEqual(monday.series_id, wednesday.series_id)
 
+    def test_changed_plan_date_moves_calendar_card_with_original_start(self):
+        for item, day in zip(self.items, (date(2026, 10, 5), date(2026, 10, 7), date(2026, 10, 12))):
+            item.scheduled_date = day
+            item.status = PlanItemStatus.PLANNED
+            item.save(update_fields=["scheduled_date", "status"])
+        self.enrollment.weekday_slots = [
+            {"weekday": 0, "start_time": "16:00", "duration_minutes": 60},
+        ]
+        self.enrollment.save(update_fields=["weekday_slots"])
+        materialize_plan_calendar(self.plan, teacher=self.teacher)
+        self.items[0].refresh_from_db()
+        event = self.items[0].scheduled_event
+        event.original_start_at = event.starts_at
+        event.save(update_fields=["original_start_at", "updated_at"])
+        self.items[0].scheduled_date = date(2026, 10, 17)
+        self.items[0].save(update_fields=["scheduled_date", "updated_at"])
+        result = materialize_plan_calendar(
+            self.plan,
+            teacher=self.teacher,
+            slots=self.enrollment.weekday_slots,
+        )
+        event.refresh_from_db()
+        self.assertIn(event.pk, result["updated"])
+        self.assertEqual(event_local_date(event), date(2026, 10, 17))
+        self.assertEqual(ScheduleEvent.objects.filter(lesson_plan_item=self.items[0]).count(), 1)
+
+    def test_fill_dates_moves_linked_lesson_without_creating_another(self):
+        event = self._event(self.items[0], date(2026, 10, 17))
+        self.items[0].scheduled_event = event
+        self.items[0].scheduled_date = date(2026, 10, 17)
+        self.items[0].save(update_fields=["scheduled_event", "scheduled_date"])
+        response = self.client.post(
+            f"/api/cabinet/lesson-plans/{self.plan.pk}/fill-dates/",
+            {"start_date": "2026-10-19", "interval": "weekly", "overwrite": True},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        event.refresh_from_db()
+        self.items[0].refresh_from_db()
+        self.assertEqual(self.items[0].scheduled_date, date(2026, 10, 19))
+        self.assertEqual(event_local_date(event), date(2026, 10, 19))
+        self.assertEqual(response.data["calendar_moves"]["moved"], [event.pk])
+        self.assertEqual(ScheduleEvent.objects.filter(lesson_plan_item=self.items[0]).count(), 1)
+
     @override_settings(TIME_ZONE="UTC")
     def test_weekday_uses_event_timezone_across_midnight(self):
         starts = datetime(2026, 1, 15, 0, 30, tzinfo=ZoneInfo("Europe/Berlin"))

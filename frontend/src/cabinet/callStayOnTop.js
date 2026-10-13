@@ -61,20 +61,39 @@ export function bindMeetingAutoPip(onEnter) {
   };
 }
 
-/** Медиа внутри чужого iframe. Без этой отметки браузер не считает вкладку урока звонком. */
-export function setMeetingMediaSessionActive({ camera = false, microphone = false } = {}) {
+function captureActivationAllowed(userGesture) {
+  if (userGesture === true) return true;
+  try {
+    return typeof navigator !== "undefined" && navigator.userActivation?.isActive === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Отметка вкладки как звонка. Включение камеры и микрофона в Media Session
+ * Safari выполняет только из обработчика жеста. Вызов true из useEffect
+ * даёт InvalidStateError и не открывает устройства.
+ */
+export function setMeetingMediaSessionActive({
+  camera = false,
+  microphone = false,
+  userGesture = false,
+} = {}) {
   const session = typeof navigator !== "undefined" ? navigator.mediaSession : null;
   if (!session) return;
-  try {
-    session.setCameraActive?.(Boolean(camera));
-  } catch {
-    /* ignore */
-  }
-  try {
-    session.setMicrophoneActive?.(Boolean(microphone));
-  } catch {
-    /* ignore */
-  }
+  const allowOn = captureActivationAllowed(userGesture);
+  const setFlag = (method, enabled) => {
+    if (typeof session[method] !== "function") return;
+    if (enabled && !allowOn) return;
+    try {
+      session[method](Boolean(enabled));
+    } catch {
+      /* Safari: Activating capture must be called from a user gesture handler */
+    }
+  };
+  setFlag("setCameraActive", Boolean(camera));
+  setFlag("setMicrophoneActive", Boolean(microphone));
 }
 
 /** True only when the live Jitsi video can actually enter Picture-in-Picture. */

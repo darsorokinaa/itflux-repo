@@ -156,6 +156,16 @@ try:
     LIVEKIT_TOKEN_TTL_SECONDS = int(os.environ.get("LIVEKIT_TOKEN_TTL_SECONDS", "900") or "900")
 except ValueError:
     LIVEKIT_TOKEN_TTL_SECONDS = 900
+# Контур.Толк — отдельный провайдер. Пока флаг выключен, уроки остаются
+# на VIDEO_PROVIDER (meet / jaas) и запасном LiveKit. Ключ только на сервере.
+KONTUR_TALK_ENABLED = os.environ.get("KONTUR_TALK_ENABLED", "false").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+KONTUR_TALK_SPACE = os.environ.get("KONTUR_TALK_SPACE", "").strip()
+KONTUR_TALK_API_KEY = os.environ.get("KONTUR_TALK_API_KEY", "").strip()
 VIDEO_FAILOVER_REQUIRE_HEALTH = os.environ.get("VIDEO_FAILOVER_REQUIRE_HEALTH", "true").strip().lower() not in (
     "0",
     "false",

@@ -23,6 +23,26 @@ export function screenShareSupported() {
     && typeof navigator.mediaDevices?.getDisplayMedia === "function";
 }
 
+/**
+ * Ставит mute явно. toggleAudio только если текущее состояние другое:
+ * повторный вызов из клика и watchdog не должен глушить уже включённый микрофон.
+ * Не вызывает getUserMedia само и не включает микрофон без этого вызова.
+ */
+export async function setConferenceAudioMuted(api, muted) {
+  const session = sessionApi(api);
+  if (!session || typeof session.executeCommand !== "function") return false;
+  const wantMuted = Boolean(muted);
+  try {
+    if (typeof session.isAudioMuted === "function") {
+      const current = Boolean(await session.isAudioMuted());
+      if (current === wantMuted) return true;
+    }
+  } catch {
+    /* одно переключение, если состояние не прочиталось */
+  }
+  return runConferenceCommand(session, "toggleAudio");
+}
+
 export async function readMuteState(api) {
   const session = sessionApi(api);
   let audioMuted = null;

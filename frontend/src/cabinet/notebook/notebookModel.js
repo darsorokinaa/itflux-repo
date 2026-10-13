@@ -128,6 +128,13 @@ export function normalizeAnnotation(raw, pageId = "") {
       text: String(raw.text || ""),
     };
   }
+  if (type === "comment" || type === "page_feedback") {
+    return {
+      ...base,
+      text: String(raw.text || ""),
+      resolved: Boolean(raw.resolved),
+    };
+  }
   return base;
 }
 

@@ -4,6 +4,7 @@ import {
   loadConferenceDevices,
   readMuteState,
   runConferenceCommand,
+  setConferenceAudioMuted,
   setConferenceDevice,
 } from "./conferenceCommands";
 
@@ -17,6 +18,25 @@ describe("conference commands", () => {
       throw new Error("gone");
     });
     expect(runConferenceCommand({ executeCommand }, "hangup")).toBe(false);
+  });
+
+  it("toggles audio only when the live mute state differs", async () => {
+    const executeCommand = vi.fn();
+    const muted = {
+      executeCommand,
+      isAudioMuted: vi.fn(async () => true),
+    };
+    await expect(setConferenceAudioMuted(muted, false)).resolves.toBe(true);
+    expect(executeCommand).toHaveBeenCalledTimes(1);
+    expect(executeCommand).toHaveBeenCalledWith("toggleAudio");
+
+    executeCommand.mockClear();
+    const open = {
+      executeCommand,
+      isAudioMuted: vi.fn(async () => false),
+    };
+    await expect(setConferenceAudioMuted(open, false)).resolves.toBe(true);
+    expect(executeCommand).not.toHaveBeenCalled();
   });
 
   it("reads mute from the api instead of the button click", async () => {

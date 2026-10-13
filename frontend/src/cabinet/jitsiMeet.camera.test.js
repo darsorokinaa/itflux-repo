@@ -67,6 +67,8 @@ describe("meeting camera preference", () => {
     expect(cfg.channelLastN).toBe(8);
     expect(cfg.enableNoAudioDetection).toBe(true);
     expect(cfg.enableIceRestart).toBe(true);
+    expect(cfg.disableInitialGUM).toBe(false);
+    expect(cfg.startSilent).toBeUndefined();
     expect(cfg.disableRemoteControl).toBe(false);
     expect(cfg.disableSelfView).toBeUndefined();
     expect(cfg.startAudioOnly).toBeUndefined();
@@ -99,8 +101,9 @@ describe("meeting camera preference", () => {
     expect(commands[0][1].toolbarButtons).toContain("chat");
     expect(commands[1][1].toolbarButtons).not.toContain("chat");
     applyJitsiCallChrome(api, { custom: true });
-    expect(commands[2][1].toolbarButtons).toEqual([]);
-    expect(buildJitsiConfigOverwrite({ customChrome: true }).toolbarButtons).toEqual([]);
+    expect(commands[2][1].toolbarButtons).toEqual(["microphone"]);
+    expect(commands[2][1].toolbarConfig.alwaysVisible).toBe(true);
+    expect(buildJitsiConfigOverwrite({ customChrome: true }).toolbarButtons).toEqual(["microphone"]);
     expect(buildJitsiConfigOverwrite({ customChrome: true }).disableSelfView).not.toBe(true);
     expect(commands[1][1].toolbarConfig.alwaysVisible).toBe(true);
   });

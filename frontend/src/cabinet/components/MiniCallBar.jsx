@@ -43,6 +43,9 @@ function WindowButton({ label, icon, onClick }) {
 
 export default function MiniCallBar({
   view = "normal",
+  micOn = false,
+  micDisabled = false,
+  onToggleMic,
   waiting = false,
   statusLabel = "",
   remoteName = "",
@@ -84,6 +87,19 @@ export default function MiniCallBar({
           <span className="mini-call-bar__name">{callLabel}</span>
           {minimized && elapsedLabel ? (
             <span className="mini-call-bar__elapsed">{elapsedLabel}</span>
+          ) : null}
+          {typeof onToggleMic === "function" ? (
+            <button
+              type="button"
+              className={`mini-call-bar__iconbtn mini-call-bar__mic${micOn ? "" : " is-off"}`}
+              aria-label={micOn ? "Выключить микрофон" : "Включить микрофон"}
+              aria-pressed={micOn ? "true" : "false"}
+              title={micOn ? "Выключить микрофон" : "Включить микрофон"}
+              disabled={micDisabled}
+              onClick={onToggleMic}
+            >
+              <CabinetIcon name={micOn ? "mic" : "micOff"} />
+            </button>
           ) : null}
         </div>
         <div className="mini-call-bar__actions">
