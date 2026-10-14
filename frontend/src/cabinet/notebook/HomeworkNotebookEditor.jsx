@@ -30,6 +30,7 @@ import {
   uploadNotebookPageBackground,
 } from "./notebookApi";
 import { hasMod, isTypingTarget, shortcutLabel, useEditorShortcuts } from "./useEditorShortcuts";
+import { placeReviewContent } from "./notebookPlacement";
 import {
   flushNotebookForPublish,
   localNotebookFile,
@@ -60,6 +61,7 @@ function persistPages(pages) {
   return (pages || []).map((page) => ({
     ...page,
     state: {
+      ...(page.state || {}),
       version: 1,
       objects: pageAnnotations(page).map((obj) => toPersistedAnnotation(normalizeAnnotation(obj, page.id))),
       viewport: page.state?.viewport || undefined,
@@ -97,7 +99,8 @@ export default function HomeworkNotebookEditor({
   const [conflict, setConflict] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pagesOpen, setPagesOpen] = useState(true);
-  const [commentsOpen, setCommentsOpen] = useState(true);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [readyImages, setReadyImages] = useState({});
   const [helpOpen, setHelpOpen] = useState(false);
   const [hint, setHint] = useState(() => {
     try { return localStorage.getItem(HINT_KEY) !== "1"; } catch { return false; }
@@ -121,6 +124,8 @@ export default function HomeworkNotebookEditor({
   const stageRef = useRef(null);
   const prevToolRef = useRef(TOOL.PEN);
   const clipboardRef = useRef([]);
+  const placedNotebookRef = useRef("");
+  const placeLoadedRef = useRef(async () => {});
 
   const readOnly = Boolean(doc?.readonly || publishedMode || publishedPayload);
   const pages = doc?.pages || [];
@@ -150,6 +155,9 @@ export default function HomeworkNotebookEditor({
     docRef.current = data;
     setDoc(data);
     setSaveState("saved");
+    if (data?.owner_role !== "student" && !data.readonly && !data.published) {
+      void placeLoadedRef.current(data);
+    }
   }, [notebookId, publishedPayload]);
 
   useEffect(() => {
@@ -301,6 +309,45 @@ export default function HomeworkNotebookEditor({
     setDoc(stamped);
     syncHistoryButtons();
     if (save) scheduleSave(stamped);
+  };
+
+  placeLoadedRef.current = async (next) => {
+    if (!next?.id || next.readonly || next.owner_role === "student") return;
+    if (placedNotebookRef.current === next.id) return;
+    placedNotebookRef.current = next.id;
+    setTool(TOOL.SELECT);
+    let placed = null;
+    try {
+      placed = await placeReviewContent(docRef.current?.id === next.id ? docRef.current : next);
+    } catch {
+      placedNotebookRef.current = "";
+      return;
+    }
+    if (!placed?.doc || docRef.current?.id !== next.id) return;
+    const latest = docRef.current;
+    const byId = new Map((latest.pages || []).map((item) => [item.id, item]));
+    const pages = placed.doc.pages.map((page) => {
+      const current = byId.get(page.id) || page;
+      const currentObjects = pageAnnotations(current);
+      const known = new Set(currentObjects.map((obj) => obj.id));
+      const added = pageAnnotations(page).filter((obj) => (
+        obj?.sourceKey
+        && !known.has(obj.id)
+        && !currentObjects.some((item) => item.sourceKey === obj.sourceKey)
+      ));
+      if (!added.length) return current;
+      return {
+        ...current,
+        state: {
+          ...(current.state || {}),
+          contentPlaced: Boolean(page.state?.contentPlaced),
+          objects: [...currentObjects, ...added],
+        },
+      };
+    });
+    if (pages.every((page, index) => page === (latest.pages || [])[index])) return;
+    applyDoc({ ...latest, answer_text: latest.answer_text || next.answer_text || "", pages }, { save: true });
+    if (placed.selectId) setSelectedIds([placed.selectId]);
   };
 
   const commitObjects = (nextObjects, historyType = "UPDATE_ANNOTATION") => {
@@ -586,7 +633,8 @@ export default function HomeworkNotebookEditor({
   const background = pageSourceMeta(page);
   const backgroundUrl = background.url;
   const isPdf = background.isPdf;
-  const isImage = background.isImage;
+  const placedImageReady = objects.some((obj) => obj.type === "image" && readyImages[obj.id]);
+  const isImage = background.isImage && !placedImageReady;
   const saveStatus = saveState === "saving" ? LOADING_MESSAGES.save : saveState === "error" ? "Ошибка сохранения" : "Сохранено";
 
   const onAddPage = async (kind, file) => {
@@ -806,6 +854,7 @@ export default function HomeworkNotebookEditor({
               readOnly={readOnly}
               editingText={editingText}
               onEditingText={setEditingText}
+              onImageReady={(id) => setReadyImages((prev) => (prev[id] ? prev : { ...prev, [id]: true }))}
               onPanDelta={({ dx, dy }) => {
                 setFit(false);
                 setPan((p) => ({ x: p.x + dx, y: p.y + dy }));
@@ -1025,6 +1074,7 @@ function NotebookPageBackground({ page, url, isPdf, isImage, pdfCache }) {
 
 export function HomeworkPublishedNotebookPage() {
   const { submissionId, taskId } = useParams();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const revisionId = searchParams.get("revision") || "";
   const [payload, setPayload] = useState(null);
@@ -1034,7 +1084,25 @@ export function HomeworkPublishedNotebookPage() {
       .then(setPayload)
       .catch((err) => setError(err.message));
   }, [submissionId, taskId, revisionId]);
-  if (error) return <p className="hw-notebook__error">{error}</p>;
+  if (error) {
+    const missingComments = error.includes("не отправлена");
+    return createPortal(
+      <div className="hw-nb-notice" role="dialog" aria-modal="true" aria-labelledby="hw-nb-notice-title">
+        <div className="hw-nb-notice__card">
+          <strong id="hw-nb-notice-title">
+            {missingComments ? "Комментариев пока нет" : "Не удалось открыть работу"}
+          </strong>
+          <p>
+            {missingComments
+              ? "Учитель ещё не отправил комментарии к этой работе. Тетрадь откроется, когда проверка будет готова."
+              : error}
+          </p>
+          <button type="button" onClick={() => navigate(-1)}>Назад</button>
+        </div>
+      </div>,
+      document.body,
+    );
+  }
   if (!payload) return <EducationalLoading message={LOADING_MESSAGES.material} />;
   return <HomeworkNotebookEditor publishedPayload={payload} />;
 }

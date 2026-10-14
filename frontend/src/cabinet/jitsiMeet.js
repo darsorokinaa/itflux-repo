@@ -31,6 +31,12 @@ import {
 } from "./pwa/runtimeResources";
 import { attachOfficialRemoteControl } from "./jitsiRemoteControl";
 import { getJitsiElectronRemoteControlSetup } from "./jitsiElectronRemoteControlRender";
+import {
+  beginScriptAttempt,
+  installScriptErrorCapture,
+  noteScriptEvent,
+  scriptResourceTiming,
+} from "./lessonLoadTrace";
 
 export {
   createBrowserTabSessionId,
@@ -130,19 +136,26 @@ function jitsiScriptTimeoutError() {
   return err;
 }
 
-export function loadJitsiExternalApi(domain, { timeoutMs = JITSI_SCRIPT_LOAD_TIMEOUT_MS, scriptUrl = "" } = {}) {
+export function loadJitsiExternalApi(domain, { timeoutMs = JITSI_SCRIPT_LOAD_TIMEOUT_MS, scriptUrl = "", attemptId = "" } = {}) {
   const host = String(domain || "").replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0];
   if (!host) {
     return Promise.reject(new Error("Не задан домен Jitsi"));
   }
   const src = jitsiExternalApiScriptUrl(host, scriptUrl);
+  installScriptErrorCapture();
+  beginScriptAttempt({ attemptId, scriptUrl: src });
   if (typeof window !== "undefined" && window.JitsiMeetExternalAPI) {
     const existing = document.getElementById(SCRIPT_ID);
     const existingSrc = existing?.getAttribute("src") || "";
     const wantsDifferentScript = Boolean(scriptUrl) && existingSrc && existingSrc !== src;
     if (!wantsDifferentScript) {
+      noteScriptEvent("api_global", { via: "already_present" });
       return Promise.resolve(window.JitsiMeetExternalAPI);
     }
+    noteScriptEvent("tag_removed", {
+      reason: "replaced_different_src",
+      connected: Boolean(existing?.isConnected),
+    });
     existing.remove();
     try {
       delete window.JitsiMeetExternalAPI;
@@ -171,11 +184,18 @@ export function loadJitsiExternalApi(domain, { timeoutMs = JITSI_SCRIPT_LOAD_TIM
       failure.scriptErrorEvent = sawError;
       failure.apiGlobal = false;
       failure.iframeCreated = false;
-      if (failure.code === "jitsi_script_timeout" && inserted?.isConnected) {
-        try {
-          inserted.remove();
-        } catch {
-          /* повтор не должен ждать тот же элемент без load/error */
+      if (failure.code === "jitsi_script_timeout") {
+        noteScriptEvent("timeout", {
+          inDocument: Boolean(inserted?.isConnected),
+          resourceTiming: scriptResourceTiming(src),
+        });
+        if (inserted?.isConnected) {
+          noteScriptEvent("tag_removed", { reason: "timeout", connected: true });
+          try {
+            inserted.remove();
+          } catch {
+            /* повтор не должен ждать тот же элемент без load/error */
+          }
         }
       }
       reject(failure);
@@ -183,7 +203,10 @@ export function loadJitsiExternalApi(domain, { timeoutMs = JITSI_SCRIPT_LOAD_TIM
     const timer = window.setTimeout(() => finish(jitsiScriptTimeoutError()), timeoutMs);
     // iPad Safari может выполнить external_api.js и не прислать load. Это не DNS.
     poll = window.setInterval(() => {
-      if (window.JitsiMeetExternalAPI) finish(null);
+      if (window.JitsiMeetExternalAPI) {
+        noteScriptEvent("api_global", { via: "poll" });
+        finish(null);
+      }
     }, 200);
 
     const attach = (script) => {
@@ -199,17 +222,21 @@ export function loadJitsiExternalApi(domain, { timeoutMs = JITSI_SCRIPT_LOAD_TIM
       const ready = script.readyState;
       if (script.dataset.jitsiReady === "1" || ready === "complete" || ready === "loaded") {
         sawLoad = true;
+        noteScriptEvent("script_load", { via: "readyState", apiGlobal: Boolean(window.JitsiMeetExternalAPI) });
         finish(null);
         return;
       }
       script.addEventListener("load", () => {
         sawLoad = true;
         script.dataset.jitsiReady = "1";
+        noteScriptEvent("script_load", { apiGlobal: Boolean(window.JitsiMeetExternalAPI) });
+        if (window.JitsiMeetExternalAPI) noteScriptEvent("api_global", { via: "load" });
         finish(null);
       }, { once: true });
       script.addEventListener("error", () => {
         sawError = true;
         script.dataset.jitsiError = "1";
+        noteScriptEvent("script_error", { connected: script.isConnected });
         finish(jitsiScriptError());
       }, { once: true });
     };
@@ -222,15 +249,24 @@ export function loadJitsiExternalApi(domain, { timeoutMs = JITSI_SCRIPT_LOAD_TIM
       attach(existing);
       return;
     }
-    if (existing) existing.remove();
+    if (existing) {
+      noteScriptEvent("tag_removed", {
+        reason: "replaced_before_ready",
+        connected: existing.isConnected,
+        ready: existing.dataset.jitsiReady === "1",
+      });
+      existing.remove();
+    }
     const script = document.createElement("script");
     script.id = SCRIPT_ID;
     script.async = true;
+    noteScriptEvent("tag_created", { scriptUrl: src });
     // Слушатели раньше src: у кэшированного файла Safari иначе теряет load и ждёт 45 с.
     attach(script);
     script.src = src;
     inserted = script;
     document.head.appendChild(script);
+    noteScriptEvent("tag_inserted", { connected: script.isConnected, scriptUrl: script.src });
     if (window.JitsiMeetExternalAPI) finish(null);
   });
 }
@@ -400,7 +436,16 @@ export const JITSI_TOOLBAR_VISIBLE = { alwaysVisible: true, initialTimeout: 0, t
  */
 export const JITSI_CUSTOM_TOOLBAR = ["microphone"];
 
-export function jitsiCallChromeConfig(expanded, { custom = false } = {}) {
+/** В плавающем окне панель Jitsi лежит поверх кадра. Кнопки рисует страница, под видео. */
+export const JITSI_FLOATING_TOOLBAR_CONFIG = { alwaysVisible: false, initialTimeout: 0, timeout: 0 };
+
+export function jitsiCallChromeConfig(expanded, { custom = false, floating = false } = {}) {
+  if (floating) {
+    return {
+      toolbarButtons: [],
+      toolbarConfig: JITSI_FLOATING_TOOLBAR_CONFIG,
+    };
+  }
   if (custom && !expanded) {
     return {
       toolbarButtons: JITSI_CUSTOM_TOOLBAR,
@@ -430,10 +475,10 @@ export function notifyJitsiContainerResize(api) {
 }
 
 /** Меняет панель Jitsi без переподключения. В компактном виде остаётся короткий набор. */
-export function applyJitsiCallChrome(api, { expanded = false, custom = false } = {}) {
+export function applyJitsiCallChrome(api, { expanded = false, custom = false, floating = false } = {}) {
   const session = api?.api || api;
   if (!session || typeof session.executeCommand !== "function") return;
-  session.executeCommand("overwriteConfig", jitsiCallChromeConfig(expanded, { custom }));
+  session.executeCommand("overwriteConfig", jitsiCallChromeConfig(expanded, { custom, floating }));
 }
 
 /**
@@ -447,6 +492,8 @@ export function buildJitsiConfigOverwrite({
   startWithAudioMuted = true,
   domain,
   customChrome = false,
+  expandedToolbar = false,
+  floatingToolbar = false,
 } = {}) {
   const title = String(subject || "").trim() || "Урок";
   const hosts = buildJitsiHostsOverwrite(domain);
@@ -473,8 +520,12 @@ export function buildJitsiConfigOverwrite({
     hideConferenceTimer: true,
     disableModeratorIndicator: false,
     enableClosePage: false,
-    toolbarButtons: customChrome ? JITSI_CUSTOM_TOOLBAR : JITSI_COMPACT_TOOLBAR,
-    toolbarConfig: JITSI_TOOLBAR_VISIBLE,
+    toolbarButtons: floatingToolbar
+      ? []
+      : customChrome
+        ? JITSI_CUSTOM_TOOLBAR
+        : (expandedToolbar ? JITSI_EXPANDED_TOOLBAR : JITSI_COMPACT_TOOLBAR),
+    toolbarConfig: floatingToolbar ? JITSI_FLOATING_TOOLBAR_CONFIG : JITSI_TOOLBAR_VISIBLE,
     // 1:1 режим Jitsi оставляет один крупный кадр. Выключение локальной камеры
     // переносит аватар ученика на сцену и прячет учителя в обрезанный filmstrip.
     disable1On1Mode: true,
@@ -1307,7 +1358,10 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
     length: displayName.length,
   });
 
-  const JitsiMeetExternalAPI = await loadJitsiExternalApi(domain, { scriptUrl: config.scriptUrl || "" });
+  const JitsiMeetExternalAPI = await loadJitsiExternalApi(domain, {
+    scriptUrl: config.scriptUrl || "",
+    attemptId: String(config.diagnostics?.callSessionId || ""),
+  });
   logConferenceStage("script_ready", {
     diagId: String(config.diagnostics?.callSessionId || ""),
     ...describeConferenceClient(),
@@ -1334,6 +1388,8 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
       startWithAudioMuted,
       domain,
       customChrome: Boolean(config.customChrome),
+      expandedToolbar: Boolean(config.expandedToolbar) && !config.floatingToolbar,
+      floatingToolbar: Boolean(config.floatingToolbar),
     }),
     interfaceConfigOverwrite: buildJitsiInterfaceConfigOverwrite(),
     userInfo: {

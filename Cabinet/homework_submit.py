@@ -158,6 +158,10 @@ def submit_homework_for_student(
                 from Generator.Generator.variant_scoring import strip_previous_grades
             base = strip_previous_grades(previous)
         merged = _merge_result_payload(base, result)
+        if old_status in (SubmissionStatus.RETURNED, SubmissionStatus.NEEDS_REVISION):
+            from .homework_api import preserve_correct_answers
+
+            merged = preserve_correct_answers(previous, merged)
         variant_id = None
         for task in homework.tasks.filter(is_active=True):
             variant_id = extract_variant_id(task.description)

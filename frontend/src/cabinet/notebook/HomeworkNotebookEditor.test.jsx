@@ -40,6 +40,8 @@ describe("review notebook chrome", () => {
 
     expect(screen.getByRole("button", { name: "Назад" })).toBeTruthy();
     expect(screen.getByLabelText("Страницы тетради")).toBeTruthy();
+    expect(screen.queryByLabelText("Комментарии к работе")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Комментарии" }));
     expect(screen.getByLabelText("Комментарии к работе")).toBeTruthy();
     expect(screen.getAllByText("Страница 1").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));

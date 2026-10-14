@@ -11,6 +11,7 @@ import {
   DefaultSizeStyle,
   DefaultTextAlignStyle,
   GeoShapeGeoStyle,
+  TLINSTANCE_ID,
   createShapeId,
   toRichText,
 } from "@tldraw/tlschema";
@@ -204,6 +205,89 @@ export function installSavedCustomColors(editor) {
   const known = new Set(saved.map(([id]) => id));
   const fromDocument = documentCustomColorEntries(editor).filter(([id]) => !known.has(id));
   paintCustomColors(editor, [...saved, ...fromDocument]);
+}
+
+/** Цвет пера в CSS. Свой цвет `c######` читается из id, даже если его нет в чужой теме. */
+export function lessonInkHexFromInstance(instance) {
+  const id = instance?.stylesForNextShape?.[DefaultColorStyle.id] || "black";
+  if (typeof id === "string" && LESSON_CUSTOM_COLOR.test(id)) return `#${id.slice(1)}`;
+  const entry = DEFAULT_THEME?.colors?.light?.[id];
+  if (entry && typeof entry.solid === "string") return entry.solid;
+  const black = DEFAULT_THEME?.colors?.light?.black?.solid;
+  return typeof black === "string" ? black : "#1d1d1d";
+}
+
+/** Курсор и лазер — цвет пера. Кружок участника остаётся постоянным цветом роли. */
+export function lessonPresenceAppearance(user, instance) {
+  const identity = typeof user?.color === "string" ? user.color : "";
+  return {
+    color: lessonInkHexFromInstance(instance),
+    identityColor: identity,
+  };
+}
+
+export function customColorEntriesFromChanges(changes) {
+  const entries = [];
+  const seen = new Set();
+  const records = [];
+  if (changes?.added) records.push(...Object.values(changes.added));
+  if (changes?.updated) {
+    for (const pair of Object.values(changes.updated)) {
+      records.push(Array.isArray(pair) ? pair[1] : pair);
+    }
+  }
+  for (const record of records) {
+    if (record?.typeName !== "shape") continue;
+    for (const key of ["color", "labelColor"]) {
+      const id = record.props?.[key];
+      if (typeof id !== "string" || seen.has(id) || !LESSON_CUSTOM_COLOR.test(id)) continue;
+      seen.add(id);
+      entries.push([id, id.slice(1)]);
+    }
+  }
+  return entries;
+}
+
+function applyLessonLaser(editor, hex) {
+  const theme = editor.getCurrentTheme?.();
+  if (!hex || !theme?.colors?.light || !theme?.colors?.dark) return;
+  if (theme.colors.light.laser === hex && theme.colors.dark.laser === hex) return;
+  editor.updateTheme?.({
+    ...theme,
+    colors: {
+      ...theme.colors,
+      light: { ...theme.colors.light, laser: hex },
+      dark: { ...theme.colors.dark, laser: hex },
+    },
+  });
+}
+
+/**
+ * Один и тот же цвет пера на всех экранах.
+ * Чужой `c######` дописывается в тему, иначе штрих рисуется невалидным id.
+ * Лазер учителя локально берёт цвет темы, у ученика — цвет присутствия.
+ */
+export function installLessonColorSync(editor) {
+  if (!editor?.store || typeof editor.store.listen !== "function") return () => {};
+  installSavedCustomColors(editor);
+  const known = new Set(documentCustomColorEntries(editor).map(([id]) => id));
+  let applying = false;
+  const apply = (changes, source) => {
+    if (applying) return;
+    applying = true;
+    try {
+      const fresh = customColorEntriesFromChanges(changes).filter(([id]) => !known.has(id));
+      fresh.forEach(([id]) => known.add(id));
+      if (fresh.length) paintCustomColors(editor, fresh);
+      if (source !== "remote") {
+        applyLessonLaser(editor, lessonInkHexFromInstance(editor.store.get(TLINSTANCE_ID)));
+      }
+    } finally {
+      applying = false;
+    }
+  };
+  apply(null, "user");
+  return editor.store.listen((entry) => apply(entry.changes, entry.source));
 }
 
 export function applyCustomColor(editor, hex) {

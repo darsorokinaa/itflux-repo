@@ -117,6 +117,14 @@ export function annotationBounds(obj) {
     const lines = String(obj.text || " ").split("\n").length;
     return { x: obj.x, y: obj.y - (obj.fontSize || 24), w, h: lines * (obj.fontSize || 24) * 1.25 };
   }
+  if (obj.type === "image") {
+    return {
+      x: Number(obj.x || 0),
+      y: Number(obj.y || 0),
+      w: Math.abs(Number(obj.w || 0)),
+      h: Math.abs(Number(obj.h || 0)),
+    };
+  }
   if (obj.type === "rect" || obj.type === "rectangle") {
     const x = Math.min(obj.x, obj.x + (obj.w || 0));
     const y = Math.min(obj.y, obj.y + (obj.h || 0));
@@ -153,7 +161,7 @@ export function hitTest(obj, point, pad = 8) {
     return point.x >= box.x - pad && point.x <= box.x + box.w + pad
       && point.y >= box.y - pad && point.y <= box.y + box.h + pad;
   }
-  if (type === "rect" || type === "rectangle") {
+  if (type === "image" || type === "rect" || type === "rectangle") {
     const box = annotationBounds(obj);
     return point.x >= box.x - pad && point.x <= box.x + box.w + pad
       && point.y >= box.y - pad && point.y <= box.y + box.h + pad;
@@ -244,6 +252,18 @@ export function scaleAnnotation(obj, handle, pointer, origin) {
     next.cy = y + h / 2;
     next.rx = Math.abs(w) / 2;
     next.ry = Math.abs(h) / 2;
+  } else if (next.type === "image") {
+    const aspect = Math.abs(obj.w || 1) / Math.max(1, Math.abs(obj.h || 1));
+    let nw = Math.max(48, Math.abs(w));
+    let nh = Math.max(48, Math.abs(h));
+    if (handle.includes("e") || handle.includes("w")) nh = nw / aspect;
+    else nw = nh * aspect;
+    if (handle.includes("w")) x = box.x + box.w - nw;
+    if (handle.includes("n")) y = box.y + box.h - nh;
+    next.x = x;
+    next.y = y;
+    next.w = nw;
+    next.h = nh;
   } else if (next.type === "text") {
     next.x = x;
     next.y = y + (next.fontSize || 24);

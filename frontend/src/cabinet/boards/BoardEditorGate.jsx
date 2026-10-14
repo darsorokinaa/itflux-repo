@@ -7,6 +7,10 @@ import { normalizeBoardProvider } from "./boardProvider";
 import BoardV2ErrorBoundary from "./BoardV2ErrorBoundary";
 import LessonBoardMessage from "./LessonBoardMessage";
 import "../styles/boards.css";
+import { installBoardErrorCapture, markBoard } from "../lessonLoadTrace";
+
+markBoard("gateModuleAt", new Date().toISOString());
+installBoardErrorCapture();
 
 const TldrawBoard = lazy(() => import("./TldrawBoard"));
 const CabinetBoardEditorPage = lazy(() => import("../pages/CabinetBoardEditorPage"));
@@ -25,6 +29,13 @@ export default function BoardEditorGate() {
   });
 
   useEffect(() => bindBoardDocumentTelemetry(boardId), [boardId]);
+
+  useEffect(() => {
+    markBoard("gateMountedAt", new Date().toISOString());
+    return () => {
+      markBoard("gateUnmountAt", new Date().toISOString());
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,6 +75,11 @@ export default function BoardEditorGate() {
 
   const phase = request.boardId === boardId && request.attempt === attempt ? request.phase : "loading";
   const board = phase === "ready" ? request.board : null;
+
+  useEffect(() => {
+    if (phase !== "ready" || !board) return;
+    markBoard("provider", normalizeBoardProvider(board.board_provider));
+  }, [board, phase]);
 
   if (phase === "loading") {
     return (

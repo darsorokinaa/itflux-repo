@@ -7,6 +7,7 @@ import {
   loadJitsiExternalApi,
   resolveJitsiApiRoomName,
 } from "./jitsiMeet";
+import { publicScriptUrl, readScriptTrace } from "./lessonLoadTrace";
 
 describe("loadJitsiExternalApi", () => {
   beforeEach(() => {
@@ -72,6 +73,13 @@ describe("loadJitsiExternalApi", () => {
     await vi.advanceTimersByTimeAsync(60);
     await assertion;
     expect(document.getElementById("jitsi-external-api-script")).toBeNull();
+    const attempt = readScriptTrace().attempts.at(-1);
+    expect(attempt.scriptUrl).toBe("https://meet.example.test/libs/external_api.min.js");
+    expect(attempt.inDocumentAtTimeout).toBe(true);
+    expect(attempt.removedReason).toBe("timeout");
+    expect(attempt.loadAt).toBe("");
+    expect(attempt.errorAt).toBe("");
+    expect(attempt.resourceTiming.note).toMatch(/не доказывает/);
     vi.useRealTimers();
   });
 
@@ -87,6 +95,12 @@ describe("loadJitsiExternalApi", () => {
     await expect(pending).resolves.toBe(window.JitsiMeetExternalAPI);
     expect(document.getElementById("jitsi-external-api-script")).not.toBe(stuck);
     vi.useRealTimers();
+  });
+
+  it("does not keep a jwt in the recorded script URL", () => {
+    expect(publicScriptUrl("https://lesson.example/libs/external_api.min.js?token=secret&x=1")).toBe(
+      "https://lesson.example/libs/external_api.min.js?token=redacted&x=1",
+    );
   });
 
   it("resolves when the script runs but Safari does not fire load", async () => {

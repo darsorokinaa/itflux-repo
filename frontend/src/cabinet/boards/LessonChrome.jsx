@@ -29,9 +29,7 @@ export default function LessonChrome() {
       {studentView ? <StudentBanner onExit={() => setStudentView(false)} /> : null}
       <LessonRail />
       <LessonContextBar />
-      <div className="lesson-zoom-dock">
-        <ZoomControls />
-      </div>
+      <BoardDocks />
     </div>
   );
 }
@@ -155,8 +153,8 @@ function LessonTop({ onStudentView }) {
     }
   }
   return (
-    <header className="lesson-top" onPointerDown={(event) => editor.markEventAsHandled(event)}>
-      <div className="lesson-topbar" role="toolbar" aria-label="Доска">
+    <header className="lesson-top" role="toolbar" aria-label="Доска" onPointerDown={(event) => editor.markEventAsHandled(event)}>
+      <div className="lesson-topbar lesson-topbar--info">
         <div className="lesson-topbar__side">
           <TopIcon label="Назад" onClick={() => (room.inRoom ? postRoomAction("collapse") : window.history.back())}>
             <ChevronLeft size={17} strokeWidth={1.8} aria-hidden="true" />
@@ -205,7 +203,8 @@ function LessonTop({ onStudentView }) {
           </span>
           <LessonSheetSwitcher />
         </div>
-
+      </div>
+      <div className="lesson-topbar lesson-topbar--actions">
         <div className="lesson-topbar__side lesson-topbar__side--end">
           {room.inRoom ? (
             <span className="lesson-materials">
@@ -301,7 +300,7 @@ function PeopleButton({ people, followingId, extraOpen, onExtra, onFollow, onSto
   const faces = people.slice(0, 3).map((person) => ({
     id: String(person.userId || person.id),
     name: person.userName || "Ученик",
-    color: avatarColor(person.color, person.userName),
+    color: avatarColor(person.meta?.identityColor || person.color, person.userName),
     avatar: person.meta?.avatarUrl || "",
   }));
   const extra = Math.max(0, people.length - 3);
@@ -404,7 +403,7 @@ function LessonTimer() {
 
 const ZOOM_PRESETS = LESSON_ZOOM_STEPS.filter((value) => value <= 2);
 
-function ZoomControls() {
+function BoardDocks() {
   const editor = useEditor();
   const [open, setOpen] = useState(false);
   const zoom = useValue("lesson-zoom", () => editor.getZoomLevel(), [editor]);
@@ -419,32 +418,41 @@ function ZoomControls() {
     editor.setCamera({ x: camera.x, y: camera.y, z: value }, ZOOM_ANIMATION);
     setOpen(false);
   }
+  const hold = (event) => editor.markEventAsHandled(event);
   return (
-    <div className="lesson-zoom" role="group" aria-label="Масштаб" onPointerDown={(event) => editor.markEventAsHandled(event)}>
-      <button type="button" className="lesson-icon" aria-label="Отменить" title="Отменить" disabled={!undo} onClick={() => editor.undo()}>
-        <Undo2 size={16} strokeWidth={1.75} aria-hidden="true" />
-      </button>
-      <button type="button" className="lesson-icon" aria-label="Повторить" title="Повторить" disabled={!redo} onClick={() => editor.redo()}>
-        <Redo2 size={16} strokeWidth={1.75} aria-hidden="true" />
-      </button>
-      <span className="lesson-dock__rule" aria-hidden="true" />
-      <button type="button" className="lesson-icon" aria-label="Уменьшить" onClick={() => editor.zoomOut(center(), ZOOM_ANIMATION)}>−</button>
-      <button type="button" className="lesson-zoom__value" aria-label={`Масштаб ${lessonZoomLabel(zoom)}`} aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-        {lessonZoomLabel(zoom)}
-      </button>
-      <button type="button" className="lesson-icon" aria-label="Увеличить" onClick={() => editor.zoomIn(center(), ZOOM_ANIMATION)}>+</button>
-      <button type="button" className="lesson-icon" aria-label="Вместить" onClick={() => editor.zoomToFit({ animation: { duration: 120 } })}>
-        <Maximize2 size={16} strokeWidth={1.75} aria-hidden="true" />
-      </button>
-      {open ? (
-        <span className="lesson-zoom__menu" role="menu">
-          {ZOOM_PRESETS.map((value) => (
-            <button key={value} type="button" onClick={() => setZoom(value)}>{lessonZoomLabel(value)}</button>
-          ))}
-          <button type="button" onClick={() => { editor.zoomToFit({ animation: { duration: 120 } }); setOpen(false); }}>Вместить</button>
-          <button type="button" onClick={() => { editor.zoomToSelection({ animation: { duration: 120 } }); setOpen(false); }}>К выделению</button>
-        </span>
-      ) : null}
-    </div>
+    <>
+      <div className="lesson-history-dock" onPointerDown={hold}>
+        <div className="lesson-zoom" role="group" aria-label="История">
+          <button type="button" className="lesson-icon" aria-label="Отменить" title="Отменить" disabled={!undo} onClick={() => editor.undo()}>
+            <Undo2 size={17} strokeWidth={1.7} aria-hidden="true" />
+          </button>
+          <button type="button" className="lesson-icon" aria-label="Повторить" title="Повторить" disabled={!redo} onClick={() => editor.redo()}>
+            <Redo2 size={17} strokeWidth={1.7} aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+      <div className="lesson-zoom-dock" onPointerDown={hold}>
+        <div className="lesson-zoom" role="group" aria-label="Масштаб">
+          <button type="button" className="lesson-icon" aria-label="Уменьшить" onClick={() => editor.zoomOut(center(), ZOOM_ANIMATION)}>−</button>
+          <button type="button" className="lesson-zoom__value" aria-label={`Масштаб ${lessonZoomLabel(zoom)}`} aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+            {lessonZoomLabel(zoom)}
+          </button>
+          <button type="button" className="lesson-icon" aria-label="Увеличить" onClick={() => editor.zoomIn(center(), ZOOM_ANIMATION)}>+</button>
+          <span className="lesson-dock__rule" aria-hidden="true" />
+          <button type="button" className="lesson-icon lesson-zoom__fit" aria-label="Вместить" title="Показать всё" onClick={() => editor.zoomToFit({ animation: { duration: 120 } })}>
+            <Maximize2 size={16} strokeWidth={1.7} aria-hidden="true" />
+          </button>
+          {open ? (
+            <span className="lesson-zoom__menu" role="menu">
+              {ZOOM_PRESETS.map((value) => (
+                <button key={value} type="button" onClick={() => setZoom(value)}>{lessonZoomLabel(value)}</button>
+              ))}
+              <button type="button" onClick={() => { editor.zoomToFit({ animation: { duration: 120 } }); setOpen(false); }}>Вместить</button>
+              <button type="button" onClick={() => { editor.zoomToSelection({ animation: { duration: 120 } }); setOpen(false); }}>К выделению</button>
+            </span>
+          ) : null}
+        </div>
+      </div>
+    </>
   );
 }

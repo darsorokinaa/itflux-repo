@@ -27,7 +27,18 @@ export function exportScaleForPage(page, image) {
 export async function renderPageToCanvas(page, objects, { backgroundUrl, pdfCanvas } = {}) {
   const width = page?.width || PAGE_WIDTH;
   const height = page?.height || PAGE_HEIGHT;
-  const image = pdfCanvas || await loadImage(backgroundUrl);
+  const images = new Map();
+  const remember = async (url) => {
+    if (!url || images.has(url)) return images.get(url) || null;
+    const loaded = await loadImage(url);
+    if (loaded) images.set(url, loaded);
+    return loaded;
+  };
+  for (const obj of objects || []) {
+    if (obj?.type === "image" && obj.src) await remember(obj.src);
+  }
+  const placedSrc = new Set((objects || []).filter((obj) => obj?.type === "image" && obj.src).map((obj) => obj.src));
+  const image = pdfCanvas || (backgroundUrl && !placedSrc.has(backgroundUrl) ? await remember(backgroundUrl) : null);
   const scale = exportScaleForPage(page, image);
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(width * scale);
@@ -46,7 +57,7 @@ export async function renderPageToCanvas(page, objects, { backgroundUrl, pdfCanv
   ctx.save();
   ctx.scale(scale, scale);
   for (const obj of objects || []) {
-    drawAnnotation(ctx, obj);
+    drawAnnotation(ctx, obj, { images });
   }
   ctx.restore();
   return canvas;

@@ -15,6 +15,7 @@ import {
   buildTeacherVariantUrl,
   formatReviewDate,
   hasOfficialTaskAnswer,
+  hasPublishedNotebook,
   homeworkTaskAnswer,
   homeworkTaskAttachments,
   homeworkTaskComment,
@@ -84,11 +85,19 @@ const HW_TASK_TYPE_RU = {
   external_link: "Ссылка",
 };
 
-function TeacherNotebookActions({ submissionId, taskId, taskNumber, enabled, onComplete }) {
+function TeacherNotebookActions({
+  submissionId,
+  taskId,
+  taskNumber,
+  enabled,
+  publishedNotebooks,
+  onComplete,
+}) {
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [notebook, setNotebook] = useState(null);
+  const canOpenChecked = hasPublishedNotebook(publishedNotebooks, taskId, taskNumber);
   if (!submissionId || taskId == null) return null;
   return (
     <div className="hw-notebook-actions">
@@ -118,10 +127,18 @@ function TeacherNotebookActions({ submissionId, taskId, taskNumber, enabled, onC
       ) : null}
       <button
         type="button"
-        onClick={() => navigate(`/cabinet/notebook/published/${submissionId}/${encodeURIComponent(String(taskId))}`)}
+        disabled={!canOpenChecked}
+        title={canOpenChecked ? "Открыть проверенную работу" : "Комментариев пока нет"}
+        onClick={() => {
+          if (!canOpenChecked) return;
+          navigate(`/cabinet/notebook/published/${submissionId}/${encodeURIComponent(String(taskId))}`);
+        }}
       >
         Открыть проверенную работу
       </button>
+      {canOpenChecked ? null : (
+        <span className="hw-notebook-actions__note">Комментариев пока нет</span>
+      )}
       {err ? <p className="cb-inline-error" role="alert">{err}</p> : null}
       {notebook ? (
         <HomeworkNotebookEditor
@@ -471,6 +488,7 @@ function ReviewWorkspace({
   isPending,
   reviewId,
   submission,
+  publishedNotebooks,
   patchReviewAttachments,
   getPart1Verdict,
   reviewTaskTotal,
@@ -730,6 +748,7 @@ function ReviewWorkspace({
                 submissionId={submission?.id}
                 taskId={selected.id}
                 taskNumber={selected.number}
+                publishedNotebooks={publishedNotebooks}
                 enabled={isPending}
                 onComplete={(payload) => {
                   if (!payload.attachment) return;
@@ -1455,6 +1474,7 @@ export default function CabinetReviewDetailPage() {
                       ? reviewCtx.tasks[0].id
                       : "__homework__")
                   }
+                  publishedNotebooks={review?.published_notebooks}
                   enabled={isPending}
                   onComplete={(payload) => {
                     if (!payload.attachment) return;
@@ -1534,6 +1554,7 @@ export default function CabinetReviewDetailPage() {
           isPending={isPending}
           reviewId={reviewId}
           submission={submission}
+          publishedNotebooks={review?.published_notebooks}
           patchReviewAttachments={patchReviewAttachments}
           getPart1Verdict={getPart1Verdict}
           reviewTaskTotal={reviewTaskTotal}

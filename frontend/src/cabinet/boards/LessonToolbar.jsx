@@ -11,6 +11,7 @@ import {
   Minus,
   MousePointer2,
   Pencil,
+  Plus,
   Shapes,
   Square,
   StickyNote,
@@ -18,7 +19,7 @@ import {
 } from "lucide-react";
 import { useEditor, useTools, useValue } from "tldraw";
 
-import { LessonFlyout, endLessonFilePick, lessonFilePickActive, useInkColor } from "./LessonMenus";
+import { LessonFlyout, endLessonFilePick, lessonFilePickActive } from "./LessonMenus";
 import { chooseTool } from "./lessonBoardActions";
 import { LESSON_RAIL, lessonAdaptiveRail, lessonPhoneRail, lessonRailButton, lessonToolActive } from "./lessonShell";
 
@@ -32,6 +33,7 @@ const ICONS = {
   text: Type,
   note: StickyNote,
   shapes: Shapes,
+  more: Plus,
   arrow: ArrowUpRight,
   frame: Square,
   line: Minus,
@@ -123,7 +125,11 @@ export default function LessonRail() {
                   setMenu(null);
                   return;
                 }
-                if (TOOL_ON_OPEN.has(item.id)) chooseTool(editor, item.tool);
+                if (TOOL_ON_OPEN.has(item.id)) {
+                  const current = editor.getCurrentToolId();
+                  const keepInk = item.id === "draw" && (current === "draw" || current === "highlight");
+                  if (!keepInk) chooseTool(editor, item.tool);
+                }
                 const next = menu === item.id ? null : item.id;
                 setMenu(next);
                 setMenuTop(event.currentTarget.offsetTop);
@@ -136,7 +142,16 @@ export default function LessonRail() {
         <span className="lesson-rail__hint" style={{ top: hint.top }}>{hint.label}</span>
       ) : null}
       {menu ? (
-        <div className="lesson-flyout" style={{ top: menuTop }} role="dialog" aria-label={LESSON_RAIL.find((item) => item.id === menu)?.label}>
+        <div
+          className="lesson-flyout"
+          style={layout === "bottom"
+            ? { top: "auto", bottom: "calc(100% + 54px)", left: "50%", transform: "translateX(-50%)" }
+            : menu === "more"
+              ? { top: "auto", bottom: 0 }
+              : { top: menuTop }}
+          role="dialog"
+          aria-label={LESSON_RAIL.find((item) => item.id === menu)?.label}
+        >
           <LessonFlyout menu={menu} overflow={adapted.overflow} onClose={() => setMenu(null)} />
         </div>
       ) : null}
@@ -145,9 +160,7 @@ export default function LessonRail() {
 }
 
 function RailButton({ item, pressed, onClick, onHint }) {
-  const ink = useInkColor();
   const Icon = ICONS[item.id];
-  const tint = pressed && (item.id === "draw" || item.id === "highlight") ? ink : undefined;
   const hintTimer = useRef(null);
   function queueHint(event, delay) {
     const target = event.currentTarget;
@@ -177,7 +190,7 @@ function RailButton({ item, pressed, onClick, onHint }) {
         onHint(null, 0);
       }}
     >
-      <Icon size={18} strokeWidth={1.75} color={tint || "currentColor"} aria-hidden="true" />
+      <Icon size={20} strokeWidth={1.7} aria-hidden="true" />
     </button>
   );
 }

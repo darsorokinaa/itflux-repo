@@ -2,11 +2,23 @@ import { describe, expect, it } from "vitest";
 import {
   buildStudentHomeworkReviewRows,
   hasOfficialTaskAnswer,
+  hasPublishedNotebook,
   homeworkAllTeacherFiles,
   homeworkTaskAnswer,
+  homeworkScoringTaskStatus,
   resolvePart1Verdict,
 } from "./cabinetReviewUtils";
 import { homeworkResultToUiState, buildHomeworkResultPayload, homeworkAttemptProgress } from "../utils/cabinetHomework";
+
+describe("hasPublishedNotebook", () => {
+  it("matches a published notebook by task id", () => {
+    const notebooks = [{ task_id: "12", revision_id: "rev-1" }];
+    expect(hasPublishedNotebook(notebooks, 12, 1)).toBe(true);
+    expect(hasPublishedNotebook(notebooks, "other", 3)).toBe(false);
+    expect(hasPublishedNotebook([], 12, 1)).toBe(false);
+    expect(hasPublishedNotebook(null, 12, 1)).toBe(false);
+  });
+});
 
 describe("hasOfficialTaskAnswer", () => {
   it("treats empty CKEditor html as missing", () => {
@@ -74,6 +86,35 @@ describe("homeworkTaskAnswer legacy number keys", () => {
     expect(byNum[6].verdict).toBe(true);
     expect(byNum[8].answer).toBe("109");
     expect(byNum[8].verdict).toBe(true);
+  });
+
+  it("uses stored scoring when the answer key is hidden from the student", () => {
+    const hidden = [
+      { id: 101, number: 1, answer: "", part: 1 },
+      { id: 102, number: 2, answer: "", part: 1 },
+    ];
+    const result = {
+      by_task_id: { "101": "26", "102": "nope" },
+      checked: { "101": false, "102": false },
+      scoring: {
+        tasks: [
+          { id: 101, status: "correct", part: 1 },
+          { id: 102, status: "incorrect", part: 1 },
+        ],
+      },
+    };
+    expect(homeworkScoringTaskStatus(result, 101)).toBe("correct");
+    expect(resolvePart1Verdict(hidden[0], "26", result, "math")).toBe(true);
+    expect(resolvePart1Verdict(hidden[1], "nope", result, "math")).toBe(false);
+  });
+
+  it("does not mark every answer wrong when checked is false and there is no key", () => {
+    expect(resolvePart1Verdict(
+      { id: 1, number: 1, answer: "" },
+      "26",
+      { checked: { "1": false } },
+      "math",
+    )).toBe(null);
   });
 
   it("keeps latex markup in the official answer for review tables", () => {

@@ -72,7 +72,7 @@ function withRotation(ctx, obj, draw) {
   ctx.restore();
 }
 
-export function drawAnnotation(ctx, obj, { hideTextId } = {}) {
+export function drawAnnotation(ctx, obj, { hideTextId, images } = {}) {
   if (!obj) return;
   const color = strokeColor(obj);
   const width = strokeSize(obj);
@@ -112,6 +112,9 @@ export function drawAnnotation(ctx, obj, { hideTextId } = {}) {
       ctx.beginPath();
       ctx.ellipse(obj.cx || 0, obj.cy || 0, Math.abs(obj.rx || 0), Math.abs(obj.ry || 0), 0, 0, Math.PI * 2);
       ctx.stroke();
+    } else if (obj.type === "image") {
+      const img = images?.get?.(obj.src);
+      if (img) ctx.drawImage(img, obj.x || 0, obj.y || 0, obj.w || 0, obj.h || 0);
     } else if (obj.type === "text" && obj.id !== hideTextId) {
       ctx.globalAlpha = 1;
       ctx.font = `${obj.fontSize || 24}px "SF Pro Text", "Inter", system-ui, sans-serif`;
@@ -178,10 +181,11 @@ export function drawNotebookScene(ctx, objects, {
   draft = null,
   marquee = null,
   hideTextId = null,
+  images = null,
 } = {}) {
   ctx.clearRect(0, 0, pageWidth, pageHeight);
   for (const obj of objects || []) {
-    drawAnnotation(ctx, obj, { hideTextId });
+    drawAnnotation(ctx, obj, { hideTextId, images });
   }
   if (draft) drawAnnotation(ctx, draft, { hideTextId });
   const selected = new Set(selectedIds);

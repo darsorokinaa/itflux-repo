@@ -6,15 +6,18 @@ export const LESSON_RAIL = [
   { id: "divider-nav" },
   { id: "draw", label: "Рисование", tool: "draw", kbd: "D" },
   { id: "eraser", label: "Ластик", tool: "eraser", kbd: "E" },
-  { id: "laser", label: "Лазер", tool: "laser", kbd: "K" },
   { id: "divider-draw" },
   { id: "text", label: "Текст", tool: "text", kbd: "T" },
   { id: "note", label: "Стикер", tool: "note", kbd: "N" },
   { id: "shapes", label: "Фигуры", tool: "geo", kbd: "R" },
+  { id: "more", label: "Ещё" },
+];
+
+export const LESSON_RAIL_OVERFLOW = [
   { id: "arrow", label: "Стрелка", tool: "arrow", kbd: "A" },
-  { id: "frame", label: "Область", tool: "frame", kbd: "F" },
   { id: "line", label: "Линия", tool: "line", kbd: "L" },
-  { id: "divider-objects" },
+  { id: "frame", label: "Область", tool: "frame", kbd: "F" },
+  { id: "laser", label: "Лазер", tool: "laser", kbd: "K" },
   { id: "insert", label: "Вставить" },
   { id: "files", label: "Файлы" },
   { id: "embed", label: "Вставка", tool: "embed" },
@@ -40,6 +43,9 @@ export const LESSON_SHAPES = [
   { id: "ellipse", label: "Эллипс", geo: "ellipse" },
   { id: "triangle", label: "Треугольник", geo: "triangle" },
   { id: "diamond", label: "Ромб", geo: "diamond" },
+  { id: "arrow", label: "Стрелка", tool: "arrow" },
+  { id: "line", label: "Линия", tool: "line" },
+  { id: "frame", label: "Область", tool: "frame" },
   { id: "cloud", label: "Облако", geo: "cloud" },
   { id: "hexagon", label: "Шестиугольник", geo: "hexagon" },
 ];
@@ -198,8 +204,7 @@ export function lessonStickerResize(initial, handle, size) {
   return { x, y, scale: next };
 }
 
-export const LESSON_RAIL_OVERFLOW = [];
-export const LESSON_PHONE_RAIL = LESSON_RAIL.filter((item) => item.label).map((item) => item.id);
+const FOLDED_TOOLS = new Set(LESSON_RAIL_OVERFLOW.map((item) => item.tool).filter(Boolean));
 
 export const LESSON_THICKNESS_MIN = 1;
 export const LESSON_THICKNESS_MAX = 100;
@@ -306,8 +311,10 @@ export function lessonSelectionKind(types, lessonKind = "") {
 }
 
 export function lessonToolActive(id, toolId) {
-  if (id === "shapes") return toolId === "geo";
-  if (id === "insert" || id === "more" || String(id).startsWith("divider")) return false;
+  if (id === "shapes") return toolId === "geo" || toolId === "arrow" || toolId === "line" || toolId === "frame";
+  if (id === "draw") return toolId === "draw" || toolId === "highlight";
+  if (id === "more") return FOLDED_TOOLS.has(toolId) && toolId !== "arrow" && toolId !== "line" && toolId !== "frame";
+  if (id === "insert" || String(id).startsWith("divider")) return false;
   return toolId === id;
 }
 
@@ -325,43 +332,12 @@ export function lessonContextBar(kind) {
   return [];
 }
 
-export function lessonRailHeight(items, button = 40) {
-  const gap = 2;
-  const pad = 8;
-  return items.reduce((height, item, index) => {
-    const row = lessonRailButton(item) ? button : 9;
-    return height + row + (index ? gap : 0);
-  }, pad);
-}
-
-function collapseDividers(items) {
-  const next = [];
-  items.forEach((item) => {
-    const divider = !lessonRailButton(item);
-    const previous = next.at(-1);
-    const previousDivider = previous && !lessonRailButton(previous);
-    if (divider && (!previous || previousDivider)) return;
-    next.push(item);
-  });
-  while (next.length && !lessonRailButton(next.at(-1))) next.pop();
-  return next;
-}
-
-export function lessonAdaptiveRail(availableHeight, button = 40) {
-  if (lessonRailHeight(LESSON_RAIL, button) <= availableHeight) {
-    return { items: LESSON_RAIL, overflow: [] };
-  }
-  const hidden = new Set(LESSON_RAIL_OVERFLOW);
-  return {
-    items: collapseDividers(LESSON_RAIL.filter((item) => !hidden.has(item.id))),
-    overflow: LESSON_RAIL.filter((item) => hidden.has(item.id)),
-  };
+export function lessonAdaptiveRail() {
+  return { items: LESSON_RAIL, overflow: LESSON_RAIL_OVERFLOW };
 }
 
 export function lessonPhoneRail() {
-  const keep = new Set(LESSON_PHONE_RAIL);
-  const overflow = LESSON_RAIL.filter((item) => item.label && !keep.has(item.id) && item.id !== "more");
-  return { items: LESSON_RAIL.filter((item) => keep.has(item.id)), overflow };
+  return lessonAdaptiveRail();
 }
 
 export function lessonContextPosition(bounds, viewport) {

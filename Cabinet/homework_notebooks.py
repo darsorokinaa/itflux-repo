@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import re
 import uuid
 from copy import deepcopy
 
@@ -423,6 +424,52 @@ def serialize_page(page: HomeworkNotebookPage) -> dict:
     }
 
 
+_ANSWER_TAG = re.compile(r"<[^>]+>")
+
+
+def _plain_answer(value) -> str:
+    if isinstance(value, dict):
+        value = value.get("text") or value.get("value") or ""
+    text = _ANSWER_TAG.sub(" ", str(value or ""))
+    text = (
+        text.replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+    )
+    return " ".join(text.split()).strip()
+
+
+def notebook_answer_text(submission: HomeworkSubmission, task_key: str) -> str:
+    """Текст ответа ученика для этого задания. Общий ответ — только если в ДЗ одно задание."""
+    payload = submission.result_payload if isinstance(submission.result_payload, dict) else {}
+    by_id = payload.get("by_task_id") or payload.get("byTaskId") or {}
+    by_num = payload.get("by_number") or payload.get("byNumber") or {}
+    if not isinstance(by_id, dict):
+        by_id = {}
+    if not isinstance(by_num, dict):
+        by_num = {}
+    keys = []
+    raw = str(task_key or "").strip()
+    if raw and raw != SUBMISSION_NOTEBOOK_TASK_KEY:
+        keys.append(raw)
+    for key in notebook_task_keys(submission, task_key):
+        if key and key != SUBMISSION_NOTEBOOK_TASK_KEY and key not in keys and str(key) not in keys:
+            keys.append(key)
+    for key in keys:
+        skey = str(key)
+        for bucket in (by_id, by_num):
+            if skey in bucket:
+                text = _plain_answer(bucket[skey])
+                if text:
+                    return text
+    homework = getattr(submission, "homework", None)
+    active_count = homework.tasks.filter(is_active=True).count() if homework is not None else 0
+    if active_count <= 1:
+        return _plain_answer(submission.answer_text)
+    return ""
+
+
 def serialize_notebook(notebook: HomeworkNotebook, *, include_pages: bool = True) -> dict:
     pages = []
     if include_pages:
@@ -440,6 +487,11 @@ def serialize_notebook(notebook: HomeworkNotebook, *, include_pages: bool = True
         "created_at": notebook.created_at.isoformat() if notebook.created_at else None,
         "updated_at": notebook.updated_at.isoformat() if notebook.updated_at else None,
         "pages": pages,
+        "answer_text": (
+            notebook_answer_text(notebook.submission, notebook.task_key)
+            if include_pages and notebook.owner_role == HomeworkAttachmentOwnerRole.TEACHER
+            else ""
+        ),
     }
 
 
@@ -766,9 +818,12 @@ def apply_page_payloads(notebook: HomeworkNotebook, pages_payload: list) -> None
             item["id"] = obj_id
             cleaned_objects.append(item)
         state = {"version": int(state.get("version") or 1), "objects": cleaned_objects}
-        viewport = raw.get("state", {}).get("viewport") if isinstance(raw.get("state"), dict) else None
+        raw_state = raw.get("state") if isinstance(raw.get("state"), dict) else {}
+        viewport = raw_state.get("viewport")
         if isinstance(viewport, dict):
             state["viewport"] = viewport
+        if raw_state.get("contentPlaced"):
+            state["contentPlaced"] = True
         width = int(raw.get("width") or DEFAULT_PAGE_WIDTH)
         height = int(raw.get("height") or DEFAULT_PAGE_HEIGHT)
         page_type = str(raw.get("page_type") or "").strip() or HomeworkNotebookPageType.BLANK

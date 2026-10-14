@@ -147,7 +147,7 @@ function Layout() {
         {/* боковое меню */}
       </aside>
 
-      <main className={isMarketingHome || isChromelessPage || isBookingPage || isWorksheetPage ? "w-full" : "container mt-4"}>
+      <main className={isMarketingHome || isChromelessPage || isVideoMeetingPage || isBookingPage || isWorksheetPage ? "w-full" : "container mt-4"}>
         <Outlet />
       </main>
 

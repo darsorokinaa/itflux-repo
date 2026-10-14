@@ -40,6 +40,7 @@ export function withPageAnnotations(page, annotations) {
   return {
     ...page,
     state: {
+      ...(page?.state || {}),
       version: 1,
       objects: annotations,
     },
@@ -126,6 +127,18 @@ export function normalizeAnnotation(raw, pageId = "") {
       y: Number(raw.y || 0),
       w: Number(raw.w || 0),
       text: String(raw.text || ""),
+      sourceKey: String(raw.sourceKey || ""),
+    };
+  }
+  if (type === "image") {
+    return {
+      ...base,
+      x: Number(raw.x || 0),
+      y: Number(raw.y || 0),
+      w: Number(raw.w || 0),
+      h: Number(raw.h || 0),
+      src: String(raw.src || ""),
+      sourceKey: String(raw.sourceKey || ""),
     };
   }
   if (type === "comment" || type === "page_feedback") {

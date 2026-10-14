@@ -27,6 +27,35 @@
   box-sizing: border-box;
 }
 
+/* Safari схлопывает position:fixed внутри #root { overflow-x: clip }
+   и iframe/video { max-width: 100% } до нулевой высоты. Звонок тогда не виден. */
+html:has(.video-lesson-page),
+html:has(.video-lesson-page) body,
+html:has(.video-lesson-page) #root {
+  overflow-x: visible;
+  max-width: none;
+}
+
+main:has(.video-lesson-page) {
+  width: 100%;
+  max-width: none;
+  margin-top: 0;
+  padding: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.video-lesson-page iframe,
+.video-lesson-page video,
+.video-lesson-page canvas,
+#jitsi-container,
+#jitsi-container > iframe,
+#jitsi-container > div,
+.video-lesson-workspace__frame {
+  max-width: none;
+  max-height: none;
+}
+
 .video-lesson-header {
   flex: 0 0 auto;
   min-height: var(--vl-header-height);
@@ -919,9 +948,11 @@
   right: 16px;
   bottom: auto;
   left: auto;
-  width: min(520px, calc(100vw - 32px));
-  aspect-ratio: 16 / 9;
-  height: auto;
+  --vl-float-chrome: 64px;
+  --vl-float-width: min(480px, calc(100vw - 32px));
+  width: var(--vl-float-width);
+  height: calc(var(--vl-float-width) * 9 / 16 + var(--vl-float-chrome));
+  aspect-ratio: auto;
   min-width: 0;
   min-height: 0;
   max-width: calc(100vw - 24px);
@@ -940,18 +971,16 @@
 
 @media (max-width: 900px) {
   .video-lesson-page--compact .video-lesson-content {
-    width: min(240px, calc(100vw - 24px));
+    --vl-float-width: min(320px, calc(100vw - 24px));
   }
 }
 
 .video-lesson-page--compact .video-lesson-content--call-expanded {
+  --vl-float-width: min(960px, calc(100vw - 24px));
   top: calc(var(--vl-header-height) + 12px);
-  left: max(12px, calc((100vw - min(1120px, 92vw)) / 2));
+  left: max(12px, calc((100vw - min(960px, calc(100vw - 24px))) / 2));
   right: auto;
   bottom: auto;
-  width: min(1120px, calc(100vw - 24px));
-  height: auto;
-  aspect-ratio: 16 / 9;
   max-width: calc(100vw - 24px);
   max-height: calc(100dvh - var(--vl-header-height) - 24px);
   z-index: 45;
@@ -1000,7 +1029,7 @@
   bottom: 0;
   left: 14px;
   right: 14px;
-  height: 10px;
+  height: 8px;
   cursor: ns-resize;
 }
 
@@ -1095,33 +1124,23 @@
 }
 
 .video-lesson-page--compact .video-lesson-compact-drag:not(.mini-call-bar--share) {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+  position: relative;
+  flex: 0 0 28px;
+  top: auto;
+  left: auto;
+  right: auto;
   z-index: 6;
-  height: 40px;
-  background: #000;
+  height: 28px;
+  background: #0b0f14;
   color: #fff;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.video-lesson-page--compact .video-lesson-content:not(.video-lesson-content--call-collapsed) > .video-lesson-compact-drag {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 180ms ease;
-}
-
-.video-lesson-page--compact .video-lesson-content:not(.video-lesson-content--call-collapsed):hover > .video-lesson-compact-drag,
-.video-lesson-page--compact .video-lesson-content:not(.video-lesson-content--call-collapsed):focus-within > .video-lesson-compact-drag,
-.video-lesson-page--compact .video-lesson-content--dragging > .video-lesson-compact-drag {
-  opacity: 1;
-  pointer-events: auto;
-}
-
 .video-lesson-page--compact .mini-call-bar__iconbtn {
-  width: 40px;
-  height: 40px;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  border-radius: 6px;
   color: #fff;
 }
 
@@ -1142,10 +1161,47 @@
   flex-shrink: 0;
 }
 
+.mini-call-tools {
+  position: relative;
+  z-index: 4;
+  flex: 0 0 36px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  height: 36px;
+  min-height: 36px;
+  padding: 2px 6px 8px;
+  box-sizing: border-box;
+  background: #0b0f14;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.mini-call-tools .mini-call-bar__iconbtn {
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  flex: 0 0 26px;
+}
+
+.mini-call-tools .mini-call-bar__iconbtn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.mini-call-tools .mini-call-bar__iconbtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 @media (pointer: coarse) {
-  .video-lesson-page--compact .mini-call-bar__iconbtn {
-    width: 44px;
-    height: 44px;
+  .video-lesson-page--compact .mini-call-bar__iconbtn,
+  .mini-call-tools .mini-call-bar__iconbtn {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
   }
 }
 
@@ -1390,10 +1446,11 @@
 .video-lesson-content--call-collapsed {
   width: max-content;
   max-width: min(360px, calc(100vw - 24px));
-  height: 48px;
+  height: 40px;
   aspect-ratio: auto;
   min-width: 180px;
-  min-height: 48px;
+  min-height: 40px;
+  max-height: 40px;
   border-radius: 999px;
   background: #000;
   border-color: rgba(255, 255, 255, 0.16);
@@ -1408,27 +1465,37 @@
 
 .video-lesson-page--compact .video-lesson-content--call-collapsed .video-lesson-compact-drag {
   position: static;
-  height: 48px;
+  height: 40px;
+  flex: 1 1 auto;
   flex-basis: auto;
-  min-height: 48px;
+  min-height: 40px;
   border-bottom: 0;
   background: transparent;
   color: #fff;
 }
 
 .video-lesson-page--compact .video-lesson-content--call-collapsed.video-lesson-content--call-sized .video-lesson-compact-drag {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+  position: relative;
+  top: auto;
+  left: auto;
+  right: auto;
   z-index: 6;
-  height: 40px;
-  background: #000;
+  height: 28px;
+  min-height: 28px;
+  flex: 0 0 28px;
+  background: #0b0f14;
+}
+
+.video-lesson-page--compact .video-lesson-content--call-collapsed.video-lesson-content--call-sized .mini-call-bar__iconbtn {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
 }
 
 .video-lesson-page--compact .video-lesson-content--call-collapsed .mini-call-bar__iconbtn {
-  width: 44px;
-  height: 44px;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
   color: #fff;
 }
 
@@ -2820,8 +2887,7 @@ body.vl-room-fullscreen .student-cabinet-nav {
     position: fixed;
     z-index: 40;
     flex: 0 0 auto;
-    width: min(300px, calc(100vw - 24px));
-    height: auto;
+    --vl-float-width: min(320px, calc(100vw - 24px));
     top: calc(var(--vl-header-height) + 8px);
     right: max(8px, env(safe-area-inset-right, 0px));
     bottom: auto;
@@ -2842,8 +2908,7 @@ body.vl-room-fullscreen .student-cabinet-nav {
 
 @media (max-width: 480px) {
   .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-content {
-    width: min(56vw, 220px);
-    height: auto;
+    --vl-float-width: min(56vw, 280px);
   }
 }
 
@@ -2960,8 +3025,7 @@ body.vl-room-fullscreen .student-cabinet-nav {
 
   .video-lesson-page--compact .video-lesson-content,
   .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-content {
-    width: min(280px, calc(100vw - 20px));
-    height: auto;
+    --vl-float-width: min(320px, calc(100vw - 20px));
     top: calc(var(--vl-header-height) + 8px);
     right: max(8px, env(safe-area-inset-right, 0px));
     bottom: auto;
@@ -2975,7 +3039,8 @@ body.vl-room-fullscreen .student-cabinet-nav {
   .video-lesson-content--call-collapsed {
     min-width: 0;
     width: max-content;
-    height: 48px;
+    height: 40px;
+    max-height: 40px;
   }
 
   .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-compact-drag {
@@ -2994,13 +3059,13 @@ body.vl-room-fullscreen .student-cabinet-nav {
 @media (max-height: 600px) and (orientation: landscape) {
   .video-lesson-page--compact .video-lesson-content:not(.video-lesson-content--call-collapsed):not(.video-lesson-content--call-expanded),
   .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-content:not(.video-lesson-content--call-collapsed):not(.video-lesson-content--call-expanded) {
-    width: min(300px, 46vw);
-    height: auto;
+    --vl-float-width: min(320px, 46vw);
   }
 
   .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-content--call-collapsed {
     width: max-content;
-    height: 48px;
+    height: 40px;
+    max-height: 40px;
   }
 }
 
@@ -3012,7 +3077,7 @@ body.vl-room-fullscreen .student-cabinet-nav {
 }
 
 .video-lesson-page--board.video-lesson-page--compact .video-lesson-content:not(.video-lesson-content--call-collapsed):not(.video-lesson-content--call-expanded) {
-  width: min(560px, calc(100vw - 24px));
+  --vl-float-width: min(520px, calc(100vw - 24px));
 }
 
 /* ── Синхронный материал / совместное управление ─────────────────────────── */

@@ -26,6 +26,7 @@ import {
   Grid3x3,
   Hand,
   Heading1,
+  Highlighter,
   House,
   Image,
   Languages,
@@ -89,15 +90,13 @@ import {
   LESSON_EMOJIS,
   LESSON_FORMULAS,
   LESSON_INK_COLORS,
+  LESSON_MARKER_COLORS,
   LESSON_LINKS,
   LESSON_SIZE_STEPS,
   LESSON_STROKE_BASE,
-  LESSON_THICKNESS_MAX,
-  LESSON_THICKNESS_MIN,
   clampLessonThickness,
   getLessonThickness,
   subscribeLessonThickness,
-  LESSON_MORE,
   LESSON_SHAPES,
   LESSON_STICKER_COLORS,
   LESSON_TASKS,
@@ -151,12 +150,6 @@ const TEMPLATE_ICONS = {
   mindmap: Network,
 };
 
-const MORE_ICONS = {
-  frame: Square,
-  line: Minus,
-  embed: AppWindow,
-};
-
 export function LessonFlyout({ menu, overflow = [], onClose }) {
   if (menu === "pen" || menu === "draw") return <PenMenu />;
   if (menu === "text") return <TextMenu onClose={onClose} />;
@@ -176,15 +169,17 @@ export function LessonFlyout({ menu, overflow = [], onClose }) {
 function PenMenu() {
   const editor = useEditor();
   const toolId = useValue("lesson-pen-tool", () => editor.getCurrentToolId(), [editor]);
+  const marker = toolId === "highlight";
   const stylusOnly = useValue("lesson-pen-mode", () => editor.getInstanceState().isPenMode, [editor]);
   return (
     <div className="lesson-flyout__body lesson-flyout__body--pen">
       <div className="lesson-icon-row" role="toolbar" aria-label="Перо">
         <IconButton label="Карандаш" pressed={toolId === "draw"} onClick={() => chooseTool(editor, "draw")}><InkToolIcon icon={Pencil} active={toolId === "draw"} /></IconButton>
-        <IconButton label="Рисовать пальцем" pressed={!stylusOnly} onClick={() => setPenMode(editor, !stylusOnly)}><Hand size={18} strokeWidth={1.75} /></IconButton>
+        <IconButton label="Маркер" pressed={marker} onClick={() => chooseTool(editor, "highlight")}><Highlighter size={16} strokeWidth={1.75} /></IconButton>
+        <IconButton label="Рисовать пальцем" pressed={!stylusOnly} onClick={() => setPenMode(editor, !stylusOnly)}><Hand size={16} strokeWidth={1.75} /></IconButton>
       </div>
       <div className="lesson-pen-grid">
-        <ColorRow allowCustom colors={LESSON_INK_COLORS} />
+        <ColorRow allowCustom={!marker} colors={marker ? LESSON_MARKER_COLORS : LESSON_INK_COLORS} ink={marker ? "highlight" : "solid"} />
         <ThicknessSlider />
       </div>
       <OpacitySlider />
@@ -235,6 +230,7 @@ const SHAPE_ICONS = {
   diamond: Diamond,
   line: Minus,
   arrow: ArrowUpRight,
+  frame: SquareDashed,
   cloud: Cloud,
   bracket: Braces,
 };
@@ -544,46 +540,41 @@ function MoreMenu({ overflow = [], onClose }) {
   const editor = useEditor();
   const tools = useTools();
   const [insertOpen, setInsertOpen] = useState(false);
+  const icons = {
+    laser: Crosshair,
+    arrow: ArrowUpRight,
+    line: Minus,
+    frame: SquareDashed,
+    note: StickyNote,
+    insert: Image,
+    files: File,
+    embed: AppWindow,
+  };
+  if (insertOpen) return <InsertMenu />;
   return (
-    <div className="lesson-flyout__body">
-      <div className="lesson-icon-row" role="toolbar" aria-label="Ещё">
-        {overflow.map((item) => {
-          const OverflowIcon = { laser: Crosshair, note: StickyNote, insert: Image }[item.id] || Plus;
-          return (
-            <IconButton
-              key={item.id}
-              label={item.kbd ? `${item.label}  ${item.kbd}` : item.label}
-              onClick={() => {
-                if (item.id === "insert") {
-                  setInsertOpen(true);
-                  return;
-                }
-                if (item.tool) chooseTool(editor, item.tool);
-                onClose();
-              }}
-            >
-              <OverflowIcon size={18} strokeWidth={1.75} />
-            </IconButton>
-          );
-        })}
-        {insertOpen ? <InsertMenu /> : null}
-        {LESSON_MORE.map((item) => {
-          const Icon = MORE_ICONS[item.id] || Plus;
-          return (
-            <IconButton
-              key={item.id}
-              label={item.kbd ? `${item.label}  ${item.kbd}` : item.label}
-              onClick={() => {
-                if (item.tool === "embed") tools.embed?.onSelect("toolbar");
-                else chooseTool(editor, item.tool);
-                onClose();
-              }}
-            >
-              <Icon size={18} strokeWidth={1.75} />
-            </IconButton>
-          );
-        })}
-      </div>
+    <div className="lesson-flyout__body lesson-flyout__body--more">
+      {overflow.map((item) => {
+        const Icon = icons[item.id] || Plus;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            className="lesson-menu__item"
+            onClick={() => {
+              if (item.id === "insert" || item.id === "files") {
+                setInsertOpen(true);
+                return;
+              }
+              if (item.tool === "embed") tools.embed?.onSelect("toolbar");
+              else if (item.tool) chooseTool(editor, item.tool);
+              onClose();
+            }}
+          >
+            <Icon size={16} strokeWidth={1.75} aria-hidden="true" />
+            <span>{item.label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -673,9 +664,16 @@ export function useInkColor() {
   );
 }
 
+const THICKNESS_STEPS = [
+  { value: 4, bar: 2, label: "Тонкая" },
+  { value: 8, bar: 4, label: "Средняя" },
+  { value: 16, bar: 7, label: "Обычная" },
+  { value: 28, bar: 11, label: "Жирная" },
+  { value: 48, bar: 16, label: "Очень жирная" },
+];
+
 export function ThicknessSlider() {
   const editor = useEditor();
-  const color = useInkColor();
   const [value, setValue] = useState(getLessonThickness);
   useEffect(() => subscribeLessonThickness(() => setValue(getLessonThickness())), []);
   const selectedScale = useValue("lesson-thickness-selected", () => {
@@ -688,22 +686,24 @@ export function ThicknessSlider() {
     return shapes.every((shape) => shape.props.scale === scale) ? scale : null;
   }, [editor]);
   const shown = selectedScale == null ? value : clampLessonThickness(selectedScale * LESSON_STROKE_BASE);
-  const percent = ((shown - LESSON_THICKNESS_MIN) / (LESSON_THICKNESS_MAX - LESSON_THICKNESS_MIN)) * 100;
+  const active = THICKNESS_STEPS.reduce((best, step) => (
+    Math.abs(step.value - shown) < Math.abs(best.value - shown) ? step : best
+  ));
   return (
-    <label className="lesson-slider">
-      <BrushStroke color={color} thickness={Math.max(1.5, shown / 12)} />
-      <input
-        type="range"
-        min={LESSON_THICKNESS_MIN}
-        max={LESSON_THICKNESS_MAX}
-        step="1"
-        value={shown}
-        aria-label="Толщина штриха"
-        style={{ "--lesson-slider": `${percent}%` }}
-        onChange={(event) => applyThickness(editor, Number(event.target.value))}
-      />
-      <span className="lesson-slider__value">{shown}</span>
-    </label>
+    <div className="lesson-thickness" role="group" aria-label="Толщина">
+      {THICKNESS_STEPS.map((step) => (
+        <button
+          key={step.value}
+          type="button"
+          className="lesson-thickness__step"
+          aria-label={step.label}
+          aria-pressed={active.value === step.value}
+          onClick={() => applyThickness(editor, step.value)}
+        >
+          <span style={{ width: 22, height: step.bar }} />
+        </button>
+      ))}
+    </div>
   );
 }
 

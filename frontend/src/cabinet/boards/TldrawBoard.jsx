@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { computed } from "@tldraw/state";
-import { createUserId, getDefaultUserPresence, UserRecordType } from "@tldraw/tlschema";
+import { createUserId, getDefaultUserPresence, TLINSTANCE_ID, UserRecordType } from "@tldraw/tlschema";
 import { useSync } from "@tldraw/sync";
 import { Tldraw, defaultShapeUtils } from "tldraw";
 import "tldraw/tldraw.css";
 
-import { addBoardFiles, disposePdfNotice, installLessonThickness, installSavedCustomColors } from "./lessonBoardActions";
+import { addBoardFiles, disposePdfNotice, installLessonColorSync, installLessonThickness, lessonPresenceAppearance } from "./lessonBoardActions";
 import { installLessonSheets } from "./lessonSheets";
 import { installCoalescedEraserInput, keepImagesUnderEraser } from "./lessonEraser";
 import { lessonBoardComponents } from "./lessonBoardUi";
@@ -41,6 +41,10 @@ import { frameBoardIfContentIsOffscreen, revealBoardContent } from "./boardOpenF
 import BoardV2ErrorBoundary from "./BoardV2ErrorBoundary";
 import LessonBoardMessage from "./LessonBoardMessage";
 import "../styles/boards.css";
+
+import { markBoard } from "../lessonLoadTrace";
+
+markBoard("tldrawModuleAt", new Date().toISOString());
 
 function LessonBoardFrame({ roomId, boardId, children }) {
   const rootRef = useRef(null);
@@ -121,9 +125,11 @@ export function shouldResumeTldrawRoom() {
 function lessonUserPresence(store, user) {
   const presence = getDefaultUserPresence(store, user);
   if (!presence) return null;
+  const appearance = lessonPresenceAppearance(user, store.get(TLINSTANCE_ID));
   const avatarUrl = typeof user?.imageUrl === "string" ? user.imageUrl.trim() : "";
-  if (!avatarUrl) return presence;
-  return { ...presence, meta: { ...(presence.meta || {}), avatarUrl } };
+  const meta = { ...(presence.meta || {}), identityColor: appearance.identityColor };
+  if (avatarUrl) meta.avatarUrl = avatarUrl;
+  return { ...presence, color: appearance.color, meta };
 }
 
 function useLessonBoardSync({ boardId, roomId, users, assets }) {
@@ -260,7 +266,7 @@ function TldrawBoardSynced({
       onMount={(editor) => {
         assets.bind?.(editor);
         keepImagesUnderEraser(editor);
-        installSavedCustomColors(editor);
+        const disposeColors = installLessonColorSync(editor);
         editor.user.updateUserPreferences({
           colorScheme: "light",
           name: displayName,
@@ -286,6 +292,7 @@ function TldrawBoardSynced({
           disposePdfNotice(editor);
           disposeThickness();
           disposeEraserInput();
+          disposeColors();
           disposeSheets();
           disposeLegacy?.();
         };
@@ -329,6 +336,12 @@ function TldrawBoardSession({ boardId, userId, displayName, role, avatarUrl, can
  */
 export default function TldrawBoard(props) {
   const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    markBoard("tldrawMountedAt", new Date().toISOString());
+    return () => {
+      markBoard("tldrawUnmountAt", new Date().toISOString());
+    };
+  }, []);
   const retry = () => setAttempt((value) => value + 1);
   const roomId = lessonBoardRoomId(props.boardId);
 

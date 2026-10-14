@@ -1549,6 +1549,7 @@ class StudentAssignmentDetailView(StudentScopedView):
             homework_has_variant_task,
             homework_instruction_text,
             issue_homework_token,
+            apply_scoring_checked,
             redact_student_result,
             serialize_homework_tasks,
         )
@@ -1612,7 +1613,9 @@ class StudentAssignmentDetailView(StudentScopedView):
             if published_review or submission_has_published_review(submission):
                 ensure_payload_migrated(submission)
                 overlaid = overlay_payload_attachments(submission, submission.result_payload)
-                student_result = redact_student_result(visible_teacher_result(submission, overlaid))
+                student_result = redact_student_result(
+                    apply_scoring_checked(visible_teacher_result(submission, overlaid))
+                )
         card.update({
             "description": homework_instruction_text(hw),
             "tasks": tasks,

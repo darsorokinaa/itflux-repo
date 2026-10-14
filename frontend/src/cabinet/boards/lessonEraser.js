@@ -115,6 +115,103 @@ function dispatchCoalescedPrefix(editor, event) {
 }
 
 /**
+ * Жест ещё не в *.idle и это не набор текста.
+ * Окружность ластика и лазер — scribble в instance state, не фигура документа.
+ */
+export function isOpenBoardGesture(editor) {
+  if (!editor) return false;
+  if (typeof editor.getEditingShapeId === "function" && editor.getEditingShapeId()) return false;
+  if (editor.inputs?.getIsEditing?.()) return false;
+  const path = String(editor.getPath?.() || "");
+  if (!path || path === "root" || path.endsWith(".idle")) return false;
+  return true;
+}
+
+function releaseStuckPointer(editor) {
+  editor.inputs?.setIsPointing?.(false);
+  editor.inputs?.setIsDragging?.(false);
+  editor.inputs?.buttons?.delete?.(0);
+}
+
+function clientPointFromInputs(editor) {
+  const screen = editor.inputs?.getCurrentScreenPoint?.() || { x: 0, y: 0 };
+  const bounds = editor.getInstanceState?.()?.screenBounds || { x: 0, y: 0 };
+  return {
+    x: Number(screen.x) + Number(bounds.x || 0),
+    y: Number(screen.y) + Number(bounds.y || 0),
+    z: 0,
+  };
+}
+
+function traceBoardPointer(reason, editor) {
+  if (typeof globalThis === "undefined" || !globalThis.__itfluxBoardPointer) return;
+  console.info("[itflux board pointer]", reason, String(editor?.getPath?.() || ""));
+}
+
+/**
+ * tldraw 5.5.1 в Editor.dispatch отбрасывает pointer, пока isPinching.
+ * Erasing не слушает interrupt, а ScribbleManager не снимает последнюю
+ * точку активного scribble — окружность ластика остаётся в instance state.
+ * Пока щипок уже начался, pointer_up туда не доходит: закрываем жест через complete.
+ * Иначе штатный pointer_up сам снимает isPointing и вызывает onPointerUp инструмента.
+ */
+export function endOpenBoardGesture(editor, reason = "end") {
+  if (!isOpenBoardGesture(editor)) return false;
+  traceBoardPointer(reason, editor);
+  const pinching = Boolean(editor.inputs?.getIsPinching?.());
+  if (!pinching && typeof editor.dispatch === "function") {
+    const isPen = Boolean(editor.inputs?.getIsPen?.() || editor.getInstanceState?.()?.isPenMode);
+    editor.dispatch({
+      type: "pointer",
+      target: "canvas",
+      name: "pointer_up",
+      point: clientPointFromInputs(editor),
+      pointerId: editor.capturedPointerId ?? 1,
+      button: 0,
+      isPen,
+      shiftKey: false,
+      altKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      accelKey: false,
+    });
+  }
+  if (!isOpenBoardGesture(editor)) return true;
+  editor.complete?.();
+  if (isOpenBoardGesture(editor)) editor.cancel?.();
+  releaseStuckPointer(editor);
+  return true;
+}
+
+/**
+ * Перо село, пока палец или ладонь уже вели штрих.
+ * Drawing.onInterrupt при isDragging не выходит из drawing, и следующий
+ * pointer_move пера дописывает хорду в тот же shape. bailToMark снимает
+ * только метку текущего штриха, предыдущие фигуры не трогает.
+ */
+export function abandonNonPenGesture(editor) {
+  if (!isOpenBoardGesture(editor)) return false;
+  if (editor.inputs?.getIsPen?.()) return false;
+  traceBoardPointer("abandon-non-pen", editor);
+  const path = String(editor.getPath?.() || "");
+  const ink = path.startsWith("draw.") || path.startsWith("highlight.");
+  if (ink) {
+    const node = editor.getStateDescendant?.(path);
+    if (node?.markId && typeof editor.bailToMark === "function") {
+      try {
+        editor.bailToMark(node.markId);
+      } catch {
+        // Метка уже снята самим инструментом.
+      }
+    }
+  }
+  editor.cancel?.();
+  if (isOpenBoardGesture(editor)) editor.complete?.();
+  releaseStuckPointer(editor);
+  return true;
+}
+
+/**
  * Штатный ластик tldraw смотрит только на последнее pointermove.
  * На iPad Apple Pencil кладёт промежуточные точки в getCoalescedEvents,
  * а сам tldraw на iOS их не читает. Хорда между редкими событиями не пересекает изгиб.
@@ -156,6 +253,7 @@ export function installCoalescedEraserInput(editor) {
 
   const onDown = (event) => {
     if (blockForeignPointer(event)) return;
+    if (event.pointerType === "pen") abandonNonPenGesture(editor);
     notePen(event);
   };
 
@@ -206,15 +304,50 @@ export function installCoalescedEraserInput(editor) {
     releasePointer(event);
   };
 
+  let disposed = false;
+  const endIfOpen = (reason) => {
+    if (disposed) return;
+    try {
+      endOpenBoardGesture(editor, reason);
+    } catch {
+      // Редактор уже снят вместе с холстом.
+    }
+  };
+  const onEditorEvent = (info) => {
+    if (info?.type === "pinch" && info?.name === "pinch_start") endIfOpen("pinch");
+  };
+  const onHidden = () => {
+    if (doc.visibilityState === "hidden") endIfOpen("hidden");
+  };
+  const onPageHide = () => endIfOpen("pagehide");
+  const onBlur = () => endIfOpen("blur");
+  const onLostCapture = (event) => {
+    if (editor.capturedPointerId != null && event.pointerId !== editor.capturedPointerId) return;
+    const schedule = doc.defaultView?.queueMicrotask?.bind(doc.defaultView) || queueMicrotask;
+    schedule(() => endIfOpen("lostpointercapture"));
+  };
+  if (typeof editor.on === "function") editor.on("event", onEditorEvent);
+
+  const win = doc.defaultView;
   doc.addEventListener("pointerdown", onDown, true);
   doc.addEventListener("pointermove", onMove, true);
   doc.addEventListener("pointerup", onUp, true);
   doc.addEventListener("pointercancel", onUp, true);
+  doc.addEventListener("lostpointercapture", onLostCapture, true);
+  doc.addEventListener("visibilitychange", onHidden);
+  win?.addEventListener("pagehide", onPageHide);
+  win?.addEventListener("blur", onBlur);
   return () => {
+    disposed = true;
+    if (typeof editor.off === "function") editor.off("event", onEditorEvent);
     doc.removeEventListener("pointerdown", onDown, true);
     doc.removeEventListener("pointermove", onMove, true);
     doc.removeEventListener("pointerup", onUp, true);
     doc.removeEventListener("pointercancel", onUp, true);
+    doc.removeEventListener("lostpointercapture", onLostCapture, true);
+    doc.removeEventListener("visibilitychange", onHidden);
+    win?.removeEventListener("pagehide", onPageHide);
+    win?.removeEventListener("blur", onBlur);
   };
 }
 

@@ -1560,6 +1560,54 @@ class StudentReleaseTests(TestCase):
         self.assertEqual(len(items), 1)
         self.assertTrue(Homework.objects.filter(student=self.student).exists())
 
+    def test_deleted_homework_is_not_issued_again(self):
+        from rest_framework.test import APIClient
+
+        from Cabinet.models import Homework, HomeworkAutoIssueBlock
+        from Cabinet.student_release import StudentReleaseService, assign_homework_manually
+
+        StudentReleaseService.release_for_event(self.event)
+        homework = Homework.objects.get(student=self.student, lesson_plan_item=self.plan_item)
+
+        teacher = APIClient()
+        teacher.force_login(self.teacher)
+        deleted = teacher.delete(f"/api/cabinet/homework/{homework.pk}/")
+        self.assertEqual(deleted.status_code, 204, getattr(deleted, "content", b""))
+        self.assertFalse(Homework.objects.filter(student=self.student, lesson_plan_item=self.plan_item).exists())
+        self.assertTrue(
+            HomeworkAutoIssueBlock.objects.filter(
+                teacher=self.teacher,
+                student=self.student,
+                lesson_plan_item=self.plan_item,
+            ).exists()
+        )
+
+        StudentReleaseService.release_for_event(self.event)
+        student = APIClient()
+        student.force_login(self.student_user)
+        response = student.get("/api/cabinet/student/assignments/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["items"], [])
+        self.assertFalse(Homework.objects.filter(student=self.student, lesson_plan_item=self.plan_item).exists())
+
+        again = assign_homework_manually(
+            teacher=self.teacher,
+            student=self.student,
+            plan_item=self.plan_item,
+        )
+        self.assertIsNotNone(again)
+        self.assertFalse(
+            HomeworkAutoIssueBlock.objects.filter(
+                teacher=self.teacher,
+                student=self.student,
+                lesson_plan_item=self.plan_item,
+            ).exists()
+        )
+
+        teacher.delete(f"/api/cabinet/homework/{again.pk}/")
+        StudentReleaseService.release_for_event(self.event)
+        self.assertFalse(Homework.objects.filter(student=self.student, lesson_plan_item=self.plan_item).exists())
+
     def test_release_on_status_done(self):
         from Cabinet.models import LessonAssignment
         from Cabinet.student_release import StudentReleaseService

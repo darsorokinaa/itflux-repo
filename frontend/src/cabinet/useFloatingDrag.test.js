@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   CALL_FRAME_ASPECT,
+  FLOATING_CALL_CHROME,
   applyFloatingResize,
   clampFloatingBox,
   fitFloatingAspect,
+  presetCallFrame,
   readFloatingLayout,
 } from "./useFloatingDrag";
 
@@ -100,6 +102,55 @@ describe("useFloatingDrag layout", () => {
     expect(next.left).toBe(40);
     expect(next.top).toBe(40);
     expect(next.width).toBeGreaterThan(320);
+  });
+
+  it("keeps the video 16:9 while the button strip stays under it", () => {
+    const grown = applyFloatingResize({
+      edge: "se",
+      origLeft: 40,
+      origTop: 40,
+      origWidth: 480,
+      origHeight: 270 + FLOATING_CALL_CHROME,
+      dx: 160,
+      dy: 20,
+      viewport: { width: 1400, height: 900 },
+      minWidth: 260,
+      minHeight: Math.round(260 / CALL_FRAME_ASPECT) + FLOATING_CALL_CHROME,
+      aspectRatio: CALL_FRAME_ASPECT,
+      chromeHeight: FLOATING_CALL_CHROME,
+    });
+    expect(grown.width).toBeGreaterThan(480);
+    expect(grown.width / (grown.height - FLOATING_CALL_CHROME)).toBeCloseTo(CALL_FRAME_ASPECT, 1);
+
+    const shrunk = applyFloatingResize({
+      edge: "se",
+      origLeft: 40,
+      origTop: 40,
+      origWidth: 480,
+      origHeight: 270 + FLOATING_CALL_CHROME,
+      dx: -200,
+      dy: -80,
+      viewport: { width: 1400, height: 900 },
+      minWidth: 260,
+      minHeight: Math.round(260 / CALL_FRAME_ASPECT) + FLOATING_CALL_CHROME,
+      aspectRatio: CALL_FRAME_ASPECT,
+      chromeHeight: FLOATING_CALL_CHROME,
+    });
+    expect(shrunk.width).toBeLessThan(480);
+    expect(shrunk.width).toBeGreaterThanOrEqual(260);
+    expect(shrunk.width / (shrunk.height - FLOATING_CALL_CHROME)).toBeCloseTo(CALL_FRAME_ASPECT, 1);
+  });
+
+  it("uses a chip, a small frame, and a larger frame", () => {
+    const viewport = { width: 1440, height: 900 };
+    expect(presetCallFrame("minimized", viewport)).toBeNull();
+    const normal = presetCallFrame("normal", viewport);
+    const expanded = presetCallFrame("expanded", viewport);
+    expect(expanded.width).toBeGreaterThan(normal.width);
+    expect(normal.height - FLOATING_CALL_CHROME).toBe(Math.round(normal.width / CALL_FRAME_ASPECT));
+    expect(expanded.height - FLOATING_CALL_CHROME).toBe(Math.round(expanded.width / CALL_FRAME_ASPECT));
+    expect(normal.height).toBeLessThan(viewport.height);
+    expect(expanded.height).toBeLessThan(viewport.height);
   });
 
   it("corrects a previously stretched frame back to 16:9", () => {

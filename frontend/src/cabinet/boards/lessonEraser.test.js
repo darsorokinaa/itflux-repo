@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  abandonNonPenGesture,
+  endOpenBoardGesture,
   eraserSamplePoints,
   imageSurvivesEraser,
   installCoalescedEraserInput,
+  isOpenBoardGesture,
   keepImagesUnderEraser,
   sameActivePointer,
   shouldDensifyEraserMove,
@@ -309,6 +312,235 @@ describe("lesson eraser pointer", () => {
     doc.removeEventListener("pointerdown", onBubble);
     doc.removeEventListener("pointermove", onBubble);
     Object.defineProperty(navigator, "userAgent", { configurable: true, value: previousAgent });
+    host.remove();
+  });
+});
+
+describe("open gesture end", () => {
+  function harness(path = "draw.drawing") {
+    const calls = [];
+    let current = path;
+    const editor = {
+      capturedPointerId: 3,
+      getPath: () => current,
+      getEditingShapeId: () => null,
+      getStateDescendant: () => ({ markId: "draw-mark" }),
+      getInstanceState: () => ({ screenBounds: { x: 12, y: 20 }, isPenMode: false }),
+      bailToMark(id) { calls.push(["bail", id]); },
+      cancel() {
+        calls.push(["cancel"]);
+        current = "draw.idle";
+      },
+      complete() {
+        calls.push(["complete"]);
+        current = "draw.idle";
+      },
+      dispatch(info) {
+        calls.push([info.name, info.isPen, info.point.x, info.point.y, info.pointerId]);
+        current = "draw.idle";
+      },
+      inputs: {
+        getIsPen: () => false,
+        getIsPinching: () => false,
+        getIsEditing: () => false,
+        getCurrentScreenPoint: () => ({ x: 4, y: 6 }),
+        setIsPointing(value) { calls.push(["pointing", value]); },
+        setIsDragging(value) { calls.push(["dragging", value]); },
+        buttons: { delete(button) { calls.push(["button", button]); } },
+      },
+    };
+    return { editor, calls, setPath: (next) => { current = next; } };
+  }
+
+  it("treats idle and text editing as closed", () => {
+    expect(isOpenBoardGesture({ getPath: () => "eraser.idle" })).toBe(false);
+    expect(isOpenBoardGesture({ getPath: () => "select.idle", getEditingShapeId: () => null })).toBe(false);
+    expect(isOpenBoardGesture({ getPath: () => "select.editing_shape", getEditingShapeId: () => "shape:1" })).toBe(false);
+    expect(isOpenBoardGesture({ getPath: () => "eraser.erasing", getEditingShapeId: () => null })).toBe(true);
+  });
+
+  it("drops only the in-progress finger stroke when the pen comes down", () => {
+    const { editor, calls } = harness("draw.drawing");
+    expect(abandonNonPenGesture(editor)).toBe(true);
+    expect(calls).toEqual([
+      ["bail", "draw-mark"],
+      ["cancel"],
+      ["pointing", false],
+      ["dragging", false],
+      ["button", 0],
+    ]);
+    editor.inputs.getIsPen = () => true;
+    calls.length = 0;
+    expect(abandonNonPenGesture({ ...editor, getPath: () => "draw.drawing" })).toBe(false);
+    expect(calls).toEqual([]);
+  });
+
+  it("cancels an in-progress finger erase without bailing a draw mark", () => {
+    const { editor, calls } = harness("eraser.erasing");
+    editor.getStateDescendant = () => { throw new Error("draw node"); };
+    expect(abandonNonPenGesture(editor)).toBe(true);
+    expect(calls[0]).toEqual(["cancel"]);
+    expect(calls.some((item) => item[0] === "bail")).toBe(false);
+  });
+
+  it("finishes a pinched gesture with complete because pointer_up is dropped", () => {
+    const { editor, calls } = harness("eraser.erasing");
+    editor.inputs.getIsPinching = () => true;
+    editor.complete = () => {
+      calls.push(["complete"]);
+    };
+    expect(endOpenBoardGesture(editor, "pinch")).toBe(true);
+    expect(calls.map((item) => item[0])).toEqual(["complete", "cancel", "pointing", "dragging", "button"]);
+    expect(calls.some((item) => item[0] === "pointer_up")).toBe(false);
+  });
+
+  it("finishes a visible gesture with one stock pointer_up", () => {
+    const { editor, calls } = harness("draw.drawing");
+    expect(endOpenBoardGesture(editor, "hidden")).toBe(true);
+    expect(calls[0]).toEqual(["pointer_up", false, 16, 26, 3]);
+    expect(calls.some((item) => item[0] === "complete")).toBe(false);
+  });
+
+  it("keeps isPen on the closing pointer_up while pen mode is on", () => {
+    const { editor, calls } = harness("eraser.erasing");
+    editor.getInstanceState = () => ({ screenBounds: { x: 0, y: 0 }, isPenMode: true });
+    endOpenBoardGesture(editor);
+    expect(calls[0][1]).toBe(true);
+  });
+
+  it("does not close an idle board when the page hides or a pinch starts", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const calls = [];
+    let path = "select.idle";
+    const listeners = new Set();
+    const editor = {
+      getContainer: () => host,
+      getPath: () => path,
+      getEditingShapeId: () => null,
+      isIn: () => false,
+      getCurrentToolId: () => "select",
+      on(_name, fn) { listeners.add(fn); },
+      off(_name, fn) { listeners.delete(fn); },
+      complete() { calls.push("complete"); },
+      cancel() { calls.push("cancel"); },
+      dispatch(info) { calls.push(info.name); },
+      inputs: { getIsPen: () => false, getIsPinching: () => true },
+    };
+    const dispose = installCoalescedEraserInput(editor);
+    const previousVisibility = document.visibilityState;
+    try {
+      listeners.forEach((fn) => fn({ type: "pinch", name: "pinch_start" }));
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("pagehide"));
+      window.dispatchEvent(new Event("blur"));
+      expect(calls).toEqual([]);
+      path = "draw.drawing";
+      editor.inputs.getIsPinching = () => true;
+      listeners.forEach((fn) => fn({ type: "pinch", name: "pinch_start" }));
+      expect(calls).toEqual(["complete", "cancel"]);
+      dispose();
+      calls.length = 0;
+      listeners.forEach((fn) => fn({ type: "pinch", name: "pinch_start" }));
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(calls).toEqual([]);
+    } finally {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: previousVisibility });
+      dispose();
+      host.remove();
+    }
+  });
+
+  it("ends a gesture after lost pointer capture only if it is still open", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const calls = [];
+    let path = "draw.drawing";
+    const editor = {
+      capturedPointerId: 4,
+      getContainer: () => host,
+      getPath: () => path,
+      getEditingShapeId: () => null,
+      isIn: () => false,
+      getCurrentToolId: () => "draw",
+      getInstanceState: () => ({ screenBounds: { x: 0, y: 0 }, isPenMode: true }),
+      inputs: {
+        getIsPen: () => true,
+        getIsPinching: () => false,
+        getCurrentScreenPoint: () => ({ x: 1, y: 2 }),
+      },
+      dispatch(info) {
+        calls.push([info.name, info.pointerId]);
+        path = "draw.idle";
+      },
+    };
+    const dispose = installCoalescedEraserInput(editor);
+    host.ownerDocument.dispatchEvent(new PointerEvent("lostpointercapture", {
+      bubbles: true,
+      pointerId: 4,
+    }));
+    await Promise.resolve();
+    expect(calls).toEqual([["pointer_up", 4]]);
+    calls.length = 0;
+    host.ownerDocument.dispatchEvent(new PointerEvent("lostpointercapture", {
+      bubbles: true,
+      pointerId: 4,
+    }));
+    await Promise.resolve();
+    expect(calls).toEqual([]);
+    dispose();
+    host.remove();
+  });
+
+  it("still delivers the pen down after abandoning the finger stroke", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const doc = host.ownerDocument;
+    const seen = [];
+    const calls = [];
+    const onDown = (event) => seen.push(event.pointerType);
+    doc.addEventListener("pointerdown", onDown);
+    const editor = {
+      getContainer: () => host,
+      getPath: () => "draw.drawing",
+      getEditingShapeId: () => null,
+      isIn: () => false,
+      getCurrentToolId: () => "draw",
+      getStateDescendant: () => ({ markId: "mark-1" }),
+      bailToMark(id) { calls.push(id); },
+      cancel() { calls.push("cancel"); },
+      inputs: { getIsPen: () => false, buttons: { delete() {} }, setIsPointing() {}, setIsDragging() {} },
+    };
+    const dispose = installCoalescedEraserInput(editor);
+    const mouse = new PointerEvent("pointerdown", {
+      bubbles: true,
+      cancelable: true,
+      pointerId: 1,
+      button: 0,
+      buttons: 1,
+      clientX: 8,
+      clientY: 8,
+    });
+    Object.defineProperty(mouse, "pointerType", { value: "mouse" });
+    doc.dispatchEvent(mouse);
+    expect(calls).toEqual([]);
+    const event = new PointerEvent("pointerdown", {
+      bubbles: true,
+      cancelable: true,
+      pointerId: 5,
+      button: 0,
+      buttons: 1,
+      clientX: 3,
+      clientY: 4,
+    });
+    Object.defineProperty(event, "pointerType", { value: "pen" });
+    Object.defineProperty(event, "pressure", { value: 0.4 });
+    doc.dispatchEvent(event);
+    expect(calls).toEqual(["mark-1", "cancel"]);
+    expect(seen).toEqual(["mouse", "pen"]);
+    dispose();
+    doc.removeEventListener("pointerdown", onDown);
     host.remove();
   });
 });

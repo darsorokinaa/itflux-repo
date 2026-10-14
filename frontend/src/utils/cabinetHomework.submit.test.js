@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  homeworkTaskNumberEditable,
   shouldAutosaveLiveVariant,
   shouldHideHomeworkFinishButton,
   shouldShowHomeworkBottomActions,
@@ -94,5 +95,20 @@ describe("shouldAutosaveLiveVariant", () => {
       meetingUuid: "meet-1",
       viewerSettled: false,
     })).toBe(false);
+  });
+});
+
+describe("revision edits only incorrect tasks", () => {
+  it("keeps correct answers locked when the server limits the revision", () => {
+    expect(homeworkTaskNumberEditable("revision", ["102"], 1, false, 101, true)).toBe(false);
+    expect(homeworkTaskNumberEditable("revision", ["102"], 2, false, 102, true)).toBe(true);
+  });
+
+  it("still allows every answer when an old return has no revision list", () => {
+    expect(homeworkTaskNumberEditable("revision", [], 1, false, 101, false)).toBe(true);
+  });
+
+  it("locks every answer when the revision is limited and nothing is left to fix", () => {
+    expect(homeworkTaskNumberEditable("revision", [], 1, false, 101, true)).toBe(false);
   });
 });

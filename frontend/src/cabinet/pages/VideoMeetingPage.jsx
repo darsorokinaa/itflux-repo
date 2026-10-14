@@ -108,6 +108,8 @@ import {
   logVariantLifecycle,
 } from "../meetingPresent";
 import LessonBoardWorkspaceFrame from "../pwa/lessonBoardWorkspaceFrame";
+import LessonLoadTracePanel from "../LessonLoadTracePanel";
+import { bindCallSessionId, noteScriptEvent } from "../lessonLoadTrace";
 import { BOARD_IFRAME_HEALTH_MS, startBoardIframeHealth } from "../pwa/boardFrameSnapshot";
 import {
   LESSON_BOARD_CHROME_SOURCE,
@@ -145,9 +147,9 @@ import {
 } from "../screenshare/annotationModel";
 import { LASER_TTL_MS, canDrawScreenShareAnnotations } from "../screenshare/constants";
 import { AnnotationProvider } from "../annotations/AnnotationContext";
-import { CALL_FRAME_ASPECT, useFloatingDrag } from "../useFloatingDrag";
+import { CALL_FRAME_ASPECT, FLOATING_CALL_CHROME, presetCallFrame, useFloatingDrag } from "../useFloatingDrag";
 import FloatingResizeHandles from "../FloatingResizeHandles";
-import MiniCallBar from "../components/MiniCallBar";
+import MiniCallBar, { FloatingCallTools } from "../components/MiniCallBar";
 import {
   bindMeetingAutoPip,
   closeCallStayOnTop,
@@ -619,6 +621,7 @@ export default function VideoMeetingPage() {
   const boardSrcCacheRef = useRef({ url: "", src: "" });
   const boardChromeActionsRef = useRef({});
   const [callView, setCallView] = useState("normal");
+  const floatingCallRef = useRef(false);
   const [focusCall, setFocusCall] = useState(false);
   const [shareMiniDismissed, setShareMiniDismissed] = useState(false);
   const [localMicOn, setLocalMicOn] = useState(false);
@@ -820,6 +823,10 @@ export default function VideoMeetingPage() {
   }, [openShareStayOnTop, pageState, participantPipContext]);
 
   const disposeApi = useCallback(() => {
+    noteScriptEvent("dispose_api", {
+      scriptConnected: Boolean(document.getElementById("jitsi-external-api-script")?.isConnected),
+      removesScript: false,
+    });
     programmaticDisposeRef.current = true;
     jitsiInitRef.current = false;
     initGenRef.current += 1;
@@ -942,6 +949,7 @@ export default function VideoMeetingPage() {
       diagId: callSessionIdRef.current,
       ...describeConferenceClient(),
     });
+    bindCallSessionId(callSessionIdRef.current);
     jitsiInitRef.current = true;
     programmaticDisposeRef.current = false;
     joinStartedAtRef.current = Date.now();
@@ -1078,7 +1086,9 @@ export default function VideoMeetingPage() {
         ...config,
         startWithVideoMuted,
         startWithAudioMuted,
-        customChrome: true,
+        customChrome: false,
+        expandedToolbar: !floatingCallRef.current,
+        floatingToolbar: floatingCallRef.current,
         diagnostics: {
           ...(config.diagnostics || {}),
           browserTabSessionId: tabSessionIdRef.current,
@@ -1848,7 +1858,12 @@ export default function VideoMeetingPage() {
       setPageState((prev) => (prev === "loading" ? "error" : prev));
       setError((prev) => prev || "Не удалось открыть комнату. Проверьте сеть и попробуйте снова.");
     }, 15000);
+    bindCallSessionId(callSessionIdRef.current);
     return () => {
+      noteScriptEvent("page_unmount", {
+        scriptConnected: Boolean(document.getElementById("jitsi-external-api-script")?.isConnected),
+        removesScript: false,
+      });
       window.clearTimeout(watchdog);
       abortJitsiConnectionProbe();
       stopPolling();
@@ -3941,7 +3956,8 @@ export default function VideoMeetingPage() {
   });
   // Материал открыт или идёт демонстрация — звонок сворачивается в плавающее окно.
   const compactCall = Boolean(showJitsi && (workspaceOpen || shareMiniCall));
-  const showConferenceChrome = Boolean(showJitsi && !compactCall);
+  floatingCallRef.current = compactCall;
+  const showConferenceChrome = Boolean(showJitsi && !compactCall && liveKitJoin);
   const liveKitMessages = liveKitUi?.messages;
   useEffect(() => {
     if (!liveKitJoin || compactCall) {
@@ -3970,16 +3986,22 @@ export default function VideoMeetingPage() {
   } = useFloatingDrag({
     enabled: compactCall,
     resizable: compactCall && callView !== "minimized",
-    minWidth: callView === "minimized" ? 180 : callView === "expanded" ? 640 : 280,
-    minHeight: callView === "minimized" ? 48 : callView === "expanded" ? 360 : 158,
+    minWidth: callView === "minimized" ? 160 : 260,
+    minHeight: callView === "minimized"
+      ? 40
+      : Math.round(260 / CALL_FRAME_ASPECT) + FLOATING_CALL_CHROME,
     aspectRatio: callView === "minimized" ? 0 : CALL_FRAME_ASPECT,
+    chromeHeight: callView === "minimized" ? 0 : FLOATING_CALL_CHROME,
     marginTop: boardChromeOpen ? 72 : 74,
+    sizeToken: compactCall ? callView : "",
+    frameSize: callView === "minimized"
+      ? null
+      : presetCallFrame(callView, undefined, { marginTop: boardChromeOpen ? 72 : 74 }),
     storageKey: meetingUuid
-      ? (shareMiniCall ? `vl-share-pip:${meetingUuid}` : `vl-compact-call-v5:${callView}:${meetingUuid}`)
+      ? (shareMiniCall ? `vl-share-pip-v6:${meetingUuid}` : `vl-compact-call-v6:${meetingUuid}`)
       : null,
     handleSelector: ".video-lesson-compact-drag",
   });
-  const minimizedShowsVideo = callView === "minimized" && Number(compactCallStyle?.height) > 80;
 
   const compactCallPrevRef = useRef(false);
   useEffect(() => {
@@ -4037,10 +4059,10 @@ export default function VideoMeetingPage() {
 
   useEffect(() => {
     applyJitsiCallChrome(apiRef.current, {
-      expanded: Boolean(compactCall && callView === "expanded"),
-      custom: !compactCall,
+      expanded: !compactCall,
+      floating: compactCall,
     });
-  }, [compactCall, callView, joinState, conferenceBound]);
+  }, [compactCall, joinState, conferenceBound]);
 
   const toggleRoomFullscreen = useCallback(async () => {
     const frame = callFrameRef.current;
@@ -4450,8 +4472,7 @@ export default function VideoMeetingPage() {
             compactCallDragging || compactCallResizing ? "video-lesson-content--dragging" : "",
             compactCall && callView === "minimized" ? "video-lesson-content--call-collapsed" : "",
             compactCall && callView === "expanded" ? "video-lesson-content--call-expanded" : "",
-            compactCall ? "video-lesson-content--resizable" : "",
-            minimizedShowsVideo ? "video-lesson-content--call-sized" : "",
+            compactCall && callView !== "minimized" ? "video-lesson-content--resizable" : "",
             callFullscreenFallback ? "is-call-fullscreen-fallback" : "",
           ].filter(Boolean).join(" ")}
           data-participant-video-mode={participantVideoMode}
@@ -4735,7 +4756,7 @@ export default function VideoMeetingPage() {
           <div
             className={[
               "video-lesson-jitsi-host",
-              compactCall && callView === "minimized" && !minimizedShowsVideo ? "is-audio-kept" : "",
+              compactCall && callView === "minimized" ? "is-audio-kept" : "",
             ].filter(Boolean).join(" ")}
             hidden={!showJitsi}
           >
@@ -4976,6 +4997,25 @@ export default function VideoMeetingPage() {
               />
             )}
           </div>
+          {compactCall && callView !== "minimized" ? (
+            <FloatingCallTools
+              expanded={callView === "expanded"}
+              micOn={liveKitJoin ? Boolean(liveKitUi?.micOn) : localMicOn}
+              micDisabled={liveKitJoin ? !liveKitUi?.ready : !callControlsReady}
+              camOn={liveKitJoin ? Boolean(liveKitUi?.camOn) : localCamOn}
+              sharing={liveKitJoin ? Boolean(liveKitUi?.sharing) : Boolean(screenshareLayout.localSharing)}
+              handRaised={liveKitJoin ? Boolean(liveKitUi?.handRaised) : handRaised}
+              tileWide={liveKitJoin ? Boolean(liveKitUi?.tileWide) : tileWide}
+              controlsDisabled={liveKitJoin ? !liveKitUi?.ready : !callControlsReady}
+              screenShareAvailable={screenShareSupported()}
+              onToggleMic={onToggleConferenceMic}
+              onToggleCam={onToggleConferenceCam}
+              onToggleShare={onToggleScreenShare}
+              onToggleHand={onToggleConferenceHand}
+              onToggleLayout={onToggleConferenceLayout}
+              onHangup={onConferenceHangup}
+            />
+          ) : null}
           {showConferenceChrome ? (
             <ConferenceControls
               disabled={liveKitJoin ? !liveKitUi?.ready : !callControlsReady}
@@ -5109,6 +5149,7 @@ export default function VideoMeetingPage() {
         onAttachMaterial={resourcePicker === "homework" ? onAttachHomeworkMaterial : onAttachPlanMaterial}
         onAttachInteractive={resourcePicker === "homework" ? onAttachHomeworkInteractive : onAttachPlanInteractive}
       />
+      <LessonLoadTracePanel />
     </div>
     </AnnotationProvider>
   );

@@ -143,6 +143,7 @@ export function pickHomeworkFields(data, fallbackId) {
       status: "unknown",
       result: null,
       revisionTaskIds: [],
+      revisionLimited: false,
       deadline: null,
       variantId: null,
       raw: data,
@@ -164,6 +165,7 @@ export function pickHomeworkFields(data, fallbackId) {
     status: normalizeHomeworkStatus(String(st)),
     result: mergedResult,
     revisionTaskIds,
+    revisionLimited: Boolean(d.revision_limited || d.revisionLimited),
     deadline: d.deadline ?? d.deadline_at ?? d.deadlineAt ?? null,
     variantId: d.variant_id ?? d.variantId ?? d.variant_id ?? null,
     submissionId: d.submission_id ?? d.submissionId ?? null,
@@ -605,23 +607,36 @@ export async function fetchHomeworkAssignment(assignmentId, opts) {
 }
 
 /**
+ * На доработке править можно только задания из revisionTaskIds.
+ * Пустой список без revisionLimited — старые работы, где ограничения ещё не было.
  * @param {string} statusNorm
  * @param {string[]} revisionTaskIds
- * @param {number} taskNumber
+ * @param {number|string} taskNumber
  * @param {boolean} isTeacherView
+ * @param {number|string} [taskId]
+ * @param {boolean} [revisionLimited]
  */
 export function homeworkTaskNumberEditable(
   statusNorm,
   revisionTaskIds,
   taskNumber,
-  isTeacherView
+  isTeacherView,
+  taskId,
+  revisionLimited = false,
 ) {
   if (isTeacherView) return false;
   if (statusNorm === "sent" || statusNorm === "unknown") return true;
   if (statusNorm === "revision") {
-    if (!revisionTaskIds.length) return true;
-    const n = String(taskNumber);
-    return revisionTaskIds.includes(n) || revisionTaskIds.includes(String(Number(n)));
+    const ids = Array.isArray(revisionTaskIds) ? revisionTaskIds.map((x) => String(x)) : [];
+    if (!revisionLimited && !ids.length) return true;
+    const keys = [];
+    if (taskId != null && String(taskId) !== "") keys.push(String(taskId));
+    if (taskNumber != null && String(taskNumber) !== "") keys.push(String(taskNumber));
+    return keys.some((key) => {
+      if (ids.includes(key)) return true;
+      const asNum = Number(key);
+      return Number.isFinite(asNum) && ids.includes(String(asNum));
+    });
   }
   if (statusNorm === "submitted" || statusNorm === "reviewing" || statusNorm === "reviewed")
     return false;

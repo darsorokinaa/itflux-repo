@@ -1860,6 +1860,40 @@ class Homework(models.Model):
         return self.title
 
 
+class HomeworkAutoIssueBlock(models.Model):
+    """Учитель удалил ДЗ пункта плана: автовыдача этого пункта этому ученику больше не создаёт его."""
+
+    teacher = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="homework_auto_issue_blocks",
+        verbose_name="Учитель",
+    )
+    student = models.ForeignKey(
+        "Student",
+        on_delete=models.CASCADE,
+        related_name="homework_auto_issue_blocks",
+        verbose_name="Ученик",
+    )
+    lesson_plan_item = models.ForeignKey(
+        "LessonPlanItem",
+        on_delete=models.CASCADE,
+        related_name="homework_auto_issue_blocks",
+        verbose_name="Пункт плана",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Отмена автовыдачи ДЗ"
+        verbose_name_plural = "Отмены автовыдачи ДЗ"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["teacher", "student", "lesson_plan_item"],
+                name="cabinet_hw_auto_issue_block_uniq",
+            ),
+        ]
+
+
 class HomeworkTask(models.Model):
     homework = models.ForeignKey(
         Homework,

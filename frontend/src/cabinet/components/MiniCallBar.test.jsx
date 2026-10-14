@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import MiniCallBar from "./MiniCallBar";
+import MiniCallBar, { FloatingCallTools } from "./MiniCallBar";
 
 afterEach(() => {
   cleanup();
@@ -106,6 +106,41 @@ describe("MiniCallBar", () => {
       />,
     );
     expect(screen.getByRole("button", { name: "Основная связь" })).toBeTruthy();
+  });
+
+  it("keeps floating call buttons in a strip under the video", () => {
+    render(
+      <FloatingCallTools
+        micOn
+        camOn
+        onToggleMic={() => {}}
+        onToggleCam={() => {}}
+        onToggleShare={() => {}}
+        onHangup={() => {}}
+      />,
+    );
+    const bar = screen.getByRole("toolbar", { name: "Кнопки звонка" });
+    expect(bar.className).toBe("mini-call-tools");
+    expect(bar.querySelectorAll("button")).toHaveLength(4);
+    expect(screen.queryByRole("button", { name: "Поднять руку" })).toBeNull();
+  });
+
+  it("adds only a few small actions when the floating window is enlarged", () => {
+    render(
+      <FloatingCallTools
+        expanded
+        onToggleMic={() => {}}
+        onToggleCam={() => {}}
+        onToggleShare={() => {}}
+        onToggleHand={() => {}}
+        onToggleLayout={() => {}}
+        onHangup={() => {}}
+      />,
+    );
+    const bar = screen.getByRole("toolbar", { name: "Кнопки звонка" });
+    expect(bar.querySelectorAll("button")).toHaveLength(6);
+    expect(screen.getByRole("button", { name: "Поднять руку" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Плитки" })).toBeTruthy();
   });
 
   it("does not cover the video with a waiting plaque", () => {

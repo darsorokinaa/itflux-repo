@@ -38,6 +38,7 @@ import {
   findAxisLevel,
 } from "../utils/criteriaAxesScore";
 import { inferExamTaskPart, formatPart2SectionTitle, isOgeMathPictureTask } from "../utils/examTaskPart";
+import { hasPublishedNotebook, homeworkScoringTaskStatus } from "../cabinet/cabinetReviewUtils";
 import TaskNoAnswerBadge from "../components/TaskNoAnswerBadge";
 import { getShareablePageUrl } from "../utils/shareablePageUrl";
 import {
@@ -214,6 +215,7 @@ function LessonSolutionUpload({
   enabled,
   allowDelete,
   initialAttachments,
+  publishedNotebooks,
   onAttachmentsChange,
 }) {
   const navigate = useNavigate();
@@ -544,13 +546,23 @@ function LessonSolutionUpload({
           </button>
           <button
             type="button"
+            disabled={!hasPublishedNotebook(publishedNotebooks, taskId, taskNumber)}
+            title={
+              hasPublishedNotebook(publishedNotebooks, taskId, taskNumber)
+                ? "Открыть проверенную работу"
+                : "Комментариев пока нет"
+            }
             onClick={(e) => {
               e.stopPropagation();
+              if (!hasPublishedNotebook(publishedNotebooks, taskId, taskNumber)) return;
               navigate(`/cabinet/notebook/published/${submissionId}/${encodeURIComponent(String(taskId))}`);
             }}
           >
             Открыть проверенную работу
           </button>
+          {hasPublishedNotebook(publishedNotebooks, taskId, taskNumber) ? null : (
+            <span className="hw-notebook-actions__note">Комментариев пока нет</span>
+          )}
         </div>
       ) : null}
 
@@ -707,6 +719,14 @@ function examHeroExamBadge(mode, levelKey, part2Label = "Часть 2") {
   }
   if (mode === "test") return `${L} · Тренировка`;
   return `${L} · Полный вариант`;
+}
+
+function revisionAnswerNoteText(status) {
+  if (status === "correct") return { ok: true, text: "Верно. Этот ответ менять не нужно." };
+  if (status === "incorrect" || status === "partial") return { ok: false, text: "Неверно. Исправьте только этот ответ." };
+  if (status === "unanswered") return { ok: false, text: "Нет ответа. Его можно заполнить." };
+  if (status === "pending_review") return { ok: false, text: "Этот ответ можно исправить." };
+  return null;
 }
 
 function examHeroSubjectBadge(subjectKey, stateSubjectName) {
@@ -2169,8 +2189,29 @@ function ExamPage() {
   const homeworkReviewData = showHomeworkReviewedResults && variant?.tasks?.length
     ? buildHomeworkReviewFromVariant(variant.tasks, hwResultPayload, level, subject)
     : null;
-  const numLocked = (n) =>
-    isHomework && !homeworkTaskNumberEditable(hwSt, hwRevisions, n, isTeacherHomeworkView);
+  const numLocked = (taskOrNumber) => {
+    const task = taskOrNumber != null && typeof taskOrNumber === "object"
+      ? taskOrNumber
+      : { number: taskOrNumber };
+    return isHomework && !homeworkTaskNumberEditable(
+      hwSt,
+      hwRevisions,
+      task.number,
+      isTeacherHomeworkView,
+      task.id,
+      Boolean(hwPicked?.revisionLimited),
+    );
+  };
+  const revisionAnswerNote = (task) => {
+    if (!(isHomework && !isTeacherHomeworkView && hwSt === "revision")) return null;
+    const note = revisionAnswerNoteText(homeworkScoringTaskStatus(hwResultPayload, task.id));
+    if (!note) return null;
+    return (
+      <p className={note.ok ? "exam-result exam-result--ok" : "exam-result exam-result--bad"}>
+        <strong>{note.text}</strong>
+      </p>
+    );
+  };
   /** В ДЗ ученика баллы и прогресс считаются только по части 1. */
   const hwScorePart1Only = homeworkStudentMode;
   const p1FieldDisabled = (task) => {
@@ -2179,7 +2220,7 @@ function ExamPage() {
     if (isLiveVariant && checkedTasks[task.id] !== undefined) return true;
     if (homeworkStudentMode) {
       if (homeworkConfirmedTasks[task.id]) return true;
-      if (homeworkFieldsLocked || numLocked(task.number)) return true;
+      if (homeworkFieldsLocked || numLocked(task)) return true;
       return false;
     }
     if (checkedTasks[task.id] !== undefined) return true;
@@ -2198,6 +2239,7 @@ function ExamPage() {
     !isLiveVariant &&
     !isEmbeddedHomework &&
     !hRead &&
+    !numLocked(task) &&
     !homeworkConfirmedTasks[task.id];
   const showP1CheckNormal = (task) =>
     (!homeworkStudentMode || isLiveVariant) && checkedTasks[task.id] === undefined;
@@ -2207,7 +2249,7 @@ function ExamPage() {
     !isTeacherHomeworkView &&
     !hRead &&
     !hSol &&
-    !numLocked(task.number);
+    !numLocked(task);
   /** Блок «Правильный ответ» (пунктир): только в ДЗ при показе решений. В варианте после «Проверить» ответ уже в exam-result — не дублировать. */
   const p1CorrectVisible = () => isHomework && hSol;
   const lkBase = getLkPublicBase();
@@ -2601,6 +2643,13 @@ function ExamPage() {
 
     if (p === 1) {
       if (homeworkStudentMode && !isLiveVariant) {
+        if (hwSt === "revision") {
+          const status = homeworkScoringTaskStatus(hwResultPayload, task.id);
+          if (status === "correct") c += " is-done";
+          else if (status === "incorrect" || status === "partial" || status === "unanswered") c += " is-wrong";
+          else if (userAnswers[task.id] != null && String(userAnswers[task.id]).trim() !== "") c += " is-pending";
+          return c;
+        }
         if (homeworkConfirmedTasks[task.id]) c += " is-pending";
         else {
           const ua = userAnswers[task.id];
@@ -2629,6 +2678,12 @@ function ExamPage() {
 
     if (p === 2) {
       if (hwScorePart1Only) {
+        if (hwSt === "revision") {
+          const status = homeworkScoringTaskStatus(hwResultPayload, task.id);
+          if (status === "correct") c += " is-done";
+          else if (status) c += " is-wrong";
+          return c;
+        }
         const ua = userAnswers[task.id];
         if (ua != null && String(ua).trim() !== "") c += " is-pending";
         else if (boardPersistHasDraft(boardsByTask[String(task.id)])) c += " is-pending";
@@ -2659,7 +2714,7 @@ function ExamPage() {
     if (scoringMode === "axes" && axes.length > 0) {
       const selected = selectedAxesByTask[task.id] || {};
       const result = computeAxesTaskScore(axes, selected);
-      const disabled = isHomework && (hRead || numLocked(task.number));
+      const disabled = isHomework && (hRead || numLocked(task));
       const useScoreMatrix = axesNeedScoreMatrix(axes);
       const scoreResult = (
         <div className="score-result">
@@ -2889,9 +2944,9 @@ function ExamPage() {
                   value={String(c.id)}
                   className="criterion-card__input"
                   checked={selectedCriterionByTask[task.id] === c.id}
-                  disabled={isHomework && (hRead || numLocked(task.number))}
+                  disabled={isHomework && (hRead || numLocked(task))}
                   onChange={() => {
-                    if (isHomework && (hRead || numLocked(task.number))) return;
+                    if (isHomework && (hRead || numLocked(task))) return;
                     selectCriterion(task.id, c, maxSc);
                   }}
                 />
@@ -3727,6 +3782,7 @@ function ExamPage() {
                       </>
                     )}
 
+                    {revisionAnswerNote(task)}
                     <div
                       className={`exam-hw-solution${p1CorrectVisible() ? " is-visible" : ""}`}
                     >
@@ -3754,6 +3810,7 @@ function ExamPage() {
                     lessonToken={lessonEmbedParams.token}
                     assignmentId={cabinetAssignmentId}
                     submissionId={hwApiRaw?.submission_id || hwPicked?.submissionId}
+                    publishedNotebooks={hwApiRaw?.published_notebooks}
                     homeworkMode={isHomework}
                     cabinetMode={showCabinetPart2SolutionUpload}
                     allowDelete
@@ -3761,7 +3818,7 @@ function ExamPage() {
                     onAttachmentsChange={(updater, extra) => patchHomeworkTaskAttachments(task.id, task.number, updater, extra)}
                     enabled={
                       (showLessonSolutionUpload || showCabinetPart2SolutionUpload)
-                      && (!isHomework || (!hRead && !numLocked(task.number)))
+                      && (!isHomework || (!hRead && !numLocked(task)))
                     }
                   />
                   {!isHomework && (
@@ -3865,6 +3922,7 @@ function ExamPage() {
                             ) : (
                               ev2Part2Main(task)
                             )}
+                            {revisionAnswerNote(task)}
                           </div>
                           </ExamTaskDrawingShell>
                           <LessonSolutionUpload
@@ -3873,6 +3931,7 @@ function ExamPage() {
                             lessonToken={lessonEmbedParams.token}
                             assignmentId={cabinetAssignmentId}
                     submissionId={hwApiRaw?.submission_id || hwPicked?.submissionId}
+                    publishedNotebooks={hwApiRaw?.published_notebooks}
                             homeworkMode={isHomework}
                             cabinetMode={showCabinetPart2SolutionUpload}
                             allowDelete
@@ -3880,7 +3939,7 @@ function ExamPage() {
                             onAttachmentsChange={(updater, extra) => patchHomeworkTaskAttachments(task.id, task.number, updater, extra)}
                             enabled={
                               (showLessonSolutionUpload || showCabinetPart2SolutionUpload)
-                              && (!isHomework || (!hRead && !numLocked(task.number)))
+                              && (!isHomework || (!hRead && !numLocked(task)))
                             }
                           />
                           {showHomeworkReviewedResults ? (
@@ -3977,6 +4036,7 @@ function ExamPage() {
                         ) : (
                           ev2Part2Main(task)
                         )}
+                        {revisionAnswerNote(task)}
                       </div>
                       </ExamTaskDrawingShell>
                       <LessonSolutionUpload
@@ -3985,6 +4045,7 @@ function ExamPage() {
                         lessonToken={lessonEmbedParams.token}
                         assignmentId={cabinetAssignmentId}
                     submissionId={hwApiRaw?.submission_id || hwPicked?.submissionId}
+                    publishedNotebooks={hwApiRaw?.published_notebooks}
                         homeworkMode={isHomework}
                         cabinetMode={showCabinetPart2SolutionUpload}
                         allowDelete
@@ -3992,7 +4053,7 @@ function ExamPage() {
                         onAttachmentsChange={(updater, extra) => patchHomeworkTaskAttachments(task.id, task.number, updater, extra)}
                         enabled={
                           (showLessonSolutionUpload || showCabinetPart2SolutionUpload)
-                          && (!isHomework || (!hRead && !numLocked(task.number)))
+                          && (!isHomework || (!hRead && !numLocked(task)))
                         }
                       />
                       {showHomeworkReviewedResults ? (
@@ -4048,8 +4109,9 @@ function ExamPage() {
             {showHomeworkBottomActions && (
               <div className="exam-homework-finish">
                 <p className="exam-homework-finish__hint">
-                  Сохраните ответы кнопкой «Сохранить» у заданий части 1 или кнопками ниже, затем отправьте работу — до проверки
-                  эталон и верность ответа не показываются.
+                  {hwSt === "revision"
+                    ? "Верные ответы уже зачтены. Исправьте только неверные и отправьте работу снова."
+                    : "Сохраните ответы кнопкой «Сохранить» у заданий части 1 или кнопками ниже, затем отправьте работу — до проверки эталон и верность ответа не показываются."}
                 </p>
                 <div className="exam-homework-finish__row">
                   <button

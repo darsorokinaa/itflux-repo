@@ -27,13 +27,20 @@ function useCallElapsedLabel(startedAt, active) {
   return formatCallElapsed(now - started);
 }
 
-function WindowButton({ label, icon, onClick }) {
+function WindowButton({ label, icon, onClick, pressed = false, off = false, danger = false, disabled = false }) {
   return (
     <button
       type="button"
-      className="mini-call-bar__iconbtn"
+      className={[
+        "mini-call-bar__iconbtn",
+        pressed ? "is-active" : "",
+        off ? "is-off" : "",
+        danger ? "mini-call-bar__iconbtn--hangup" : "",
+      ].filter(Boolean).join(" ")}
       aria-label={label}
+      aria-pressed={pressed || off ? "true" : undefined}
       title={label}
+      disabled={disabled}
       onClick={onClick}
     >
       <CabinetIcon name={icon} />
@@ -88,7 +95,7 @@ export default function MiniCallBar({
           {minimized && elapsedLabel ? (
             <span className="mini-call-bar__elapsed">{elapsedLabel}</span>
           ) : null}
-          {typeof onToggleMic === "function" ? (
+          {minimized && typeof onToggleMic === "function" ? (
             <button
               type="button"
               className={`mini-call-bar__iconbtn mini-call-bar__mic${micOn ? "" : " is-off"}`}
@@ -119,5 +126,82 @@ export default function MiniCallBar({
         </div>
       </div>
     </>
+  );
+}
+
+export function FloatingCallTools({
+  expanded = false,
+  micOn = false,
+  micDisabled = false,
+  camOn = false,
+  sharing = false,
+  handRaised = false,
+  tileWide = false,
+  controlsDisabled = false,
+  screenShareAvailable = true,
+  onToggleMic,
+  onToggleCam,
+  onToggleShare,
+  onToggleHand,
+  onToggleLayout,
+  onHangup,
+}) {
+  return (
+    <div className="mini-call-tools" role="toolbar" aria-label="Кнопки звонка">
+      {typeof onToggleMic === "function" ? (
+        <WindowButton
+          label={micOn ? "Выключить микрофон" : "Включить микрофон"}
+          icon={micOn ? "mic" : "micOff"}
+          off={!micOn}
+          disabled={micDisabled || controlsDisabled}
+          onClick={onToggleMic}
+        />
+      ) : null}
+      {typeof onToggleCam === "function" ? (
+        <WindowButton
+          label={camOn ? "Выключить камеру" : "Включить камеру"}
+          icon={camOn ? "video" : "videoOff"}
+          off={!camOn}
+          disabled={controlsDisabled}
+          onClick={onToggleCam}
+        />
+      ) : null}
+      {typeof onToggleShare === "function" ? (
+        <WindowButton
+          label={screenShareAvailable ? (sharing ? "Остановить демонстрацию" : "Демонстрация экрана") : "Демонстрация экрана недоступна"}
+          icon="display"
+          pressed={sharing}
+          disabled={controlsDisabled || !screenShareAvailable}
+          onClick={onToggleShare}
+        />
+      ) : null}
+      {expanded && typeof onToggleHand === "function" ? (
+        <WindowButton
+          label={handRaised ? "Опустить руку" : "Поднять руку"}
+          icon="hand"
+          pressed={handRaised}
+          disabled={controlsDisabled}
+          onClick={onToggleHand}
+        />
+      ) : null}
+      {expanded && typeof onToggleLayout === "function" ? (
+        <WindowButton
+          label={tileWide ? "Крупный кадр" : "Плитки"}
+          icon="tiles"
+          pressed={tileWide}
+          disabled={controlsDisabled}
+          onClick={onToggleLayout}
+        />
+      ) : null}
+      {typeof onHangup === "function" ? (
+        <WindowButton
+          label="Завершить звонок"
+          icon="hangup"
+          danger
+          disabled={controlsDisabled}
+          onClick={onHangup}
+        />
+      ) : null}
+    </div>
   );
 }

@@ -60,6 +60,33 @@ export function clampFloatingBox(box, viewport, minWidth, minHeight, margins) {
 
 export const CALL_FRAME_ASPECT = 16 / 9;
 
+/** Полоска заголовка и кнопки под видео в плавающем окне. В пропорцию кадра не входит. */
+export const FLOATING_CALL_CHROME = 64;
+
+export function presetCallFrame(view, viewport = viewportSize(), {
+  marginTop = 74,
+  chromeHeight = FLOATING_CALL_CHROME,
+  aspectRatio = CALL_FRAME_ASPECT,
+} = {}) {
+  if (view === "minimized") return null;
+  const vw = viewport?.width ?? 1280;
+  const vh = viewport?.height ?? 720;
+  const chrome = Math.max(0, chromeHeight);
+  const maxW = Math.max(260, vw - 24);
+  const maxOuter = Math.max(chrome + 120, vh - marginTop - 24);
+  const maxVideo = Math.max(120, maxOuter - chrome);
+  const want = view === "expanded"
+    ? Math.min(960, vw - 24)
+    : Math.min(vw < 900 ? 320 : 480, vw - 32);
+  let width = Math.min(Math.max(260, want), maxW);
+  let video = Math.round(width / aspectRatio);
+  if (video > maxVideo) {
+    video = Math.round(maxVideo);
+    width = Math.round(video * aspectRatio);
+  }
+  return { width, height: video + chrome };
+}
+
 function roundBoxSize(width, height) {
   return {
     width: Math.round(width),
@@ -67,14 +94,17 @@ function roundBoxSize(width, height) {
   };
 }
 
-/** Keep a stored or dragged frame at width/height = aspectRatio. */
-export function fitFloatingAspect(layout, aspectRatio) {
+/** Keep a stored or dragged frame at width/height = aspectRatio. chromeHeight sits under the video. */
+export function fitFloatingAspect(layout, aspectRatio, chromeHeight = 0) {
   if (!layout || !(aspectRatio > 0)) return layout;
   const next = { ...layout };
+  const chrome = Math.max(0, chromeHeight);
   if (typeof next.width === "number") {
-    next.height = Math.round(next.width / aspectRatio);
+    next.height = Math.round(next.width / aspectRatio + chrome);
   } else if (typeof next.height === "number") {
-    next.width = Math.round(next.height * aspectRatio);
+    const video = Math.max(0, next.height - chrome);
+    next.width = Math.round(video * aspectRatio);
+    next.height = Math.round(next.width / aspectRatio + chrome);
   }
   return next;
 }
@@ -88,26 +118,31 @@ function sizeForAspect({
   maxW,
   maxH,
   driver,
+  chromeHeight = 0,
 }) {
-  let nextWidth = driver === "height" ? height * aspectRatio : width;
-  let nextHeight = driver === "height" ? height : width / aspectRatio;
+  const chrome = Math.max(0, chromeHeight);
+  const contentMin = Math.max(1, minHeight - chrome);
+  const contentMax = Math.max(contentMin, maxH - chrome);
+  const contentHeight = Math.max(0, height - chrome);
+  let nextWidth = driver === "height" ? contentHeight * aspectRatio : width;
+  let nextContent = driver === "height" ? contentHeight : width / aspectRatio;
   if (nextWidth < minWidth) {
     nextWidth = minWidth;
-    nextHeight = nextWidth / aspectRatio;
+    nextContent = nextWidth / aspectRatio;
   }
-  if (nextHeight < minHeight) {
-    nextHeight = minHeight;
-    nextWidth = nextHeight * aspectRatio;
+  if (nextContent < contentMin) {
+    nextContent = contentMin;
+    nextWidth = nextContent * aspectRatio;
   }
   if (nextWidth > maxW) {
     nextWidth = maxW;
-    nextHeight = nextWidth / aspectRatio;
+    nextContent = nextWidth / aspectRatio;
   }
-  if (nextHeight > maxH) {
-    nextHeight = maxH;
-    nextWidth = nextHeight * aspectRatio;
+  if (nextContent > contentMax) {
+    nextContent = contentMax;
+    nextWidth = nextContent * aspectRatio;
   }
-  return roundBoxSize(nextWidth, nextHeight);
+  return roundBoxSize(nextWidth, nextContent + chrome);
 }
 
 export function applyFloatingResize({
@@ -123,6 +158,7 @@ export function applyFloatingResize({
   minHeight,
   margins,
   aspectRatio = 0,
+  chromeHeight = 0,
 }) {
   let width = origWidth;
   let height = origHeight;
@@ -154,6 +190,7 @@ export function applyFloatingResize({
       maxW,
       maxH,
       driver,
+      chromeHeight,
     });
     width = sized.width;
     height = sized.height;
@@ -198,6 +235,9 @@ export function useFloatingDrag({
   minHeight = 120,
   marginTop = FLOATING_MARGIN,
   aspectRatio = 0,
+  chromeHeight = 0,
+  sizeToken = "",
+  frameSize = null,
 } = {}) {
   const [layout, setLayout] = useState(() => {
     if (!storageKey || typeof window === "undefined") return null;
@@ -213,6 +253,10 @@ export function useFloatingDrag({
   const nodeRef = useRef(null);
   const dragStateRef = useRef(null);
   const layoutKeyRef = useRef(storageKey);
+  const frameSizeRef = useRef(frameSize);
+  frameSizeRef.current = frameSize;
+  const metricsRef = useRef({ minWidth, minHeight, marginTop });
+  metricsRef.current = { minWidth, minHeight, marginTop };
 
   const persist = useCallback((next) => {
     if (!storageKey || !next) return;
@@ -224,16 +268,41 @@ export function useFloatingDrag({
   }, [storageKey]);
 
   useEffect(() => {
+    if (!enabled) return undefined;
     if (!storageKey || typeof window === "undefined") {
       setLayout(null);
-      return;
+      return undefined;
     }
+    const { minWidth: minW, minHeight: minH, marginTop: top } = metricsRef.current;
+    let stored = null;
     try {
-      setLayout(fitFloatingAspect(readFloatingLayout(JSON.parse(sessionStorage.getItem(storageKey) || "null")), aspectRatio));
+      stored = readFloatingLayout(JSON.parse(sessionStorage.getItem(storageKey) || "null"));
     } catch {
-      setLayout(null);
+      stored = null;
     }
-  }, [aspectRatio, storageKey]);
+    const position = typeof stored?.left === "number" && typeof stored?.top === "number"
+      ? { left: stored.left, top: stored.top }
+      : {};
+    const size = frameSizeRef.current;
+    if (!size) {
+      setLayout(Object.keys(position).length ? position : null);
+      return undefined;
+    }
+    const next = clampFloatingBox(
+      { ...position, width: size.width, height: size.height },
+      viewportSize(),
+      minW,
+      minH,
+      { top },
+    );
+    setLayout(next);
+    try {
+      sessionStorage.setItem(storageKey, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+    return undefined;
+  }, [enabled, sizeToken, storageKey]);
 
   const beginPointer = useCallback((event, extra) => {
     const el = nodeRef.current;
@@ -300,6 +369,7 @@ export function useFloatingDrag({
           minHeight,
           margins: { top: marginTop },
           aspectRatio,
+          chromeHeight,
         });
         setLayout(next);
         return;
@@ -308,13 +378,16 @@ export function useFloatingDrag({
       const maxTop = Math.max(marginTop, window.innerHeight - state.height - FLOATING_MARGIN);
       const left = Math.min(maxLeft, Math.max(FLOATING_MARGIN, state.origLeft + (event.clientX - state.startX)));
       const top = Math.min(maxTop, Math.max(marginTop, state.origTop + (event.clientY - state.startY)));
-      setLayout((prev) => ({
-        ...(prev || {}),
-        left,
-        top,
-        width: prev?.width ?? state.width,
-        height: prev?.height ?? state.height,
-      }));
+      setLayout((prev) => {
+        if (!(aspectRatio > 0)) return { left, top };
+        return {
+          ...(prev || {}),
+          left,
+          top,
+          width: prev?.width ?? state.width,
+          height: prev?.height ?? state.height,
+        };
+      });
     };
 
     const endDrag = (event) => {
@@ -347,7 +420,7 @@ export function useFloatingDrag({
       window.removeEventListener("pointerup", endDrag);
       window.removeEventListener("pointercancel", endDrag);
     };
-  }, [aspectRatio, dragging, enabled, marginTop, minHeight, minWidth, persist, resizing]);
+  }, [aspectRatio, chromeHeight, dragging, enabled, marginTop, minHeight, minWidth, persist, resizing]);
 
   useEffect(() => {
     if (!layout) return undefined;

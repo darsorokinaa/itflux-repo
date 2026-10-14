@@ -20,6 +20,7 @@ from .choices import (
 )
 from .models import (
     Homework,
+    HomeworkAutoIssueBlock,
     HomeworkTask,
     InteractiveAssignment,
     Lesson,
@@ -584,6 +585,44 @@ def _ensure_interactive_assignment(*, teacher, interactive, student, lesson, pla
             assignment.save(update_fields=updates)
 
 
+def remember_homework_auto_issue_cancelled(homework) -> None:
+    """Запомнить, что учитель снял это ДЗ, чтобы завершение урока не выдало его снова."""
+    plan_item_id = getattr(homework, "lesson_plan_item_id", None)
+    teacher_id = getattr(homework, "teacher_id", None)
+    if not plan_item_id or not teacher_id:
+        return
+    student_ids = []
+    if getattr(homework, "student_id", None):
+        student_ids.append(homework.student_id)
+    elif getattr(homework, "group_id", None):
+        student_ids = list(
+            Student.objects.filter(groups=homework.group_id)
+            .exclude(status=StudentStatus.ARCHIVED)
+            .values_list("id", flat=True)
+        )
+    if not student_ids:
+        return
+    HomeworkAutoIssueBlock.objects.bulk_create(
+        [
+            HomeworkAutoIssueBlock(
+                teacher_id=teacher_id,
+                student_id=student_id,
+                lesson_plan_item_id=plan_item_id,
+            )
+            for student_id in student_ids
+        ],
+        ignore_conflicts=True,
+    )
+
+
+def _homework_auto_issue_blocked(*, teacher, student, plan_item) -> bool:
+    return HomeworkAutoIssueBlock.objects.filter(
+        teacher=teacher,
+        student=student,
+        lesson_plan_item=plan_item,
+    ).exists()
+
+
 def _issue_plan_item_homework(
     *,
     teacher,
@@ -592,14 +631,35 @@ def _issue_plan_item_homework(
     due_at=None,
     student_subject=None,
     fill_empty_due_only=False,
+    auto=False,
 ):
-    """Одна выдача пункта плана одному ученику. Повторный вызов не создаёт вторую запись."""
+    """Одна выдача пункта плана одному ученику. Повторный вызов не создаёт вторую запись.
+
+    auto=True — выдача после урока. Если учитель уже удалил это ДЗ, новую запись не создаём.
+    Явная выдача учителем (auto=False) снимает запрет и выдаёт снова.
+    """
     if student is None or getattr(student, "teacher_id", None) != getattr(teacher, "id", None):
         raise PermissionError("Нет доступа к этому ученику.")
 
     with transaction.atomic():
         LessonPlanItem.objects.select_for_update().filter(pk=plan_item.pk).order_by("pk").first()
         Student.objects.select_for_update().filter(pk=student.pk).order_by("pk").first()
+        if auto and not Homework.objects.filter(
+            teacher=teacher,
+            lesson_plan_item=plan_item,
+            student=student,
+        ).exists() and _homework_auto_issue_blocked(
+            teacher=teacher,
+            student=student,
+            plan_item=plan_item,
+        ):
+            return None, False
+        if not auto:
+            HomeworkAutoIssueBlock.objects.filter(
+                teacher=teacher,
+                student=student,
+                lesson_plan_item=plan_item,
+            ).delete()
         plan_item = (
             LessonPlanItem.objects.select_related("plan", "linked_lesson")
             .prefetch_related(
@@ -1196,15 +1256,16 @@ def release_for_student(event, student, plan_item, lesson):
             due_at=due_at,
             student_subject=event.student_subject if event.student_subject_id else None,
             fill_empty_due_only=True,
+            auto=True,
         )
         from .homework_from_review import notify_students_homework_assigned
 
-        if hw_created:
+        if homework is not None and hw_created:
             try:
                 notify_students_homework_assigned(homework)
             except Exception:
                 logger.exception("Failed to notify students about homework %s", homework.pk)
-        if event.homework_id != homework.id:
+        if homework is not None and event.homework_id != homework.id:
             event.homework = homework
             event.save(update_fields=["homework", "updated_at"])
 

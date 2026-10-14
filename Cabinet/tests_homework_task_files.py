@@ -506,6 +506,42 @@ class HomeworkNotebookTests(TestCase):
         )
         self.assertEqual(exports.count(), 1)
 
+    def test_teacher_notebook_includes_student_answer_text(self):
+        self.submission.answer_text = "<p>Решение в тетради</p>"
+        self.submission.result_payload = {"by_task_id": {"A": "42"}}
+        self.submission.save(update_fields=["answer_text", "result_payload"])
+        opened = self.teacher_client.post(
+            f"/api/homework/submissions/{self.submission.pk}/notebooks/",
+            {"task_id": "A", "owner_role": "teacher", "seed_from_attachments": True},
+            format="json",
+        )
+        self.assertIn(opened.status_code, (200, 201), opened.content)
+        self.assertEqual(opened.json()["answer_text"], "42")
+        page = opened.json()["pages"][0]
+        page["state"] = {
+            "version": 1,
+            "contentPlaced": True,
+            "objects": [{
+                "id": "src-image-1",
+                "type": "image",
+                "src": "/photo.jpg",
+                "x": 36,
+                "y": 36,
+                "w": 400,
+                "h": 200,
+            }],
+        }
+        saved = self.teacher_client.put(
+            f"/api/homework/notebooks/{opened.json()['id']}/",
+            {"version": opened.json()["version"], "pages": [page]},
+            format="json",
+        )
+        self.assertEqual(saved.status_code, 200, saved.content)
+        state = saved.json()["pages"][0]["state"]
+        self.assertTrue(state.get("contentPlaced"))
+        self.assertEqual(state["objects"][0]["type"], "image")
+        self.assertEqual(state["objects"][0]["y"], 36)
+
     def test_teacher_notebook_opens_with_student_photo(self):
         teacher_nb = self.teacher_client.post(
             f"/api/homework/submissions/{self.submission.pk}/notebooks/",

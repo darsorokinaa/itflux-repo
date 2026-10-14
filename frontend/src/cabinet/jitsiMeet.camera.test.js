@@ -101,8 +101,14 @@ describe("meeting camera preference", () => {
     expect(commands[0][1].toolbarButtons).toContain("chat");
     expect(commands[1][1].toolbarButtons).not.toContain("chat");
     applyJitsiCallChrome(api, { custom: true });
+    applyJitsiCallChrome(api, { expanded: true, floating: true });
     expect(commands[2][1].toolbarButtons).toEqual(["microphone"]);
+    expect(commands[3][1].toolbarButtons).toEqual([]);
+    expect(commands[3][1].toolbarConfig.alwaysVisible).toBe(false);
+    expect(buildJitsiConfigOverwrite({ floatingToolbar: true, expandedToolbar: true }).toolbarButtons).toEqual([]);
     expect(commands[2][1].toolbarConfig.alwaysVisible).toBe(true);
+    expect(buildJitsiConfigOverwrite({ expandedToolbar: true }).toolbarButtons).toContain("chat");
+    expect(buildJitsiConfigOverwrite({ expandedToolbar: true }).toolbarButtons).toContain("settings");
     expect(buildJitsiConfigOverwrite({ customChrome: true }).toolbarButtons).toEqual(["microphone"]);
     expect(buildJitsiConfigOverwrite({ customChrome: true }).disableSelfView).not.toBe(true);
     expect(commands[1][1].toolbarConfig.alwaysVisible).toBe(true);

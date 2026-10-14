@@ -52,7 +52,14 @@ function setObjects(doc, pageId, objects) {
     ...doc,
     pages: (doc.pages || []).map((page) => (
       page.id === pageId
-        ? { ...page, state: { version: 1, objects: objects.map((item) => ({ ...item })) } }
+        ? {
+          ...page,
+          state: {
+            ...(page.state || {}),
+            version: 1,
+            objects: objects.map((item) => ({ ...item })),
+          },
+        }
         : page
     )),
   };

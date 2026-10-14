@@ -3545,6 +3545,9 @@ class HomeworkDetailView(TeacherScopedMixin, APIView):
                 source_type="homework", source_id__in=submission_ids
             ).delete()
 
+        from .student_release import remember_homework_auto_issue_cancelled
+
+        remember_homework_auto_issue_cancelled(homework)
         homework.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 

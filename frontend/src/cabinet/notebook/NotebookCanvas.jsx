@@ -87,6 +87,7 @@ export default function NotebookCanvas({
   editingText,
   onEditingText,
   onPanDelta,
+  onImageReady,
 }) {
   const canvasRef = useRef(null);
   const objectsRef = useRef(objects || []);
@@ -101,12 +102,30 @@ export default function NotebookCanvas({
   const editingTextRef = useRef(editingText);
   const ignoreBlurRef = useRef(false);
   const [textDraft, setTextDraft] = useState(null);
+  const [shownImages, setShownImages] = useState({});
+  const layerRef = useRef(null);
   editingTextRef.current = editingText;
   textDraftRef.current = textDraft;
 
   objectsRef.current = sessionRef.current ? objectsRef.current : (objects || []);
   selectedRef.current = selectedIds || [];
   toolRef.current = tool;
+
+  const syncPlacedImages = (list) => {
+    const root = layerRef.current;
+    if (!root) return;
+    const width = page?.width || 1000;
+    const height = page?.height || 1414;
+    const byId = new Map((list || []).filter((obj) => obj?.type === "image").map((obj) => [obj.id, obj]));
+    root.querySelectorAll("[data-image-id]").forEach((node) => {
+      const obj = byId.get(node.getAttribute("data-image-id"));
+      if (!obj) return;
+      node.style.left = `${((obj.x || 0) / width) * 100}%`;
+      node.style.top = `${((obj.y || 0) / height) * 100}%`;
+      node.style.width = `${((obj.w || 0) / width) * 100}%`;
+      node.style.height = `${((obj.h || 0) / height) * 100}%`;
+    });
+  };
 
   const paint = () => {
     if (rafRef.current) {
@@ -121,10 +140,21 @@ export default function NotebookCanvas({
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    const pageWidth = page?.width || 1000;
+    const pageHeight = page?.height || 1414;
+    const rect = canvas.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    const pixelW = Math.max(1, Math.round((rect.width || pageWidth) * dpr));
+    const pixelH = Math.max(1, Math.round((rect.height || pageHeight) * dpr));
+    if (canvas.width !== pixelW || canvas.height !== pixelH) {
+      canvas.width = pixelW;
+      canvas.height = pixelH;
+    }
+    ctx.setTransform?.(pixelW / pageWidth, 0, 0, pixelH / pageHeight, 0, 0);
     drawNotebookScene(ctx, objectsRef.current, {
       selectedIds: selectedRef.current,
-      pageWidth: page?.width || 1000,
-      pageHeight: page?.height || 1414,
+      pageWidth,
+      pageHeight,
       draft: draftRef.current,
       marquee: marqueeRef.current,
       hideTextId: textDraftRef.current?.id || editingTextRef.current?.id || null,
@@ -149,6 +179,14 @@ export default function NotebookCanvas({
   useEffect(() => {
     schedulePaint();
   }, [objects, selectedIds, page, textDraft, editingText]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(() => schedulePaint());
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [page]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -429,6 +467,7 @@ export default function NotebookCanvas({
       objectsRef.current = origin.map((obj) => (
         session.ids.includes(obj.id) ? moveObject(obj, dx, dy) : obj
       ));
+      syncPlacedImages(objectsRef.current);
       schedulePaint();
       return;
     }
@@ -437,6 +476,7 @@ export default function NotebookCanvas({
       objectsRef.current = session.origin.map((obj) => (
         obj.id === session.id ? scaleAnnotation(originObj, session.handle, point, { shift: event.shiftKey || session.shift }) : obj
       ));
+      syncPlacedImages(objectsRef.current);
       schedulePaint();
       return;
     }
@@ -660,14 +700,36 @@ export default function NotebookCanvas({
   const width = page?.width || 1000;
   const height = page?.height || 1414;
   const editor = textDraft || editingText;
+  const images = (objects || []).filter((obj) => obj?.type === "image" && obj.src);
 
   return (
     <>
+      <div ref={layerRef} className="hw-notebook-images">
+        {images.map((obj) => (
+          <img
+            key={obj.id}
+            data-image-id={obj.id}
+            src={obj.src}
+            alt=""
+            draggable={false}
+            className="hw-notebook-image"
+            style={{
+              left: `${((obj.x || 0) / width) * 100}%`,
+              top: `${((obj.y || 0) / height) * 100}%`,
+              width: `${((obj.w || 0) / width) * 100}%`,
+              height: `${((obj.h || 0) / height) * 100}%`,
+              visibility: shownImages[obj.id] ? "visible" : "hidden",
+            }}
+            onLoad={() => {
+              setShownImages((prev) => (prev[obj.id] ? prev : { ...prev, [obj.id]: true }));
+              onImageReady?.(obj.id);
+            }}
+          />
+        ))}
+      </div>
       <canvas
         ref={canvasRef}
         className="hw-notebook-canvas"
-        width={width}
-        height={height}
         style={{ cursor: cursorForTool(tool, { grabbing, spacePan, editingText: editor }), touchAction: "none" }}
         onPointerDown={pointerDown}
         onPointerMove={pointerMove}

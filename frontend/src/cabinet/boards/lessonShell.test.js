@@ -39,18 +39,13 @@ describe("lesson shell", () => {
       "Перемещение",
       "Рисование",
       "Ластик",
-      "Лазер",
       "Текст",
       "Стикер",
       "Фигуры",
-      "Стрелка",
-      "Область",
-      "Линия",
-      "Вставить",
-      "Файлы",
-      "Вставка",
+      "Ещё",
     ]);
     expect(lessonToolActive("draw", "draw")).toBe(true);
+    expect(lessonToolActive("draw", "highlight")).toBe(true);
     expect(lessonToolActive("shapes", "geo")).toBe(true);
     expect(lessonToolActive("draw", "select")).toBe(false);
     expect(lessonContextBar("formula")).toEqual(["edit", "duplicate", "delete", "more"]);
@@ -102,19 +97,14 @@ describe("lesson shell", () => {
     expect(lessonStickerResize(initial, { id: "top", x: 100, y: -200 }, size)).toEqual({ x: 10, y: -180, scale: 2 });
   });
 
-  it("keeps the extra tools on the rail", () => {
-    const full = lessonAdaptiveRail(900, 40);
-    expect(full.overflow).toEqual([]);
-    const short = lessonAdaptiveRail(420, 40);
-    expect(short.overflow).toEqual([]);
-    ["laser", "note", "insert", "frame", "line", "embed"].forEach((id) => {
-      expect(short.items.map((item) => item.id)).toContain(id);
-    });
-    expect(short.items.map((item) => item.id)).not.toContain("highlight");
-    const phone = lessonPhoneRail();
-    expect(phone.overflow).toEqual([]);
-    expect(phone.items.map((item) => item.id)).not.toContain("highlight");
-    expect(phone.items.map((item) => item.id)).toContain("embed");
+  it("keeps the extra tools behind one more button", () => {
+    const rail = lessonAdaptiveRail();
+    const ids = rail.items.map((item) => item.id);
+    expect(ids).toContain("more");
+    expect(ids).not.toContain("laser");
+    expect(ids).not.toContain("highlight");
+    expect(rail.overflow.map((item) => item.id)).toEqual(["arrow", "line", "frame", "laser", "insert", "files", "embed"]);
+    expect(lessonPhoneRail().items.map((item) => item.id)).toEqual(ids);
   });
 
   it("keeps the context bar inside the board", () => {

@@ -1,6 +1,7 @@
 import { Component } from "react";
 
 import LessonBoardMessage from "./LessonBoardMessage";
+import { markBoard } from "../lessonLoadTrace";
 
 /** Ловит падение tldraw, не отдавая его границе всей страницы урока. */
 export default class BoardV2ErrorBoundary extends Component {
@@ -14,6 +15,8 @@ export default class BoardV2ErrorBoundary extends Component {
   }
 
   componentDidCatch(error) {
+    const detail = error instanceof Error ? error.message : String(error || "");
+    markBoard("renderError", detail.slice(0, 180));
     console.error("tldraw board render failed", error);
   }
 

@@ -90,6 +90,18 @@ export function homeworkTaskChecked(result, taskId) {
   return typeof v === "boolean" ? v : null;
 }
 
+export function hasPublishedNotebook(notebooks, taskId, taskNumber) {
+  const keys = new Set(
+    [taskId, taskNumber]
+      .filter((value) => value != null && String(value).trim() !== "")
+      .map((value) => String(value)),
+  );
+  if (!keys.size) return false;
+  return (Array.isArray(notebooks) ? notebooks : []).some((item) =>
+    keys.has(String(item?.task_id ?? "")),
+  );
+}
+
 export function homeworkTaskComment(result, taskId, taskNumber, tasks) {
   if (!result || typeof result !== "object") return "";
   const byId = result.comments_by_task_id || result.commentsByTaskId || {};
@@ -191,17 +203,30 @@ export function homeworkTeacherAttachments(result, taskId, taskNumber, tasks) {
 export { homeworkTaskAttachments };
 export { computePart1TaskCorrect, formatCorrectAnswerPlain } from "../utils/examAnswerCheck";
 
+/** Статус из серверного scoring. Ученику эталон не отдают, checked с клиента часто весь false. */
+export function homeworkScoringTaskStatus(result, taskId) {
+  const rows = result?.scoring?.tasks;
+  if (!Array.isArray(rows) || taskId == null) return "";
+  const row = rows.find((item) => String(item?.id) === String(taskId));
+  return String(row?.status || "");
+}
+
 /** Вердикт ч.1: без ответа всегда «Нет ответа». Эталон важнее saved checked. */
 export function resolvePart1Verdict(task, answer, result, subject) {
   const text = String(answer ?? "").trim();
   if (!text) return null;
-  // Ученику эталон скрыт — клиент часто шлёт checked=false даже при верном ответе.
-  if (task?.answer != null && String(task.answer).trim() !== "") {
+  if (hasOfficialTaskAnswer(task?.answer)) {
     const recomputed = computePart1TaskCorrect(task, text, subject);
     if (recomputed != null) return Boolean(recomputed);
   }
-  const saved = homeworkTaskChecked(result, task.id);
-  if (typeof saved === "boolean") return saved;
+  const fromScoring = homeworkScoringTaskStatus(result, task?.id);
+  if (fromScoring === "correct") return true;
+  if (fromScoring === "incorrect" || fromScoring === "partial") return false;
+  if (fromScoring === "unanswered" || fromScoring === "pending_review") return null;
+  const saved = homeworkTaskChecked(result, task?.id);
+  if (saved === true) return true;
+  // checked=false без эталона ненадёжен: ученик присылает его и на верные ответы.
+  if (!hasOfficialTaskAnswer(task?.answer)) return null;
   return computePart1TaskCorrect(task, text, subject);
 }
 

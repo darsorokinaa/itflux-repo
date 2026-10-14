@@ -1753,6 +1753,7 @@ class ReviewItemSerializer(serializers.ModelSerializer):
     group_title = serializers.CharField(source="group.title", read_only=True, allow_null=True)
     homework_submission = serializers.SerializerMethodField()
     homework_review = serializers.SerializerMethodField()
+    published_notebooks = serializers.SerializerMethodField()
     result_summary = serializers.SerializerMethodField()
 
     class Meta:
@@ -1776,6 +1777,7 @@ class ReviewItemSerializer(serializers.ModelSerializer):
             "teacher_comment",
             "homework_submission",
             "homework_review",
+            "published_notebooks",
             "result_summary",
         ]
 
@@ -1810,6 +1812,16 @@ class ReviewItemSerializer(serializers.ModelSerializer):
         from .homework_api import build_homework_review_context
 
         return build_homework_review_context(homework)
+
+    def get_published_notebooks(self, obj):
+        if self.context.get("list_mode"):
+            return []
+        submission = self._submission_for(obj)
+        if not submission:
+            return []
+        from .homework_notebooks import student_published_notebooks
+
+        return student_published_notebooks(submission)
 
     def get_result_summary(self, obj):
         submission = self._submission_for(obj)

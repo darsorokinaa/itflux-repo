@@ -1070,6 +1070,7 @@ def serialize_assignment_payload(
         result = overlay_payload_attachments(submission, result)
         if for_student:
             result = visible_teacher_result(submission, result)
+        result = apply_scoring_checked(result)
     score = float(submission.score) if submission and submission.score is not None else None
     if score is None and result:
         computed = compute_score_percent(result)
@@ -1083,7 +1084,12 @@ def serialize_assignment_payload(
         "status": submission_api_status(submission),
         "result": redact_student_result(result) if result else result,
         "task_attachments": (result or {}).get("task_attachments") if result else {"tasks": {}, "comment": []},
-        "revision_task_ids": [],
+        "revision_task_ids": (
+            revision_editable_task_ids(result)
+            if submission_api_status(submission) == "revision" and revision_is_limited(result)
+            else []
+        ),
+        "revision_limited": submission_api_status(submission) == "revision" and revision_is_limited(result),
         "deadline": homework.due_at.isoformat() if homework.due_at else None,
         "deadline_at": homework.due_at.isoformat() if homework.due_at else None,
         "variant_id": variant_id,
@@ -1317,6 +1323,119 @@ _RESULT_MAP_KEYS = (
     "comments_by_number",
 )
 _SERVER_RESULT_KEYS = ("scoring", "tasks_snapshot", "grading_snapshot")
+
+
+def _scoring_rows(payload) -> list[dict]:
+    if not isinstance(payload, dict):
+        return []
+    scoring = payload.get("scoring")
+    rows = scoring.get("tasks") if isinstance(scoring, dict) else None
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, dict) and row.get("id") is not None]
+
+
+def revision_is_limited(payload) -> bool:
+    """Есть серверный разбор: на доработке можно закрыть верные ответы."""
+    return bool(_scoring_rows(payload))
+
+
+def revision_editable_task_ids(payload) -> list[str]:
+    """Id заданий, которые ученик ещё может исправить. Верные сюда не входят."""
+    rows = _scoring_rows(payload)
+    if not rows:
+        return []
+    editable: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        task_id = str(row["id"])
+        seen.add(task_id)
+        if str(row.get("status") or "") != "correct":
+            editable.append(task_id)
+    snapshot = payload.get("tasks_snapshot") if isinstance(payload, dict) else None
+    if isinstance(snapshot, list):
+        for row in snapshot:
+            if not isinstance(row, dict) or row.get("id") is None:
+                continue
+            task_id = str(row["id"])
+            if task_id not in seen:
+                editable.append(task_id)
+                seen.add(task_id)
+    return editable
+
+
+def task_answer_is_locked(payload, task_id: str) -> bool:
+    key = str(task_id or "").strip()
+    if not key:
+        return False
+    rows = _scoring_rows(payload)
+    if not rows:
+        return False
+    for row in rows:
+        if str(row.get("id")) == key and str(row.get("status") or "") == "correct":
+            return True
+    number_hits = [row for row in rows if str(row.get("number")) == key]
+    if len(number_hits) == 1 and str(number_hits[0].get("status") or "") == "correct":
+        return True
+    return False
+
+
+def apply_scoring_checked(payload):
+    """Подменить клиентский checked статусами scoring.
+
+    Ученик не видит эталон и часто сохраняет checked=false на все ответы.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    rows = _scoring_rows(payload)
+    if not rows:
+        return payload
+    data = dict(payload)
+    checked = dict(data.get("checked") or {}) if isinstance(data.get("checked"), dict) else {}
+    for row in rows:
+        status_label = str(row.get("status") or "")
+        key = str(row["id"])
+        if status_label == "correct":
+            checked[key] = True
+        elif status_label == "incorrect":
+            checked[key] = False
+        elif status_label in ("unanswered", "pending_review"):
+            checked.pop(key, None)
+    data["checked"] = checked
+    return data
+
+
+def preserve_correct_answers(previous: dict | None, merged: dict | None) -> dict:
+    """На доработке верный ответ нельзя заменить новым текстом."""
+    prev = previous if isinstance(previous, dict) else {}
+    out = dict(merged or {})
+    rows = _scoring_rows(prev)
+    locked = [row for row in rows if str(row.get("status") or "") == "correct"]
+    if not locked:
+        return out
+    prev_by_id = prev.get("by_task_id") if isinstance(prev.get("by_task_id"), dict) else {}
+    prev_by_num = prev.get("by_number") if isinstance(prev.get("by_number"), dict) else {}
+    by_id = dict(out.get("by_task_id") or {}) if isinstance(out.get("by_task_id"), dict) else {}
+    by_num = dict(out.get("by_number") or {}) if isinstance(out.get("by_number"), dict) else {}
+    number_counts: dict[str, int] = {}
+    for row in rows:
+        number_key = str(row.get("number"))
+        number_counts[number_key] = number_counts.get(number_key, 0) + 1
+    for row in locked:
+        task_id = str(row["id"])
+        number_key = str(row.get("number"))
+        stored = prev_by_id.get(task_id)
+        if stored is None and number_counts.get(number_key, 0) <= 1:
+            stored = prev_by_num.get(number_key, prev_by_id.get(number_key))
+        if stored is None:
+            by_id.pop(task_id, None)
+        else:
+            by_id[task_id] = stored
+        if number_counts.get(number_key, 0) <= 1 and number_key in prev_by_num:
+            by_num[number_key] = prev_by_num[number_key]
+    out["by_task_id"] = by_id
+    out["by_number"] = by_num
+    return out
 
 
 def _merge_result_payload(
@@ -1909,6 +2028,8 @@ class HomeworkAssignmentSaveDraftView(HomeworkAssignmentBaseView):
             previous_snapshot = previous.get("tasks_snapshot")
             previous_grading = previous.get("grading_snapshot")
             merged = _merge_result_payload(previous, result)
+            if submission.status in (SubmissionStatus.RETURNED, SubmissionStatus.NEEDS_REVISION):
+                merged = preserve_correct_answers(previous, merged)
             variant_id = None
             for task in homework.tasks.filter(is_active=True):
                 variant_id = extract_variant_id(task.description)
@@ -2000,6 +2121,13 @@ class HomeworkAssignmentUploadAnswerView(HomeworkAssignmentBaseView):
                     status=status.HTTP_403_FORBIDDEN,
                 )
             ensure_payload_migrated(submission)
+            if submission_api_status(submission) == "revision" and task_answer_is_locked(
+                submission.result_payload, task_key
+            ):
+                return Response(
+                    {"error": "Этот ответ верный — его не нужно исправлять."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
             try:
                 rows = create_task_attachments(
                     submission=submission,
@@ -2059,6 +2187,13 @@ class HomeworkAssignmentUploadAnswerView(HomeworkAssignmentBaseView):
             )
             if attachment is None:
                 return Response({"error": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
+            if submission_api_status(submission) == "revision" and task_answer_is_locked(
+                submission.result_payload, attachment.task_key
+            ):
+                return Response(
+                    {"error": "Этот ответ верный — его не нужно исправлять."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
             soft_delete_attachment(attachment, actor=request.user)
         return Response({"ok": True})
 
