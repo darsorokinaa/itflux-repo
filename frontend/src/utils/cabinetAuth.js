@@ -1,4 +1,5 @@
 import { getAppVersion } from "./appVersion";
+import { markBootAuthEnd, markBootAuthStart } from "./bootTrace";
 
 function apiBase() {
   return "/api/cabinet";
@@ -259,17 +260,25 @@ async function cabinetDownload(path, fallbackName, { method = "GET", body, json 
 }
 
 export function fetchCabinetSession({ fresh = false } = {}) {
+  markBootAuthStart();
   if (fresh) {
     rememberCabinetSnapshot("me", null);
     invalidateCabinetRead("me");
   } else {
     const existing = readCabinetSnapshot("me");
-    if (existing) return Promise.resolve(existing);
+    if (existing) {
+      markBootAuthEnd(true);
+      return Promise.resolve(existing);
+    }
   }
   return shareCabinetRead("me", () =>
     cabinetFetch("/me/", { method: "GET" }).then((data) => {
       rememberCabinetSnapshot("me", data);
+      markBootAuthEnd(true);
       return data;
+    }, (err) => {
+      markBootAuthEnd(false);
+      throw err;
     }),
   );
 }

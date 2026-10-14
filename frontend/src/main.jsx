@@ -1,3 +1,5 @@
+import './utils/bootTrace.start'
+import { markBoot } from './utils/bootTrace'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles/tokens.css'
@@ -36,7 +38,9 @@ import('./utils/analytics.js').then((m) => {
 const rootEl = document.getElementById('root')
 markBootStage(BOOT_STAGES.ROUTE_LOADING)
 try {
-  createRoot(rootEl).render(
+  const root = createRoot(rootEl)
+  markBoot('react_root')
+  root.render(
     <StrictMode>
       <ErrorBoundary kind="app">
         <App />
@@ -46,9 +50,14 @@ try {
   const paint = () => {
     if (markAppReady()) return
     window.setTimeout(() => {
-      if (!markAppReady()) {
-        markBootStage(BOOT_STAGES.BOOTSTRAP_FAILED)
-      }
+      if (markAppReady()) return
+      markBootStage(BOOT_STAGES.BOOTSTRAP_FAILED)
+      const lateRoot = document.getElementById('root')
+      if (!lateRoot || typeof MutationObserver !== 'function') return
+      const obs = new MutationObserver(() => {
+        if (markAppReady()) obs.disconnect()
+      })
+      obs.observe(lateRoot, { childList: true, subtree: true })
     }, 50)
   }
   if (typeof requestAnimationFrame === "function") {

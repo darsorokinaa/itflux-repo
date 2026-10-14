@@ -3,6 +3,7 @@
  */
 
 import { isIosStandaloneDisplay, isStandaloneDisplay } from "../cabinet/pwa/pwaHelpers";
+import { markBoot } from "./bootTrace";
 
 export const BOOT_STAGES = Object.freeze({
   BOOTSTRAPPING: "BOOTSTRAPPING",
@@ -159,6 +160,7 @@ export function markAppReady() {
   if (!root || root.childElementCount < 1) return false;
   window.__ITFLUX_BOOTED = true;
   markBootStage(BOOT_STAGES.READY);
+  markBoot("first_ui");
   clearChunkRecoveryFlag();
   try {
     document.getElementById("itflux-boot-recover")?.remove();

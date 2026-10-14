@@ -157,11 +157,11 @@ function LessonTop({ onStudentView }) {
       <div className="lesson-topbar lesson-topbar--info">
         <div className="lesson-topbar__side">
           <TopIcon label="Назад" onClick={() => (room.inRoom ? postRoomAction("collapse") : window.history.back())}>
-            <ChevronLeft size={17} strokeWidth={1.8} aria-hidden="true" />
+            <ChevronLeft size={14} strokeWidth={1.8} aria-hidden="true" />
           </TopIcon>
           <span className="lesson-topbar__pop">
             <TopIcon label="Меню" pressed={menu === "paper"} onClick={() => toggle("paper")}>
-              <Menu size={17} strokeWidth={1.8} aria-hidden="true" />
+              <Menu size={14} strokeWidth={1.8} aria-hidden="true" />
             </TopIcon>
             {menu === "paper" ? (
               <div className="lesson-top__popover lesson-board-menu" role="menu" aria-label="Меню доски">
@@ -217,7 +217,7 @@ function LessonTop({ onStudentView }) {
                 pressed={room.materialsOpen}
                 onClick={() => postRoomAction("materials")}
               >
-                <FileText size={17} strokeWidth={1.8} aria-hidden="true" />
+                <FileText size={14} strokeWidth={1.8} aria-hidden="true" />
               </TopIcon>
             </span>
           ) : null}
@@ -246,12 +246,12 @@ function LessonTop({ onStudentView }) {
               pressed={room.fullscreen}
               onClick={() => postRoomAction("fullscreen")}
             >
-              <Maximize2 size={17} strokeWidth={1.8} aria-hidden="true" />
+              <Maximize2 size={14} strokeWidth={1.8} aria-hidden="true" />
             </TopIcon>
           ) : null}
           {room.canFinish ? (
             <TopIcon label="Завершить звонок" danger disabled={room.finishing} onClick={() => postRoomAction("finish")}>
-              <PhoneOff size={17} strokeWidth={1.8} aria-hidden="true" />
+              <PhoneOff size={14} strokeWidth={1.8} aria-hidden="true" />
             </TopIcon>
           ) : null}
           {menu === "students" ? <StudentsList people={people} onFollow={(userId) => {

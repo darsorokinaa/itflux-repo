@@ -3,6 +3,47 @@
 
 <head>
   <meta charset="UTF-8" />
+  <script>
+    (function () {
+      if (window.__itfluxBootMark) return;
+      var labels = {
+        html: "HTML загружен",
+        main_js_start: "загрузка основного JS началась",
+        main_js_done: "загрузка основного JS завершилась",
+        main_jsx: "main.jsx начал выполнение",
+        react_root: "React root создан",
+        first_ui: "первый интерфейс отображён",
+        auth_start: "запущена авторизация",
+        auth_ok: "авторизация завершилась",
+        auth_error: "авторизация завершилась ошибкой",
+        api_ok: "первый API-запрос завершился",
+        api_error: "первый API-запрос завершился ошибкой",
+        sw_ok: "Service Worker зарегистрирован",
+        sw_error: "Service Worker вернул ошибку",
+        watchdog_hang: "watchdog обнаружил возможное зависание"
+      };
+      var seen = {};
+      window.__ITFLUX_BOOT_SEEN = seen;
+      window.__ITFLUX_BOOT_LOG = [];
+      window.__itfluxBootMark = function (stage, status) {
+        try {
+          var key = String(stage || "").slice(0, 40);
+          if (!key || seen[key]) return;
+          seen[key] = 1;
+          var now = 0;
+          if (window.performance && typeof performance.now === "function") now = Math.round(performance.now());
+          var entry = { t: now, stage: key };
+          var note = status ? String(status).slice(0, 24) : "";
+          if (note) entry.status = note;
+          window.__ITFLUX_BOOT_LOG.push(entry);
+          var label = labels[key] || key;
+          var suffix = note === "error" ? " ошибка" : "";
+          console.info("[ITFLUX_BOOT] +" + now + "ms " + key + " — " + label + suffix);
+        } catch (err) { /* диагностика не блокирует запуск */ }
+      };
+      window.__itfluxBootMark("html");
+    })();
+  </script>
   <style>
     html, body, #root {
       margin: 0;
@@ -61,7 +102,18 @@
 
 <body>
   <div id="root"></div>
-  <script type="module" src="/src/main.jsx"></script>
+  <script>
+    if (window.__itfluxBootMark) window.__itfluxBootMark("main_js_start");
+  </script>
+  <script type="module" src="/src/main.jsx" id="itflux-main"></script>
+  <script>
+    (function () {
+      var el = document.getElementById("itflux-main");
+      if (!el || !window.__itfluxBootMark) return;
+      el.addEventListener("load", function () { window.__itfluxBootMark("main_js_done"); });
+      el.addEventListener("error", function () { window.__itfluxBootMark("main_js_done", "error"); });
+    })();
+  </script>
 </body>
 
 </html>

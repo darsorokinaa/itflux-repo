@@ -2,6 +2,7 @@
  * Shared PWA helpers — one installable app for teacher and student.
  */
 
+import { markBoot } from "../../utils/bootTrace";
 import { reportClientEvent } from "../../utils/clientTelemetry";
 import { isLiveSessionPath, requestHardReload } from "../../utils/liveSessionGuard";
 
@@ -97,6 +98,7 @@ export async function registerServiceWorker() {
     );
 
     const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    markBoot("sw_ok");
     // Дождаться activate — иначе subscribe может упасть с «ещё не готов»
     if (reg.installing || reg.waiting) {
       await withTimeout(navigator.serviceWorker.ready, 8000, null);
@@ -124,6 +126,7 @@ export async function registerServiceWorker() {
     }
     return reg;
   } catch (err) {
+    markBoot("sw_error");
     console.warn("SW registration failed", err);
     return null;
   }

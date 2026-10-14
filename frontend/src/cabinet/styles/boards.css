@@ -2974,8 +2974,11 @@ html.cb-board-editor-open body {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  padding: 16px 16px 0;
+  gap: 10px;
+  padding: 8px 10px 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   pointer-events: none;
 }
 
@@ -2983,14 +2986,14 @@ html.cb-board-editor-open body {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
-  height: 58px;
+  gap: 2px;
+  height: auto;
   min-width: 0;
-  padding: 6px 8px;
-  border: 1px solid #e9ecf2;
-  border-radius: 14px;
-  background: #fff;
-  box-shadow: var(--lesson-shadow, 0 4px 18px #202b4410, 0 1px 3px #202b4405);
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
   pointer-events: auto;
 }
 
@@ -3011,16 +3014,16 @@ html.cb-board-editor-open body {
 .lesson-topbar__side {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 0;
   min-width: 0;
 }
 
 .lesson-sheets {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 0;
   min-width: 72px;
-  margin-left: 2px;
+  margin-left: 0;
   flex: 1 1 auto;
 }
 
@@ -3051,9 +3054,9 @@ html.cb-board-editor-open body {
 
 .lesson-sheets__tab {
   max-width: 148px;
-  height: 32px;
+  height: 26px;
   padding: 0 2px;
-  border-radius: 8px;
+  border-radius: 7px;
   font-family: var(--font-body);
   font-size: 12px;
   font-weight: 580;
@@ -3082,7 +3085,7 @@ html.cb-board-editor-open body {
   align-items: center;
   min-width: 0;
   max-width: 120px;
-  height: 32px;
+  height: 26px;
   margin: 0;
   padding: 0 8px;
   border: 0;
@@ -3150,10 +3153,10 @@ html.cb-board-editor-open body {
 }
 
 .lesson-sheets__add {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  font-size: 18px;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  font-size: 16px;
   line-height: 1;
 }
 
@@ -3262,11 +3265,11 @@ html.cb-board-editor-open body {
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   border: 0;
-  border-radius: 9px;
+  border-radius: 8px;
   background: transparent;
   color: #5d6578;
   cursor: pointer;
@@ -3306,9 +3309,9 @@ html.cb-board-editor-open body {
   gap: 1px;
   min-width: 0;
   max-width: 240px;
-  padding: 3px 6px;
+  padding: 0 2px;
   color: #242a38;
-  font-size: 15px;
+  font-size: 13.5px;
   font-weight: 650;
   letter-spacing: -0.35px;
   line-height: 1.2;
@@ -3316,7 +3319,7 @@ html.cb-board-editor-open body {
 
 .lesson-topbar__lesson--block {
   gap: 0;
-  padding: 3px 6px;
+  padding: 0 2px;
   border-radius: 8px;
   background: transparent;
 }
@@ -3454,7 +3457,7 @@ html.cb-board-editor-open body {
 .lesson-faces {
   display: flex;
   align-items: center;
-  height: 36px;
+  height: 28px;
   padding: 0 2px;
   border: 0;
   border-radius: 8px;
@@ -3501,13 +3504,13 @@ button.lesson-faces__dot[aria-pressed="true"] {
 .lesson-faces__more {
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
-  margin-left: -8px;
+  width: 26px;
+  height: 26px;
+  margin-left: -6px;
   border: 2px solid #fff;
   border-radius: 999px;
   color: #fff;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 650;
   line-height: 1;
   box-shadow: 0 0 0 1px #e1e8ff;
@@ -3741,8 +3744,7 @@ button.lesson-faces__dot[aria-pressed="true"] {
   box-shadow: 0 6px 30px #202b4418, 0 1px 5px #202b4408;
 }
 
-.lesson-rail--bottom .lesson-rail__item,
-.lesson-rail--bottom .lesson-flyout button {
+.lesson-rail--bottom .lesson-rail__item {
   flex: 0 0 auto;
   width: 44px;
   height: 44px;
@@ -4006,11 +4008,27 @@ button.lesson-faces__dot[aria-pressed="true"] {
 .lesson-flyout__body--pen .lesson-context__colors,
 .lesson-flyout__body--pen .lesson-size {
   display: grid;
-  grid-template-columns: repeat(4, 32px);
-  justify-content: space-between;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  justify-content: stretch;
   width: 100%;
-  gap: 0;
+  gap: 2px;
   padding: 0;
+}
+
+.lesson-flyout__body--pen .lesson-swatch {
+  width: 32px;
+  height: 32px;
+  justify-self: center;
+}
+
+.lesson-flyout__body--pen .lesson-thickness__step {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.lesson-flyout__body--pen .lesson-swatch[aria-pressed="true"] {
+  outline-offset: 1px;
 }
 
 .lesson-flyout__body--pen .lesson-size__step {
@@ -4352,14 +4370,14 @@ button.lesson-faces__dot[aria-pressed="true"] {
 @media (max-width: 760px) {
   .lesson-top {
     gap: 6px;
-    padding: calc(8px + env(safe-area-inset-top, 0px)) 10px 8px;
-    background: rgba(255, 255, 255, 0.93);
-    border-bottom: 1px solid #e9ecf3;
-    backdrop-filter: blur(16px);
+    padding: calc(6px + env(safe-area-inset-top, 0px)) 8px 6px;
+    background: transparent;
+    border-bottom: 0;
+    backdrop-filter: none;
   }
 
   .lesson-topbar {
-    height: 44px;
+    height: auto;
     padding: 0 2px;
     border: 0;
     border-radius: 0;
@@ -4375,20 +4393,20 @@ button.lesson-faces__dot[aria-pressed="true"] {
   .lesson-topbar__lesson {
     max-width: min(148px, 34vw);
     padding: 0 4px;
-    font-size: 14px;
+    font-size: 12.6px;
     letter-spacing: -0.2px;
   }
 
   .lesson-topbar__icon {
-    width: 36px;
-    height: 36px;
+    width: 28px;
+    height: 28px;
   }
 
   .lesson-faces__dot,
   .lesson-faces__more {
-    width: 30px;
-    height: 30px;
-    font-size: 12px;
+    width: 24px;
+    height: 24px;
+    font-size: 10px;
   }
 
   .lesson-history-dock {

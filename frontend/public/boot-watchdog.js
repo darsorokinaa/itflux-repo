@@ -34,15 +34,53 @@
     if (box && box.parentNode) box.parentNode.removeChild(box);
   }
 
-  function recover() {
+  var hangMarked = false;
+  var recovering = false;
+
+  function noteHang() {
+    if (hangMarked) return;
+    hangMarked = true;
+    try {
+      if (window.__itfluxBootMark) window.__itfluxBootMark("watchdog_hang");
+    } catch (err) { /* ignore */ }
+  }
+
+  function whenSettled(promise, ms) {
+    return new Promise(function (resolve) {
+      var settled = false;
+      var timer = setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        resolve();
+      }, ms);
+      Promise.resolve(promise).then(function () {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      }, function () {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+
+  // Только ручная кнопка. Таймер не снимает Service Worker и не чистит Cache Storage:
+  // на медленном iPad это обрывало ещё идущую загрузку и могло повторяться.
+  function recover(manual) {
+    if (manual !== true || recovering) return;
     if (appMounted()) {
       dismissOverlay();
       return;
     }
+    recovering = true;
     var btn = document.getElementById("itflux-boot-reload");
     if (btn) btn.disabled = true;
     var done = function () {
       if (appMounted()) {
+        recovering = false;
         dismissOverlay();
         return;
       }
@@ -63,12 +101,13 @@
         }));
       }
     } catch (err) { /* ignore */ }
-    Promise.all(pending).catch(function () {}).then(done);
+    var cleanup = pending.length ? Promise.all(pending) : Promise.resolve();
+    whenSettled(cleanup, 2000).then(done);
   }
 
   function bindReload() {
     var reloadBtn = document.getElementById("itflux-boot-reload");
-    if (reloadBtn) reloadBtn.onclick = recover;
+    if (reloadBtn) reloadBtn.onclick = function () { recover(true); };
   }
 
   function paint(html) {
@@ -100,11 +139,25 @@
     return '<a href="' + href + '" style="min-height:44px;padding:10px 18px;border-radius:12px;background:transparent;border:1.5px solid #1550D8;color:#1550D8;font-weight:700;text-decoration:none;display:inline-flex;align-items:center;box-sizing:border-box">' + label + "</a>";
   }
 
+  function showManualStuck() {
+    var homeHref = onCabinetHome ? "/" : "/cabinet";
+    var homeLabel = onCabinetHome ? "На главную" : "В кабинет";
+    paint(card(
+      '<p style="font-size:1.15rem;font-weight:700;margin:0 0 10px">Не удалось загрузить приложение.</p>'
+      + '<p style="margin:0 0 16px;line-height:1.5;color:#5a6490">Попробуйте ещё раз. Если ошибка повторяется — обновите приложение или вернитесь назад.</p>'
+      + '<div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center">'
+      + primaryBtn("itflux-boot-reload", "Обновить приложение")
+      + secondaryLink(homeHref, homeLabel)
+      + "</div>"
+    ));
+  }
+
   function showStuck() {
     if (appMounted()) {
       dismissOverlay();
       return;
     }
+    noteHang();
     if (navigator.onLine === false) {
       paint(card(
         '<p style="font-size:1.15rem;font-weight:700;margin:0 0 10px">Нет сети</p>'
@@ -113,35 +166,15 @@
       ));
       return;
     }
-    if (stillLoading() && !recovered) {
+    if (stillLoading() && !recovered && !overlayTimer) {
       paint(card(
         '<p style="font-size:1.15rem;font-weight:700;margin:0 0 10px">Загружаем кабинет</p>'
         + '<p style="margin:0;line-height:1.5;color:#5a6490">Приложение ещё открывается. Подождите несколько секунд — страница не перезагружается.</p>'
       ));
-      if (!overlayTimer) {
-        overlayTimer = setTimeout(showStuck, 12000);
-        return;
-      }
-      // Extra wait already used and the shell is still downloading — treat as a stale shortcut.
-    }
-    if (recovered || meeting) {
-      var homeHref = onCabinetHome ? "/" : "/cabinet";
-      var homeLabel = onCabinetHome ? "На главную" : "В кабинет";
-      paint(card(
-        '<p style="font-size:1.15rem;font-weight:700;margin:0 0 10px">Не удалось загрузить приложение.</p>'
-        + '<p style="margin:0 0 16px;line-height:1.5;color:#5a6490">Попробуйте ещё раз. Если ошибка повторяется — обновите приложение или вернитесь назад.</p>'
-        + '<div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center">'
-        + primaryBtn("itflux-boot-reload", "Обновить приложение")
-        + secondaryLink(homeHref, homeLabel)
-        + "</div>"
-      ));
+      overlayTimer = setTimeout(showStuck, 12000);
       return;
     }
-    paint(card(
-      '<p style="font-size:1.15rem;font-weight:700;margin:0 0 10px">Обновляем приложение</p>'
-      + '<p style="margin:0;line-height:1.5;color:#5a6490">Ярлык на рабочем столе держал старую копию. Сбрасываем кэш — откроется само.</p>'
-    ));
-    recover();
+    showManualStuck();
   }
 
   function watchMount() {
