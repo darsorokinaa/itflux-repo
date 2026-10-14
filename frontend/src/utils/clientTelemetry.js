@@ -185,9 +185,24 @@ export function isChunkLoadError(error) {
   ]
     .filter(Boolean)
     .join(" ");
-  return /ChunkLoadError|Loading chunk [\d]+ failed|Failed to fetch dynamically imported module|error loading dynamically imported module|Unexpected token '<'/i.test(
-    blob,
-  );
+  if (/ChunkLoadError|Loading chunk [\d]+ failed|Failed to fetch dynamically imported module|error loading dynamically imported module|Unexpected token '<'/i.test(blob)) {
+    return true;
+  }
+  // iPad Safari: import() rejects with TypeError "Load failed" and line 0.
+  const message = String(error?.message || error?.reason?.message || "");
+  const name = String(error?.name || error?.reason?.name || "");
+  return name === "TypeError" && message === "Load failed";
+}
+
+function embeddedInLiveLesson() {
+  if (typeof window === "undefined") return false;
+  try {
+    if (!window.top || window.top === window) return false;
+    return isLiveSessionPath(window.top.location.pathname)
+      && !isLiveSessionPath(window.location.pathname);
+  } catch {
+    return false;
+  }
 }
 
 function alreadyRecoveredChunk() {
@@ -209,6 +224,13 @@ function markChunkRecovered() {
 /** One-shot cache-bust after a missing hashed chunk. Never loops. Never reloads a live lesson. */
 export function recoverChunkLoadOnce() {
   if (typeof window === "undefined") return false;
+  // Board iframe inside the lesson: reload only that frame, never the call.
+  if (embeddedInLiveLesson()) {
+    if (alreadyRecoveredChunk()) return false;
+    markChunkRecovered();
+    window.location.reload();
+    return true;
+  }
   if (isLiveSessionPath()) {
     reportClientEvent("CHUNK_RECOVERY_BLOCKED_LIVE_SESSION", {
       path: window.location.pathname,

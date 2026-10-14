@@ -1,7 +1,8 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { fetchInteractiveBoard } from "../../utils/cabinetAuth";
+import { lazyWithRetry } from "../../utils/importWithRetry";
 import { bindBoardDocumentTelemetry } from "./boardDocumentTelemetry";
 import { normalizeBoardProvider } from "./boardProvider";
 import BoardV2ErrorBoundary from "./BoardV2ErrorBoundary";
@@ -12,11 +13,9 @@ import { installBoardErrorCapture, markBoard } from "../lessonLoadTrace";
 markBoard("gateModuleAt", new Date().toISOString());
 installBoardErrorCapture();
 
-const TldrawBoard = lazy(() => import("./TldrawBoard"));
-const CabinetBoardEditorPage = lazy(() => import("../pages/CabinetBoardEditorPage"));
-
 /**
  * Одна реализация доски за раз. Пока флаг неизвестен, ни Excalidraw, ни tldraw не монтируются.
+ * Новый lazy на каждую попытку: иначе React запоминает первый Load failed.
  */
 export default function BoardEditorGate() {
   const { boardId = "" } = useParams();
@@ -75,6 +74,14 @@ export default function BoardEditorGate() {
 
   const phase = request.boardId === boardId && request.attempt === attempt ? request.phase : "loading";
   const board = phase === "ready" ? request.board : null;
+  const TldrawBoard = useMemo(
+    () => lazyWithRetry(() => import("./TldrawBoard")),
+    [attempt],
+  );
+  const CabinetBoardEditorPage = useMemo(
+    () => lazyWithRetry(() => import("../pages/CabinetBoardEditorPage")),
+    [attempt],
+  );
 
   useEffect(() => {
     if (phase !== "ready" || !board) return;

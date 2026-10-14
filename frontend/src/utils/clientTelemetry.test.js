@@ -85,6 +85,11 @@ describe("clientTelemetry", () => {
     expect(replace).not.toHaveBeenCalled();
   });
 
+  it("treats Safari Load failed as a missing module", () => {
+    expect(isChunkLoadError({ name: "TypeError", message: "Load failed" })).toBe(true);
+    expect(isChunkLoadError({ name: "Error", message: "Load failed" })).toBe(false);
+  });
+
   it("treats Unexpected token '<' as a stale chunk that can recover once", () => {
     expect(isChunkLoadError({ message: "Unexpected token '<'" })).toBe(true);
     expect(reportClientEvent("APP_FATAL_ERROR", { message: "boom" })).toBe(true);

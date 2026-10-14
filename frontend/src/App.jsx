@@ -90,17 +90,18 @@ import AppUpdateBanner from "./components/AppUpdateBanner";
 import { ensureSiteFavicon } from "./utils/ensureSiteFavicon";
 import { markUpdateFromClientRequired } from "./utils/appUpdate";
 import { SeasonalThemeProvider } from "./seasonal/SeasonalThemeProvider";
+import { importWithRetry } from "./utils/importWithRetry";
 
 const ExamPage = lazy(() => import("./pages/ExamPage"));
 const CabinetReviewDetailPage = lazy(() => import("./cabinet/pages/CabinetReviewDetailPage"));
-const BoardEditorGate = lazy(() => import("./cabinet/boards/BoardEditorGate"));
+const BoardEditorGate = lazy(() => importWithRetry(() => import("./cabinet/boards/BoardEditorGate")));
 const HomeworkNotebookEditor = lazy(() => import("./cabinet/notebook/HomeworkNotebookEditor"));
 const HomeworkPublishedNotebookPage = lazy(() =>
   import("./cabinet/notebook/HomeworkNotebookEditor").then((mod) => ({
     default: mod.HomeworkPublishedNotebookPage,
   })),
 );
-const VideoMeetingPage = lazy(() => import("./cabinet/pages/VideoMeetingPage"));
+const VideoMeetingPage = lazy(() => importWithRetry(() => import("./cabinet/pages/VideoMeetingPage")));
 const JaasBareProbe = lazy(() => import("./cabinet/pages/JaasBareProbe"));
 const MeetingCallDock = lazy(() => import("./cabinet/components/MeetingCallDock"));
 
