@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { readScriptTrace } from "./lessonLoadTrace";
 
@@ -126,38 +126,27 @@ export default function LessonLoadTracePanel() {
   const [text, setText] = useState("");
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const revealedRef = useRef(false);
 
   useEffect(() => {
     let timer = 0;
     const tick = () => {
-      const trace = readScriptTrace();
-      const board = readBoardProbe();
-      const next = formatLessonLoadTrace(trace, board);
-      setText(next);
-      const attempt = trace.attempts?.[trace.attempts.length - 1];
-      const failed = attempt?.inDocumentAtTimeout != null || attempt?.errorAt || board.renderError;
-      if (failed && !revealedRef.current) {
-        revealedRef.current = true;
-        setOpen(true);
-      }
+      setText(formatLessonLoadTrace(readScriptTrace(), readBoardProbe()));
     };
     tick();
     timer = window.setInterval(tick, 1000);
     return () => window.clearInterval(timer);
   }, []);
 
-  const summary = text.split("\n").slice(0, 4).join(" · ");
-
   return (
-    <div data-testid="lesson-load-trace">
-      <div style={{ position: "fixed", left: 8, right: 8, bottom: 8, zIndex: 80 }}>
-        <details
-          open={open}
-          onToggle={(event) => setOpen(event.currentTarget.open)}
+    <div data-testid="lesson-load-trace" style={{ position: "fixed", left: 10, bottom: 10, zIndex: 40 }}>
+      {open ? (
+        <div
+          id="lesson-load-trace-panel"
           style={{
+            width: "min(420px, calc(100vw - 20px))",
             maxHeight: "42vh",
             overflow: "auto",
+            marginBottom: 8,
             background: "#fff",
             color: "#111",
             border: "1px solid #94a3b8",
@@ -167,8 +156,7 @@ export default function LessonLoadTracePanel() {
             boxShadow: "0 8px 24px rgba(0,0,0,.18)",
           }}
         >
-          <summary>{summary || "Диагностика загрузки урока"}</summary>
-          <pre style={{ whiteSpace: "pre-wrap", margin: "8px 0" }}>{text}</pre>
+          <pre style={{ whiteSpace: "pre-wrap", margin: "0 0 8px" }}>{text}</pre>
           <button
             type="button"
             onClick={() => {
@@ -182,8 +170,33 @@ export default function LessonLoadTracePanel() {
           >
             {copied ? "Скопировано" : "Скопировать диагностику"}
           </button>
-        </details>
-      </div>
+        </div>
+      ) : null}
+      <button
+        type="button"
+        aria-label="Диагностика загрузки"
+        aria-expanded={open}
+        aria-controls="lesson-load-trace-panel"
+        title="Диагностика загрузки"
+        onClick={() => {
+          setCopied(false);
+          setOpen((value) => !value);
+        }}
+        style={{
+          width: 28,
+          height: 28,
+          padding: 0,
+          borderRadius: 999,
+          border: "1px solid rgba(148, 163, 184, 0.7)",
+          background: "rgba(255, 255, 255, 0.92)",
+          color: "#334155",
+          font: "700 13px/1 ui-sans-serif, system-ui, sans-serif",
+          boxShadow: "0 2px 8px rgba(15, 23, 42, 0.16)",
+          cursor: "pointer",
+        }}
+      >
+        i
+      </button>
     </div>
   );
 }
