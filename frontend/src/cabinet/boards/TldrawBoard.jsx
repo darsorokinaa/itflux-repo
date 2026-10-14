@@ -106,13 +106,28 @@ function createLessonUserStore({ userId, displayName, color, avatarUrl }) {
   };
 }
 
+const SYNC_TOKEN_RETRY_MS = [0, 400, 1200];
+
 async function lessonBoardConnectUri(boardId) {
-  const issued = await fetchTldrawSyncToken(boardId);
-  const token = issued?.token;
-  if (!token) throw new Error("sync token missing");
-  const url = new URL(lessonBoardSyncUri(boardId));
-  url.searchParams.set("access_token", token);
-  return url.toString();
+  let lastError = null;
+  for (let index = 0; index < SYNC_TOKEN_RETRY_MS.length; index += 1) {
+    if (SYNC_TOKEN_RETRY_MS[index] > 0) {
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, SYNC_TOKEN_RETRY_MS[index]);
+      });
+    }
+    try {
+      const issued = await fetchTldrawSyncToken(boardId);
+      const token = issued?.token;
+      if (!token) throw new Error("sync token missing");
+      const url = new URL(lessonBoardSyncUri(boardId));
+      url.searchParams.set("access_token", token);
+      return url.toString();
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("sync token missing");
 }
 
 // useSync reconnects a dropped socket on the same store. Remounting on wake,
@@ -169,6 +184,9 @@ function restoreLegacyScene(editor, sceneData) {
   };
 }
 
+const BOARD_SYNC_AUTO_RETRY_MS = 1200;
+const BOARD_SYNC_AUTO_RETRIES = 2;
+
 function TldrawBoardSynced({
   boardId,
   roomId,
@@ -179,6 +197,7 @@ function TldrawBoardSynced({
   canEdit,
   sceneData,
   onRetry,
+  attempt = 0,
 }) {
   const users = useMemo(
     () => createLessonUserStore({ userId, displayName, color, avatarUrl }),
@@ -187,7 +206,8 @@ function TldrawBoardSynced({
   const assets = useMemo(() => createLessonBoardAssetStore(boardId), [boardId]);
   const sync = useLessonBoardSync({ boardId, roomId, users, assets });
   const licenseKey = tldrawLicenseKey();
-  const [stalled, setStalled] = useState(false);
+  const onRetryRef = useRef(onRetry);
+  onRetryRef.current = onRetry;
 
   useEffect(() => {
     markPerf("board_mount");
@@ -222,29 +242,15 @@ function TldrawBoardSynced({
   }, [boardId, sync.status]);
 
   useEffect(() => {
-    if (sync.status !== "loading") {
-      setStalled(false);
-      return undefined;
-    }
-    const timer = window.setTimeout(() => {
-      setStalled(true);
-      if (reportedSyncRef.current === "error") return;
-      const previous = reportedSyncRef.current;
-      reportedSyncRef.current = "error";
-      reportClientEvent("board_sync_status", {
-        board_id: String(boardId || "").slice(0, 64),
-        status: "error",
-        previous,
-        raw: "stalled",
-      });
-    }, 8000);
+    if (sync.status !== "error" || attempt >= BOARD_SYNC_AUTO_RETRIES) return undefined;
+    const timer = window.setTimeout(() => onRetryRef.current?.(), BOARD_SYNC_AUTO_RETRY_MS);
     return () => window.clearTimeout(timer);
-  }, [boardId, sync.status]);
+  }, [attempt, sync.status]);
 
-  if (sync.status === "loading" && !stalled) {
+  if (sync.status === "loading") {
     return <LessonBoardMessage text="Подключаем доску…" />;
   }
-  if (sync.status === "error" || stalled) {
+  if (sync.status === "error") {
     return (
       <LessonBoardMessage
         title="Не удалось подключить доску"
@@ -301,7 +307,7 @@ function TldrawBoardSynced({
   );
 }
 
-function TldrawBoardSession({ boardId, userId, displayName, role, avatarUrl, canEdit, sceneData, onRetry }) {
+function TldrawBoardSession({ boardId, userId, displayName, role, avatarUrl, canEdit, sceneData, onRetry, attempt = 0 }) {
   const roomId = lessonBoardRoomId(boardId);
   const name = lessonBoardDisplayName(displayName, role);
   const color = lessonBoardPresenceColor(role, userId);
@@ -326,6 +332,7 @@ function TldrawBoardSession({ boardId, userId, displayName, role, avatarUrl, can
       canEdit={canEdit}
       sceneData={sceneData}
       onRetry={onRetry}
+      attempt={attempt}
     />
   );
 }
@@ -348,7 +355,7 @@ export default function TldrawBoard(props) {
   return (
     <LessonBoardFrame roomId={roomId} boardId={props.boardId}>
       <BoardV2ErrorBoundary onRetry={retry}>
-        <TldrawBoardSession key={attempt} {...props} onRetry={retry} />
+        <TldrawBoardSession key={attempt} {...props} onRetry={retry} attempt={attempt} />
       </BoardV2ErrorBoundary>
     </LessonBoardFrame>
   );

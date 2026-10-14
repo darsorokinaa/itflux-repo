@@ -166,15 +166,29 @@ describe("TldrawBoard", () => {
     expect(screen.queryByTestId("excalidraw-board")).toBeNull();
   });
 
-  it("stops waiting when the board connection never answers", () => {
+  it("keeps connecting while sync is still loading", () => {
     vi.useFakeTimers();
     render(boardTree());
     expect(screen.getByText("Подключаем доску…")).toBeTruthy();
     act(() => {
       vi.advanceTimersByTime(8000);
     });
+    expect(screen.getByText("Подключаем доску…")).toBeTruthy();
+    expect(screen.queryByText("Не удалось подключить доску")).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("reconnects a failed sync without leaving the lesson", () => {
+    vi.useFakeTimers();
+    syncResult = { status: "error", error: new Error("offline") };
+    render(boardTree());
     expect(screen.getByText("Не удалось подключить доску")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Повторить" })).toBeTruthy();
+    const before = syncCalls.length;
+    act(() => {
+      vi.advanceTimersByTime(1200);
+    });
+    expect(syncCalls.length).toBeGreaterThan(before);
+    expect(syncCalls.every((call) => call.roomId === BOARD)).toBe(true);
     vi.useRealTimers();
   });
 
