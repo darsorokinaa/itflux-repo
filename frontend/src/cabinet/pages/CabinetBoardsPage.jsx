@@ -14,6 +14,7 @@ import {
   normalizeCabinetList,
   updateInteractiveBoard,
 } from "../../utils/cabinetAuth";
+import { prefetchTldrawSyncToken, warmBoardEditor } from "../boards/boardSyncPrefetch";
 import "../styles/boards.css";
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -125,7 +126,25 @@ export default function CabinetBoardsPage() {
     return "";
   }, [items.length, loading, search, groupFilter, studentFilter]);
 
+  useEffect(() => {
+    const start = () => {
+      warmBoardEditor().catch(() => {});
+    };
+    if (typeof window.requestIdleCallback === "function") {
+      const idle = window.requestIdleCallback(start, { timeout: 1200 });
+      return () => window.cancelIdleCallback(idle);
+    }
+    const timer = window.setTimeout(start, 400);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const prepareBoard = (board) => {
+    warmBoardEditor().catch(() => {});
+    prefetchTldrawSyncToken(board?.id).catch(() => {});
+  };
+
   const openBoard = (board) => {
+    prepareBoard(board);
     setCardMenu(null);
     navigate(`/cabinet/boards/${board.id}`);
   };
@@ -276,6 +295,7 @@ export default function CabinetBoardsPage() {
                 <button
                   type="button"
                   className="cb-board-card__preview"
+                  onPointerDown={() => prepareBoard(board)}
                   onClick={() => openBoard(board)}
                   aria-label={`Открыть доску «${board.title || "Без названия"}»`}
                 >

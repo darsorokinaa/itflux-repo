@@ -8,6 +8,7 @@ const fetchBoard = vi.hoisted(() => vi.fn());
 
 vi.mock("../../utils/cabinetAuth", () => ({
   fetchInteractiveBoard: (...args) => fetchBoard(...args),
+  fetchTldrawSyncToken: vi.fn(async () => ({ token: "test-token" })),
 }));
 
 vi.mock("../pages/CabinetBoardEditorPage", () => ({

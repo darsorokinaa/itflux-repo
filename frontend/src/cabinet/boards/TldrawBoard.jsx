@@ -29,7 +29,7 @@ import {
   lessonBoardSyncUri,
   tldrawLicenseKey,
 } from "./boardProvider";
-import { fetchTldrawSyncToken } from "../../utils/cabinetAuth";
+import { prefetchTldrawSyncToken } from "./boardSyncPrefetch";
 import { markPerf } from "../../utils/appBoot";
 import { reportClientEvent } from "../../utils/clientTelemetry";
 import {
@@ -37,7 +37,7 @@ import {
   nextCanvasGeometry,
 } from "./boardDocumentTelemetry";
 import { createLessonBoardAssetStore } from "./lessonBoardAssetStore";
-import { frameBoardIfContentIsOffscreen, revealBoardContent } from "./boardOpenFrame";
+import { revealBoardContent } from "./boardOpenFrame";
 import BoardV2ErrorBoundary from "./BoardV2ErrorBoundary";
 import LessonBoardMessage from "./LessonBoardMessage";
 import "../styles/boards.css";
@@ -117,7 +117,7 @@ async function lessonBoardConnectUri(boardId) {
       });
     }
     try {
-      const issued = await fetchTldrawSyncToken(boardId);
+      const issued = await prefetchTldrawSyncToken(boardId);
       const token = issued?.token;
       if (!token) throw new Error("sync token missing");
       const url = new URL(lessonBoardSyncUri(boardId));
@@ -160,30 +160,6 @@ function useLessonBoardSync({ boardId, roomId, users, assets }) {
   });
 }
 
-function restoreLegacyScene(editor, sceneData) {
-  let cancelled = false;
-  let dispose = () => {};
-  if (sceneData == null) return undefined;
-  // Отдельный модуль, чтобы обычная tldraw-доска не тянула разбор Excalidraw до открытия старой сцены.
-  import("./excalidrawToTldraw").then((mod) => {
-    if (cancelled) return;
-    const attached = mod.attachLegacyExcalidrawScene(editor, sceneData);
-    dispose = attached.dispose;
-    if (cancelled) {
-      dispose();
-      return;
-    }
-    if (attached.restored) installSavedCustomColors(editor);
-    frameBoardIfContentIsOffscreen(editor);
-  }).catch((error) => {
-    console.error("failed to restore excalidraw board", error);
-  });
-  return () => {
-    cancelled = true;
-    dispose();
-  };
-}
-
 const BOARD_SYNC_AUTO_RETRY_MS = 1200;
 const BOARD_SYNC_AUTO_RETRIES = 2;
 
@@ -195,7 +171,6 @@ function TldrawBoardSynced({
   color,
   avatarUrl,
   canEdit,
-  sceneData,
   onRetry,
   attempt = 0,
 }) {
@@ -292,7 +267,6 @@ function TldrawBoardSynced({
             addBoardFiles(editor, content?.files, content?.point)
           ));
         }
-        const disposeLegacy = restoreLegacyScene(editor, sceneData);
         return () => {
           stopReveal();
           disposePdfNotice(editor);
@@ -300,14 +274,13 @@ function TldrawBoardSynced({
           disposeEraserInput();
           disposeColors();
           disposeSheets();
-          disposeLegacy?.();
         };
       }}
     />
   );
 }
 
-function TldrawBoardSession({ boardId, userId, displayName, role, avatarUrl, canEdit, sceneData, onRetry, attempt = 0 }) {
+function TldrawBoardSession({ boardId, userId, displayName, role, avatarUrl, canEdit, onRetry, attempt = 0 }) {
   const roomId = lessonBoardRoomId(boardId);
   const name = lessonBoardDisplayName(displayName, role);
   const color = lessonBoardPresenceColor(role, userId);
@@ -330,7 +303,6 @@ function TldrawBoardSession({ boardId, userId, displayName, role, avatarUrl, can
       color={color}
       avatarUrl={avatarUrl || ""}
       canEdit={canEdit}
-      sceneData={sceneData}
       onRetry={onRetry}
       attempt={attempt}
     />

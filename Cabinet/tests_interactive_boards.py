@@ -104,6 +104,32 @@ class InteractiveBoardApiTests(TestCase):
         self.assertTrue(res_student.json()["can_edit"])
         self.assertTrue(res_student.json().get("collaborative_edit"))
 
+    @override_settings(BOARD_PROVIDER="tldraw")
+    def test_tldraw_open_skips_empty_legacy_scene(self):
+        self._auth(self.teacher)
+        empty = InteractiveBoard.objects.create(
+            owner=self.teacher,
+            title="Пустая",
+            scene_data=empty_board_scene(),
+        )
+        filled = InteractiveBoard.objects.create(
+            owner=self.teacher,
+            title="Старая",
+            scene_data={
+                "elements": [{"id": "keep-me", "type": "text", "text": "старая сцена урока"}],
+                "appState": {},
+                "files": {},
+            },
+        )
+        empty_res = self.client.get(f"/api/cabinet/interactive-boards/{empty.id}/")
+        self.assertEqual(empty_res.status_code, 200, empty_res.content)
+        self.assertIsNone(empty_res.json()["scene_data"])
+        filled_res = self.client.get(f"/api/cabinet/interactive-boards/{filled.id}/")
+        self.assertEqual(filled_res.status_code, 200, filled_res.content)
+        self.assertIsNone(filled_res.json()["scene_data"])
+        filled.refresh_from_db()
+        self.assertEqual(filled.scene_data["elements"][0]["id"], "keep-me")
+
     def test_default_title(self):
         self._auth(self.teacher)
         res = self.client.post("/api/cabinet/interactive-boards/", {}, format="json")
@@ -183,7 +209,7 @@ class InteractiveBoardApiTests(TestCase):
         self.assertEqual(body["board_provider"], "tldraw")
         self.assertEqual(body["viewer_display_name"], "Учитель")
         self.assertNotIn("@", body["viewer_display_name"])
-        self.assertEqual(body["scene_data"]["elements"][0]["id"], "keep-me")
+        self.assertIsNone(body["scene_data"])
         board.refresh_from_db()
         self.assertEqual(board.scene_data["elements"][0]["id"], "keep-me")
 

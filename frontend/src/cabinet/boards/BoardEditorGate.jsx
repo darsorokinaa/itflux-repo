@@ -2,6 +2,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { fetchInteractiveBoard } from "../../utils/cabinetAuth";
+import { prefetchTldrawSyncToken, warmBoardEditor } from "./boardSyncPrefetch";
 import { lazyWithRetry } from "../../utils/importWithRetry";
 import { bindBoardDocumentTelemetry } from "./boardDocumentTelemetry";
 import { normalizeBoardProvider } from "./boardProvider";
@@ -38,6 +39,9 @@ export default function BoardEditorGate() {
 
   useEffect(() => {
     let cancelled = false;
+    // Редактор и токен комнаты стартуют вместе с карточкой доски, а не после неё.
+    warmBoardEditor().catch(() => {});
+    prefetchTldrawSyncToken(boardId).catch(() => {});
     // Короткий повтор: runserver на секунду отваливается при перезапуске,
     // а обрезанный JSON при 200 иначе навсегда остаётся этой ошибкой.
     const delays = [0, 300, 900];
@@ -132,7 +136,6 @@ export default function BoardEditorGate() {
             role={board.viewer_role}
             avatarUrl={board.viewer_avatar_url}
             canEdit={Boolean(board.can_edit)}
-            sceneData={board.scene_data}
           />
         </Suspense>
       </BoardV2ErrorBoundary>

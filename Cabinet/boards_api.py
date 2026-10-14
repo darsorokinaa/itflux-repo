@@ -978,6 +978,9 @@ class InteractiveBoardDetailSerializer(InteractiveBoardListSerializer):
         fields = InteractiveBoardListSerializer.Meta.fields + ["scene_data", "access"]
 
     def get_scene_data(self, obj):
+        # Живая доска tldraw лежит в комнате синхронизации, не в этой колонке.
+        if get_board_provider() == "tldraw":
+            return None
         scene = normalize_scene_data(obj.scene_data)
         scene = rewrite_scene_asset_urls(obj, scene)
         request = self.context.get("request")
@@ -1107,6 +1110,11 @@ def user_accessible_boards_qs(user: User):
     )
 
 
+def boards_open_queryset(qs):
+    """Открытие tldraw не читает колонку старой сцены: рисунок в комнате синхронизации."""
+    return qs.defer("scene_data")
+
+
 def boards_list_queryset(qs):
     """Список не читает сцену. Право редактирования ученика берётся одним prefetch."""
     edit_access = InteractiveBoardAccess.objects.filter(
@@ -1189,6 +1197,8 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
         qs = user_accessible_boards_qs(self.request.user)
         if self.action == "list":
             qs = boards_list_queryset(qs)
+        elif self.action == "retrieve":
+            qs = boards_open_queryset(qs)
         params = self.request.query_params
 
         # Список: архив скрыт, detail/actions — архив доступен владельцу/имеющим доступ
