@@ -19,6 +19,7 @@ import {
 } from "../../utils/cabinetAuth";
 import AppDiagnosticsPanel from "../../components/AppDiagnosticsPanel";
 import "../styles/notifications-settings.css";
+import MarketingConsentSettings from "../../r52/MarketingConsentSettings";
 
 const REMINDER_OPTIONS = [
   { minutes: 1440, label: "За 24 часа", description: "Напоминание за сутки до урока" },
@@ -1218,6 +1219,7 @@ export default function CabinetNotificationsSettingsPage() {
           {saving ? "Сохранение…" : "Сохранить изменения"}
         </button>
       </div>
+      {homePath === "/cabinet" ? <MarketingConsentSettings /> : null}
     </CabinetPageShell>
   );
 }

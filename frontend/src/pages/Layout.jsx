@@ -22,7 +22,8 @@ function Layout() {
     /^\/cabinet\/interactives\/[^/]+\/play$/.test(pathNorm)
     || /^\/cabinet\/student\/interactives\/\d+\/play$/.test(pathNorm);
   const isStudentCabinet = pathname.startsWith("/cabinet/student");
-  const isCabinetArea = pathname.startsWith("/cabinet");
+  // r49: банк задач (/tasks, /tasks/my…) теперь живёт внутри кабинета — без публичной шапки/футера.
+  const isCabinetArea = pathname.startsWith("/cabinet") || pathNorm === "/tasks" || pathname.startsWith("/tasks/");
   const isVideoMeetingPage = /^\/cabinet\/meetings\//.test(pathNorm);
   const isBoardEditorPage =
     /^\/cabinet\/boards\/[^/]+$/.test(pathNorm)
@@ -157,11 +158,11 @@ function Layout() {
           <span className="site-footer-copy">© 2026 Цифровой поток</span>
           {!isLessonOrHomeworkContext && (
           <div className="site-footer-links">
-            <Link to="/privacy" className="site-footer-link">Политика конфиденциальности</Link>
+            <Link to="/privacy" className="site-footer-link">Политика обработки ПД</Link>
             <span className="site-footer-sep" aria-hidden="true">·</span>
             <Link to="/messages-agreement" className="site-footer-link">Соглашение о сообщениях</Link>
             <span className="site-footer-sep" aria-hidden="true">·</span>
-            <Link to="/privacy#pd" className="site-footer-link">Согласие на обработку ПД</Link>
+            <Link to="/personal-data-consent" className="site-footer-link">Согласие на обработку ПД</Link>
           </div>
           )}
         </div>
@@ -173,7 +174,7 @@ function Layout() {
           <div className="cookie-banner-inner">
             <p className="cookie-banner-text">
               Мы используем файлы cookie для корректной работы сайта. Продолжая использование сайта, вы соглашаетесь с{" "}
-              <Link to="/privacy" className="cookie-banner-link">политикой конфиденциальности</Link> и обработкой персональных данных.
+              <Link to="/privacy" className="cookie-banner-link">политикой обработки персональных данных</Link> и использованием cookie и Яндекс Метрики.
             </p>
             <button type="button" className="cookie-banner-btn" onClick={acceptCookies}>
               Принять

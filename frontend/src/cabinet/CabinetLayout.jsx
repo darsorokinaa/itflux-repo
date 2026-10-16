@@ -35,6 +35,7 @@ import TimewebAiEmbed, { planHasTimewebAi } from "./TimewebAiEmbed";
 import "../styles/cabinet-dashboard.css";
 import "./styles/teacher-cabinet.css";
 import "../styles/cabinet-mobile-system.css";
+import MarketingPromptBanner from "../r52/MarketingPromptBanner";
 
 const GUIDE_SEEN_KEY = "cabinet-guide-seen-v1";
 const GUIDE_OPEN_ON_REGISTER_KEY = "cabinet-guide-open-on-register";
@@ -637,6 +638,7 @@ export default function CabinetLayout() {
         <div className={contentClass}>
           {isDashboard ? (
             <>
+              <MarketingPromptBanner />
               <PwaInstallPrompt role="teacher" />
               <PwaEnableNotificationsPrompt role="teacher" />
             </>

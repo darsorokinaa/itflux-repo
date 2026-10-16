@@ -23,7 +23,7 @@ from .access import (
     teacher_subject_line,
 )
 from .attachments import download_headers, is_image_ext, safe_original_name, store_message_file
-from .consent_texts import MARKETING_CONSENT_V1, MESSAGING_GATE_V1, consent_snapshot
+from .consent_texts import MARKETING_CONSENT_V1, MESSAGING_GATE_V1, MESSAGING_GATE_V2, consent_snapshot
 from .models import (
     ConsentPromptState,
     Conversation,
@@ -1029,11 +1029,9 @@ def _broadcast_recipients() -> list:
     """Все активные аккаунты, которые согласились и на рассылку, и на персональные данные."""
     from django.db.models import Count
 
-    channels = (
-        UserConsent.Channel.PERSONAL,
-        UserConsent.Channel.EMAIL,
-        UserConsent.Channel.INAPP,
-    )
+    # r52: шлюз сообщений больше не включает рекламу. Служебная рассылка — всем, кто принял
+    # соглашение о сообщениях (ПД). Рекламу через неё отправлять нельзя (нужно inapp_marketing V1+).
+    channels = (UserConsent.Channel.PERSONAL,)
     consented_ids = (
         UserConsent.objects.filter(
             channel__in=channels,
@@ -1086,15 +1084,12 @@ def broadcast_developer_message(actor, *, text: str, audience: str, group_ids=No
     return {"sent": sent, "audience": "consented"}
 
 
-MESSAGING_GATE_CHANNELS = (
-    UserConsent.Channel.PERSONAL,
-    UserConsent.Channel.EMAIL,
-    UserConsent.Channel.INAPP,
-)
+# r52: для доступа к сообщениям обязательно только согласие на обработку ПД (MESSAGING_GATE_V2).
+MESSAGING_GATE_CHANNELS = (UserConsent.Channel.PERSONAL,)
 
 
 def messaging_agreement_payload() -> dict:
-    definition, _digest = consent_snapshot(MESSAGING_GATE_V1)
+    definition, _digest = consent_snapshot(MESSAGING_GATE_V2)
     return {
         "version": definition["version"],
         "title": definition["title"],
@@ -1110,7 +1105,7 @@ def has_messaging_consent(user) -> bool:
         for row in UserConsent.objects.filter(user=user, channel__in=MESSAGING_GATE_CHANNELS)
     }
     return all(
-        (row := rows.get(channel)) and row.granted and row.consented_at
+        (row := rows.get(channel)) and row.granted and row.consented_at and not row.revoked_at
         for channel in MESSAGING_GATE_CHANNELS
     )
 
@@ -1124,16 +1119,15 @@ def require_messaging_consent(user) -> None:
 
 
 def accept_messaging_consent(user, *, source: str, ip_address=None, user_agent: str = "") -> dict:
-    definition, digest = consent_snapshot(MESSAGING_GATE_V1)
+    # r52: шлюз фиксирует только согласие на ПД для сообщений; реклама — отдельно и добровольно.
+    definition, digest = consent_snapshot(MESSAGING_GATE_V2)
     for channel, consent_type in (
         (UserConsent.Channel.PERSONAL, "personal_data"),
-        (UserConsent.Channel.EMAIL, "marketing"),
-        (UserConsent.Channel.INAPP, "marketing"),
     ):
         _grant_channel(
             user=user,
             channel=channel,
-            version=MESSAGING_GATE_V1,
+            version=MESSAGING_GATE_V2,
             digest=digest,
             source=source,
             ip_address=ip_address,
