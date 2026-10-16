@@ -124,12 +124,12 @@ class PerformanceTimingMiddleware:
 # Report-Only: не блокирует кабинет. Enforcement не включать, пока отчёты не разобраны.
 CABINET_CSP_REPORT_ONLY = "; ".join([
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://mc.yandex.ru https://lesson.itflux-academy.ru https://8x8.vc https://*.8x8.vc",
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob: https://mc.yandex.ru https://lesson.itflux-academy.ru https://8x8.vc https://*.8x8.vc",
-    "font-src 'self' data:",
-    "connect-src 'self' https://mc.yandex.ru wss://mc.yandex.ru https://lesson.itflux-academy.ru wss://lesson.itflux-academy.ru wss://itflux.ru wss://test.itflux.ru wss://lk-test.itflux.ru wss://lesson.itflux.ru https://8x8.vc wss://8x8.vc https://*.8x8.vc wss://*.8x8.vc",
-    "frame-src 'self' https://lesson.itflux-academy.ru https://8x8.vc https://*.8x8.vc",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://mc.yandex.ru https://lesson.itflux-academy.ru https://8x8.vc https://*.8x8.vc https://timeweb.cloud https://*.timeweb.cloud",
+    "style-src 'self' 'unsafe-inline' https://timeweb.cloud https://*.timeweb.cloud",
+    "img-src 'self' data: blob: https://mc.yandex.ru https://lesson.itflux-academy.ru https://8x8.vc https://*.8x8.vc https://timeweb.cloud https://*.timeweb.cloud",
+    "font-src 'self' data: https://timeweb.cloud https://*.timeweb.cloud",
+    "connect-src 'self' https://mc.yandex.ru wss://mc.yandex.ru https://lesson.itflux-academy.ru wss://lesson.itflux-academy.ru wss://itflux.ru wss://test.itflux.ru wss://lk-test.itflux.ru wss://lesson.itflux.ru https://8x8.vc wss://8x8.vc https://*.8x8.vc wss://*.8x8.vc https://timeweb.cloud https://*.timeweb.cloud wss://*.timeweb.cloud",
+    "frame-src 'self' https://lesson.itflux-academy.ru https://8x8.vc https://*.8x8.vc https://timeweb.cloud https://*.timeweb.cloud",
     "media-src 'self' blob:",
     "worker-src 'self' blob:",
 ])

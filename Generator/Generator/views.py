@@ -121,7 +121,11 @@ _SPA_KNOWN_PATH_PATTERNS = (
     re.compile(r"^/$"),
     re.compile(r"^/about/?$"),
     re.compile(r"^/privacy/?$"),
+    re.compile(r"^/offer/?$"),  # r50
+    re.compile(r"^/personal-data-consent/?$"),  # r52
+    re.compile(r"^/contacts/?$"),  # r50
     re.compile(r"^/tasks/?$"),
+    re.compile(r"^/tasks/my(?:/.*)?$"),  # r49: «Мой банк задач» (прямые ссылки)
     re.compile(r"^/generator/?$"),
     re.compile(r"^/lessons/?$"),
     re.compile(r"^/lessons/collections/[^/]+/?$"),
@@ -155,6 +159,9 @@ _SITEMAP_STATIC_PATHS = (
     "/interesting",
     "/teachers",
     "/privacy",
+    "/offer",
+    "/personal-data-consent",
+    "/contacts",
     "/subject/oge",
     "/subject/ege",
     "/subject/vpr",
@@ -988,39 +995,41 @@ def app_version_json(request):
 
 
 def robots_txt(request):
-    base = request.build_absolute_uri("/")
-    sitemap_url = request.build_absolute_uri("/sitemap.xml")
-    body = (
-        "User-agent: *\n"
-        "Allow: /\n"
-        "\n"
-        f"Host: {urlparse(base).netloc}\n"
-        f"Sitemap: {sitemap_url}\n"
-    )
-    return HttpResponse(body, content_type="text/plain; charset=UTF-8")
+    # r35: фиксированный главный домен, закрыты служебные разделы.
+    from . import seo as _seo
+    resp = HttpResponse(_seo.robots_txt_body(), content_type="text/plain; charset=UTF-8")
+    resp["Cache-Control"] = "public, max-age=3600"
+    return resp
 
 
 def sitemap_xml(request):
-    now_iso = timezone.now().date().isoformat()
-    base = request.build_absolute_uri("/").rstrip("/")
-    urls = []
-    for path in _SITEMAP_STATIC_PATHS:
-        loc = f"{base}{path}"
-        urls.append(
-            "  <url>\n"
-            f"    <loc>{loc}</loc>\n"
-            f"    <lastmod>{now_iso}</lastmod>\n"
-            "    <changefreq>daily</changefreq>\n"
-            "    <priority>0.8</priority>\n"
-            "  </url>"
-        )
-    xml = (
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-        + "\n".join(urls)
-        + "\n</urlset>\n"
-    )
-    return HttpResponse(xml, content_type="application/xml; charset=UTF-8")
+    # r35: https, главный домен, уроки/тренажёры/предметы/тарифы, без кабинета.
+    from . import seo as _seo
+    resp = HttpResponse(_seo.sitemap_xml_body(), content_type="application/xml; charset=UTF-8")
+    resp["Cache-Control"] = "public, max-age=3600"
+    return resp
+
+
+@require_http_methods(["GET"])
+def api_seo_meta(request):
+    """r35: мета для клиентской смены маршрута (document.title, description, canonical)."""
+    from . import seo as _seo
+    path = (request.GET.get("path") or "/")[:300]
+    try:
+        meta = _seo.resolve(path)
+    except Exception:
+        logger.exception("seo resolve failed")
+        meta = None
+    if meta is None:
+        meta = dict(_seo.NOT_FOUND_META)
+        found = False
+    else:
+        found = True
+    data = {k: meta.get(k) for k in ("title", "description", "canonical", "image", "noindex", "public")}
+    data["found"] = found
+    resp = JsonResponse(data)
+    resp["Cache-Control"] = "public, max-age=300"
+    return resp
 
 
 _YANDEX_WEBMASTER_HTML = {
@@ -1080,7 +1089,19 @@ def react_app(request):
     if index_path.exists():
         with open(index_path, 'r', encoding='utf-8') as f:
             index_html = f.read()
+        # r35: мета/canonical/JSON-LD на стороне сервера и настоящий 404 для неизвестных путей.
         status = 200 if _is_known_spa_path(request.path) else 404
+        try:
+            from . import seo as _seo
+            meta = _seo.resolve(request.path)
+            if meta is None:
+                status = 404
+                meta = _seo.NOT_FOUND_META
+            else:
+                status = 200
+            index_html = _seo.inject(index_html, request.path, meta)
+        except Exception:
+            logger.exception("seo inject failed for %s", request.path)
         resp = HttpResponse(index_html, content_type='text/html; charset=utf-8', status=status)
         # Иначе браузер/CDN держит старый index.html и подгружает старый бандл без новых экранов/карточек.
         resp["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
@@ -5321,14 +5342,59 @@ def api_interesting_detail(request, slug):
     return JsonResponse({"item": data})
 
 
-@require_http_methods(["GET"])
-def api_interesting_view(request, slug):
-    item = get_object_or_404(_visible_interesting_queryset(request), slug=slug)
+_INTERESTING_VIEW_CACHE: dict = {}
+_INLINE_SCRIPT_RE = re.compile(r"<script(\s[^>]*)?>([\s\S]*?)</script>", re.I)
+_EXTERNALIZE_MIN_BYTES = 50_000
 
-    denied = _interesting_content_access_denied(request, item)
-    if denied:
-        return denied
 
+def _externalize_big_inline_scripts(html: str) -> str:
+    """r33: выносим большие inline-скрипты (MathJax и т.п.) в кэшируемые static-файлы."""
+    import hashlib
+    from django.conf import settings as _s
+
+    out_dir = Path(_s.STATIC_ROOT) / "interesting-inline"
+
+    def repl(m):
+        attrs = m.group(1) or ""
+        body = m.group(2)
+        if len(body) < _EXTERNALIZE_MIN_BYTES or re.search(r"\bsrc\s*=", attrs, re.I):
+            return m.group(0)
+        tm = re.search(r"\btype\s*=\s*[\"']?([^\"'\s>]+)", attrs, re.I)
+        if tm and tm.group(1).lower() not in ("text/javascript", "application/javascript"):
+            return m.group(0)
+        if re.search(r"\bid\s*=", attrs, re.I):
+            return m.group(0)
+        data = body.encode("utf-8")
+        name = hashlib.sha256(data).hexdigest()[:20] + ".js"
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            target = out_dir / name
+            if not target.exists():
+                tmp = target.with_suffix(".tmp")
+                tmp.write_bytes(data)
+                tmp.replace(target)
+        except OSError:
+            return m.group(0)
+        return f'<script src="/static/interesting-inline/{name}"></script>'
+
+    return _INLINE_SCRIPT_RE.sub(repl, html)
+
+
+def _interesting_view_source_key(item):
+    import os
+    try:
+        if item.archive:
+            st = os.stat(item.archive.path)
+            return ("a", item.archive.path, st.st_mtime_ns, st.st_size)
+        if item.file:
+            st = os.stat(item.file.path)
+            return ("f", item.file.path, st.st_mtime_ns, st.st_size)
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def _render_interesting_view_html(request, item, slug):
     from .lesson_archive import (
         archive_base_dir,
         find_html_entry,
@@ -5348,28 +5414,70 @@ def api_interesting_view(request, slug):
             if not base_href.endswith("/"):
                 base_href += "/"
             html = read_plain_archive_html(zf, html_entry, base_href)
-        html = inject_lesson_drawing_assets(html, request, f"interesting:{slug}")
-        return HttpResponse(html, content_type="text/html; charset=utf-8")
-
-    if item.file:
-        file_path = item.file.path
-        if not file_path.lower().endswith(".html"):
-            from django.http import FileResponse
-            import mimetypes
-
-            content_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
-            return FileResponse(open(file_path, "rb"), content_type=content_type)
-
+    else:
         file_dir = (item.file.name or "").replace("\\", "/").rsplit("/", 1)[0]
         path = f"/media/{file_dir}/" if file_dir else "/media/"
         base_href = request.build_absolute_uri(path)
         if not base_href.endswith("/"):
             base_href += "/"
-        html = read_plain_file_html(file_path, base_href)
-        html = inject_lesson_drawing_assets(html, request, f"interesting:{slug}")
-        return HttpResponse(html, content_type="text/html; charset=utf-8")
+        html = read_plain_file_html(item.file.path, base_href)
+    html = _externalize_big_inline_scripts(html)
+    return inject_lesson_drawing_assets(html, request, f"interesting:{slug}")
 
-    raise Http404("Материал не найден")
+
+def _drawing_assets_key():
+    import os
+    from .lesson_archive import _DRAWING_STATIC_DIR
+    key = []
+    for rel in ("css/lesson-slide-drawing.css", "js/lesson-slide-drawing.js"):
+        try:
+            key.append(os.stat(_DRAWING_STATIC_DIR / rel).st_mtime_ns)
+        except OSError:
+            key.append(0)
+    return tuple(key)
+
+
+@require_http_methods(["GET"])
+def api_interesting_view(request, slug):
+    import hashlib
+
+    item = get_object_or_404(_visible_interesting_queryset(request), slug=slug)
+
+    denied = _interesting_content_access_denied(request, item)
+    if denied:
+        return denied
+
+    if not item.archive and item.file and not item.file.path.lower().endswith(".html"):
+        from django.http import FileResponse
+        import mimetypes
+
+        file_path = item.file.path
+        content_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+        return FileResponse(open(file_path, "rb"), content_type=content_type)
+    if not item.archive and not item.file:
+        raise Http404("Материал не найден")
+
+    src_key = _interesting_view_source_key(item)
+    cache_key = (slug, request.get_host(), request.scheme, src_key, _drawing_assets_key()) if src_key else None
+    cached = _INTERESTING_VIEW_CACHE.get(cache_key) if cache_key else None
+    if cached is None:
+        html = _render_interesting_view_html(request, item, slug)
+        etag = '"' + hashlib.sha256(html.encode("utf-8")).hexdigest()[:32] + '"'
+        cached = (html, etag)
+        if cache_key:
+            if len(_INTERESTING_VIEW_CACHE) > 200:
+                _INTERESTING_VIEW_CACHE.clear()
+            _INTERESTING_VIEW_CACHE[cache_key] = cached
+    html, etag = cached
+
+    inm = request.META.get("HTTP_IF_NONE_MATCH", "")
+    if etag in [t.strip().removeprefix("W/") for t in inm.split(",")]:
+        resp = HttpResponse(status=304)
+    else:
+        resp = HttpResponse(html, content_type="text/html; charset=utf-8")
+    resp["ETag"] = etag
+    resp["Cache-Control"] = "private, no-cache"
+    return resp
 
 
 @require_http_methods(["GET"])

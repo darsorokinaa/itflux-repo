@@ -5,13 +5,14 @@ from django.conf import settings
 from django.views.static import serve
 
 from . import views
+from . import seo_tasks  # r36
 from . import seasonal_theme_api
 from . import variant_theme_api
 from Cabinet import homework_api
 from Cabinet import homework_notebooks
 from Cabinet import homework_task_files
 from Cabinet.subscription_api import PaymentWebhookView
-from Cabinet.views import api_teacher_application, api_teacher_community_feedback
+from Cabinet.views import api_teacher_application, api_teacher_community_feedback, api_school_request
 
 # MFA для /admin/ (TOTP). Включение: ADMIN_OTP_REQUIRED=true или prod DEBUG=False.
 # Доп. ограничение: ADMIN_OTP_ALLOWED_USERNAMES (по умолчанию admin_dasha, darsorokinaa).
@@ -48,6 +49,7 @@ urlpatterns = [
 
     path("api/csrf/", views.api_csrf, name="api_csrf"),
     path("api/teacher-applications/", api_teacher_application, name="api_teacher_applications"),
+    path("api/school-requests/", api_school_request, name="api_school_requests"),
     path(
         "api/teacher-community-feedback/",
         api_teacher_community_feedback,
@@ -301,6 +303,13 @@ urlpatterns = [
     re_path(r"^assets/(?P<relpath>.+)$", views.frontend_public_tree, {"prefix": "assets"}),
     path("robots.txt", views.robots_txt),
     path("sitemap.xml", views.sitemap_xml),
+    path("api/seo/meta/", views.api_seo_meta, name="api_seo_meta"),
+    # r36: SEO-страницы заданий из банка
+    path("zadaniya/<str:level>/<slug:subject>/", seo_tasks.task_hub),
+    path("zadaniya/<str:level>/<slug:subject>", seo_tasks.task_hub),
+    re_path(r"^zadaniya/(?P<level>[a-z]+)/(?P<subject>[\w-]+)/(?P<a>\d+)-(?P<b>\d+)/?$", seo_tasks.group_page),  # r45
+    path("zadaniya/<str:level>/<slug:subject>/<int:number>", seo_tasks.task_page),
+    path("zadaniya/<str:level>/<slug:subject>/<int:number>/", seo_tasks.task_page),
     re_path(r"^(?P<filename>yandex_[0-9a-f]+\.html)$", views.yandex_webmaster_verification),
     path("api/<str:level>/<str:subject>/tasks/", views.api_tasks),
     path("api/<str:level>/<str:subject>/subtopics/", views.api_subtopics),
