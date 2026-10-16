@@ -351,6 +351,8 @@ class PlanLifecycleTests(TestCase):
 
         first = self._event(1)
         second = self._event(8)
+        # r42: темы выбраны вручную — отмена их не сдвигает (авто-сдвиг: tests_plan_autolink_r42).
+        ScheduleEvent.objects.filter(pk__in=[first.pk, second.pk]).update(plan_item_auto=False)
         lesson_material = Material.objects.create(
             teacher=self.teacher,
             title="Конспект",
@@ -405,6 +407,8 @@ class PlanLifecycleTests(TestCase):
         self.assertEqual(first.lesson_plan_item_id, self.items[0].id)
         self.assertEqual(second.lesson_plan_item_id, self.items[1].id)
         self.assertEqual(third.lesson_plan_item_id, self.items[2].id)
+        # r42: ручной выбор тем — отмена не сдвигает (авто-сдвиг: tests_plan_autolink_r42).
+        ScheduleEvent.objects.filter(pk__in=[first.pk, second.pk, third.pk]).update(plan_item_auto=False)
 
         cancel_event_with_scope(
             first, changed_by=self.teacher, notify=False, plan_cancel_action="shift",

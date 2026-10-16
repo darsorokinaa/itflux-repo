@@ -157,14 +157,25 @@ class PlanSyncService:
             min_order = 0
         if start_order > min_order:
             qs = qs.filter(order__gte=start_order)
-        for item in qs:
+        # r41: тема, чьё занятие отменено/пропущено, снова свободна. Раньше любой
+        # scheduled_event (даже отменённый) делал тему «занятой», и новая серия
+        # оставалась без тем плана.
+        # Отменённое занятие по умолчанию «держит» свою тему (keep): сначала
+        # выдаём темы без занятий, и только если их нет — темы, у которых
+        # занятие лишь отменено/пропущено (например, отменили всю старую серию
+        # и создали новую).
+        free_statuses = {ScheduleEvent.Status.CANCELLED, ScheduleEvent.Status.SKIPPED}
+        fallback = None
+        for item in qs.select_related("scheduled_event"):
             if item.id in busy_ids:
                 continue
-            other = item.scheduled_event_id
-            if other and (exclude_event is None or other != exclude_event.pk):
+            other = item.scheduled_event
+            if other is not None and (exclude_event is None or other.pk != exclude_event.pk):
+                if other.status in free_statuses and fallback is None:
+                    fallback = item
                 continue
             return item
-        return None
+        return fallback
 
     NEAR_END_INFO = 5
     NEAR_END_WARN = 2
@@ -589,6 +600,12 @@ class PlanSyncService:
             event.pk,
             item.pk,
         )
+        try:
+            from .plan_autolink import shift_after_cancel
+
+            shift_after_cancel(event)
+        except Exception:
+            logger.exception("shift after cancel failed event=%s", event.pk)
         return action
 
     @classmethod

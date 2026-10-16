@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import CabinetIcon from "../CabinetIcons";
 import ConfirmActionModal from "../components/ConfirmActionModal";
 import PlanItemDetailModal from "../components/PlanItemDetailModal";
+import PlanWeeklyScheduleModal from "../components/PlanWeeklyScheduleModal";
 import { CabinetPageShell } from "../CabinetSectionUi";
 import EducationalLoading, { LOADING_MESSAGES } from "../../components/EducationalLoading";
 import {
@@ -151,6 +152,7 @@ export default function CabinetLessonPlanDetailPage() {
   const [actionError, setActionError] = useState("");
   const [publishing, setPublishing] = useState(false);
   const [canPublishCatalog, setCanPublishCatalog] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   usePageTitle(plan?.title || "План занятий");
 
   useEffect(() => {
@@ -327,6 +329,13 @@ export default function CabinetLessonPlanDetailPage() {
                 <button
                   type="button"
                   className="cb-btn cb-btn--outline"
+                  onClick={() => setScheduleOpen(true)}
+                >
+                  <CabinetIcon name="calendar" /> Расписание
+                </button>
+                <button
+                  type="button"
+                  className="cb-btn cb-btn--outline"
                   onClick={handleCopyPlan}
                   disabled={copying || deleting}
                 >
@@ -460,6 +469,14 @@ export default function CabinetLessonPlanDetailPage() {
           canEdit={!plan.isPublic}
           onClose={() => setSelectedItem(null)}
           onItemUpdated={handleItemUpdated}
+        />
+      ) : null}
+
+      {scheduleOpen ? (
+        <PlanWeeklyScheduleModal
+          planId={planId}
+          onClose={() => setScheduleOpen(false)}
+          onApplied={load}
         />
       ) : null}
 

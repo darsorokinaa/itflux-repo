@@ -24,14 +24,15 @@ function ruCount(n, one, few, many) {
 function limitLine(value, { one, few, many, unlimited, prefix = "до " }) {
   if (value == null) return unlimited || null;
   const n = Number(value);
-  if (!Number.isFinite(n)) return null;
+  // r36: нулевой лимит — функции нет в тарифе, «до 0 учеников» не показываем.
+  if (!Number.isFinite(n) || n <= 0) return null;
   return `${prefix}${n} ${ruCount(n, one, few, many)}`;
 }
 
 function monthlyLine(value, { one, few, many, unlimited }) {
   if (value == null) return unlimited || null;
   const n = Number(value);
-  if (!Number.isFinite(n)) return null;
+  if (!Number.isFinite(n) || n <= 0) return null;
   return `${n} ${ruCount(n, one, few, many)} в месяц`;
 }
 
@@ -226,4 +227,30 @@ export function buildPlanHighlights(plan, opts = {}) {
     ai,
     f.simulators && "Симуляторы",
   ].filter(Boolean);
+}
+
+/**
+ * r36: реальная выгода годовой оплаты по ценам тарифа (без выдуманных цифр).
+ * @returns {{ months: number, percent: number, saved: number, perMonth: number } | null}
+ */
+export function yearSavings(plan) {
+  const month = Number(plan?.price_month);
+  const year = Number(plan?.price_year);
+  if (!Number.isFinite(month) || !Number.isFinite(year) || month <= 0 || year <= 0) return null;
+  const full = month * 12;
+  if (year >= full) return null;
+  const saved = full - year;
+  return {
+    months: Math.round((saved / month) * 10) / 10,
+    percent: Math.round((saved / full) * 100),
+    saved,
+    perMonth: Math.round(year / 12),
+  };
+}
+
+export function yearSavingsText(plan) {
+  const s = yearSavings(plan);
+  if (!s) return null;
+  const fmt = (n) => new Intl.NumberFormat("ru-RU").format(Math.round(n));
+  return `${fmt(s.perMonth)} ₽/мес · выгода ${fmt(s.saved)} ₽ (−${s.percent}%) против помесячной оплаты`;
 }

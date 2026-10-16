@@ -133,3 +133,46 @@ def sync_plan_on_event_complete(sender, instance, created, **kwargs):
         logging.getLogger(__name__).exception(
             "Ошибка синхронизации плана для события #%s", instance.pk
         )
+
+
+
+# --- r42/r43: темы плана по порядку для будущих автоуроков (reflow) ----------
+
+@receiver(post_save, sender=ScheduleEvent)
+def reflow_on_event_save(sender, instance, created, **kwargs):
+    from django.utils import timezone
+
+    from .plan_autolink import LESSON_TYPES, schedule_reflow_on_commit
+
+    if instance.event_type not in LESSON_TYPES or not (instance.student_id or instance.group_id):
+        return
+    if instance.starts_at is None or instance.starts_at <= timezone.now():
+        return
+    schedule_reflow_on_commit(event_id=instance.pk)
+
+
+def _reflow_enrollment(sender, instance, **kwargs):
+    from .choices import EnrollmentStatus
+    from .plan_autolink import schedule_reflow_on_commit
+
+    if instance.status == EnrollmentStatus.ACTIVE:
+        schedule_reflow_on_commit(enrollment_ids=[instance.pk])
+
+
+def _reflow_plan_item(sender, instance, **kwargs):
+    from .plan_autolink import schedule_reflow_on_commit
+
+    schedule_reflow_on_commit(plan_id=instance.plan_id)
+
+
+def _connect_r43():
+    from django.db.models.signals import post_delete
+
+    from .models import LessonPlanEnrollment, LessonPlanItem
+
+    post_save.connect(_reflow_enrollment, sender=LessonPlanEnrollment, dispatch_uid="r43_reflow_enrollment")
+    post_save.connect(_reflow_plan_item, sender=LessonPlanItem, dispatch_uid="r43_reflow_plan_item")
+    post_delete.connect(_reflow_plan_item, sender=LessonPlanItem, dispatch_uid="r43_reflow_plan_item_delete")
+
+
+_connect_r43()

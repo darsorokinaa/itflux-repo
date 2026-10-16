@@ -381,6 +381,17 @@ def apply_students_timezone(*, teacher, student_ids=None, extra_student_ids=None
     Profile.objects.filter(user_id__in=user_ids).exclude(timezone=name).update(timezone=name)
 
 
+def _mark_auto_linked(events):
+    """r42: темы, выданные автоматически (не выбранные вручную)."""
+    ids = [ev.pk for ev in events if ev is not None and ev.pk]
+    if not ids:
+        return
+    ScheduleEvent.objects.filter(pk__in=ids, lesson_plan_item__isnull=False).update(plan_item_auto=True)
+    for ev in events:
+        if ev is not None and ev.lesson_plan_item_id:
+            ev.plan_item_auto = True
+
+
 def create_single_event(
     *,
     teacher,
@@ -513,6 +524,7 @@ def create_single_event(
 
         LessonLearningPlanSyncService.attach_event_to_student_plan(event, teacher=teacher)
         event.refresh_from_db()
+        _mark_auto_linked([event])
 
     log_change(event, changed_by=teacher, change_type=ScheduleChangeType.CREATED, new_data=event_snapshot(event))
     if notify and data.get("notify_participants", True) and not is_non_lesson:
@@ -669,6 +681,9 @@ def create_series(
         from .lesson_plan_content_sync import LessonLearningPlanSyncService
 
         PlanSyncService.assign_plan_items_to_events(events, first_item=first_item)
+        _mark_auto_linked(
+            [ev for ev in events if first_item is None or ev.pk != events[0].pk],
+        )
         for event in events:
             event.refresh_from_db()
             linked = event.lesson_plan_item
@@ -1151,6 +1166,7 @@ def update_event(event, *, changed_by, data, notify=True, sync_plan=True):
                 event.lesson_plan_item = value
             else:
                 event.lesson_plan_item_id = int(value)
+            event.plan_item_auto = False
             continue
         setattr(event, f, value)
     time_changed = False

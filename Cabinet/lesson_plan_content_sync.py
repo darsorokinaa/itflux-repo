@@ -220,7 +220,8 @@ class LessonLearningPlanSyncService:
 
         event.content_source = LessonContentSource.PLAN
         event.plan_sync_enabled = True
-        update_fields = ["lesson_plan_item", "content_source", "plan_sync_enabled", "updated_at"]
+        event.plan_item_auto = False
+        update_fields = ["lesson_plan_item", "content_source", "plan_sync_enabled", "plan_item_auto", "updated_at"]
 
         if event.plan_sync_enabled:
             cls._copy_item_fields_to_event(event, item, force_fields=CONTENT_FIELDS)

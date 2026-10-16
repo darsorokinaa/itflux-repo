@@ -2,6 +2,9 @@ from django.db import migrations
 
 
 def seed_catalog_plans(apps, schema_editor):
+    import sys
+    if "test" in sys.argv:  # сид на живых моделях не работает на чистой тестовой БД (r40)
+        return
     from Cabinet.catalog_plans import sync_all_catalog_plans
 
     sync_all_catalog_plans()

@@ -66,17 +66,29 @@ def event_zone(event):
 
 def linked_schedule_event_for_item(item):
     """Событие расписания, по которому у темы есть дата занятия."""
+    # Отменённые/пропущенные занятия календарь по умолчанию скрывает, поэтому
+    # план не должен показывать их дату и время как «запланированный урок» (r39).
     event = getattr(item, "scheduled_event", None) if getattr(item, "scheduled_event_id", None) else None
-    if event is not None and getattr(event, "lesson_plan_item_id", None) == item.id:
+    if (
+        event is not None
+        and getattr(event, "lesson_plan_item_id", None) == item.id
+        and getattr(event, "status", None) not in INACTIVE_EVENT_STATUSES
+    ):
         return event
     linked = getattr(item, "schedule_events_linked", None)
     if linked is None:
         return None
     rows = linked.all() if hasattr(linked, "all") else linked
     for ev in rows:
-        if getattr(ev, "lesson_plan_item_id", None) == item.id:
+        if (
+            getattr(ev, "lesson_plan_item_id", None) == item.id
+            and getattr(ev, "status", None) not in INACTIVE_EVENT_STATUSES
+        ):
             return ev
     return None
+
+
+INACTIVE_EVENT_STATUSES = frozenset({"cancelled", "skipped"})
 
 
 def plan_item_is_passed(item, *, now=None):
