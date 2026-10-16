@@ -8,7 +8,7 @@ import { b64Vecs } from "@tldraw/tlschema";
 import { DrawShapeUtil, getStrokePoints, getSvgPathFromStrokePoints } from "tldraw";
 
 /** Умереннее штатных 0.62 у пера: углы, петли и короткие штрихи не срезаются. */
-const LESSON_FREEHAND_STREAMLINE = 0.5;
+const LESSON_FREEHAND_STREAMLINE = 0.58;
 const LESSON_FREEHAND_WIDTH = 4.5;
 
 function coord(value) {
@@ -179,13 +179,18 @@ export function lessonDrawDashArray(dash, strokeWidth) {
   return undefined;
 }
 
+/* Базовая толщина пера до +1 в lessonDrawStrokeWidth: итог s=2, m=3, l=5, xl=8 px.
+   Штатные tldraw (theme 2 × 1/1.75/2.5/5 + 1) давали 3/4.5/6/11 — xl слишком жирный. */
+export const LESSON_DRAW_BASE_WIDTHS = { s: 1, m: 2, l: 4, xl: 7 };
+
 function displayValues(util, shape, colorMode) {
   const theme = util.editor.getCurrentTheme();
   const mode = colorMode || util.editor.getColorMode();
-  return {
+  const values = {
     ...util.options.getDefaultDisplayValues(util.editor, shape, theme, mode),
     ...util.options.getCustomDisplayValues(util.editor, shape, theme, mode),
   };
+  return values;
 }
 
 function LessonDrawMark({ shape, dv }) {
@@ -219,35 +224,28 @@ function LessonDrawMark({ shape, dv }) {
   );
 }
 
+/**
+ * Штатный штрих tldraw (DrawShapeUtil: толщины s/m/l/xl, давление пера, streamline,
+ * заливка svgInk) — рисуем ровно его вывод. Отличие от стока одно: <svg> растянут
+ * на всю область штриха с запасом. Контейнер фигуры стоит в начале штриха и имеет
+ * размер bounds, а точки бывают левее/выше нуля; без запаса iPad Safari не
+ * перерисовывал выступающую часть и оставлял «призраки».
+ */
 export class LessonDrawShapeUtil extends DrawShapeUtil {
-  getIndicatorPath(shape) {
-    const dv = displayValues(this, shape);
-    const strokeWidth = lessonDrawStrokeWidth(dv.strokeWidth, shape.props.scale);
-    const d = lessonDrawShapePath(
-      shape.props.segments,
-      shape.props.scaleX,
-      shape.props.scaleY,
-      false,
-      shape.props.isPen,
-      strokeWidth,
-    );
-    return new Path2D(d || "");
-  }
-
   component(shape) {
+    const stock = super.component(shape);
+    const dv = displayValues(this, shape);
+    const sw = lessonDrawStrokeWidth(dv.strokeWidth, shape.props.scale);
+    const b = this.editor.getShapeGeometry(shape).bounds;
+    const pad = Math.ceil(sw * 2 + 4);
+    const left = Math.floor(Math.min(0, b.minX) - pad);
+    const top = Math.floor(Math.min(0, b.minY) - pad);
+    const width = Math.ceil(Math.max(b.maxX, 1) - left + pad);
+    const height = Math.ceil(Math.max(b.maxY, 1) - top + pad);
     return (
-      <SVGContainer>
-        <LessonDrawMark shape={shape} dv={displayValues(this, shape)} />
+      <SVGContainer style={{ left, top, width, height }}>
+        <g transform={`translate(${-left} ${-top})`}>{stock?.props?.children}</g>
       </SVGContainer>
-    );
-  }
-
-  toSvg(shape, ctx) {
-    const scale = Number(shape.props.scale) > 0 ? shape.props.scale : 1;
-    return (
-      <g transform={`scale(${1 / scale})`}>
-        <LessonDrawMark shape={shape} dv={displayValues(this, shape, ctx?.colorMode)} />
-      </g>
     );
   }
 }

@@ -14,6 +14,9 @@ export function imageSurvivesEraser(shape, source, erasing) {
   return Boolean(erasing && source === "user" && shape?.type === "image");
 }
 
+/** Подмешивание coalesced-точек пера в Draw/Highlight на iOS. Выключено. */
+export const LESSON_IOS_DRAW_FILL = false;
+
 const ERASER_REPLAY = "__itfluxEraserReplay";
 
 /**
@@ -260,7 +263,9 @@ export function installCoalescedEraserInput(editor) {
   const onMove = (event) => {
     if (blockForeignPointer(event)) return;
     const eraserWants = shouldDensifyEraserMove(event, Boolean(editor.isIn?.("eraser")));
-    const drawWants = !eraserWants && shouldFillIosPenDraw(
+    // Не подмешиваем coalesced-точки в штрих на iOS: tldraw сам отключил их там
+    // (PR #6917); подмешанные точки дают лишнюю геометрию штриха.
+    const drawWants = LESSON_IOS_DRAW_FILL && !eraserWants && shouldFillIosPenDraw(
       event,
       editor.getCurrentToolId?.(),
       iosSkipsCoalesced,

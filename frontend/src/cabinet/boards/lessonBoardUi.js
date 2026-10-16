@@ -1,9 +1,11 @@
+import { LessonCursor } from "./lessonCursor";
 import LessonChrome from "./LessonChrome";
 import { LessonBoardToasts } from "./LessonSheetSwitcher";
 import { LessonPaperBackground } from "./LessonPaper.jsx";
 
 /** Официальные слоты tldraw. null отключает стандартную панель, не прячет её через CSS. */
 export const lessonBoardComponents = {
+  CollaboratorCursor: LessonCursor,
   Toolbar: null,
   Background: LessonPaperBackground,
   InFrontOfTheCanvas: LessonChrome,

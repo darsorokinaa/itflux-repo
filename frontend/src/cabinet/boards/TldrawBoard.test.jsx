@@ -144,7 +144,7 @@ describe("TldrawBoard", () => {
     view.rerender(boardTree());
     expect(syncCalls.length).toBeGreaterThan(0);
     expect(syncCalls.every((call) => call.roomId === BOARD)).toBe(true);
-    expect(syncCalls[0].shapeUtils.map((util) => util.type)).toEqual(["geo", "draw", "arrow", "formula", "graph", "task"]);
+    expect(syncCalls[0].shapeUtils.map((util) => util.type)).toEqual(["geo", "arrow", "formula", "graph", "task"]);
     expect(typeof syncCalls[0].uri).toBe("function");
     expect(typeof syncCalls[0].assets.upload).toBe("function");
     expect(typeof syncCalls[0].getUserPresence).toBe("function");

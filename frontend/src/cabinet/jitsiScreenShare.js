@@ -130,6 +130,9 @@ export function attachScreenSharePresence(api, { onChange, pollMs = 2500 } = {})
   let tileView = false;
   let displaySurface = "";
   let pollTimer = null;
+  // getConnectionStats до входа в конференцию бросает в iframe (P9.connectionQuality, room ещё нет);
+  // на WebKit этот запрос обрабатывается во время init и обрывает запуск Jitsi до сигналинга.
+  let joined = false;
 
   const emit = (reason = "update") => {
     if (disposed) return;
@@ -169,7 +172,7 @@ export function attachScreenSharePresence(api, { onChange, pollMs = 2500 } = {})
   };
 
   const refreshResolution = async () => {
-    if (!api || typeof api.getConnectionStats !== "function") return;
+    if (!joined || !api || typeof api.getConnectionStats !== "function") return;
     try {
       const stats = await api.getConnectionStats();
       const sized = extractTrackResolution(stats, sharingIds[0] || localId);
@@ -189,6 +192,7 @@ export function attachScreenSharePresence(api, { onChange, pollMs = 2500 } = {})
   };
 
   listen(api, "videoConferenceJoined", (event) => {
+    joined = true;
     localId = safeStr(event?.id);
     void refresh("joined");
   }, listeners);

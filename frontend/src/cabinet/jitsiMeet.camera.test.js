@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 
 import {
   applyJitsiCallChrome,
+  JITSI_FLOATING_TOOLBAR,
   applyJitsiCameraResolution,
   ensureJitsiIframeMediaAllow,
   buildJitsiAppData,
@@ -103,9 +104,9 @@ describe("meeting camera preference", () => {
     applyJitsiCallChrome(api, { custom: true });
     applyJitsiCallChrome(api, { expanded: true, floating: true });
     expect(commands[2][1].toolbarButtons).toEqual(["microphone"]);
-    expect(commands[3][1].toolbarButtons).toEqual([]);
-    expect(commands[3][1].toolbarConfig.alwaysVisible).toBe(false);
-    expect(buildJitsiConfigOverwrite({ floatingToolbar: true, expandedToolbar: true }).toolbarButtons).toEqual([]);
+    expect(commands[3][1].toolbarButtons).toEqual(JITSI_FLOATING_TOOLBAR);
+    expect(commands[3][1].toolbarConfig.alwaysVisible).toBe(true);
+    expect(buildJitsiConfigOverwrite({ floatingToolbar: true, expandedToolbar: true }).toolbarButtons).toEqual(JITSI_FLOATING_TOOLBAR);
     expect(commands[2][1].toolbarConfig.alwaysVisible).toBe(true);
     expect(buildJitsiConfigOverwrite({ expandedToolbar: true }).toolbarButtons).toContain("chat");
     expect(buildJitsiConfigOverwrite({ expandedToolbar: true }).toolbarButtons).toContain("settings");
@@ -260,13 +261,13 @@ describe("E: Jitsi appData.localStorageContent", () => {
     expect(url).not.toContain("appData.");
   });
 
-  it("strips null localStorageContent from iframe hash", () => {
+  it("replaces null localStorageContent in iframe hash with {} (WebKit needs the key)", () => {
     expect(stripNullJitsiLocalStorageContentFromUrl(
       "https://meet.example.test/room#appData.localStorageContent=null&config.prejoinPageEnabled=false",
-    )).toBe("https://meet.example.test/room#config.prejoinPageEnabled=false");
+    )).toBe("https://meet.example.test/room#appData.localStorageContent=%22%7B%7D%22&config.prejoinPageEnabled=false");
     expect(stripNullJitsiLocalStorageContentFromUrl(
       "https://meet.example.test/room#appData.localStorageContent=%22null%22",
-    )).not.toContain("localStorageContent");
+    )).toBe("https://meet.example.test/room#appData.localStorageContent=%22%7B%7D%22");
   });
 
   it("adds camera, microphone and autoplay to the conference iframe", () => {
@@ -285,7 +286,7 @@ describe("E: Jitsi appData.localStorageContent", () => {
       const iframe = document.createElement("iframe");
       iframe.src = "https://meet.example.test/room#appData.localStorageContent=null&config.x=1";
       expect(iframe.src).not.toContain("localStorageContent=null");
-      expect(iframe.src).not.toMatch(/appData\.localStorageContent=/);
+      expect(iframe.src).toContain("appData.localStorageContent=%22%7B%7D%22");
       expect(iframe.src).toContain("config.x=1");
     } finally {
       restore();

@@ -249,6 +249,7 @@ export function customColorEntriesFromChanges(changes) {
 }
 
 function applyLessonLaser(editor, hex) {
+  hex = "#ff1a1a"; // itflux r29: указка всегда красная
   const theme = editor.getCurrentTheme?.();
   if (!hex || !theme?.colors?.light || !theme?.colors?.dark) return;
   if (theme.colors.light.laser === hex && theme.colors.dark.laser === hex) return;

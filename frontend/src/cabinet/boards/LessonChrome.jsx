@@ -4,6 +4,7 @@ import { createShapeId } from "@tldraw/tlschema";
 import { useEditor, useValue } from "tldraw";
 
 import LessonContextBar from "./LessonContextBar";
+import { LessonTimerControls, LessonTimerWidget } from "./lessonTimer.jsx";
 import { LessonPaperControl } from "./LessonPaper.jsx";
 import LessonSheetSwitcher from "./LessonSheetSwitcher";
 import LessonRail from "./LessonToolbar";
@@ -153,6 +154,8 @@ function LessonTop({ onStudentView }) {
     }
   }
   return (
+    <>
+    <LessonTimerWidget />
     <header className="lesson-top" role="toolbar" aria-label="Доска" onPointerDown={(event) => editor.markEventAsHandled(event)}>
       <div className="lesson-topbar lesson-topbar--info">
         <div className="lesson-topbar__side">
@@ -178,7 +181,7 @@ function LessonTop({ onStudentView }) {
                   <Timer size={16} strokeWidth={1.8} aria-hidden="true" />
                   Таймер
                 </button>
-                {timerOpen ? <LessonTimer /> : null}
+                {timerOpen ? <LessonTimerControls /> : null}
                 <div className="lesson-board-menu__divider" aria-hidden="true" />
                 <LessonPaperControl inline />
               </div>
@@ -262,6 +265,7 @@ function LessonTop({ onStudentView }) {
         </div>
       </div>
     </header>
+    </>
   );
 }
 

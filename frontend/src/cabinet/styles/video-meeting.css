@@ -4780,3 +4780,23 @@ body.vl-room-fullscreen .student-cabinet-nav {
     flex: 1 1 calc(50% - 8px);
   }
 }
+
+/* itflux r30: «Завершить урок» иногда не нажимался.
+   1) Плавающее окно звонка (z 40–11050, position:fixed) по умолчанию стоит у правого верхнего края
+      и в режиме доски (--vl-header-height: 0) перекрывает правую часть шапки/дока, где кнопка.
+   2) Модалка подтверждения (.cb-modal-backdrop z 8000) открывалась ПОД окном звонка/оверлеями урока. */
+.video-lesson-page .video-lesson-header,
+.video-lesson-page .video-lesson-board-dock {
+  position: relative;
+  z-index: 11060;
+}
+.video-lesson-page .video-lesson-board-dock { position: absolute; }
+.video-lesson-header__actions .video-lesson-btn,
+.video-lesson-board-dock .video-lesson-btn {
+  position: relative;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+body:has(.video-lesson-page) .cb-modal-backdrop {
+  z-index: 13500;
+}

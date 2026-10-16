@@ -665,11 +665,11 @@ export function useInkColor() {
 }
 
 const THICKNESS_STEPS = [
+  { value: 1, bar: 1, label: "Очень тонкая" },
   { value: 4, bar: 2, label: "Тонкая" },
   { value: 8, bar: 4, label: "Средняя" },
   { value: 16, bar: 7, label: "Обычная" },
   { value: 28, bar: 11, label: "Жирная" },
-  { value: 48, bar: 16, label: "Очень жирная" },
 ];
 
 export function ThicknessSlider() {

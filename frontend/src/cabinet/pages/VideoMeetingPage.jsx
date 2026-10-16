@@ -3986,10 +3986,10 @@ export default function VideoMeetingPage() {
   } = useFloatingDrag({
     enabled: compactCall,
     resizable: compactCall && callView !== "minimized",
-    minWidth: callView === "minimized" ? 160 : 260,
+    minWidth: callView === "minimized" ? 160 : 320,
     minHeight: callView === "minimized"
       ? 40
-      : Math.round(260 / CALL_FRAME_ASPECT) + FLOATING_CALL_CHROME,
+      : Math.round(320 / CALL_FRAME_ASPECT) + FLOATING_CALL_CHROME,
     aspectRatio: callView === "minimized" ? 0 : CALL_FRAME_ASPECT,
     chromeHeight: callView === "minimized" ? 0 : FLOATING_CALL_CHROME,
     marginTop: boardChromeOpen ? 72 : 74,
@@ -4997,7 +4997,8 @@ export default function VideoMeetingPage() {
               />
             )}
           </div>
-          {compactCall && callView !== "minimized" ? (
+          {/* Jitsi: в плавающем окне штатная панель Jitsi внутри iframe; своя — только для LiveKit. */}
+          {compactCall && callView !== "minimized" && liveKitJoin ? (
             <FloatingCallTools
               expanded={callView === "expanded"}
               micOn={liveKitJoin ? Boolean(liveKitUi?.micOn) : localMicOn}

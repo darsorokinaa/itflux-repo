@@ -9,14 +9,18 @@ import { addBoardFiles, disposePdfNotice, installLessonColorSync, installLessonT
 import { installLessonSheets } from "./lessonSheets";
 import { installCoalescedEraserInput, keepImagesUnderEraser } from "./lessonEraser";
 import { lessonBoardComponents } from "./lessonBoardUi";
-import { LessonDrawShapeUtil } from "./lessonDrawShape";
+import { boardDebug, boardDebugMounted, debugBoardComponents } from "./boardDebug";
+import { installSyncHold } from "./lessonSyncHold";
+import { installLessonLaser } from "./lessonLaser";
+import { installLessonThumbnail } from "./lessonThumbnail";
+
+const boardComponents = debugBoardComponents(lessonBoardComponents);
 import { LessonGeoShapeUtil } from "./lessonGeoShape";
 import { LessonNoteShapeUtil, lessonCanvasShapeUtils, lessonShapeUtils, lessonTools, lessonUiOverrides } from "./lessonShapes";
 
 const lessonSyncShapeUtils = [
   LessonGeoShapeUtil,
-  LessonDrawShapeUtil,
-  ...defaultShapeUtils.filter((Util) => Util.type !== "geo" && Util.type !== "draw"),
+  ...defaultShapeUtils.filter((Util) => Util.type !== "geo"),
   ...lessonShapeUtils,
 ];
 const lessonTldrawOptions = { selectLockedShapes: true, maxPages: Infinity };
@@ -149,7 +153,11 @@ function lessonUserPresence(store, user) {
 
 function useLessonBoardSync({ boardId, roomId, users, assets }) {
   const uri = useCallback(() => lessonBoardConnectUri(boardId), [boardId]);
-  const getUserPresence = useCallback(lessonUserPresence, []);
+  // ?tldebug=nopresence — не отправлять присутствие (курсоры, выделение) в комнату.
+  const getUserPresence = useCallback(
+    boardDebug.has("nopresence") ? () => null : lessonUserPresence,
+    [],
+  );
   return useSync({
     uri,
     roomId,
@@ -240,28 +248,33 @@ function TldrawBoardSynced({
       store={sync.store}
       licenseKey={licenseKey}
       options={lessonTldrawOptions}
-      shapeUtils={[LessonGeoShapeUtil, LessonNoteShapeUtil, LessonDrawShapeUtil, ...lessonCanvasShapeUtils]}
+      shapeUtils={[LessonGeoShapeUtil, LessonNoteShapeUtil, ...lessonCanvasShapeUtils]}
       tools={lessonTools}
       overrides={lessonUiOverrides}
-      components={lessonBoardComponents}
+      components={boardComponents}
       onMount={(editor) => {
         assets.bind?.(editor);
         keepImagesUnderEraser(editor);
         const disposeColors = installLessonColorSync(editor);
+        const disposeLaser = installLessonLaser(editor);
         editor.user.updateUserPreferences({
           colorScheme: "light",
           name: displayName,
           color,
         });
         if (!canEdit) editor.updateInstanceState({ isReadonly: true });
-        const disposeSheets = installLessonSheets(editor, {
+        boardDebugMounted();
+        if (boardDebug.has("log")) window.__tlEditor = editor;
+        const disposeSyncHold = installSyncHold(editor);
+        const disposeSheets = boardDebug.has("nosheets") ? () => {} : installLessonSheets(editor, {
           userId,
           boardId,
           storage: window.localStorage,
         });
-        const stopReveal = revealBoardContent(editor);
-        const disposeEraserInput = installCoalescedEraserInput(editor);
+        const stopReveal = boardDebug.has("nosheets") ? () => {} : revealBoardContent(editor);
+        const disposeEraserInput = boardDebug.has("noinput") ? () => {} : installCoalescedEraserInput(editor);
         const disposeThickness = installLessonThickness(editor);
+        const disposeThumbnail = installLessonThumbnail(editor, { boardId, canEdit });
         if (typeof editor.registerExternalContentHandler === "function") {
           editor.registerExternalContentHandler("files", (content) => (
             addBoardFiles(editor, content?.files, content?.point)
@@ -269,10 +282,13 @@ function TldrawBoardSynced({
         }
         return () => {
           stopReveal();
+          disposeThumbnail();
           disposePdfNotice(editor);
           disposeThickness();
+          disposeSyncHold();
           disposeEraserInput();
           disposeColors();
+          disposeLaser();
           disposeSheets();
         };
       }}

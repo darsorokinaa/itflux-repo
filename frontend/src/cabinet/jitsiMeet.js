@@ -88,6 +88,7 @@ function disposeActiveExternalApi() {
 }
 
 export function jitsiExternalApiScriptUrl(domain, scriptUrl = "") {
+  if (String(domain || "").replace(/^https?:\/\//, "").split("/")[0] === "lesson.itflux-academy.ru") return `${window.location.origin}/jitsi_external_api.min.js`;
   const explicit = String(scriptUrl || "").trim();
   const host = String(domain || "").replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0];
   if (explicit) {
@@ -107,7 +108,7 @@ export function jitsiExternalApiScriptUrl(domain, scriptUrl = "") {
     }
   }
   if (!host) return "";
-  return `https://${host}/libs/external_api.min.js`;
+  return host === "lesson.itflux-academy.ru" ? "/jitsi_external_api.min.js" : `https://${host}/libs/external_api.min.js`;
 }
 
 export function resolveJitsiApiRoomName(config) {
@@ -329,6 +330,29 @@ export function setMeetingMicEnabled(meetingUuid, enabled) {
   }
 }
 
+const JITSI_SAME_ORIGIN_SOURCE_HOST = "lesson.itflux-academy.ru";
+const JITSI_SAME_ORIGIN_PAGE_HOSTS = ["itflux-academy.ru", "www.itflux-academy.ru", "itflux.ru", "www.itflux.ru"];
+
+export function isAppleTouchDevice() {
+  if (typeof navigator === "undefined") return false;
+  return /iPad|iPhone|iPod/.test(navigator.userAgent || "")
+    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+
+/**
+ * iPad/iPhone: новые TLS-соединения к lesson.* теряются в сети, поэтому iframe, BOSH и websocket
+ * ведём через уже открытый хост страницы: https://<host>/jitsi/ (nginx проксирует на lesson.*).
+ * XMPP-домены (hosts.domain/muc) и JWT остаются lesson.itflux-academy.ru.
+ */
+export function resolveJitsiFrameDomain(domain) {
+  const clean = String(domain || "").replace(/^https?:\/\//, "").replace(/\/$/, "");
+  if (clean.toLowerCase() !== JITSI_SAME_ORIGIN_SOURCE_HOST) return clean;
+  if (typeof window === "undefined" || !isAppleTouchDevice()) return clean;
+  const pageHost = String(window.location?.host || "").toLowerCase();
+  if (!JITSI_SAME_ORIGIN_PAGE_HOSTS.includes(pageHost)) return clean;
+  return `${pageHost}/jitsi`;
+}
+
 export function shouldPreferBosh(domain) {
   const host = String(domain || "")
     .replace(/^https?:\/\//, "")
@@ -439,11 +463,14 @@ export const JITSI_CUSTOM_TOOLBAR = ["microphone"];
 /** В плавающем окне панель Jitsi лежит поверх кадра. Кнопки рисует страница, под видео. */
 export const JITSI_FLOATING_TOOLBAR_CONFIG = { alwaysVisible: false, initialTimeout: 0, timeout: 0 };
 
+/** Плавающее окно: штатная панель Jitsi, короткий набор кнопок (без своей панели страницы). */
+export const JITSI_FLOATING_TOOLBAR = ["microphone", "camera", "desktop", "tileview", "hangup"];
+
 export function jitsiCallChromeConfig(expanded, { custom = false, floating = false } = {}) {
   if (floating) {
     return {
-      toolbarButtons: [],
-      toolbarConfig: JITSI_FLOATING_TOOLBAR_CONFIG,
+      toolbarButtons: JITSI_FLOATING_TOOLBAR,
+      toolbarConfig: JITSI_TOOLBAR_VISIBLE,
     };
   }
   if (custom && !expanded) {
@@ -521,11 +548,11 @@ export function buildJitsiConfigOverwrite({
     disableModeratorIndicator: false,
     enableClosePage: false,
     toolbarButtons: floatingToolbar
-      ? []
+      ? JITSI_FLOATING_TOOLBAR
       : customChrome
         ? JITSI_CUSTOM_TOOLBAR
         : (expandedToolbar ? JITSI_EXPANDED_TOOLBAR : JITSI_COMPACT_TOOLBAR),
-    toolbarConfig: floatingToolbar ? JITSI_FLOATING_TOOLBAR_CONFIG : JITSI_TOOLBAR_VISIBLE,
+    toolbarConfig: JITSI_TOOLBAR_VISIBLE,
     // 1:1 режим Jitsi оставляет один крупный кадр. Выключение локальной камеры
     // переносит аватар ученика на сцену и прячет учителя в обрезанный filmstrip.
     disable1On1Mode: true,
@@ -537,7 +564,8 @@ export function buildJitsiConfigOverwrite({
     // но нет звука/видео». Медиа идёт через JVB.
     p2p: { enabled: false },
     // XMPP websocket на своём Prosody может отдавать 501. На 8x8 и meet.jit.si BOSH не форсируем.
-    preferBosh: shouldPreferBosh(domain),
+    // iPad/iPhone: новое TLS-соединение для websocket часто теряется в сети, BOSH идёт по уже открытому HTTP/2.
+    preferBosh: typeof navigator !== "undefined" && (/iPad|iPhone|iPod/.test(navigator.userAgent || "") || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)),
     // Повторный вход с тем же JWT user.id (обновление, мини-окно, проверка связи)
     // иначе Prosody отвечает not-allowed → «Ошибка аутентификации».
     replaceParticipant: true,
@@ -653,17 +681,22 @@ export function readJitsiLocalStorageContent() {
   }
 }
 
+// Jitsi парсит значение дважды (parseURLParams, затем JSON.parse) → нужна JSON-строка "{}".
+const JITSI_EMPTY_LOCAL_STORAGE_CONTENT = "%22%7B%7D%22";
+
 export function stripNullJitsiLocalStorageContentFromUrl(url) {
   const raw = String(url || "");
   const hashIdx = raw.indexOf("#");
   if (hashIdx < 0) return raw;
   const base = raw.slice(0, hashIdx);
   const hash = raw.slice(hashIdx + 1);
-  const kept = hash.split("&").filter((part) => {
-    if (!part) return false;
+  // Ключ НЕ удаляем: WebKit (iPad/Safari) в iframe всегда читает appData.localStorageContent;
+  // без ключа JSON.parse(undefined) падает раньше setLocalStorageDisabled, и Jitsi рушится
+  // (P9.connectionQuality) до сигналинга. null/невалидное заменяем на пустой объект {}.
+  const kept = hash.split("&").filter(Boolean).map((part) => {
     const eq = part.indexOf("=");
     const key = eq >= 0 ? part.slice(0, eq) : part;
-    if (key !== "appData.localStorageContent") return true;
+    if (key !== "appData.localStorageContent") return part;
     const value = eq >= 0 ? part.slice(eq + 1) : "";
     let decoded = value;
     try {
@@ -671,7 +704,10 @@ export function stripNullJitsiLocalStorageContentFromUrl(url) {
     } catch {
       decoded = value;
     }
-    return hasValidJitsiLocalStorageContent(decoded);
+    const trimmed = String(decoded || "").trim();
+    const empty = !trimmed || ["null", "undefined", '"null"', '"undefined"', '""'].includes(trimmed);
+    if (!empty) return part;
+    return `${key}=${JITSI_EMPTY_LOCAL_STORAGE_CONTENT}`;
   });
   return kept.length ? `${base}#${kept.join("&")}` : base;
 }
@@ -1021,13 +1057,13 @@ export function buildJitsiEmbedUrl(config) {
   ];
 
   if (shouldPreferBosh(domain)) {
-    hashParts.push("config.preferBosh=true");
+    hashParts.push("config.preferBosh=false");
   }
   const q = params.toString();
   const pathRoom = encodeConferencePath(resolveJitsiApiRoomName(config));
   // Не передаём appData.localStorageContent: Jitsi падает на Object.keys(null).
   return stripNullJitsiLocalStorageContentFromUrl(
-    `https://${domain}/${pathRoom}${q ? `?${q}` : ""}#${hashParts.join("&")}`,
+    `https://${resolveJitsiFrameDomain(domain)}/${pathRoom}${q ? `?${q}` : ""}#${hashParts.join("&")}`,
   );
 }
 
@@ -1435,7 +1471,9 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
   disposeActiveExternalApi();
   let api;
   try {
-    api = new JitsiMeetExternalAPI(domain, options);
+    const frameDomain = resolveJitsiFrameDomain(domain);
+    if (frameDomain !== domain) console.info("[Jitsi] same-origin frame domain", { frameDomain });
+    api = new JitsiMeetExternalAPI(frameDomain, options);
     activeExternalApi = api;
   } finally {
     unhookCreate();

@@ -52,7 +52,8 @@ describe("lesson eraser pointer", () => {
     expect(shouldFillIosPenDraw({ ...penMove, buttons: 0, pressure: 0 }, "draw", true)).toBe(false);
   });
 
-  it("injects only confirmed coalesced pen samples and ignores a second pointer", () => {
+  // LESSON_IOS_DRAW_FILL=false: подмешивание coalesced в штрих на iOS выключено.
+  it.skip("injects only confirmed coalesced pen samples and ignores a second pointer", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
     const moves = [];

@@ -72,17 +72,18 @@ export function presetCallFrame(view, viewport = viewportSize(), {
   const vw = viewport?.width ?? 1280;
   const vh = viewport?.height ?? 720;
   const chrome = Math.max(0, chromeHeight);
-  const maxW = Math.max(260, vw - 24);
+  // Jitsi при ширине <300px включает reduced UI и убирает видео-плёнку — держим ≥320.
+  const maxW = Math.max(320, vw - 24);
   const maxOuter = Math.max(chrome + 120, vh - marginTop - 24);
   const maxVideo = Math.max(120, maxOuter - chrome);
   const want = view === "expanded"
     ? Math.min(960, vw - 24)
     : Math.min(vw < 900 ? 320 : 480, vw - 32);
-  let width = Math.min(Math.max(260, want), maxW);
+  let width = Math.min(Math.max(320, want), maxW);
   let video = Math.round(width / aspectRatio);
   if (video > maxVideo) {
     video = Math.round(maxVideo);
-    width = Math.round(video * aspectRatio);
+    width = Math.max(320, Math.round(video * aspectRatio));
   }
   return { width, height: video + chrome };
 }
