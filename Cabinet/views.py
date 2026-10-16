@@ -138,7 +138,16 @@ def api_login(request):
         logger.info("login failed reason=bad_password user=%s", user.id)
         return JsonResponse({"ok": False, "error": "Неверный логин или пароль"}, status=403)
 
-    access_error = _profile_access_error(auth_user.profile)
+    # r36: служебные учётки без профиля кабинета давали 500 (RelatedObjectDoesNotExist).
+    try:
+        auth_profile = auth_user.profile
+    except Profile.DoesNotExist:
+        logger.warning("login failed reason=no_profile user=%s", auth_user.id)
+        return JsonResponse(
+            {"ok": False, "error": "У этой учётной записи нет профиля кабинета. Обратитесь в поддержку."},
+            status=403,
+        )
+    access_error = _profile_access_error(auth_profile)
     if access_error:
         return JsonResponse({"ok": False, "error": access_error}, status=403)
 
@@ -352,6 +361,17 @@ def api_register(request):
             )
         except Exception:
             pass
+
+    # r52: согласие на обработку ПД (отдельный документ) и добровольное согласие на рекламу.
+    try:
+        from .r52_consent import grant_marketing, grant_pd
+
+        if data.get("pd_consent"):
+            grant_pd(user, source="registration_email", request=request)
+        if data.get("marketing_email_consent"):
+            grant_marketing(user, "email_marketing", source="registration_email", request=request)
+    except Exception:
+        logger.exception("r52 consent at registration failed user=%s", user.id)
 
     login(request, user)
     invite_result = None
@@ -1651,3 +1671,130 @@ def api_teacher_community_feedback(request):
         "message": "Спасибо! Ваше сообщение отправлено. Именно такие отзывы помогают развивать платформу.",
     })
 
+
+
+@require_http_methods(["POST"])
+def api_school_request(request):
+    """r36: публичная заявка от школы/ОЦ (вместо ссылки в Telegram). Honeypot + rate limit."""
+    import re as _re
+    from django.core.validators import validate_email
+    from django.core.exceptions import ValidationError
+    from .models import SchoolRequest
+
+    if not rate_limit_check(request, "school_request", 5, 3600):
+        return rate_limit_json_response("school_request")
+    try:
+        data = json.loads(request.body.decode("utf-8") or "{}")
+    except (TypeError, ValueError, UnicodeDecodeError):
+        return JsonResponse({"ok": False, "error": "Некорректный JSON"}, status=400)
+    if not isinstance(data, dict):
+        return JsonResponse({"ok": False, "error": "Некорректные данные"}, status=400)
+
+    ok_msg = "Спасибо! Мы свяжемся с вами в ближайшее время."
+    # Honeypot: скрытое поле заполняют только боты; отвечаем «успехом», ничего не сохраняя.
+    if str(data.get("website") or "").strip():
+        logger.info("school_request honeypot hit")
+        return JsonResponse({"ok": True, "message": ok_msg})
+    # Слишком быстрая отправка формы (меньше 3 секунд с открытия) — тоже бот.
+    try:
+        elapsed = float(data.get("elapsed_ms") or 0)
+    except (TypeError, ValueError):
+        elapsed = 0
+    if 0 < elapsed < 3000:
+        logger.info("school_request too fast elapsed=%s", elapsed)
+        return JsonResponse({"ok": True, "message": ok_msg})
+
+    name = str(data.get("name") or "").strip()[:200]
+    school = str(data.get("school") or "").strip()[:300]
+    role = str(data.get("role") or "").strip()[:120]
+    phone = str(data.get("phone") or "").strip()[:64]
+    email = str(data.get("email") or "").strip()[:254]
+    message = str(data.get("message") or "").strip()[:5000]
+    consent = data.get("consent") is True
+    # r50: одно поле «Телефон или e-mail» + число преподавателей/учеников.
+    contact = str(data.get("contact") or "").strip()[:254]
+    if contact and not phone and not email:
+        if "@" in contact:
+            email = contact
+        else:
+            phone = contact
+
+    def _count(v):
+        try:
+            n = int(str(v or "").strip())
+        except (TypeError, ValueError):
+            return None
+        return n if 0 < n < 1000000 else None
+
+    teachers_count = _count(data.get("teachers_count"))
+    students_count = _count(data.get("students_count"))
+
+    if not name:
+        return JsonResponse({"ok": False, "error": "Укажите имя"}, status=400)
+    if not school:
+        return JsonResponse({"ok": False, "error": "Укажите школу или организацию"}, status=400)
+    if not phone and not email:
+        return JsonResponse({"ok": False, "error": "Укажите телефон или e-mail"}, status=400)
+    if email:
+        try:
+            validate_email(email)
+        except ValidationError:
+            return JsonResponse({"ok": False, "error": "Проверьте email"}, status=400)
+    if phone and len(_re.sub(r"\D", "", phone)) < 10:
+        return JsonResponse({"ok": False, "error": "Проверьте номер телефона"}, status=400)
+    if not consent:
+        return JsonResponse({"ok": False, "error": "Нужно согласие на обработку персональных данных"}, status=400)
+    if _re.search(r"https?://", name + school):
+        return JsonResponse({"ok": True, "message": ok_msg})
+
+    req = SchoolRequest.objects.create(
+        name=name, school=school, role=role, phone=phone, email=email, message=message,
+        contact=contact or email or phone, teachers_count=teachers_count, students_count=students_count,
+        consent=True, ip_address=client_ip(request) or None,
+        user_agent=(request.META.get("HTTP_USER_AGENT") or "")[:512],
+    )
+    try:
+        from Generator.telegram_utils import escape_telegram_html as _e, send_telegram_message
+    except Exception:
+        try:
+            from Generator.Generator.telegram_utils import escape_telegram_html as _e, send_telegram_message
+        except Exception:
+            send_telegram_message = None
+    if send_telegram_message:
+        try:
+            text = (
+                f"🏫 <b>Заявка от школы #{req.id}</b>\n"
+                f"Имя: {_e(name)}\nОрганизация: {_e(school)}\n"
+                + (f"Роль: {_e(role)}\n" if role else "")
+                + (f"Телефон: {_e(phone)}\n" if phone else "")
+                + (f"Email: {_e(email)}\n" if email else "")
+                + (f"Преподавателей: {teachers_count}\n" if teachers_count else "")
+                + (f"Учеников: {students_count}\n" if students_count else "")
+                + (f"\n{_e(message[:1500])}" if message else "")
+            )
+            send_telegram_message(text)
+        except Exception:
+            logger.exception("school_request telegram notify failed id=%s", req.id)
+    # r50: копия заявки владельцу на почту (только на адрес владельца, не пользователю).
+    try:
+        from django.conf import settings as _s
+        from django.core.mail import send_mail
+
+        if getattr(_s, "EMAIL_HOST_USER", "") and getattr(_s, "EMAIL_HOST_PASSWORD", ""):
+            send_mail(
+                f"Заявка «Школа» #{req.id}: {school}",
+                (
+                    f"Имя: {name}\nОрганизация: {school}\nКонтакт: {contact or email or phone}\n"
+                    f"Телефон: {phone or '—'}\nE-mail: {email or '—'}\n"
+                    f"Преподавателей: {teachers_count or '—'}\nУчеников: {students_count or '—'}\n\n{message}\n\n"
+                    f"Админка: /admin/Cabinet/schoolrequest/{req.id}/change/"
+                ),
+                getattr(_s, "DEFAULT_FROM_EMAIL", None),
+                [getattr(_s, "SCHOOL_REQUEST_NOTIFY_EMAIL", "itflux.academy@yandex.ru")],
+                fail_silently=False,
+            )
+        else:
+            logger.warning("school_request email skipped: SMTP password not configured id=%s", req.id)
+    except Exception:
+        logger.exception("school_request email notify failed id=%s", req.id)
+    return JsonResponse({"ok": True, "id": req.id, "message": ok_msg})

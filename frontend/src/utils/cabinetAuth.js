@@ -126,6 +126,10 @@ export function rememberCabinetSnapshot(key, value) {
   else cabinetSnapshots.set(key, value);
 }
 
+/** r49: страница не должна ждать ответа дольше 10 с — дальше показываем ошибку и «Повторить». */
+export const CABINET_GET_TIMEOUT_MS = 10000;
+export const CABINET_TIMEOUT_MESSAGE = "Сервер не ответил за 10 секунд. Проверьте соединение и нажмите «Повторить».";
+
 /** Timeouts by request class. 0 means no timer. Callers may still pass timeoutMs. */
 export function resolveCabinetTimeout(path, options = {}) {
   if (options.timeoutMs === 0) return 0;
@@ -134,7 +138,7 @@ export function resolveCabinetTimeout(path, options = {}) {
   if (options.upload) return 300000;
   const normalized = String(path || "");
   if (normalized.includes("/ai/") && method !== "GET") return 120000;
-  if (method === "GET" || method === "HEAD") return 20000;
+  if (method === "GET" || method === "HEAD") return CABINET_GET_TIMEOUT_MS;
   return 45000;
 }
 
@@ -180,6 +184,14 @@ async function cabinetFetch(path, options = {}) {
       headers,
       signal: timeout.signal,
     });
+  } catch (err) {
+    if (err?.name === "AbortError" && !options.signal?.aborted) {
+      const e = new Error(CABINET_TIMEOUT_MESSAGE);
+      e.code = "TIMEOUT";
+      e.status = 0;
+      throw e;
+    }
+    throw err;
   } finally {
     timeout.clear();
   }
@@ -1261,6 +1273,14 @@ async function cabinetFetchMultipart(path, formData, { method = "POST", timeoutM
       headers,
       signal: timeout.signal,
     });
+  } catch (err) {
+    if (err?.name === "AbortError" && !options.signal?.aborted) {
+      const e = new Error(CABINET_TIMEOUT_MESSAGE);
+      e.code = "TIMEOUT";
+      e.status = 0;
+      throw e;
+    }
+    throw err;
   } finally {
     timeout.clear();
   }
@@ -1356,6 +1376,17 @@ export function fetchLessonPlans(params = {}) {
   });
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return cabinetFetch(`/lesson-plans/${suffix}`, { method: "GET" });
+}
+
+export function fetchPlanWeeklySchedule(id) {
+  return cabinetFetch(`/lesson-plans/${id}/weekly-schedule/`, { method: "GET" });
+}
+
+export function submitPlanWeeklySchedule(id, body) {
+  return cabinetFetch(`/lesson-plans/${id}/weekly-schedule/`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 export function fetchLessonPlan(id) {
@@ -1622,6 +1653,24 @@ export function updateInteractiveBoard(id, payload) {
   return cabinetFetch(`/interactive-boards/${id}/`, {
     method: "PATCH",
     body: JSON.stringify(payload),
+  });
+}
+
+export function fetchBoardMergeSuggestions() {
+  return cabinetFetch("/interactive-boards/merge-suggestions/");
+}
+
+export function mergeInteractiveBoards(payload) {
+  return cabinetFetch("/interactive-boards/merge/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function undoBoardMerge(mergeId) {
+  return cabinetFetch("/interactive-boards/merge-undo/", {
+    method: "POST",
+    body: JSON.stringify({ merge_id: mergeId }),
   });
 }
 

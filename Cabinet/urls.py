@@ -1,8 +1,13 @@
+from . import social_auth  # r36
 from django.urls import path, include
 
 from . import avatar_api, views
 
 urlpatterns = [
+    # r36: Яндекс ID / VK ID
+    path("oauth/providers/", social_auth.oauth_providers, name="oauth_providers"),
+    path("oauth/<str:provider>/start/", social_auth.oauth_start, name="oauth_start"),
+    path("oauth/<str:provider>/callback/", social_auth.oauth_callback, name="oauth_callback"),
     path("me/", views.api_me, name="cabinet_api_me"),
     path("login/", views.api_login, name="cabinet_api_login"),
     path("register/", views.api_register, name="cabinet_api_register"),

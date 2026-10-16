@@ -10,6 +10,7 @@ import {
   fetchReferralPreview,
 } from "../utils/cabinetAuth";
 import { usePageTitle } from "../cabinet/hooks/usePageTitle";
+import SocialLoginButtons from "../components/SocialLoginButtons";
 import { safeReturnPath, takeReturnPath } from "../accessGate/accessGate";
 import {
   inviteAuthFollowUp,
@@ -18,6 +19,8 @@ import {
 } from "../cabinet/inviteAuth";
 import { captureAcquisition, readAcquisition } from "../cabinet/activationAnalytics";
 import { authLeadForIntent, inferValueIntent, trackValueGoal } from "../utils/valuePath";
+import { MARKETING_EMAIL_TEXT } from "../r52/consentTexts";
+import "../r52/r52.css";
 
 const ROLE_OPTIONS = [
   { value: "student", label: "Ученик" },
@@ -58,6 +61,7 @@ export default function CabinetAuthPage() {
   const [referralPreview, setReferralPreview] = useState(null);
 
   const [loginForm, setLoginForm] = useState({ login: "", password: "" });
+  const [consents, setConsents] = useState({ pd: false, mkt: false });
   const [forgotLogin, setForgotLogin] = useState("");
   const [resetForm, setResetForm] = useState({ password: "", password_confirm: "" });
   const valueIntent = inferValueIntent(redirectTo);
@@ -241,6 +245,10 @@ export default function CabinetAuthPage() {
   const onRegisterSubmit = async (event) => {
     event.preventDefault();
     setError("");
+    if (!consents.pd) {
+      setError("Отметьте согласие на обработку персональных данных — без него регистрация невозможна.");
+      return;
+    }
     setSubmitting(true);
     try {
       const payload = authPayload({
@@ -250,6 +258,8 @@ export default function CabinetAuthPage() {
           : inviteToken
             ? "student"
             : (hasReferralSignup || referralPreview || valueIntent ? "teacher" : registerForm.role),
+        pd_consent: consents.pd,
+        marketing_email_consent: consents.mkt,
       });
       if (valueIntent === "lesson") trackValueGoal("signup_from_lesson");
       if (valueIntent === "tasks") trackValueGoal("signup_from_generator");
@@ -408,6 +418,45 @@ export default function CabinetAuthPage() {
             {inviteToken ? "Создать аккаунт" : "Регистрация"}
           </button>
         </div>
+        ) : null}
+
+        {mode === "register" ? (
+          <div className="r52-auth-consents">
+            <label className="r52-check">
+              <input
+                type="checkbox"
+                checked={consents.pd}
+                onChange={(e) => setConsents((prev) => ({ ...prev, pd: e.target.checked }))}
+              />
+              <span>
+                Я даю <Link to="/personal-data-consent" target="_blank" className="cabinet-auth-link">согласие на обработку персональных данных</Link>{" "}
+                и ознакомлен(а) с <Link to="/privacy" target="_blank" className="cabinet-auth-link">политикой обработки персональных данных</Link>
+                <b className="r52-req" aria-label="обязательно">*</b>
+              </span>
+            </label>
+            <label className="r52-check">
+              <input
+                type="checkbox"
+                checked={consents.mkt}
+                onChange={(e) => setConsents((prev) => ({ ...prev, mkt: e.target.checked }))}
+              />
+              <span>{MARKETING_EMAIL_TEXT} <em>Необязательно.</em></span>
+            </label>
+          </div>
+        ) : null}
+
+        {(mode === "login" || mode === "register") && !inviteToken && !parentInviteToken ? (
+          <SocialLoginButtons
+            nextPath={safeReturnPath(redirectTo) || "/cabinet"}
+            role={mode === "register" ? "teacher" : ""}
+            consent={mode === "register" ? consents : null}
+            onConsentMissing={() => setError("Отметьте согласие на обработку персональных данных, чтобы зарегистрироваться через Яндекс ID или VK ID.")}
+          />
+        ) : null}
+        {!error && new URLSearchParams(location.search).get("oauth_error") ? (
+          <p className="cabinet-auth-error" role="alert">
+            {new URLSearchParams(location.search).get("oauth_error")}
+          </p>
         ) : null}
 
         {error ? (
@@ -605,11 +654,11 @@ export default function CabinetAuthPage() {
         )}
 
         <p className="cabinet-auth-footer">
-          Продолжая, вы соглашаетесь с{" "}
-          <Link to="/privacy" className="cabinet-auth-link">
-            политикой конфиденциальности
-          </Link>
-          .
+          <Link to="/privacy" className="cabinet-auth-link">Политика обработки персональных данных</Link>
+          {" · "}
+          <Link to="/personal-data-consent" className="cabinet-auth-link">Согласие на обработку ПД</Link>
+          {" · "}
+          <Link to="/offer" className="cabinet-auth-link">Оферта</Link>
         </p>
       </div>
     </div>
