@@ -165,9 +165,21 @@ def _media_name(value: str) -> str:
     return name
 
 
+SOURCE_LABELS = {
+    "files": "Мои файлы",
+    "materials": "Материалы",
+    "boards": "Интерактивные доски",
+    "interactives": "Интерактивы",
+    "homework": "Домашние задания",
+    "tasks": "Мой банк задач",
+    "notebooks": "Тетради ДЗ",
+}
+
+
 class _BlobSet:
     def __init__(self):
         self._items: dict[str, dict[str, Any]] = {}
+        self.source = "files"
 
     def add(self, key: str, size: int = 0, *, name: str = "", mime: str = "", extension: str = "") -> None:
         key = _media_name(key) if "://" in str(key) or str(key).startswith("/") else str(key or "").strip()
@@ -182,6 +194,7 @@ class _BlobSet:
         if not size:
             size = physical_size(key, 0)
         self._items[key] = {
+            "source": self.source,
             "size": size,
             "name": name or os.path.basename(key),
             "mime": mime or "",
@@ -193,6 +206,20 @@ class _BlobSet:
 
     def used_bytes(self) -> int:
         return sum(int(row["size"] or 0) for row in self._items.values())
+
+    def sources(self) -> list[dict[str, Any]]:
+        """r49: откуда набирается занятое место — тот же набор файлов, что и used_bytes."""
+        rows: dict[str, dict[str, int]] = {}
+        for row in self._items.values():
+            src = row.get("source") or "files"
+            r = rows.setdefault(src, {"count": 0, "used_bytes": 0})
+            r["count"] += 1
+            r["used_bytes"] += int(row["size"] or 0)
+        return [
+            {"key": key, "label": SOURCE_LABELS.get(key, key), **rows[key]}
+            for key in SOURCE_LABELS
+            if key in rows
+        ]
 
     def breakdown(self) -> list[dict[str, Any]]:
         totals = {key: 0 for key in BREAKDOWN_ORDER}
@@ -208,18 +235,23 @@ class _BlobSet:
 
 def collect_owned_blobs(user: User) -> _BlobSet:
     blobs = _BlobSet()
-    _add_cabinet_files(user, blobs)
-    _add_materials(user, blobs)
-    _add_board_assets(user, blobs)
-    _add_interactive_uploads(user, blobs)
-    _add_homework_attachments(user, blobs)
-    _add_teacher_task_files(user, blobs)
-    _add_notebook_files(user, blobs)
+    for source, fn in (
+        ("files", _add_cabinet_files),
+        ("materials", _add_materials),
+        ("boards", _add_board_assets),
+        ("interactives", _add_interactive_uploads),
+        ("homework", _add_homework_attachments),
+        ("tasks", _add_teacher_task_files),
+        ("notebooks", _add_notebook_files),
+    ):
+        blobs.source = source
+        fn(user, blobs)
     return blobs
 
 
 def _add_cabinet_files(user: User, blobs: _BlobSet) -> None:
-    files = CabinetFile.objects.filter(owner=user).values(
+    # r49: файлы в корзине место не занимают (удалённые файлы освобождают квоту).
+    files = CabinetFile.objects.filter(owner=user, deleted_at__isnull=True).values(
         "storage_key", "size", "display_name", "original_name", "mime_type", "extension",
     )
     for row in files:
@@ -230,7 +262,7 @@ def _add_cabinet_files(user: User, blobs: _BlobSet) -> None:
             mime=row["mime_type"] or "",
             extension=row["extension"] or "",
         )
-    versions = CabinetFileVersion.objects.filter(file__owner=user).values(
+    versions = CabinetFileVersion.objects.filter(file__owner=user, file__deleted_at__isnull=True).values(
         "storage_key",
         "size",
         "file__display_name",
@@ -306,13 +338,8 @@ def _add_homework_attachments(user: User, blobs: _BlobSet) -> None:
     for row in att_qs:
         key = row["file"] or row["storage_path"] or ""
         if row["is_deleted"]:
-            if not key:
-                continue
-            try:
-                if not default_storage.exists(key):
-                    continue
-            except Exception:
-                continue
+            # r49: удалённое вложение место не занимает.
+            continue
         blobs.add(
             key,
             row["file_size"] or 0,
@@ -397,6 +424,7 @@ def get_quota_info(user: User) -> dict[str, Any]:
         "warning": percent >= 90,
         "over_limit": over,
         "breakdown": blobs.breakdown(),
+        "sources": blobs.sources(),
         "can_upgrade": can_upgrade,
         "actions": ["open_files"] + (["upgrade_storage"] if can_upgrade else []),
     }

@@ -11,6 +11,7 @@ import { WebSocketServer } from "ws";
 
 import { lessonSyncSchema } from "./schema.mjs";
 import { verifySyncToken } from "./token.mjs";
+import { backupRoomFile, mergeIntoRoom, unmergeRoom } from "./merge.mjs";
 
 const ROOM_PATH = /^\/ws\/tldraw\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i;
 const DEV_SYNC_SECRET = "itflux-tldraw-sync-dev";
@@ -188,7 +189,124 @@ export async function createSyncServer({ port = 5858, host = "127.0.0.1", secret
     return entry.room;
   }
 
+  function releaseIfIdle(boardId) {
+    const entry = rooms.get(boardId);
+    if (!entry || entry.idle) return;
+    if (entry.room.getSessions().length > 0) return;
+    entry.idle = setTimeout(() => dropRoom(boardId), IDLE_MS);
+  }
+
+  const BOARD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  function internalAuthorized(req) {
+    const got = Buffer.from(String(req.headers["x-itflux-sync-secret"] || ""));
+    const want = Buffer.from(secret);
+    return got.length === want.length && crypto.timingSafeEqual(got, want);
+  }
+  function readJson(req, limit = 64 * 1024 * 1024) {
+    return new Promise((resolve, reject) => {
+      const chunks = [];
+      let size = 0;
+      req.on("data", (c) => {
+        size += c.length;
+        if (size > limit) { reject(new Error("body too large")); req.destroy(); return; }
+        chunks.push(c);
+      });
+      req.on("end", () => {
+        try { resolve(JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}")); } catch (e) { reject(e); }
+      });
+      req.on("error", reject);
+    });
+  }
+  function sendJson(res, code, body) {
+    res.writeHead(code, { "content-type": "application/json" });
+    res.end(JSON.stringify(body));
+  }
+  function roomFileExists(boardId) {
+    return fs.existsSync(path.join(dataDir, `${boardId}.sqlite`));
+  }
+  async function handleInternal(req, res) {
+    if (req.method !== "POST" || !internalAuthorized(req)) return sendJson(res, 403, { detail: "forbidden" });
+    const body = await readJson(req);
+    const target = String(body.target || body.ids?.[0] || "").toLowerCase();
+    if (!BOARD_ID.test(target)) return sendJson(res, 400, { detail: "bad target" });
+    if (req.url === "/internal/room-status") {
+      const ids = (Array.isArray(body.ids) ? body.ids : [target]).map((x) => String(x).toLowerCase()).filter((x) => BOARD_ID.test(x));
+      const out = {};
+      for (const id of ids) {
+        const entry = rooms.get(id);
+        let shapes = 0;
+        if (entry) {
+          shapes = entry.room.getCurrentSnapshot().documents.filter((d) => d.state?.typeName === "shape").length;
+        } else if (roomFileExists(id)) {
+          try {
+            const ro = new DatabaseSync(path.join(dataDir, `${id}.sqlite`), { readOnly: true });
+            try {
+              for (const row of ro.prepare("SELECT state FROM documents").iterate()) {
+                if (Buffer.from(row.state).includes('"typeName":"shape"')) shapes += 1;
+              }
+            } finally {
+              ro.close();
+            }
+          } catch {
+            shapes = -1;
+          }
+        }
+        out[id] = { sessions: entry ? entry.room.getSessions().length : 0, file: roomFileExists(id), shapes };
+      }
+      return sendJson(res, 200, { rooms: out });
+    }
+    if (req.url === "/internal/merge") {
+      const parts = Array.isArray(body.parts) ? body.parts : [];
+      for (const part of parts) {
+        part.source_id = String(part.source_id || "").toLowerCase();
+        if (!BOARD_ID.test(part.source_id) || part.source_id === target) return sendJson(res, 400, { detail: "bad source" });
+        if (part.kind === "room" && !roomFileExists(part.source_id)) return sendJson(res, 400, { detail: "no room for source" });
+      }
+      const mergeId = String(body.merge_id || "");
+      if (!/^[A-Za-z0-9_-]{6,64}$/.test(mergeId)) return sendJson(res, 400, { detail: "bad merge id" });
+      const targetRoom = roomFor(target);
+      try {
+        const backup = backupRoomFile(rooms.get(target).db, dataDir, target);
+        const touched = new Set();
+        const result = await mergeIntoRoom({
+          targetRoom,
+          parts,
+          urlMap: body.url_map || {},
+          mergeId,
+          snapshotOf: (id) => {
+            touched.add(id);
+            return roomFor(id).getCurrentSnapshot().documents.map((d) => d.state);
+          },
+        });
+        for (const id of touched) releaseIfIdle(id);
+        return sendJson(res, 200, { ...result, backup, sessions: targetRoom.getSessions().length });
+      } finally {
+        releaseIfIdle(target);
+      }
+    }
+    if (req.url === "/internal/unmerge") {
+      const mergeId = String(body.merge_id || "");
+      if (!roomFileExists(target)) return sendJson(res, 404, { detail: "no room" });
+      const targetRoom = roomFor(target);
+      try {
+        const backup = backupRoomFile(rooms.get(target).db, dataDir, target);
+        const result = await unmergeRoom({ targetRoom, mergeId });
+        return sendJson(res, 200, { ...result, backup });
+      } finally {
+        releaseIfIdle(target);
+      }
+    }
+    return sendJson(res, 404, { detail: "unknown" });
+  }
+
   const httpServer = http.createServer((req, res) => {
+    if (req.url && req.url.startsWith("/internal/")) {
+      handleInternal(req, res).catch((error) => {
+        console.error("tldraw-sync internal failed", error);
+        if (!res.headersSent) sendJson(res, 500, { detail: String(error?.message || error).slice(0, 300) });
+      });
+      return;
+    }
     if (req.url === "/health") {
       res.writeHead(200, { "content-type": "text/plain" });
       res.end("ok");

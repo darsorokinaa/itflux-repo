@@ -692,6 +692,8 @@ def restore_file(user, file_id, *, target_folder_id=None) -> CabinetFile:
             target = get_owned_folder(user, file_obj.folder_id)
         except FileServiceError:
             target = None
+    # r49: корзина место не занимает — при восстановлении проверяем квоту.
+    assert_quota_allows(user, int(file_obj.size or 0))
     file_obj.folder = target
     file_obj.status = CabinetFileStatus.ACTIVE
     file_obj.deleted_at = None
@@ -714,6 +716,15 @@ def restore_folder(user, folder_id, *, target_folder_id=None) -> CabinetFolder:
             target = None
     if target:
         assert_no_folder_cycle(folder, target)
+    # r49: корзина место не занимает — при восстановлении проверяем квоту.
+    _restore_ids = [folder.id] + [f.id for f in _collect_descendant_folders(folder)]
+    _restore_bytes = sum(
+        int(s or 0)
+        for s in CabinetFile.objects.filter(
+            owner=user, folder_id__in=_restore_ids, status=CabinetFileStatus.TRASHED
+        ).values_list("size", flat=True)
+    )
+    assert_quota_allows(user, _restore_bytes)
     folder.parent = target
     folder.deleted_at = None
     folder.save(update_fields=["parent", "deleted_at", "updated_at"])

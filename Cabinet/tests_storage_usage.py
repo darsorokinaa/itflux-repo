@@ -66,13 +66,17 @@ class StorageUsageTests(TestCase):
         self.assertEqual(copied.status_code, 201, copied.content)
         self.assertEqual(calc_usage_bytes(self.teacher), len(payload) * 2)
 
-    def test_trash_keeps_quota_purge_frees(self):
+    def test_trash_frees_quota_restore_counts_again(self):
+        # r49: удалённые (в корзине) файлы место не занимают; восстановление снова учитывает.
         payload = b"trash-and-purge"
         res = self._upload("tmp.txt", payload, content_type="text/plain")
         self.assertEqual(res.status_code, 201, res.content)
         file_id = res.json()["id"]
         self.client.post(f"/api/cabinet/files/{file_id}/trash/", {}, format="json")
+        self.assertEqual(calc_usage_bytes(self.teacher), 0)
+        self.client.post(f"/api/cabinet/files/{file_id}/restore/", {}, format="json")
         self.assertEqual(calc_usage_bytes(self.teacher), len(payload))
+        self.client.post(f"/api/cabinet/files/{file_id}/trash/", {}, format="json")
         self.client.delete(f"/api/cabinet/files/{file_id}/?force=1")
         self.assertEqual(calc_usage_bytes(self.teacher), 0)
 

@@ -1351,6 +1351,17 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
+        if set(data.keys()) == {"thumbnail"}:
+            # Превью — служебное поле: не двигаем updated_at и version.
+            if perm not in ("owner", InteractiveBoardAccess.EDIT):
+                return Response(
+                    {"detail": "Недостаточно прав для редактирования доски."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            InteractiveBoard.objects.filter(pk=board.pk).update(thumbnail=data["thumbnail"] or "")
+            board.thumbnail = data["thumbnail"] or ""
+            return Response(InteractiveBoardListSerializer(board, context={"request": request}).data)
+
         saved_scene = None
         try:
             with transaction.atomic():
@@ -1539,6 +1550,40 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
 
         out = InteractiveBoardDetailSerializer(clone, context={"request": request}).data
         return Response(out, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["get"], url_path="merge-suggestions")
+    def merge_suggestions(self, request):
+        from .board_merge import MergeError, suggestions_for
+        try:
+            return Response({"suggestions": suggestions_for(request.user)})
+        except MergeError as exc:
+            return Response({"detail": exc.message, "code": exc.code, "suggestions": []}, status=exc.status)
+
+    @action(detail=False, methods=["post"], url_path="merge")
+    def merge(self, request):
+        from .board_merge import MergeError, merge_boards
+        kind = str(request.data.get("kind") or "")
+        ref_id = _parse_optional_pk(request.data.get("ref_id"))
+        if kind not in ("student", "group") or ref_id is None:
+            return Response({"detail": "Укажите ученика или группу."}, status=status.HTTP_400_BAD_REQUEST)
+        if request.data.get("confirm") is not True:
+            return Response({"detail": "Нужно подтверждение.", "code": "CONFIRM_REQUIRED"}, status=status.HTTP_400_BAD_REQUEST)
+        board_ids = request.data.get("board_ids") or None
+        if board_ids is not None and not isinstance(board_ids, list):
+            return Response({"detail": "board_ids должен быть списком."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            out = merge_boards(request.user, kind, ref_id, request.data.get("target_id") or None, board_ids)
+        except MergeError as exc:
+            return Response({"detail": exc.message, "code": exc.code}, status=exc.status)
+        return Response(out)
+
+    @action(detail=False, methods=["post"], url_path="merge-undo")
+    def merge_undo(self, request):
+        from .board_merge import MergeError, undo_merge
+        try:
+            return Response(undo_merge(request.user, str(request.data.get("merge_id") or "")))
+        except MergeError as exc:
+            return Response({"detail": exc.message, "code": exc.code}, status=exc.status)
 
     @action(detail=True, methods=["post"], url_path="clear")
     def clear(self, request, id=None):

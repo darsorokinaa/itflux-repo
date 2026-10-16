@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CabinetPageHeader, CabinetPageShell, useSoonToast } from "../CabinetSectionUi";
 import BoardCreateModal from "../components/BoardCreateModal";
+import BoardMergeSuggestions from "../components/BoardMergeSuggestions";
 import CabinetFloatingMenu from "../components/CabinetFloatingMenu";
 import CabinetModal from "../components/CabinetModal";
 import ConfirmActionModal from "../components/ConfirmActionModal";
@@ -266,7 +267,19 @@ export default function CabinetBoardsPage() {
         </select>
       </div>
 
-      {error ? <p className="cb-board-form__error" role="alert">{error}</p> : null}
+      {!studentFilter && !groupFilter && !debouncedSearch ? (
+        <BoardMergeSuggestions
+          onMerged={() => refresh()}
+          onOpenBoard={(id) => navigate(`/cabinet/boards/${id}`)}
+        />
+      ) : null}
+
+      {error ? (
+        <p className="cb-board-form__error" role="alert">
+          {error}{" "}
+          <button type="button" className="cb-btn cb-btn--ghost" onClick={() => refresh()}>Повторить</button>
+        </p>
+      ) : null}
       {filteredHint ? <p className="cabinet-auth-muted">{filteredHint}</p> : null}
 
       {loading ? (
