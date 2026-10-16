@@ -59,3 +59,23 @@ e2e-real-devices/selenium-ios/screenshots/
 e2e-real-devices/selenium-ios/artifacts/
 e2e-selenium-ios/screenshots/
 e2e-selenium-ios/artifacts/
+
+# r55 (16.10.2026): локальные копии, отладка, артефакты
+*.bak
+*.bak-*
+*.bak.*
+*.bak[0-9]*
+*.orig
+*.rej
+*.purged-*
+*.env
+.env*
+*.pem
+*.key
+frontend/dist/
+frontend/dist-*/
+node_modules/
+frontend/debug-pages/
+frontend/public/tl-test/
+*.log
+quarantine*/
