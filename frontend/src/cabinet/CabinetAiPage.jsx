@@ -166,12 +166,23 @@ export default function CabinetAiPage() {
       />
 
       <div className="ai-usage-row">
-        <span className={`ai-quota${warning === "high" || textExhausted ? " ai-quota--warn" : ""}`}>
-          {remainingLabel("text", textRemaining, textLimit)}
-        </span>
-        <span className={`ai-quota${imageExhausted ? " ai-quota--warn" : ""}`}>
-          {remainingLabel("images", imageRemaining, imageLimit)}
-        </span>
+        {usage?.tokens?.balance != null ? (
+          <span
+            className={`ai-quota${usage.tokens.monthly_grant && usage.tokens.balance < usage.tokens.monthly_grant * 0.2 ? " ai-quota--warn" : ""}`}
+            title="Единый баланс «Цифрика» и ИИ-конструктора. Неизрасходованные токены переносятся на один месяц."
+          >
+            {`Токены «Цифрика»: ${usage.tokens.balance}${usage.tokens.monthly_grant ? ` · ${usage.tokens.monthly_grant} в месяц по тарифу` : ""}`}
+          </span>
+        ) : (
+          <>
+            <span className={`ai-quota${warning === "high" || textExhausted ? " ai-quota--warn" : ""}`}>
+              {remainingLabel("text", textRemaining, textLimit)}
+            </span>
+            <span className={`ai-quota${imageExhausted ? " ai-quota--warn" : ""}`}>
+              {remainingLabel("images", imageRemaining, imageLimit)}
+            </span>
+          </>
+        )}
         {textExhausted && nextPlan?.slug ? (
           <Link to="/cabinet/upgrade" className="ai-upgrade-link">
             Перейти на {nextPlan.name || "следующий тариф"}

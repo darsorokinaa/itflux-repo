@@ -2,6 +2,7 @@ import uuid
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -987,6 +988,12 @@ class LessonPlan(models.Model):
         help_text="Готовый план каталога: другие учителя могут создать свою копию, но не изменяют оригинал.",
     )
     lessons_count = models.PositiveIntegerField("Количество занятий", default=0)
+    weekly_schedule = models.JSONField(
+        "Недельное расписание",
+        default=dict,
+        blank=True,
+        help_text="Дни недели и время занятий плана + отпечатки созданных событий (r40).",
+    )
     status = models.CharField(
         "Статус",
         max_length=20,
@@ -2625,6 +2632,11 @@ class ScheduleEvent(models.Model):
         default=True,
         help_text="Если выключено, изменения пункта плана не перезаписывают этот урок",
     )
+    plan_item_auto = models.BooleanField(
+        "Тема выдана автоматически",
+        default=False,
+        help_text="Тема плана подобрана автоматически (не выбрана вручную) — её можно сдвигать при отмене (r42).",
+    )
     content_source = models.CharField(
         "Источник данных урока",
         max_length=16,
@@ -3459,7 +3471,7 @@ class TariffPlan(models.Model):
     price_month = models.DecimalField("Цена/месяц", max_digits=10, decimal_places=2, default=0)
     price_year = models.DecimalField("Цена/год", max_digits=10, decimal_places=2, default=0)
     currency = models.CharField("Валюта", max_length=8, default="RUB")
-    max_students = models.PositiveIntegerField("Макс. учеников", default=5)
+    max_students = models.PositiveIntegerField("Макс. учеников", null=True, blank=True, default=5, help_text="Пусто — без лимита")
     max_groups = models.PositiveIntegerField(
         "Макс. групп",
         null=True,
@@ -3707,6 +3719,7 @@ class TeacherSubscription(models.Model):
             self.source in billing_sources
             or self.auto_renew
             or has_payment_method
+            or self.status == self.Status.TRIAL  # r50: пробный/промо-период всегда ограничен датой
         ):
             if self.expires_at and self.expires_at <= tz.now():
                 return False
@@ -4263,6 +4276,10 @@ class PromoCode(models.Model):
         help_text="Дополнительные дни доступа (можно комбинировать со скидкой)",
     )
     first_payment_only = models.BooleanField("Только первый платёж", default=False)
+    billing_period = models.CharField(
+        "Только для периода", max_length=10, blank=True, default="",
+        help_text="Пусто — любой период; month — только помесячно; year — только за год (r50)",
+    )
     stackable_with_referral = models.BooleanField("Совмещается с рефералом", default=False)
     applicable_plans = models.ManyToManyField(
         TariffPlan,
@@ -5426,3 +5443,59 @@ from .worksheet_ai.models import (  # noqa: E402, F401
     WorksheetAIQuote,
     WorksheetDocument,
 )
+
+
+class SchoolRequest(models.Model):
+    """r36: заявка на тариф «Школа / образовательный центр» с витрины /pricing."""
+
+    class Status(models.TextChoices):
+        NEW = "new", "Новая"
+        IN_PROGRESS = "in_progress", "В работе"
+        DONE = "done", "Обработана"
+        SPAM = "spam", "Спам"
+
+    name = models.CharField("Имя", max_length=200)
+    school = models.CharField("Школа / организация", max_length=300)
+    role = models.CharField("Должность / роль", max_length=120, blank=True)
+    contact = models.CharField("Телефон или e-mail (как ввёл)", max_length=254, blank=True, default="")
+    teachers_count = models.PositiveIntegerField("Число преподавателей", null=True, blank=True)
+    students_count = models.PositiveIntegerField("Число учеников", null=True, blank=True)
+    phone = models.CharField("Телефон", max_length=64, blank=True)
+    email = models.EmailField("Email", max_length=254, blank=True)
+    message = models.TextField("Сообщение", blank=True)
+    consent = models.BooleanField("Согласие на обработку ПД", default=False)
+    status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.NEW)
+    admin_note = models.TextField("Заметка администратора", blank=True)
+    ip_address = models.GenericIPAddressField("IP", null=True, blank=True)
+    user_agent = models.CharField("User-Agent", max_length=512, blank=True)
+    created_at = models.DateTimeField("Создана", auto_now_add=True)
+    updated_at = models.DateTimeField("Обновлена", auto_now=True)
+
+    class Meta:
+        verbose_name = "Заявка от школы"
+        verbose_name_plural = "Заявки от школ"
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.school} — {self.name}"
+
+
+class SocialAccount(models.Model):
+    """r36: привязка внешнего входа (Яндекс ID / VK ID) к пользователю."""
+
+    PROVIDERS = (("yandex", "Яндекс ID"), ("vk", "VK ID"))
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="social_accounts")
+    provider = models.CharField("Провайдер", max_length=16, choices=PROVIDERS)
+    uid = models.CharField("ID у провайдера", max_length=64)
+    email = models.EmailField("Email у провайдера", blank=True)
+    created_at = models.DateTimeField("Привязан", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Внешний вход"
+        verbose_name_plural = "Внешние входы"
+        constraints = [models.UniqueConstraint(fields=["provider", "uid"], name="uniq_social_provider_uid")]
+
+    def __str__(self):
+        return f"{self.provider}:{self.uid} → {self.user_id}"
+
+from .r50_models import EmailOptOut, SubscriptionReminderLog, TrialGrant  # noqa: E402, F401

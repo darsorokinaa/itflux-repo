@@ -18,6 +18,11 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        from Cabinet.r50_tariffs import reminders_enabled
+
+        if reminders_enabled():
+            self.stdout.write("r50 reminders enabled — legacy notify skipped")
+            return
         total = 0
         for days in options["days"]:
             created = notify_subscription_expiring(days_ahead=int(days))

@@ -42,7 +42,12 @@ def _local_day_bounds(days_ahead: int):
 
 
 def process_expiry_reminders(*, days_list=(7, 3, 1)) -> dict:
+    from .r50_tariffs import process_r50_reminders, reminders_enabled
     from .subscription_notifications import notify_subscription_expiry_reminder
+
+    # r50: новые шаблоны (7/3/0, пробный 3/1/0) заменяют старые, только когда владелец включил флаг.
+    if reminders_enabled():
+        return {"r50": process_r50_reminders()}
 
     results = {}
     for days in days_list:
@@ -171,6 +176,7 @@ def process_expired_subscriptions(*, limit: int = 500) -> dict:
             )
             | Q(auto_renew=True)
             | Q(tbank_rebill_id__gt="")
+            | Q(status=TeacherSubscription.Status.TRIAL)
         )
         .order_by("expires_at")[:limit]
     )
@@ -194,6 +200,12 @@ def process_expired_subscriptions(*, limit: int = 500) -> dict:
                 and locked.expires_at >= now - RENEW_GRACE
             ):
                 continue
+            try:
+                from .r50_tariffs import remember_expired
+
+                remember_expired(locked)
+            except Exception:
+                logger.exception("r50 remember_expired failed sub=%s", locked.pk)
             locked.plan = start_plan
             locked.status = TeacherSubscription.Status.EXPIRED
             locked.auto_renew = False
@@ -229,6 +241,13 @@ def run_subscription_maintenance(*, renew: bool = True, remind: bool = True, exp
         result["renewals"] = process_auto_renewals()
     if expire:
         result["expired"] = process_expired_subscriptions()
+        try:
+            from .r50_tariffs import process_r50_reminders, reminders_enabled
+
+            if remind and reminders_enabled():
+                result["r50_after_expire"] = process_r50_reminders()
+        except Exception:
+            logger.exception("r50 reminders after expire failed")
     return result
 
 

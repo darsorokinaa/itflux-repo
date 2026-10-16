@@ -311,3 +311,52 @@
     padding-top: 1.5rem;
   }
 }
+
+/* r36: school request modal */
+.school-req-overlay{position:fixed;inset:0;z-index:1000;background:rgba(15,23,42,.5);display:flex;align-items:center;justify-content:center;padding:16px}
+.school-req{position:relative;background:#fff;border-radius:18px;max-width:520px;width:100%;max-height:92vh;overflow:auto;padding:24px 22px;box-shadow:0 20px 60px rgba(15,23,42,.25)}
+.school-req__close{position:absolute;top:10px;right:14px;border:0;background:none;font-size:28px;line-height:1;cursor:pointer;color:#64748b}
+.school-req__title{font-size:20px;margin:0 28px 16px 0}
+.school-req__field{display:flex;flex-direction:column;gap:4px;font-size:14px;font-weight:600;margin-bottom:12px;flex:1}
+.school-req__field input,.school-req__field textarea{font:inherit;font-weight:400;padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px}
+.school-req__row{display:flex;gap:12px;flex-wrap:wrap}
+.school-req__hp{position:absolute;left:-10000px;width:1px;height:1px;opacity:0}
+.school-req__consent{display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:4px 0 12px}
+.school-req__error{color:#b91c1c;font-size:14px;margin:0 0 10px}
+.school-req__alt{font-size:13px;color:#64748b;margin:10px 0 0;text-align:center}
+.school-req__done p{font-size:16px;margin:0 0 16px}
+
+/* r50: новая витрина (4 тарифа) */
+.pricing-page--r50 .pricing-hero__brand { font-size: clamp(1.7rem, 4vw, 2.5rem); margin-bottom: 0.6rem; }
+.pricing-page--r50 .pricing-card { cursor: default; }
+.pricing-grid--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: stretch; }
+@media (max-width: 1040px) { .pricing-grid--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .pricing-grid--4 { grid-template-columns: 1fr; } }
+.pricing-page--r50 .pricing-card__price { margin-bottom: 0.25rem; }
+.pricing-page--r50 .pricing-card__now { margin: 0 0 0.2rem; font-size: 0.82rem; color: var(--pricing-muted); }
+.pricing-card__yearly { margin-bottom: 0.6rem; }
+.pricing-card__save { margin: 0; font-size: 0.82rem; color: #157f3b; font-weight: 600; }
+.pricing-card__save s { color: var(--pricing-muted); font-weight: 400; }
+.pricing-page--r50 .pricing-card__desc { margin-top: 0.5rem; min-height: 0; }
+.pricing-card__actions { display: flex; flex-direction: column; gap: 0.45rem; margin-top: auto; }
+.pricing-page--r50 .pricing-card__cta { width: 100%; border: 0; cursor: pointer; font: inherit; font-weight: 600; box-sizing: border-box; text-align: center; }
+.pricing-page--r50 .pricing-card__cta--outline { border: 1px solid var(--pricing-line); }
+.pricing-card--featured .pricing-card__cta:not(.pricing-card__cta--current) { background: var(--pricing-accent); }
+.pricing-card__cta--current, .pricing-page--r50 .pricing-card__cta:disabled { background: #e7ebf2 !important; color: var(--pricing-muted) !important; cursor: default; }
+.pricing-card__fine { margin: 0; font-size: 0.74rem; line-height: 1.35; color: var(--pricing-muted); }
+.pricing-saved { border: 1px solid rgba(21, 127, 59, 0.25); background: rgba(236, 253, 243, 0.85); border-radius: 1rem; padding: 1rem 1.25rem; margin: 0 auto 1.5rem; max-width: 760px; text-align: center; }
+.pricing-saved__title { margin: 0 0 0.3rem; font-size: 1.2rem; font-weight: 750; }
+.pricing-saved__text { margin: 0 0 0.4rem; color: var(--pricing-ink); }
+.pricing-saved__note { margin: 0; font-size: 0.75rem; color: var(--pricing-muted); }
+.pricing-page--r50 .pricing-compare tbody th { background: transparent; font-weight: 600; }
+.pricing-page--r50 .pricing-compare .is-current { background: rgba(31, 107, 255, 0.06); }
+.pricing-compare__hint { margin: 0.9rem 0 1.5rem; text-align: center; color: var(--pricing-muted); }
+.pricing-legal { margin: 1.5rem 0 0; text-align: center; font-size: 0.85rem; color: var(--pricing-muted); }
+.pricing-legal a, .pricing-faq dd a { color: var(--pricing-accent); }
+.school-req__field-error { color: #b91c1c; font-size: 12.5px; font-weight: 500; }
+.school-req__field input[aria-invalid="true"] { border-color: #ef4444; }
+@media (max-width: 400px) {
+  .pricing-page--r50 { padding-left: 0.85rem; padding-right: 0.85rem; }
+  .pricing-period button { padding: 0.45rem 0.75rem; }
+}
+.school-req-overlay{z-index:10050} /* r50: выше cookie-баннера */

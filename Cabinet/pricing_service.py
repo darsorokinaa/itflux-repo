@@ -192,7 +192,7 @@ def calculate_subscription_price(
             else:
                 try:
                     if validate_promo:
-                        promo = PromoCodeService.validate(user, promo_code, plan.slug)
+                        promo = PromoCodeService.validate(user, promo_code, plan.slug, billing_period=billing_period)
                     else:
                         from .models import PromoCode
 
@@ -216,7 +216,7 @@ def calculate_subscription_price(
         if promo_code and user:
             try:
                 if validate_promo:
-                    promo = PromoCodeService.validate(user, promo_code, plan.slug)
+                    promo = PromoCodeService.validate(user, promo_code, plan.slug, billing_period=billing_period)
                 else:
                     from .models import PromoCode
 

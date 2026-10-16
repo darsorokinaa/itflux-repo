@@ -23,7 +23,7 @@ import { notifySubscriptionChanged, useSubscription } from "../hooks/useSubscrip
 import SupportContactLink from "../components/SupportContactLink";
 import TariffUsageBlock from "../components/TariffUsageBlock";
 import { openSupport } from "../support";
-import { buildPlanHighlights, formatStorageLabel } from "../../utils/planHighlights";
+import { buildPlanHighlights, formatStorageLabel, yearSavingsText } from "../../utils/planHighlights";
 import { trackValueGoal } from "../../utils/valuePath";
 
 function isLocalFrontendHost() {
@@ -422,7 +422,7 @@ function SubscriptionStatusCard({
         <ul className="upg-status__meta">
           <li>Тариф: {planName || currentPlan?.name || "—"}</li>
           {monthlyPrice && !isStart ? <li>Стоимость: {monthlyPrice} / месяц</li> : null}
-          <li>Действует до: {expiresAt ? formatDate(expiresAt) : "—"}</li>
+          <li>{isStart || subscription.is_unlimited ? "Срок: бессрочно" : `Действует до: ${expiresAt ? formatDate(expiresAt) : "—"}`}</li>
           <li className="upg-status__auto">
             <span>Автопродление:</span>
             <div className="upg-auto-toggle" role="group" aria-label="Автопродление">
@@ -641,7 +641,10 @@ function PlanCard({
   } else if (period === "year" && priceYear > 0) {
     priceMain = formatMoney(priceYear);
     const perMonth = priceYear / 12;
-    if (Number.isFinite(perMonth) && perMonth > 0) {
+    const savingText = yearSavingsText(plan);
+    if (savingText) {
+      priceSub = savingText;
+    } else if (Number.isFinite(perMonth) && perMonth > 0) {
       priceSub = `${formatMoney(perMonth)}/мес при оплате за год`;
     } else {
       priceSub = "за год";

@@ -339,7 +339,7 @@ class PromoCodeError(Exception):
 class PromoCodeService:
 
     @staticmethod
-    def validate(teacher: User, code_str: str, plan_slug: Optional[str] = None):
+    def validate(teacher: User, code_str: str, plan_slug: Optional[str] = None, billing_period: Optional[str] = None):
         """
         Проверяет промокод для учителя. Не применяет — только валидирует.
         Возвращает объект PromoCode или выбрасывает PromoCodeError.
@@ -389,6 +389,13 @@ class PromoCodeService:
                     "Промокод не действует для этого тарифа.",
                 )
 
+        promo_period = (getattr(promo, "billing_period", "") or "").strip()
+        if promo_period and billing_period and promo_period != billing_period:
+            raise PromoCodeError(
+                "PROMO_PERIOD_MISMATCH",
+                "Промокод действует только при оплате " + ("за год." if promo_period == "year" else "помесячно."),
+            )
+
         if getattr(promo, "first_payment_only", False):
             from .models import Payment
 
@@ -427,7 +434,10 @@ class PromoCodeService:
         """
         from .models import PromoCodeUsage, TariffPlan
 
-        promo = PromoCodeService.validate(teacher, code_str, plan_slug)
+        promo = PromoCodeService.validate(
+            teacher, code_str, plan_slug,
+            billing_period=getattr(payment, "billing_period", None) if payment is not None else None,
+        )
         plan = None
         if plan_slug:
             plan = TariffPlan.objects.filter(slug=plan_slug, is_active=True).first()

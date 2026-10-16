@@ -188,14 +188,14 @@ class TariffUsageService:
         items = [
             _item(
                 key="variant_generations",
-                label="Генерация вариантов",
+                label="Варианты",
                 used=counts["variants"],
                 limit=plan.max_variants_monthly,
                 period="month",
             ),
             _item(
                 key="workbooks",
-                label="Рабочие тетради",
+                label="Рабочие листы",
                 used=counts["workbooks"],
                 limit=plan.max_workbooks_monthly,
                 period="month",

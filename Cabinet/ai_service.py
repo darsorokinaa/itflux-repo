@@ -279,6 +279,7 @@ def usage_snapshot(teacher: User) -> dict:
             "used": usage.used_credits,
             "limit": plan.ai_credits_monthly_limit,
         },
+        "tokens": _r50_tokens_payload(usage.teacher),
         "day": {
             "used": day_used,
             "limit": day_limit,
@@ -510,6 +511,16 @@ def _ensure_can_run_text(usage: AIUsage, plan: TariffPlan, credits: int) -> None
             plan.ai_text_requests_daily_limit,
             usage.used_text_today,
             plan,
+        )
+    _bal = _r50_wallet_balance(usage.teacher)
+    if _bal < int(credits or 0):
+        raise LimitExceeded(
+            code="AI_TOKENS_EXHAUSTED",
+            message="Токены «Цифрика» на этот месяц закончились. Новые начислятся 1-го числа, или перейдите на тариф выше.",
+            limit=int(credits or 0),
+            current=_bal,
+            recommended_plan="pro",
+            extra={"tokens_balance": _bal, "tokens_required": int(credits or 0)},
         )
     if plan.ai_credits_monthly_limit and usage.used_credits + credits > plan.ai_credits_monthly_limit:
         _raise_limit(
@@ -855,6 +866,7 @@ def _run_text_then_images(
                 return _serialize_event_result(existing)
             raise AIServiceError("AI_IN_FLIGHT", "Запрос уже выполняется.", status=409)
         _apply_delta(usage, text=1, credits=text_credits, day=1)
+        _r50_wallet(teacher, text_credits, f"text:{event.pk}")
 
     billed = False
     assistant_text = ""
@@ -933,6 +945,7 @@ def _run_text_then_images(
             with transaction.atomic():
                 usage = get_or_create_usage(teacher, for_update=True)
                 _apply_delta(usage, text=-1, credits=-text_credits, day=-1)
+                _r50_wallet(teacher, -text_credits, f"text:{event.pk}")
                 event.status = AIRequestLog.RequestStatus.FAILED
                 event.error_message = "provider_error"
                 event.save(update_fields=["status", "error_message", "updated_at"])
@@ -946,6 +959,7 @@ def _run_text_then_images(
             with transaction.atomic():
                 usage = get_or_create_usage(teacher, for_update=True)
                 _apply_delta(usage, text=-1, credits=-text_credits, day=-1)
+                _r50_wallet(teacher, -text_credits, f"text:{event.pk}")
                 event.status = AIRequestLog.RequestStatus.FAILED
                 event.error_message = "backend_error"
                 event.save(update_fields=["status", "error_message", "updated_at"])
@@ -1036,6 +1050,8 @@ def _generate_images_for_teacher(teacher, plan, conversation, asst_message, spec
             credits = settings_obj.credit_image
             if plan.ai_credits_monthly_limit and usage.used_credits + credits > plan.ai_credits_monthly_limit:
                 break
+            if _r50_wallet_balance(teacher) < credits:
+                break
             event = AIRequestLog.objects.create(
                 teacher=teacher,
                 conversation=conversation,
@@ -1048,6 +1064,7 @@ def _generate_images_for_teacher(teacher, plan, conversation, asst_message, spec
                 image_count=1,
             )
             _apply_delta(usage, images=1, credits=credits)
+            _r50_wallet(teacher, credits, f"image:{event.pk}")
         billed = False
         acquired = False
         try:
@@ -1072,6 +1089,7 @@ def _generate_images_for_teacher(teacher, plan, conversation, asst_message, spec
                 with transaction.atomic():
                     usage = get_or_create_usage(teacher, for_update=True)
                     _apply_delta(usage, images=-1, credits=-credits)
+                    _r50_wallet(teacher, -credits, f"image:{event.pk}")
                     event.status = AIRequestLog.RequestStatus.FAILED
                     event.error_message = "image_provider_error"
                     event.save(update_fields=["status", "error_message", "updated_at"])
@@ -1139,3 +1157,52 @@ def _run_images_only(teacher, plan, conversation, prompt, classification, key, d
         "conversation_id": str(conversation.id),
         "confirmation": None,
     }
+
+
+# ── r50: единые токены «Цифрика» (кошелёк AITokenAccount, общий с ИИ-конструктором) ──
+
+def _r50_wallet_balance(teacher) -> int:
+    from .worksheet_ai.billing import ensure_period_grant
+
+    return int(ensure_period_grant(teacher).balance or 0)
+
+
+def _r50_wallet(teacher, credits: int, key: str) -> None:
+    """credits>0 — списать, credits<0 — вернуть. Идемпотентно по key."""
+    from .worksheet_ai import billing as wallet
+    from .worksheet_ai.models import AITransaction
+
+    amount = int(credits or 0)
+    if amount > 0:
+        try:
+            wallet.debit(
+                teacher, amount, idempotency_key=f"cifrik:{key}"[:80],
+                description="ИИ-помощник «Цифрик»", metadata={"source": "cifrik", "key": key},
+            )
+        except wallet.InsufficientTokens as exc:
+            raise LimitExceeded(
+                code="AI_TOKENS_EXHAUSTED",
+                message="Токены «Цифрика» на этот месяц закончились. Новые начислятся 1-го числа, или перейдите на тариф выше.",
+                limit=exc.extra.get("required", amount),
+                current=exc.extra.get("balance", 0),
+                recommended_plan="pro",
+                extra={"tokens_balance": exc.extra.get("balance", 0), "tokens_required": amount},
+            )
+    elif amount < 0:
+        wallet.refund(
+            teacher, -amount, idempotency_key=f"cifrik-refund:{key}"[:80],
+            description="Возврат токенов «Цифрика»", metadata={"source": "cifrik", "key": key},
+        )
+
+
+def _r50_tokens_payload(teacher) -> dict:
+    try:
+        from .worksheet_ai.pricing import get_pricing
+
+        bal = _r50_wallet_balance(teacher)
+        plan = SubscriptionLimitService.get_current_plan(teacher)
+        grants = get_pricing()["monthly_grant_by_plan"]
+        return {"balance": bal, "monthly_grant": int(grants.get(plan.slug, grants.get("default", 0)) or 0)}
+    except Exception:
+        logger.exception("r50 tokens payload failed")
+        return {"balance": None, "monthly_grant": None}

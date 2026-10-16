@@ -12,6 +12,8 @@
 from __future__ import annotations
 
 import logging
+
+from django.conf import settings  # r50
 from decimal import Decimal
 from typing import Optional
 
@@ -186,7 +188,11 @@ class DowngradeService:
         sub = SubscriptionLimitService.get_or_create_subscription(teacher, apply_promo=False)
         current = sub.plan
         usage = SubscriptionLimitService.get_usage(teacher)
-        students_over = max(0, usage["students"] - int(target_plan.max_students or 0))
+        students_over = (
+            0 if target_plan.max_students is None
+            else max(0, usage["students"] - int(target_plan.max_students or 0))
+        )
+        _archive_on = bool(getattr(settings, "DOWNGRADE_ARCHIVE_EXTRAS", False))
         groups_limit = target_plan.max_groups
         groups_over = 0
         if groups_limit is not None:
@@ -235,14 +241,14 @@ class DowngradeService:
                     "current": usage["students"],
                     "limit": target_plan.max_students,
                     "over": students_over,
-                    "needs_selection": students_over > 0,
+                    "needs_selection": students_over > 0 and _archive_on,
                     "candidates": students,
                 },
                 "groups": {
                     "current": usage["groups"],
                     "limit": groups_limit,
                     "over": groups_over,
-                    "needs_selection": groups_over > 0,
+                    "needs_selection": groups_over > 0 and _archive_on,
                     "candidates": groups,
                 },
                 "storage": {
@@ -620,6 +626,11 @@ class DowngradeService:
         teacher = sub.teacher
         if not SubscriptionAccessService.can_use_student_booking(teacher):
             deactivate_teacher_booking_link(teacher)
+        # r50: при понижении ничего не архивируем — лишние ученики/группы остаются,
+        # просто нельзя добавить новых сверх лимита. Старое поведение — DOWNGRADE_ARCHIVE_EXTRAS=True.
+        if not getattr(settings, "DOWNGRADE_ARCHIVE_EXTRAS", False):
+            logger.info("downgrade_no_archive teacher=%s plan=%s", teacher.pk, plan.slug)
+            return
         keep_students = set(int(x) for x in (change.selected_student_ids or []))
         keep_groups = set(int(x) for x in (change.selected_group_ids or []))
 

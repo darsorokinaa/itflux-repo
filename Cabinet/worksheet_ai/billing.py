@@ -163,9 +163,11 @@ def ensure_period_grant(user) -> AITokenAccount:
         slug = sub.plan.slug or "default"
     amount = int(grants.get(slug, grants.get("default", 0)) or 0)
     if amount <= 0:
+        _r50_burn_expired(user, timezone.localdate().strftime("%Y-%m"))
         return get_account(user)
     period = timezone.localdate().strftime("%Y-%m")
     prefix = f"subscription:{user.pk}:{period}"
+    _r50_burn_expired(user, period)
     credit(
         user,
         amount,
@@ -192,3 +194,50 @@ def ensure_period_grant(user) -> AITokenAccount:
             metadata={"plan": slug, "period": period, "grant": amount, "already": credited},
         )
     return get_account(user)
+
+
+def _r50_burn_expired(user, period: str) -> None:
+    """
+    r50: неизрасходованные токены переносятся максимум на один месяц.
+    При первом обращении в новом месяце сгорает всё, что старше прошлого месяца:
+    остаток сверх (начисление прошлого месяца + несгораемый остаток) списывается.
+    Токены тратятся «сначала старые», поэтому остаток ≤ начисления прошлого месяца — это перенос.
+    Несгораемый остаток (protected_balance) — накопления конструктора до объединения (см. /root/r50-tokens.json).
+    """
+    from datetime import date
+
+    key = f"r50-burn:{user.pk}:{period}"
+    if AITransaction.objects.filter(user=user, idempotency_key=key).exists():
+        return
+    y, m = (int(x) for x in period.split("-"))
+    prev = date(y - 1, 12, 1) if m == 1 else date(y, m - 1, 1)
+    prev_prefix = f"subscription:{user.pk}:{prev.strftime('%Y-%m')}"
+    prev_grant = sum(
+        AITransaction.objects.filter(
+            user=user,
+            operation_type=AITransaction.Operation.SUBSCRIPTION_CREDIT,
+            status=AITransaction.Status.POSTED,
+            idempotency_key__startswith=prev_prefix,
+        ).values_list("amount", flat=True)
+    )
+    with transaction.atomic():
+        account, _ = AITokenAccount.objects.select_for_update().get_or_create(user=user)
+        protected = min(int(account.protected_balance or 0), int(account.balance or 0))
+        if protected != account.protected_balance:
+            account.protected_balance = protected
+            account.save(update_fields=["protected_balance", "updated_at"])
+        burn = max(0, int(account.balance) - int(prev_grant) - protected)
+    if burn > 0:
+        debit(
+            user, burn, operation_type=AITransaction.Operation.DEBIT, idempotency_key=key,
+            description=f"Сгорание токенов старше одного месяца ({period})",
+            metadata={"r50": "burn", "prev_grant": prev_grant, "protected": protected},
+        )
+    else:
+        AITransaction.objects.create(
+            user=user, amount=0, operation_type=AITransaction.Operation.DEBIT,
+            description=f"Проверка переноса токенов ({period}): сгорания нет",
+            balance_before=account.balance, balance_after=account.balance,
+            status=AITransaction.Status.POSTED, idempotency_key=key,
+            metadata={"r50": "burn", "prev_grant": prev_grant, "protected": protected, "burn": 0},
+        )

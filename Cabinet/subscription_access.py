@@ -164,8 +164,7 @@ class SubscriptionAccessService:
         plan = SubscriptionAccessService.get_effective_plan(user)
         if not plan:
             return False
-        if getattr(plan, "is_free", False) or plan.slug == "start":
-            return False
+        # r50: расписание, журнал и видеоуроки доступны на всех тарифах, включая «Старт».
         return True
 
     @staticmethod
@@ -193,7 +192,7 @@ class SubscriptionAccessService:
             return
         raise AccessDenied(
             code="BOOKING_REQUIRES_TEACHER_PLAN",
-            message="Запись учеников по ссылке доступна начиная с тарифа «Учитель».",
+            message="Ссылка для самостоятельной записи учеников доступна на тарифах «Репетитор» и «Профи».",
             feature="student_booking",
             min_plan="teacher",
         )

@@ -1698,3 +1698,26 @@ def _admin_urls_with_activation():
 admin.site.get_urls = _admin_urls_with_activation
 
 from .worksheet_ai import admin as worksheet_ai_admin  # noqa: E402, F401
+
+
+from .models import SchoolRequest as _SchoolRequest  # r36
+
+
+@admin.register(_SchoolRequest)
+class SchoolRequestAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "school", "name", "role", "phone", "email", "status")
+    list_filter = ("status", "created_at")
+    search_fields = ("school", "name", "phone", "email", "message")
+    list_editable = ("status",)
+    readonly_fields = ("created_at", "updated_at", "ip_address", "user_agent", "consent")
+
+
+from .models import SocialAccount as _SocialAccount  # r36
+
+
+@admin.register(_SocialAccount)
+class SocialAccountAdmin(admin.ModelAdmin):
+    list_display = ("provider", "uid", "email", "user", "created_at")
+    list_filter = ("provider",)
+    search_fields = ("uid", "email", "user__username", "user__email")
+    raw_id_fields = ("user",)

@@ -16,6 +16,10 @@ class AITokenAccount(models.Model):
         verbose_name="Пользователь",
     )
     balance = models.PositiveIntegerField("Баланс AI-токенов", default=0)
+    protected_balance = models.PositiveIntegerField(
+        "Несгораемый остаток", default=0,
+        help_text="r50: токены конструктора, накопленные до объединения; не сгорают по правилу переноса",
+    )
     updated_at = models.DateTimeField("Обновлён", auto_now=True)
 
     class Meta:

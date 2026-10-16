@@ -383,9 +383,9 @@ function TokenMenu({
       {open ? (
         <div className="flux-popover" id={panelId}>
           <div className="flux-token-summary">
-            <small>Ваши AI-токены</small>
+            <small>Токены «Цифрика»</small>
             <strong>{label}</strong>
-            <p>Для создания и оформления учебных материалов. Лист можно собрать бесплатно.</p>
+            <p>Единый баланс для ИИ-помощника «Цифрик» и ИИ-конструктора. Начисляются каждый месяц, неизрасходованные переносятся на один месяц.</p>
           </div>
           <ul className="flux-token-spend">
             {aiSpend.map((item) => (
@@ -400,7 +400,7 @@ function TokenMenu({
             <FluxIcon>
               <path d="M12 5v14M5 12h14" />
             </FluxIcon>
-            Пополнить баланс
+            Тарифы и токены
           </Link>
         </div>
       ) : null}
@@ -538,6 +538,13 @@ export default function Nav() {
               <span>Сообщество<span className="flux-community-extra"> учителей</span></span>
             </Link>
           ) : null}
+          <Link
+            to="/pricing"
+            className="flux-secondary-link"
+            aria-current={pathname === "/pricing" || pathname === "/pricing/" ? "page" : undefined}
+          >
+            <span>Тарифы</span>
+          </Link>
           <span className="flux-secondary-spacer" />
           <HeaderSearch />
           {session.isTeacher && session.tokens != null ? (

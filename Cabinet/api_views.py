@@ -159,9 +159,11 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
             qs = qs.filter(groups__exam_type=exam_type)
 
         status_param = params.get("status")
+        include_archived = (params.get("include_archived") or "").lower() in ("1", "true", "yes")
         if status_param:
             qs = qs.filter(status=status_param)
-        else:
+        elif not include_archived:
+            # r49: include_archived=1 — для фильтров (Оплаты), где архивные нужны с пометкой.
             qs = qs.exclude(status=StudentStatus.ARCHIVED)
 
         group_id = params.get("group")
@@ -1496,6 +1498,52 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
             apply_enrollment_start_dates(enrollment)
         return Response(LessonPlanEnrollmentSerializer(enrollment).data, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=["get", "post"], url_path="weekly-schedule")
+    def weekly_schedule(self, request, pk=None):
+        """Недельное расписание плана: GET — настройки, POST mode=preview|apply."""
+        from .plan_weekly_schedule import (
+            WeeklyScheduleError,
+            apply_schedule,
+            build_schedule,
+            enrollment_label,
+            normalize_pattern,
+            plan_enrollments,
+            public_result,
+        )
+        from .schedule_service import resolve_schedule_timezone
+
+        plan = self.get_object()
+        teacher = self.get_teacher()
+        if plan.teacher_id != teacher.id or is_catalog_lesson_plan(plan):
+            return Response(
+                {"detail": "Расписание можно настроить только в своём плане (для публичного — сделайте копию)."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if request.method == "GET":
+            state = plan.weekly_schedule or {}
+            return Response({
+                "pattern": state.get("pattern") or None,
+                "applied_at": state.get("applied_at"),
+                "timezone": resolve_schedule_timezone(teacher=teacher).key,
+                "enrollments": [
+                    {"id": e.pk, "label": enrollment_label(e), "status": e.status}
+                    for e in plan_enrollments(plan, teacher)
+                ],
+            })
+        mode = (request.data.get("mode") or "preview").strip()
+        try:
+            pattern = normalize_pattern(request.data.get("pattern") or request.data)
+            if mode == "apply":
+                result = apply_schedule(plan, teacher, pattern)
+            else:
+                result = public_result(build_schedule(plan, teacher, pattern))
+        except WeeklyScheduleError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        result["mode"] = mode
+        return Response(result)
+
     @action(detail=True, methods=["post"], url_path="fill-dates")
     def fill_dates(self, request, pk=None):
         """Проставить даты занятий от даты первого урока."""
@@ -1956,6 +2004,12 @@ class LessonPlanItemViewSet(
                 updated_event_ids.extend(result.get("updated_event_ids") or [])
                 if result.get("warning"):
                     warnings.append(result["warning"])
+                try:
+                    from .plan_autolink import reflow_enrollment
+
+                    reflow_enrollment(enrollment)
+                except Exception:
+                    pass
 
         return Response({
             "ok": True,

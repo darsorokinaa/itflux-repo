@@ -919,7 +919,30 @@ class PaymentProviderService:
                 logger.exception("sync_effective_at_to_expires failed")
             return
 
-        base = sub.expires_at if sub.expires_at and sub.expires_at > now else now
+        # r49: досрочное продление считаем от конца ОПЛАЧЕННОГО периода, и только
+        # если он реальный: ручные/legacy даты (admin, self) и аномальные даты
+        # (дальше 13 мес. вперёд) не накапливаются — иначе получалось «до 2062».
+        paid_sources = {
+            TeacherSubscription.Source.PAYMENT,
+            TeacherSubscription.Source.PROMOTION,
+            TeacherSubscription.Source.PROMO_CODE,
+            TeacherSubscription.Source.LAUNCH_PROMO,
+            TeacherSubscription.Source.REFERRAL,
+        }
+        base = now
+        if (
+            sub.expires_at
+            and sub.expires_at > now
+            and sub.source in paid_sources
+            and sub.plan_id == plan.pk
+            and sub.expires_at <= add_months(now, 13)
+        ):
+            base = sub.expires_at
+        elif sub.expires_at and sub.expires_at > add_months(now, 13):
+            logger.warning(
+                "subscription_anomalous_expires teacher=%s expires_at=%s - ignored as base",
+                payment.teacher_id, sub.expires_at.isoformat(),
+            )
         expires = add_months(base, months)
         if bonus_days:
             expires = expires + timedelta(days=bonus_days)

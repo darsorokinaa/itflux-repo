@@ -210,6 +210,12 @@ def _subscription_payload(sub: TeacherSubscription) -> dict:
         "source": getattr(sub, "source", "self"),
         "started_at": sub.started_at.isoformat() if sub.started_at else None,
         "expires_at": expires_at.isoformat() if expires_at else None,
+        # r53: бессрочный доступ только для служебных аккаунтов (владелец/staff), выданный вручную.
+        "is_unlimited": bool(
+            expires_at is None
+            and sub.source == TeacherSubscription.Source.ADMIN
+            and (sub.teacher.is_staff or sub.teacher.is_superuser)
+        ),
         "promo_ends_at": sub.promo_ends_at.isoformat() if getattr(sub, "promo_ends_at", None) else None,
         "promo_started_at": (
             sub.promo_started_at.isoformat() if getattr(sub, "promo_started_at", None) else None
@@ -424,8 +430,13 @@ class SubscriptionPlansView(APIView):
 
         _ensure_tariff_catalog()
 
+        from django.db.models import Q as _Q
+
+        # r50: снятые с продажи тарифы («Премиум», «Только материалы») видит только их текущий владелец.
         plans = (
             TariffPlan.objects.filter(is_active=True)
+            .filter(_Q(is_public=True) | _Q(subscriptions__teacher=request.user))
+            .distinct()
             .order_by("sort_order", "price_month")
         )
         SubscriptionLimitService.get_or_create_subscription(request.user)
@@ -437,12 +448,11 @@ class SubscriptionPlansView(APIView):
         assigned_plan = sub.plan
 
         paid_plans = [p for p in plans if not _plan_is_free(p) and p.cta_type != TariffPlan.CtaType.CONTACT]
-        year_savings = None
-        for p in paid_plans:
-            s = _year_savings_months(p.price_month, p.price_year)
-            if s:
-                year_savings = s
-                break
+        # r36: раньше брался первый платный тариф («Только материалы», 4 мес.) и подпись
+        # «экономия 4 месяца» показывалась для всех. Теперь — реальный диапазон по тарифам.
+        _savings = sorted({s for s in (_year_savings_months(p.price_month, p.price_year) for p in paid_plans) if s})
+        year_savings = _savings[0] if _savings else None
+        year_savings_max = _savings[-1] if _savings else None
 
         plan_payloads = []
         for p in plans:
@@ -481,8 +491,13 @@ class SubscriptionPlansView(APIView):
             "billing": {
                 "year_savings_months": year_savings,
                 "year_savings_label": (
-                    f"При оплате за год — экономия {year_savings} "
-                    f"{'месяц' if year_savings == 1 else 'месяца' if year_savings in (2, 3, 4) else 'месяцев'}"
+                    (
+                        f"При оплате за год — экономия от {year_savings} до {year_savings_max} месяцев "
+                        f"(зависит от тарифа)"
+                        if year_savings_max != year_savings
+                        else f"При оплате за год — экономия {year_savings} "
+                        f"{'месяц' if year_savings == 1 else 'месяца' if year_savings in (2, 3, 4) else 'месяцев'}"
+                    )
                     if year_savings
                     else None
                 ),
@@ -966,6 +981,14 @@ class SubscriptionCreatePaymentView(APIView):
             return Response({"detail": "Тарифный план не найден."}, status=404)
         if getattr(plan, "cta_type", "") == TariffPlan.CtaType.CONTACT:
             return Response({"detail": "Тариф оформляется по заявке.", "code": "CONTACT_ONLY"}, status=400)
+        if not plan.is_public:
+            # r50: «Премиум» и «Только материалы» сняты с продажи; продлить можно только свой текущий тариф.
+            _cur = SubscriptionLimitService.get_or_create_subscription(request.user)
+            if not (_cur and _cur.plan_id == plan.pk and _cur.source == TeacherSubscription.Source.PAYMENT):
+                return Response(
+                    {"detail": "Этот тариф больше не продаётся. Выберите «Репетитор» или «Профи».", "code": "PLAN_NOT_FOR_SALE"},
+                    status=400,
+                )
 
         payments_on = bool(getattr(settings, "PAYMENTS_ENABLED", False))
         if not payments_on:

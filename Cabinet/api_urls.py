@@ -6,6 +6,8 @@ from . import (
     ai_api,
 )
 from .worksheet_ai import api as worksheet_ai_api
+from . import r50_api
+from . import r52_api
 from . import (
     api_views,
     availability_api,
@@ -519,6 +521,17 @@ urlpatterns = [
     path("subscription/usage/", subscription_api.SubscriptionUsageView.as_view(), name="subscription_usage"),
     path("subscription/plans/", subscription_api.SubscriptionPlansView.as_view(), name="subscription_plans"),
     path("pricing/plans/", subscription_api.PublicPricingPlansView.as_view(), name="pricing_plans_public"),
+    path("r50/pricing-me/", r50_api.PricingMeView.as_view(), name="r50_pricing_me"),
+    path("r50/trial/start/", r50_api.TrialStartView.as_view(), name="r50_trial_start"),
+    path("r50/pay/<str:token>/", r50_api.pay_link_view, name="r50_pay_link"),
+    path("r50/unsubscribe/<str:token>/", r50_api.unsubscribe_view, name="r50_unsubscribe"),
+    path("r52/consent-text/<str:version>/", r52_api.ConsentTextView.as_view(), name="r52_consent_text"),
+    path("r52/consent/status/", r52_api.ConsentStatusView.as_view(), name="r52_consent_status"),
+    path("r52/consent/step/", r52_api.ConsentStepView.as_view(), name="r52_consent_step"),
+    path("r52/marketing/prompt/", r52_api.MarketingPromptView.as_view(), name="r52_marketing_prompt"),
+    path("r52/marketing/settings/", r52_api.MarketingSettingsView.as_view(), name="r52_marketing_settings"),
+    path("r52/marketing/confirm/<str:token>/", r52_api.marketing_confirm_view, name="r52_marketing_confirm"),
+    path("r52/marketing/unsubscribe/<str:token>/", r52_api.marketing_unsubscribe_view, name="r52_marketing_unsubscribe"),
     path("library/new-this-month/", subscription_api.LibraryNewThisMonthView.as_view(), name="library_new_this_month"),
     path("usage/workbook/", subscription_api.WorkbookUsageTrackView.as_view(), name="usage_workbook_track"),
     path("usage/variant-check/", subscription_api.VariantUsageCheckView.as_view(), name="usage_variant_check"),
