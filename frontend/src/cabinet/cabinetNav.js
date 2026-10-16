@@ -49,7 +49,7 @@ export const CABINET_NAV_GROUPS = [
     label: "Сервисы",
     items: [
       { id: "payments", label: "Оплаты", path: "/cabinet/payments", icon: "wallet" },
-      { id: "task-bank", label: "Банк задач", path: "/tasks", icon: "tasks", accent: true, newTab: true },
+      { id: "task-bank", label: "Банк задач", path: "/tasks", icon: "tasks", accent: true },
       { id: "my-task-bank", label: "Мой банк задач", path: "/tasks/my", icon: "cards" },
     ],
   },
@@ -112,13 +112,24 @@ export const CABINET_MORE_ITEMS = CABINET_MORE_GROUPS.flatMap((group) => group.i
 
 const MORE_PATHS = CABINET_MORE_ITEMS.filter((item) => item.path).map((item) => item.path);
 
-export function isCabinetNavActive(pathname, item) {
-  const match = item.matchPath || item.path;
+function navPathMatches(pathname, match) {
   if (!match) return false;
   if (match === "/cabinet") {
     return pathname === "/cabinet" || pathname === "/cabinet/";
   }
   return pathname === match || pathname.startsWith(`${match}/`);
+}
+
+/** r49: подсвечиваем только самый точный пункт (/tasks/my не подсвечивает и «Банк задач» /tasks). */
+export function isCabinetNavActive(pathname, item) {
+  const path = String(pathname || "").replace(/\/+$/, "") || "/";
+  const match = item.matchPath || item.path;
+  if (!navPathMatches(path, match)) return false;
+  const all = [...CABINET_NAV, ...CABINET_MORE_ITEMS];
+  return !all.some((other) => {
+    const om = other.matchPath || other.path;
+    return om && om !== match && om.length > match.length && navPathMatches(path, om);
+  });
 }
 
 export function isCabinetMobileNavActive(pathname, item) {
@@ -131,7 +142,7 @@ export function isCabinetMobileNavActive(pathname, item) {
       (path) => pathname === path || pathname.startsWith(`${path}/`),
     );
   }
-  return pathname === item.path || pathname.startsWith(`${item.path}/`);
+  return isCabinetNavActive(pathname, item);
 }
 
 export function getCabinetSectionTitle(pathname) {

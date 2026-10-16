@@ -183,6 +183,10 @@ function ensureEmbedScript() {
   const script = document.createElement("script");
   script.id = SCRIPT_ID;
   script.async = true;
+  // r49: сайт отдаёт Referrer-Policy: same-origin, и без Referer Timeweb отвечает 403
+  // (проверка домена агента) -> ошибка в консоли на каждой странице кабинета.
+  // Для этого скрипта отправляем только origin.
+  script.referrerPolicy = "strict-origin-when-cross-origin";
   script.src = TIMEWEB_AI_EMBED_SRC;
   document.body.appendChild(script);
 }

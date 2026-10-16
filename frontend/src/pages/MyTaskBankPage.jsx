@@ -436,18 +436,23 @@ export default function MyTaskBankPage() {
   return (
     <MyTaskBankShell>
       {accessModal}
-      {error ? <p className="all-tasks-meta__error">{error}</p> : null}
+      {error ? (
+        <div className="all-tasks-meta__error" role="alert">
+          <p>{error}</p>
+          <button type="button" className="mtb-btn mtb-btn--primary" onClick={() => load()}>Повторить</button>
+        </div>
+      ) : null}
 
-      {loading && !data ? <EducationalLoading message={LOADING_MESSAGES.data} /> : null}
+      {loading && !data && !error ? <EducationalLoading message={LOADING_MESSAGES.data} /> : null}
 
       {bankIsEmpty ? (
         <div className="mtb-empty">
           <div className="mtb-empty__icon" aria-hidden>
             <FileText size={22} strokeWidth={2} />
           </div>
-          <h2>Пока здесь нет задач</h2>
+          <h2>Здесь пока нет задач.</h2>
           <p>Создайте свою первую задачу или добавьте подходящее задание из общего банка.</p>
-          <button type="button" className="mtb-btn mtb-btn--primary" onClick={openCreate}>+ Создать задачу</button>
+          <button type="button" className="mtb-btn mtb-btn--primary" onClick={openCreate}>Создать задачу</button>
           <Link className="mtb-empty__link" to="/tasks">Найти в общем банке →</Link>
         </div>
       ) : data ? (

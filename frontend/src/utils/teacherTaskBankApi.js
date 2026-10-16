@@ -1,4 +1,4 @@
-import { ensureCsrfCookie } from "./cabinetAuth";
+import { CABINET_GET_TIMEOUT_MS, CABINET_TIMEOUT_MESSAGE, ensureCsrfCookie } from "./cabinetAuth";
 
 function getCsrfToken() {
   const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
@@ -16,11 +16,27 @@ async function teacherTaskFetch(path, options = {}) {
   };
   const csrf = getCsrfToken();
   if (csrf) headers["X-CSRFToken"] = csrf;
-  const res = await fetch(`/api/cabinet${path}`, {
-    credentials: "same-origin",
-    ...options,
-    headers,
-  });
+  const method = String(options.method || "GET").toUpperCase();
+  const controller = new AbortController();
+  const timer = method === "GET" ? setTimeout(() => controller.abort(), CABINET_GET_TIMEOUT_MS) : null;
+  let res;
+  try {
+    res = await fetch(`/api/cabinet${path}`, {
+      credentials: "same-origin",
+      signal: controller.signal,
+      ...options,
+      headers,
+    });
+  } catch (err) {
+    if (err?.name === "AbortError") {
+      const e = new Error(CABINET_TIMEOUT_MESSAGE);
+      e.code = "TIMEOUT";
+      throw e;
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   let data = null;
   try {
     data = await res.json();

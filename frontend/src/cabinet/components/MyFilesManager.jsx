@@ -586,6 +586,8 @@ export default function MyFilesManager({
   const availableBytes = Number(quota?.available_bytes ?? Math.max(0, limitBytes - usedBytes));
   const quotaBreakdown = Array.isArray(quota?.breakdown) ? quota.breakdown.filter((row) => row.used_bytes > 0) : [];
   const canUpgradeStorage = Boolean(quota?.can_upgrade) && !student;
+  // r49: квота = сумма этих источников; файлы в корзине не учитываются.
+  const quotaSources = Array.isArray(quota?.sources) ? quota.sources.filter((row) => row.count > 0) : [];
   const canWrite = apiSection !== "trash";
   const parentCrumb = breadcrumbs.length > 1 ? breadcrumbs[breadcrumbs.length - 2] : null;
   const collection = recordingsOn && activeWorkspace === "my"
@@ -1028,7 +1030,12 @@ export default function MyFilesManager({
                   showOpenFiles={false}
                   showUpgrade={canUpgradeStorage}
                 />
-              ) : error ? <div className="cbf-error">{error}</div> : null}
+              ) : error ? (
+                <div className="cbf-error" role="alert">
+                  {error}{" "}
+                  <button type="button" className="cbf-btn" onClick={() => load()}>Повторить</button>
+                </div>
+              ) : null}
 
               {loading ? (
                 <div className="cbf-skeleton" aria-busy="true">
@@ -1293,6 +1300,16 @@ export default function MyFilesManager({
                 ) : (
                   <span>Материалы всегда под рукой</span>
                 )}
+              </div>
+            ) : null}
+            {!compact && quotaSources.length ? (
+              <div className="cbf-foot cbf-foot--sources" data-testid="storage-sources">
+                <span>
+                  {"Место занимают: "}
+                  {quotaSources
+                    .map((row) => `${row.label} — ${pluralRu(row.count, "файл", "файла", "файлов")}, ${formatStorageBytes(row.used_bytes)}`)
+                    .join(" · ")}
+                </span>
               </div>
             ) : null}
           </div>

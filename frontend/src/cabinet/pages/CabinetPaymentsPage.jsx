@@ -456,7 +456,8 @@ function CabinetPaymentsPageInner() {
       const [dash, acc, stud, prevDash, txs] = await Promise.all([
         fetchBillingDashboard({ year: bounds.year, month: bounds.month }),
         fetchBillingAccounts({}),
-        fetchStudents(),
+        // r49: все ученики преподавателя (и без оплат, и групповые), архивные — с пометкой.
+        fetchStudents({ include_archived: 1 }),
         fetchBillingDashboard({
           year: prevMonth.getFullYear(),
           month: prevMonth.getMonth() + 1,
@@ -469,10 +470,13 @@ function CabinetPaymentsPageInner() {
       setAccounts(Array.isArray(acc) ? acc : []);
       const studentList = normalizeCabinetList(stud);
       setStudents(
-        studentList.map((s) => ({
-          id: s.id,
-          name: s.full_name || `${s.first_name || ""} ${s.last_name || ""}`.trim(),
-        })),
+        studentList
+          .map((s) => {
+            const base = s.full_name || `${s.first_name || ""} ${s.last_name || ""}`.trim() || `Ученик #${s.id}`;
+            const archived = s.status === "archived";
+            return { id: s.id, archived, name: archived ? `${base} (архив)` : base };
+          })
+          .sort((a, b) => Number(a.archived) - Number(b.archived)),
       );
     } catch (err) {
       setError(err.message || "Не удалось загрузить оплаты");
@@ -633,7 +637,12 @@ function CabinetPaymentsPageInner() {
 
   return (
     <div className="pay-page pay-studio">
-      {error ? <div className="pay-error">{error}</div> : null}
+      {error ? (
+        <div className="pay-error" role="alert">
+          {error}{" "}
+          <button type="button" className="pay-studio__btn" onClick={() => reload()}>Повторить</button>
+        </div>
+      ) : null}
       {toast ? <div className="pay-toast" role="status">{toast}</div> : null}
 
       <div className="pay-studio__layout">
@@ -954,7 +963,7 @@ function CabinetPaymentsPageInner() {
       <BillingPaymentModal
         open={paymentOpen}
         simple
-        students={students}
+        students={students.filter((s) => !s.archived)}
         accounts={accounts}
         defaultStudentId={defaultStudentId}
         onClose={() => setPaymentOpen(false)}
@@ -1101,7 +1110,7 @@ function CabinetPaymentsPageInner() {
       <BillingOperationWizard
         open={wizardOpen}
         onClose={() => setWizardOpen(false)}
-        students={students}
+        students={students.filter((s) => !s.archived)}
         accounts={accounts}
         defaultStudentId={defaultStudentId}
         defaultOpType={wizardOp}
