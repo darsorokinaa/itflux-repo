@@ -79,15 +79,11 @@ const FAQ_ITEMS = [
   },
   {
     q: "Какие материалы доступны на «Старт»?",
-    a: "«Старт» — ознакомительный тариф: только бесплатные материалы. Расписание, журнал и видеозанятия открываются с тарифа «Учитель».",
+    a: "На «Старт» доступны бесплатные материалы, банк ФИПИ и тренажёры. Расписание, журнал и видеозанятия открыты на всех тарифах, включая «Старт».",
   },
   {
     q: "Что означает «не менее 5 новых материалов»?",
     a: "На тарифах с ежемесячным обновлением библиотеки мы публикуем не меньше пяти новых готовых материалов каждый месяц. Это минимум, а не потолок.",
-  },
-  {
-    q: "Какие симуляторы доступны на «Профи»?",
-    a: "На «Профи» и выше симуляторы и интерактивы в приоритете: новые тренажёры и интерактивные уроки появляются там в первую очередь.",
   },
   {
     q: "Как применить промокод?",
@@ -103,28 +99,28 @@ const FAQ_ITEMS = [
   },
 ];
 
+// r56: строки совпадают с /pricing; значения — из TariffPlan (API), без вымышленных градаций.
 const COMPARE_ROWS = [
   { key: "students", label: "Активные ученики", type: "limit", field: "students" },
   { key: "groups", label: "Группы", type: "limit", field: "groups" },
-  { key: "storage", label: "Хранилище", type: "storage" },
+  { key: "schedule", label: "Расписание", type: "always" },
+  { key: "journal", label: "Журнал", type: "always" },
+  { key: "video", label: "Видеоконференции", type: "always" },
   { key: "homework", label: "Домашние задания", type: "feature", field: "homework" },
   { key: "review", label: "Проверка работ", type: "feature", field: "review" },
+  { key: "booking", label: "Ссылка для записи учеников", type: "feature", field: "student_booking" },
+  { key: "free_lib", label: "Бесплатные материалы", type: "always" },
+  { key: "teacher_lib", label: "Расширенная библиотека", type: "rank", min: 1 },
   { key: "variants", label: "Генератор вариантов", type: "limit_monthly", field: "variants_monthly" },
   { key: "workbooks", label: "Рабочие тетради", type: "limit_monthly", field: "workbooks_monthly" },
   { key: "interactives", label: "Создание интерактивов", type: "limit_monthly", field: "interactives" },
-  { key: "lessons", label: "Занятия в расписании", type: "limit", field: "lessons" },
-  { key: "schedule", label: "Расписание", type: "rank", min: 1 },
-  { key: "journal", label: "Журнал", type: "rank", min: 1 },
-  { key: "video", label: "Видеоконференции", type: "rank", min: 1 },
+  { key: "storage", label: "Хранилище", type: "storage" },
+  { key: "teacher_tasks", label: "Личный банк задач", type: "limit", field: "teacher_tasks" },
+  { key: "ai_tokens", label: "Токены «Цифрика»", type: "limit_monthly", field: "ai_tokens_monthly" },
+  { key: "ai_day", label: "Запросы к «Цифрику» в день", type: "limit", field: "ai_text_day" },
+  { key: "watermark", label: "Водяной знак на ИИ-листах", type: "watermark" },
   { key: "notifications", label: "Уведомления", type: "notifications" },
-  { key: "analytics", label: "Аналитика", type: "analytics_level" },
   { key: "mass", label: "Массовые действия", type: "feature", field: "mass_actions" },
-  { key: "free_lib", label: "Бесплатные материалы", type: "always" },
-  { key: "teacher_lib", label: "Расширенная библиотека", type: "rank", min: 1 },
-  { key: "pro_lib", label: "Полная библиотека", type: "rank", min: 2 },
-  { key: "premium_lib", label: "Premium-материалы", type: "rank", min: 3 },
-  { key: "simulators", label: "Симуляторы", type: "simulators_level" },
-  { key: "cross_subject", label: "Межпредметные проекты", type: "cross_subject" },
   { key: "support", label: "Поддержка", type: "support" },
 ];
 
@@ -240,7 +236,7 @@ function ctaLabel(plan, isCurrent, { expiresAt, currentSlug, currentPlan, period
   }
   if (plan.slug === "pro") return "Перейти на Профи";
   if (plan.slug === "start") return "Выбрать Старт";
-  if (plan.slug === "teacher") return "Выбрать Учитель";
+  if (plan.slug === "teacher") return `Выбрать ${plan.name || "Репетитор"}`;
   if (plan.slug === "premium") return "Выбрать Премиум";
   return `Выбрать ${plan.name}`;
 }
@@ -261,13 +257,18 @@ function compareCell(plan, row) {
 
   switch (row.type) {
     case "limit": {
+      if (!(row.field in l)) return "—";
       const v = l[row.field];
       if (v == null) return "Без лимита";
+      if (Number(v) <= 0) return "—";
       return String(v);
     }
     case "limit_monthly": {
+      if (!(row.field in l)) return "—";
       const v = l[row.field];
       if (v == null) return "Без лимита";
+      if (Number(v) <= 0) return "—";
+      if (row.field === "ai_tokens_monthly" && plan.slug === SCHOOL_SLUG) return `от ${v}/мес`;
       return `${v}/мес`;
     }
     case "feature":
@@ -291,19 +292,9 @@ function compareCell(plan, row) {
       if (f.priority_support) return "Приоритетная";
       if (rank >= 1) return "Стандартная";
       return "Базовая";
-    case "analytics_level":
-      if (rank >= 3) return "Полная";
-      if (rank >= 2 || f.analytics) return "Расширенная";
-      if (rank >= 1) return "Базовая";
-      return "—";
-    case "simulators_level":
-      if (f.simulators || rank >= 2) return "✓";
-      if (rank >= 1) return "Часть";
-      return "Демо";
-    case "cross_subject":
-      if (rank >= 3) return "✓";
-      if (rank >= 2) return "Часть";
-      return "—";
+    case "watermark":
+      if (plan.ai_worksheet_watermark == null) return "—";
+      return plan.ai_worksheet_watermark ? "Есть" : "Нет";
     default:
       return "—";
   }

@@ -36,6 +36,25 @@ WRONG_ACCOUNT_MESSAGE = (
     "Выйдите из текущего аккаунта или продолжите под ним, "
     "если учитель разрешает привязку."
 )
+STUDENT_LIMIT_INVITE_MESSAGE = (
+    "У преподавателя закончились места для учеников на текущем тарифе. "
+    "Сообщите преподавателю: чтобы добавить вас, ему нужно освободить место "
+    "(перенести ученика в архив) или перейти на тариф выше."
+)
+
+
+def _enforce_student_limit_on_accept(teacher):
+    """r56: лимит учеников проверяется и при принятии ссылки (общая ссылка не обходит тариф)."""
+    from .subscription_service import LimitExceeded, SubscriptionLimitService
+
+    # Сериализуем параллельные принятия к одному учителю.
+    User.objects.select_for_update().filter(pk=teacher.pk).first()
+    try:
+        SubscriptionLimitService.raise_if_student_limit_reached(teacher)
+    except LimitExceeded as exc:
+        raise InvitationError(STUDENT_LIMIT_INVITE_MESSAGE, code="student_limit") from exc
+
+
 NAMED_INVITE_MISSING_STUDENT_MESSAGE = (
     "Приглашение не связано с профилем ученика. "
     "Попросите учителя отправить новую ссылку."
@@ -630,6 +649,8 @@ def accept_student_invitation(token: str, user: User):
         elif (invitation.first_name or "").strip():
             raise InvitationError(NAMED_INVITE_MISSING_STUDENT_MESSAGE, code="invalid")
         else:
+            if not Student.objects.filter(teacher=invitation.teacher, user=user).exists():
+                _enforce_student_limit_on_accept(invitation.teacher)
             student, created = Student.objects.get_or_create(
                 teacher=invitation.teacher,
                 user=user,
@@ -666,6 +687,7 @@ def accept_student_invitation(token: str, user: User):
             student.grade = invitation.grade
             update_fields.append("grade")
         if student.status == StudentStatus.ARCHIVED:
+            _enforce_student_limit_on_accept(invitation.teacher)
             student.status = StudentStatus.ACTIVE
             update_fields.append("status")
         if update_fields:

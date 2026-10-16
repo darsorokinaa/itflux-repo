@@ -1,7 +1,7 @@
 /**
  * Публичная витрина тарифов /pricing (r50: Старт / Репетитор / Профи / Школа).
- * Тексты — дословно из брифа владельца. Лимиты совпадают с TariffPlan в БД
- * и проверками в Cabinet/tariff_usage.py / subscription_access.py.
+ * r56: лимиты и цены берутся из /api/cabinet/pricing/plans/ (TariffPlan в БД),
+ * при недоступности API — запасные значения FALLBACK.
  */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -13,86 +13,150 @@ import { ensureCsrfCookie, getCsrfToken } from "../utils/cabinetAuth";
 
 const fmt = (n) => Number(n).toLocaleString("ru-RU").replace(/\u00a0/g, " ");
 
-const PLANS = [
-  {
-    slug: "start",
-    name: "Старт",
-    month: 0,
-    lead: "Чтобы попробовать платформу с первыми учениками.",
-    bullets: [
-      "До 5 учеников",
-      "Полный кабинет: расписание, журнал, видеоуроки, учёт оплат, проверка ДЗ",
-      "Бесплатная библиотека материалов и банк ФИПИ",
-      "10 вариантов и 3 рабочих листа в месяц",
-      "ИИ-помощник «Цифрик»: 30 токенов в месяц",
-    ],
-  },
-  {
-    slug: "teacher",
-    name: "Репетитор",
-    month: 990,
-    year: 8316,
-    lead: "Для репетитора с постоянной группой учеников.",
-    bullets: [
-      "До 15 учеников",
-      "Всё из тарифа «Старт»",
-      "Расширенная библиотека материалов",
-      "50 вариантов, 20 рабочих листов и 10 интерактивов в месяц",
-      "Ссылка для самостоятельной записи учеников",
-      "ИИ-помощник «Цифрик»: 200 токенов в месяц",
-    ],
-  },
-  {
-    slug: "pro",
-    name: "Профи",
-    month: 1990,
-    year: 16716,
-    badge: "Рекомендуем",
-    lead: "Для тех, кто ведёт много учеников и групп.",
-    bullets: [
-      "Без ограничений по ученикам и группам",
-      "Всё из тарифа «Репетитор»",
-      "Полная библиотека: банк ФИПИ, генератор, тренажёры",
-      "Без ограничений по вариантам, рабочим листам и интерактивам",
-      "ИИ-помощник «Цифрик»: 1000 токенов в месяц",
-      "Аналитика по ученикам",
-    ],
-  },
-  {
-    slug: "school",
-    name: "Школа",
-    contact: true,
-    lead: "Для школ и учебных центров с несколькими преподавателями.",
-    bullets: [
-      "Всё из тарифа «Профи» для каждого преподавателя",
-      "Количество преподавателей и учеников — по договорённости",
-      "Условия подключения обсуждаем индивидуально",
-    ],
-  },
-];
+/** r56: запасные значения на случай, если API недоступно. Совпадают с TariffPlan в БД на 16.10.2026. */
+const FALLBACK = {
+  start: { students: 5, variants: 10, workbooks: 3, interactives: 0, tokens: 30, aiDay: 20, storageMb: 512, tasks: 20, watermark: true },
+  teacher: { students: 15, variants: 50, workbooks: 20, interactives: 10, tokens: 200, aiDay: 60, storageMb: 1024, tasks: 500, watermark: false, month: 990, year: 8316 },
+  pro: { students: null, variants: null, workbooks: null, interactives: null, tokens: 1000, aiDay: 200, storageMb: 3072, tasks: 5000, watermark: false, month: 1990, year: 16716 },
+  school: { students: null, variants: null, workbooks: null, interactives: null, tokens: 2000, aiDay: 500, storageMb: 102400, tasks: null, watermark: false },
+};
 
-const ROWS = [
-  ["Цена в месяц", "0 ₽", "990 ₽", "1 990 ₽", "по запросу"],
-  ["Цена в год", "—", "8 316 ₽ (≈ 693 ₽/мес)", "16 716 ₽ (≈ 1 393 ₽/мес)", "по запросу"],
-  ["Ученики", "до 5", "до 15", "без ограничений", "по договорённости"],
-  ["Группы", "✓ (в пределах лимита учеников)", "✓ (в пределах лимита учеников)", "без ограничений", "без ограничений"],
-  ["Расписание", "✓", "✓", "✓", "✓"],
-  ["Журнал", "✓", "✓", "✓", "✓"],
-  ["Видеоуроки", "✓", "✓", "✓", "✓"],
-  ["Учёт оплат", "✓", "✓", "✓", "✓"],
-  ["Проверка ДЗ", "✓", "✓", "✓", "✓"],
-  ["Ссылка для записи учеников", "—", "✓", "✓", "✓"],
-  ["Библиотека", "бесплатная", "расширенная", "полная", "полная"],
-  ["Банк ФИПИ", "✓", "✓", "✓", "✓"],
-  ["Генератор", "10/мес", "50/мес", "✓ без ограничений", "✓ без ограничений"],
-  ["Тренажёры", "—", "—", "✓", "✓"],
-  ["Варианты в месяц", "10", "50", "без ограничений", "без ограничений"],
-  ["Рабочие листы в месяц", "3", "20", "без ограничений", "без ограничений"],
-  ["Интерактивы в месяц", "—", "10", "без ограничений", "без ограничений"],
-  ["ИИ-помощник «Цифрик»", "30 токенов/мес", "200 токенов/мес", "1000 токенов/мес", "по договорённости"],
-  ["Аналитика", "—", "—", "✓", "✓"],
-  ["Пробный период", "—", "—", "14 дней для новых преподавателей", "—"],
-];
+/** Значения тарифа из ответа /api/cabinet/pricing/plans/ поверх запасных. null = без ограничений. */
+function planValues(slug, apiPlans) {
+  const fb = FALLBACK[slug] || {};
+  const p = (apiPlans || []).find((x) => x.slug === slug);
+  if (!p) return fb;
+  const l = p.limits || {};
+  const pick = (key, fallback) => (key in l ? l[key] : fallback);
+  const num = (v, fallback) => {
+    const n = Number(v);
+    return v != null && Number.isFinite(n) && n > 0 ? n : fallback;
+  };
+  return {
+    students: pick("students", fb.students),
+    variants: pick("variants_monthly", fb.variants),
+    workbooks: pick("workbooks_monthly", fb.workbooks),
+    interactives: pick("interactives", fb.interactives),
+    tokens: l.ai_tokens_monthly != null ? l.ai_tokens_monthly : fb.tokens,
+    aiDay: l.ai_text_day != null && l.ai_text_day > 0 ? l.ai_text_day : fb.aiDay,
+    storageMb: l.storage_mb != null && l.storage_mb > 0 ? l.storage_mb : fb.storageMb,
+    tasks: pick("teacher_tasks", fb.tasks),
+    watermark: p.ai_worksheet_watermark != null ? Boolean(p.ai_worksheet_watermark) : fb.watermark,
+    month: num(p.price_month, fb.month || 0),
+    year: num(p.price_year, fb.year),
+  };
+}
+
+function storageText(mb) {
+  if (mb == null) return "—";
+  if (mb >= 1024) {
+    const gb = mb / 1024;
+    return `${Number.isInteger(gb) ? gb : Math.round(gb * 10) / 10} ГБ`;
+  }
+  return `${mb} МБ`;
+}
+
+const lim = (v, unit = "") => (v == null ? "без ограничений" : `${fmt(v)}${unit}`);
+const upTo = (v) => (v == null ? "без ограничений" : `до ${fmt(v)}`);
+const monthly = (v) => (v == null ? "без ограничений" : v <= 0 ? "—" : fmt(v));
+
+function buildPlans(apiPlans) {
+  const s = planValues("start", apiPlans);
+  const t = planValues("teacher", apiPlans);
+  const p = planValues("pro", apiPlans);
+  const sc = planValues("school", apiPlans);
+  return [
+    {
+      slug: "start",
+      name: "Старт",
+      month: 0,
+      v: s,
+      lead: "Чтобы попробовать платформу с первыми учениками.",
+      bullets: [
+        `До ${fmt(s.students)} учеников`,
+        "Полный кабинет: расписание, журнал, видеоуроки, учёт оплат, проверка ДЗ",
+        "Бесплатная библиотека материалов, банк ФИПИ и тренажёры",
+        `${fmt(s.variants)} вариантов и ${fmt(s.workbooks)} рабочих листа в месяц`,
+        `ИИ-помощник «Цифрик»: ${fmt(s.tokens)} токенов в месяц, до ${fmt(s.aiDay)} запросов в день`,
+        `Хранилище ${storageText(s.storageMb)}`,
+      ],
+    },
+    {
+      slug: "teacher",
+      name: "Репетитор",
+      month: t.month,
+      year: t.year,
+      v: t,
+      lead: "Для репетитора с постоянной группой учеников.",
+      bullets: [
+        `До ${fmt(t.students)} учеников`,
+        "Всё из тарифа «Старт»",
+        "Расширенная библиотека материалов",
+        `${fmt(t.variants)} вариантов, ${fmt(t.workbooks)} рабочих листов и ${fmt(t.interactives)} интерактивов в месяц`,
+        "Ссылка для самостоятельной записи учеников",
+        `ИИ-помощник «Цифрик»: ${fmt(t.tokens)} токенов в месяц, до ${fmt(t.aiDay)} запросов в день`,
+        `Хранилище ${storageText(t.storageMb)}`,
+      ],
+    },
+    {
+      slug: "pro",
+      name: "Профи",
+      month: p.month,
+      year: p.year,
+      v: p,
+      badge: "Рекомендуем",
+      lead: "Для тех, кто ведёт много учеников и групп.",
+      bullets: [
+        p.students == null ? "Без ограничений по ученикам и группам" : `До ${fmt(p.students)} учеников`,
+        "Всё из тарифа «Репетитор»",
+        "Без ограничений по вариантам, рабочим листам и интерактивам",
+        `ИИ-помощник «Цифрик»: ${fmt(p.tokens)} токенов в месяц, до ${fmt(p.aiDay)} запросов в день`,
+        `Хранилище ${storageText(p.storageMb)}, до ${fmt(p.tasks)} задач в личном банке`,
+      ],
+    },
+    {
+      slug: "school",
+      name: "Школа",
+      contact: true,
+      v: sc,
+      lead: "Для школ и учебных центров.",
+      bullets: [
+        "Подключаем каждого преподавателя школы на «Профи» с индивидуальными условиями",
+        `ИИ-помощник «Цифрик»: от ${fmt(sc.tokens)} токенов в месяц`,
+        "Условия подключения обсуждаем индивидуально",
+      ],
+    },
+  ];
+}
+
+function buildRows(plans) {
+  const [s, t, p, sc] = plans.map((x) => x.v);
+  const price = (pl) => (pl.month ? `${fmt(pl.month)} ₽` : "0 ₽");
+  const yearPrice = (pl) => (pl.year ? `${fmt(pl.year)} ₽ (≈ ${fmt(Math.round(pl.year / 12))} ₽/мес)` : "—");
+  return [
+    ["Цена в месяц", price(s), price(t), price(p), "по запросу"],
+    ["Цена в год", "—", yearPrice(t), yearPrice(p), "по запросу"],
+    ["Ученики", upTo(s.students), upTo(t.students), upTo(p.students), "по договорённости"],
+    ["Группы", "✓ (в пределах лимита учеников)", "✓ (в пределах лимита учеников)", "без ограничений", "без ограничений"],
+    ["Расписание", "✓", "✓", "✓", "✓"],
+    ["Журнал", "✓", "✓", "✓", "✓"],
+    ["Видеоуроки", "✓", "✓", "✓", "✓"],
+    ["Учёт оплат", "✓", "✓", "✓", "✓"],
+    ["Проверка ДЗ", "✓", "✓", "✓", "✓"],
+    ["Ссылка для записи учеников", "—", "✓", "✓", "✓"],
+    ["Библиотека", "бесплатная", "расширенная", "полная", "полная"],
+    ["Банк ФИПИ", "✓", "✓", "✓", "✓"],
+    ["Варианты в месяц", monthly(s.variants), monthly(t.variants), monthly(p.variants), monthly(sc.variants)],
+    ["Рабочие листы в месяц", monthly(s.workbooks), monthly(t.workbooks), monthly(p.workbooks), monthly(sc.workbooks)],
+    ["Интерактивы в месяц", monthly(s.interactives), monthly(t.interactives), monthly(p.interactives), monthly(sc.interactives)],
+    ["Хранилище файлов", storageText(s.storageMb), storageText(t.storageMb), storageText(p.storageMb), storageText(sc.storageMb)],
+    ["Личный банк задач", lim(s.tasks, " задач"), lim(t.tasks, " задач"), lim(p.tasks, " задач"), lim(sc.tasks, " задач")],
+    ["ИИ-помощник «Цифрик»", `${fmt(s.tokens)} токенов/мес`, `${fmt(t.tokens)} токенов/мес`, `${fmt(p.tokens)} токенов/мес`, `от ${fmt(sc.tokens)} токенов/мес`],
+    ["Запросы к «Цифрику» в день", `до ${fmt(s.aiDay)}`, `до ${fmt(t.aiDay)}`, `до ${fmt(p.aiDay)}`, `до ${fmt(sc.aiDay)}`],
+    ["Водяной знак на ИИ-листах", ...[s, t, p, sc].map((v) => (v.watermark ? "есть" : "нет"))],
+    ["Пробный период", "—", "—", "14 дней для новых преподавателей", "—"],
+  ];
+}
 
 const FAQ = [
   {
@@ -100,7 +164,7 @@ const FAQ = [
     a: (
       <>
         Токены — это внутренняя единица работы ИИ-помощника «Цифрик». Каждый месяц начисляется: «Старт» — 30
-        токенов, «Репетитор» — 200, «Профи» — 1000, «Школа» — по договорённости. Токены расходуются на: ответ
+        токенов, «Репетитор» — 200, «Профи» — 1000, «Школа» — от 2000. Токены расходуются на: ответ
         «Цифрика» — 1–3 токена (короткий, длинный или массовый запрос), разбор фото — 3, картинку — 10; в
         ИИ-конструкторе листов: переформулировка или адаптация задания под тему — 1, новое задание — 3, блок
         теории — 2, оформление — 5, картинка к заданию — 8. Сборка листа из банка заданий токены не тратит.
@@ -112,6 +176,10 @@ const FAQ = [
   {
     q: "Как работает пробный период?",
     a: "Новые преподаватели получают 14 дней тарифа «Профи» бесплатно, со всеми возможностями. За 3 дня и в последний день придёт напоминание. Когда пробный период закончится, аккаунт перейдёт на «Старт». Все материалы и данные учеников сохранятся.",
+  },
+  {
+    q: "Кому доступен пробный период «Профи»?",
+    a: "Пробный период можно включить один раз и только если у аккаунта раньше не было платных подписок или промо-подписок. Если у вас был бесплатный «Премиум» на 3 месяца, пробный «Профи» недоступен.",
   },
   {
     q: "Что будет, если я достигну лимита?",
@@ -137,7 +205,7 @@ const FAQ = [
   },
   {
     q: "Как подключить школу или учебный центр?",
-    a: "Оставьте заявку в карточке «Школа». Мы свяжемся с вами и подберём условия под число преподавателей и учеников.",
+    a: "Оставьте заявку в карточке «Школа». Мы свяжемся с вами и подключим каждого преподавателя школы на «Профи» с индивидуальными условиями.",
   },
 ];
 
@@ -151,6 +219,7 @@ export default function PricingPage() {
   const [period, setPeriod] = useState("year");
   const [schoolOpen, setSchoolOpen] = useState(false);
   const [me, setMe] = useState(null);
+  const [apiPlans, setApiPlans] = useState(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [params] = useSearchParams();
@@ -164,6 +233,18 @@ export default function PricingPage() {
       .catch(() => { if (!cancelled) setMe(null); });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/cabinet/pricing/plans/", { credentials: "same-origin" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled && d && Array.isArray(d.plans)) setApiPlans(d.plans); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const PLANS = useMemo(() => buildPlans(apiPlans), [apiPlans]);
+  const ROWS = useMemo(() => buildRows(PLANS), [PLANS]);
 
   const teacher = !!(me && me.authenticated && me.is_teacher);
   const current = teacher ? me.current_plan : null;

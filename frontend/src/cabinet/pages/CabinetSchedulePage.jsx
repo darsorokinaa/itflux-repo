@@ -1029,13 +1029,13 @@ function BookingTools({ link, bookingAllowed, onOpenBooking, onShare, onCloseBoo
     ? (until ? `Запись открыта · до ${until}` : "Запись открыта")
     : "Запись закрыта";
   const lockTip = !bookingAllowed
-    ? "Открыть запись — доступно с тарифа «Учитель»"
+    ? "Открыть запись — доступно с тарифа «Репетитор»"
     : open
       ? "Закрыть запись"
       : "Открыть запись";
   const lockLabel = open ? "Закрыть" : "Открыть";
   const shareTip = !bookingAllowed
-    ? "Поделиться — доступно с тарифа «Учитель»"
+    ? "Поделиться — доступно с тарифа «Репетитор»"
     : "Поделиться с учениками";
 
   const handleLock = async () => {
@@ -1137,7 +1137,7 @@ function ScheduleToolbar({
 }) {
   const views = VIEWS;
   const paintTip = !bookingAllowed
-    ? "Отметить свободное время — доступно с тарифа «Учитель»"
+    ? "Отметить свободное время — доступно с тарифа «Репетитор»"
     : paintMode
       ? "Режим свободного времени включён"
       : "Отметить свободное время";

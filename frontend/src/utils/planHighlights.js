@@ -169,12 +169,9 @@ export function buildPlanHighlights(plan, opts = {}) {
       variants,
       workbooks,
       interactives,
-      "полная основная библиотека",
       notifications,
       ai,
-      f.simulators && "симуляторы",
       f.mass_actions && "массовые действия",
-      f.analytics && "расширенная аналитика",
     ].filter(Boolean);
   }
 
@@ -199,17 +196,11 @@ export function buildPlanHighlights(plan, opts = {}) {
 
   if (plan.slug === "school") {
     return [
-      f.multi_teacher && "Несколько преподавателей",
-      f.team_roles && "Роли в команде",
+      "Подключаем каждого преподавателя школы на «Профи» с индивидуальными условиями",
+      l.ai_tokens_monthly ? `от ${l.ai_tokens_monthly} токенов «Цифрика» в месяц` : null,
       storageLine,
       ...bank,
-      "Единый кабинет организации",
-      "Управление лицензиями",
-      f.analytics && "Общая аналитика",
-      "Администратор организации",
-      "Индивидуальные лимиты",
-      ai,
-      f.priority_support && "Корпоративная поддержка",
+      "Индивидуальные условия подключения",
     ].filter(Boolean);
   }
 

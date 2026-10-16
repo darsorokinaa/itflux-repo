@@ -62,6 +62,19 @@ def _year_savings_months(price_month, price_year) -> int | None:
     return months if months > 0 else None
 
 
+def _plan_ai_tokens_monthly(slug):
+    """Месячная выдача токенов «Цифрика» из настроек конструктора ИИ-листов."""
+    try:
+        from .worksheet_ai.pricing import get_pricing
+
+        grants = get_pricing().get("monthly_grant_by_plan") or {}
+        value = grants.get(slug, grants.get("default"))
+        return int(value) if value is not None else None
+    except Exception:  # pragma: no cover - витрина не должна падать
+        logger.exception("pricing: ai tokens grant lookup failed")
+        return None
+
+
 def _plan_public(plan, *, promotion=None) -> dict:
     """Витрина: без ИИ-лимитов."""
     savings = _year_savings_months(plan.price_month, plan.price_year)
@@ -94,7 +107,11 @@ def _plan_public(plan, *, promotion=None) -> dict:
             "storage_mb": plan.max_storage_mb,
             "teacher_tasks": getattr(plan, "max_teacher_tasks", 20),
             "teacher_task_copies_monthly": getattr(plan, "max_teacher_task_copies_monthly", 5),
+            # r56: для витрины /pricing — те же числа, что проверяет бэкенд.
+            "ai_text_day": getattr(plan, "ai_text_requests_daily_limit", 0),
+            "ai_tokens_monthly": _plan_ai_tokens_monthly(plan.slug),
         },
+        "ai_worksheet_watermark": bool(getattr(plan, "is_free", False)),
         "features": {
             "homework": plan.has_homework,
             "review": plan.has_review,

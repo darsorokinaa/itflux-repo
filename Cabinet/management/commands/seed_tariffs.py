@@ -280,13 +280,20 @@ TARIFFS = [
 REQUIRED_PUBLIC_SLUGS = ("start", "teacher", "pro", "premium")
 
 
-def apply_tariff_catalog() -> list[tuple[str, bool]]:
-    """Создаёт или обновляет каталог тарифов. Не мутирует TARIFFS."""
+def apply_tariff_catalog(*, overwrite: bool = False) -> list[tuple[str, bool]]:
+    """Создаёт недостающие тарифы. Не мутирует TARIFFS.
+
+    r56: существующие тарифы НЕ перезаписываются (лимиты r50 живут в БД и правятся
+    через админку). Перезапись — только явным флагом --overwrite-existing.
+    """
     results = []
     for raw in TARIFFS:
         slug = raw["slug"]
         defaults = {key: value for key, value in raw.items() if key != "slug"}
-        _, created = TariffPlan.objects.update_or_create(slug=slug, defaults=defaults)
+        if overwrite:
+            _, created = TariffPlan.objects.update_or_create(slug=slug, defaults=defaults)
+        else:
+            _, created = TariffPlan.objects.get_or_create(slug=slug, defaults=defaults)
         results.append((slug, created))
     for legacy_slug in ("repetitor", "profi"):
         legacy = TariffPlan.objects.filter(slug=legacy_slug).first()
@@ -310,10 +317,20 @@ def ensure_default_tariff_plans() -> int:
 class Command(BaseCommand):
     help = "Создаёт или обновляет тарифные планы"
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--overwrite-existing",
+            action="store_true",
+            help="Перезаписать существующие тарифы устаревшими значениями из файла (опасно).",
+        )
+
     def handle(self, *args, **kwargs):
-        for slug, created in apply_tariff_catalog():
+        overwrite = bool(kwargs.get("overwrite_existing"))
+        if not overwrite:
+            self.stdout.write("Существующие тарифы не изменяются (только создание недостающих).")
+        for slug, created in apply_tariff_catalog(overwrite=overwrite):
             plan = TariffPlan.objects.get(slug=slug)
-            action = "Создан" if created else "Обновлён"
+            action = "Создан" if created else ("Обновлён" if overwrite else "Без изменений")
             self.stdout.write(f"  {action}: {plan.name} ({slug})")
 
         self.stdout.write(self.style.SUCCESS(f"\nГотово: {len(TARIFFS)} тарифов."))

@@ -8,8 +8,8 @@ import CatalogEngagementBar from "./CatalogEngagementBar";
 
 const PLAN_NAMES = {
   start: "Старт",
-  teacher: "Учитель",
-  repetitor: "Учитель",
+  teacher: "Репетитор",
+  repetitor: "Репетитор",
   pro: "Профи",
   profi: "Профи",
   premium: "Премиум",
