@@ -14,6 +14,29 @@ function contentUrl(slug) {
   return `/api/interesting/${encodeURIComponent(slug)}/view/`;
 }
 
+/** r33: грузим HTML iframe параллельно с метаданными (кэш браузера + ETag/304),
+ *  и сразу предзагружаем вынесенные из него большие скрипты (MathJax). */
+const warmedFrames = new Set();
+function warmFrame(slug) {
+  const url = contentUrl(slug);
+  if (warmedFrames.has(url) || typeof fetch !== "function") return;
+  warmedFrames.add(url);
+  fetch(url, { credentials: "same-origin" })
+    .then((r) => (r.ok ? r.text() : ""))
+    .then((html) => {
+      const re = /<script src="(\/static\/interesting-inline\/[a-f0-9]+\.js)"/g;
+      let m;
+      while ((m = re.exec(html))) {
+        const link = document.createElement("link");
+        link.rel = "preload";
+        link.as = "script";
+        link.href = m[1];
+        document.head.appendChild(link);
+      }
+    })
+    .catch(() => {});
+}
+
 function canOpenInteresting(item) {
   const access = item?.access || {};
   if (item?.locked) return false;
@@ -39,6 +62,7 @@ export default function InterestingViewerPage() {
     setLoading(true);
     setError("");
     const collection = searchParams.get("collection") || "";
+    warmFrame(slug);
     fetchInterestingItem(slug, { collection })
       .then((data) => {
         if (cancelled) return;

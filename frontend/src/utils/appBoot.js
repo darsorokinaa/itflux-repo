@@ -147,7 +147,9 @@ export function clearChunkRecoveryFlag({
   session = typeof sessionStorage !== "undefined" ? sessionStorage : null,
 } = {}) {
   try {
-    session?.removeItem(CHUNK_RECOVER_KEY);
+    // r34: keep the timestamp guard (max one auto-reload per 15 min); drop only stale values.
+    const ts = Number(session?.getItem(CHUNK_RECOVER_KEY) || 0);
+    if (!ts || Date.now() - ts > 15 * 60 * 1000) session?.removeItem(CHUNK_RECOVER_KEY);
     return true;
   } catch {
     return false;

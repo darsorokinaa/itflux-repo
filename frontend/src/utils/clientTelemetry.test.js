@@ -86,7 +86,7 @@ describe("clientTelemetry", () => {
   });
 
   it("treats Safari Load failed as a missing module", () => {
-    expect(isChunkLoadError({ name: "TypeError", message: "Load failed" })).toBe(true);
+    expect(isChunkLoadError({ name: "TypeError", message: "Load failed" })).toBe(false); // r34: bare Load failed is any fetch
     expect(isChunkLoadError({ name: "Error", message: "Load failed" })).toBe(false);
   });
 

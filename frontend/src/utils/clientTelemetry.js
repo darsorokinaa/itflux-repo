@@ -188,10 +188,27 @@ export function isChunkLoadError(error) {
   if (/ChunkLoadError|Loading chunk [\d]+ failed|Failed to fetch dynamically imported module|error loading dynamically imported module|Unexpected token '<'/i.test(blob)) {
     return true;
   }
-  // iPad Safari: import() rejects with TypeError "Load failed" and line 0.
-  const message = String(error?.message || error?.reason?.message || "");
-  const name = String(error?.name || error?.reason?.name || "");
-  return name === "TypeError" && message === "Load failed";
+  // r34: bare Safari "TypeError: Load failed" is ANY failed fetch, not a chunk error.
+  return false;
+}
+
+const CHUNK_RECOVER_WINDOW_MS = 15 * 60 * 1000;
+
+function pathOfTop() {
+  try { return window.top.location.pathname; } catch { return window.location.pathname; }
+}
+
+/* r34: confirm a vite preload failure is a really missing chunk (404 / SPA html). */
+async function chunkReallyMissing(message) {
+  const m = String(message || "").match(/https?:\/\/[^\s"'()]+?\.(?:js|css)/);
+  if (!m) return false;
+  try {
+    const r = await fetch(m[0], { method: "HEAD", cache: "no-store" });
+    if (r.status === 404 || r.status === 410) return true;
+    return /text\/html/i.test(r.headers.get("content-type") || "");
+  } catch {
+    return false; // offline / network blip, not a deploy problem
+  }
 }
 
 function embeddedInLiveLesson() {
@@ -207,7 +224,8 @@ function embeddedInLiveLesson() {
 
 function alreadyRecoveredChunk() {
   try {
-    return sessionStorage.getItem(CHUNK_RECOVER_KEY) === "1";
+    const ts = Number(sessionStorage.getItem(CHUNK_RECOVER_KEY) || 0);
+    return ts > 0 && Date.now() - ts < CHUNK_RECOVER_WINDOW_MS;
   } catch {
     return false;
   }
@@ -215,7 +233,7 @@ function alreadyRecoveredChunk() {
 
 function markChunkRecovered() {
   try {
-    sessionStorage.setItem(CHUNK_RECOVER_KEY, "1");
+    sessionStorage.setItem(CHUNK_RECOVER_KEY, String(Date.now()));
   } catch {
     /* ignore */
   }
@@ -224,12 +242,11 @@ function markChunkRecovered() {
 /** One-shot cache-bust after a missing hashed chunk. Never loops. Never reloads a live lesson. */
 export function recoverChunkLoadOnce() {
   if (typeof window === "undefined") return false;
-  // Board iframe inside the lesson: reload only that frame, never the call.
-  if (embeddedInLiveLesson()) {
-    if (alreadyRecoveredChunk()) return false;
-    markChunkRecovered();
-    window.location.reload();
-    return true;
+  // r34: never auto-reload a board / board iframe inside a lesson; show the banner instead.
+  if (embeddedInLiveLesson() || isLiveSessionPath(pathOfTop())) {
+    reportClientEvent("CHUNK_RECOVERY_BLOCKED_LIVE_SESSION", { path: window.location.pathname });
+    noteChunkRecoveryBlocked();
+    return false;
   }
   if (isLiveSessionPath()) {
     reportClientEvent("CHUNK_RECOVERY_BLOCKED_LIVE_SESSION", {
@@ -379,14 +396,29 @@ export function startClientTelemetry() {
   const onHide = () => {
     if (document.visibilityState === "hidden") void flushClientTelemetry({ beacon: true });
   };
+  const onPreloadError = (event) => {
+    const message = String(event?.payload?.message || event?.payload || "preload");
+    try { event.preventDefault(); } catch { /* ignore */ }
+    void chunkReallyMissing(message).then((missing) => {
+      reportClientEvent("chunk_load_failed", {
+        message: message.slice(0, 240),
+        recovered: alreadyRecoveredChunk(),
+        confirmed: missing,
+        source: "vite:preloadError",
+      });
+      if (missing) recoverChunkLoadOnce();
+    });
+  };
   window.addEventListener("error", onError);
   window.addEventListener("unhandledrejection", onRejection);
+  window.addEventListener("vite:preloadError", onPreloadError);
   window.addEventListener("pagehide", onHide);
   document.addEventListener("visibilitychange", onHide);
 
   return () => {
     window.removeEventListener("error", onError);
     window.removeEventListener("unhandledrejection", onRejection);
+    window.removeEventListener("vite:preloadError", onPreloadError);
     window.removeEventListener("pagehide", onHide);
     document.removeEventListener("visibilitychange", onHide);
     started = false;

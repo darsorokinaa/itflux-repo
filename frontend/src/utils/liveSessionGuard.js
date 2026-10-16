@@ -12,6 +12,7 @@ export function isLiveSessionPath(pathname) {
 
   return (
     path.includes("/cabinet/meetings/") ||
+    path.includes("/cabinet/boards/") || // r34: boards are live too
     path.includes("/lesson/join")
   );
 }

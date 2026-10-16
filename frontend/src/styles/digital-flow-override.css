@@ -9,7 +9,8 @@
    Файл лежит в frontend/public/fonts/Bounded-Variable.ttf */
 @font-face {
   font-family: "Bounded";
-  src: url("/fonts/Bounded-Variable.ttf") format("truetype-variations"),
+  src: url("/fonts/Bounded-Variable.woff2") format("woff2-variations"),
+       url("/fonts/Bounded-Variable.woff2") format("woff2"),
        url("/fonts/Bounded-Variable.ttf") format("truetype");
   font-weight: 200 900;
   font-style: normal;

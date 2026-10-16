@@ -305,6 +305,9 @@ function HomeValuePathsBlock() {
           </Link>
         ))}
       </div>
+      <p className="home-value-paths__pricing" style={{ margin: "16px 0 0", textAlign: "center", fontWeight: 600 }}>
+        <Link to="/pricing">Тарифы и цены — от 0 ₽ →</Link>
+      </p>
     </section>
   );
 }

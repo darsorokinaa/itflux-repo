@@ -13,6 +13,10 @@ const TasksPage = lazy(() => import("./pages/TasksPage"));
 const SearchTaskPage = lazy(() => import("./pages/SearchTaskPage"));
 const SearchVariantPage = lazy(() => import("./pages/SearchVariantPage"));
 const PrivacyPage = lazy(() => import("./pages/PrivacyPage"));
+const PersonalDataConsentPage = lazy(() => import("./pages/PersonalDataConsentPage"));
+const ConsentStepGate = lazy(() => import("./r52/ConsentStepGate"));
+const OfferPage = lazy(() => import("./pages/OfferPage"));
+const ContactsPage = lazy(() => import("./pages/ContactsPage"));
 const MessagingAgreementPage = lazy(() => import("./pages/MessagingAgreementPage"));
 const PricingPage = lazy(() => import("./pages/PricingPage"));
 const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
@@ -154,11 +158,20 @@ function getMetaDescriptionForPath(pathname) {
   if (path === "/privacy") {
     return "Политика конфиденциальности платформы «Цифровой поток».";
   }
+  if (path === "/offer") {
+    return "Публичная оферта онлайн-сервиса «Цифровой поток» для репетиторов.";
+  }
+  if (path === "/contacts") {
+    return "Контакты и реквизиты «Цифрового потока».";
+  }
+  if (path === "/personal-data-consent") {
+    return "Согласие на обработку персональных данных пользователей платформы «Цифровой поток».";
+  }
   if (path === "/messages-agreement") {
     return "Соглашение об использовании сообщений на платформе «Цифровой поток».";
   }
   if (path === "/pricing" || path.startsWith("/pricing/")) {
-    return "Тарифы «Цифровой поток»: Старт, Учитель, Профи, Премиум и Школа — кабинет, библиотека и лимиты для преподавателей.";
+    return "Тарифы для репетиторов «Цифровой поток»: Старт, Репетитор, Профи и Школа. Расписание, журнал, учёт оплат и проверка ДЗ — на всех тарифах.";
   }
   if (path.startsWith("/book/")) {
     return "Запись на постоянное время занятий к преподавателю на платформе «Цифровой поток».";
@@ -264,6 +277,62 @@ function MetaDescriptionSync() {
     meta.setAttribute("content", content);
   }, [pathname]);
 
+  // r35: серверный SEO-блок нужен только роботам до старта JS.
+  useEffect(() => {
+    const pre = document.getElementById("seo-prerender");
+    if (pre) pre.remove();
+  }, []);
+
+  // r35: title/description/canonical/og на смене маршрута (данные — /api/seo/meta/, как и в серверной вставке).
+  useEffect(() => {
+    let cancelled = false;
+    const apply = (data) => {
+      if (cancelled || !data || !data.public) return;
+      const setMeta = (sel, attr, key, value) => {
+        if (!value) return;
+        let el = document.head.querySelector(sel);
+        if (!el) {
+          el = document.createElement("meta");
+          el.setAttribute(attr, key);
+          document.head.appendChild(el);
+        }
+        el.setAttribute("content", value);
+      };
+      if (data.title) document.title = data.title;
+      if (data.description) {
+        setMeta('meta[name="description"]', "name", "description", data.description);
+        setMeta('meta[property="og:description"]', "property", "og:description", data.description);
+      }
+      setMeta('meta[property="og:title"]', "property", "og:title", data.title);
+      setMeta('meta[property="og:url"]', "property", "og:url", data.canonical);
+      let link = document.head.querySelector('link[rel="canonical"]');
+      if (data.canonical) {
+        if (!link) {
+          link = document.createElement("link");
+          link.setAttribute("rel", "canonical");
+          document.head.appendChild(link);
+        }
+        link.setAttribute("href", data.canonical);
+      } else if (link) {
+        link.remove();
+      }
+    };
+    const initial = typeof window !== "undefined" ? window.__ITFLUX_SEO__ : null;
+    if (initial && initial.path === (pathname.replace(/\/+$/, "") || "/")) {
+      return undefined; // сервер уже вставил мету для этой страницы
+    }
+    if (/^\/(cabinet|teacher|dev|tasks\/my|worksheets|parent|invite|community|book)(\/|$)/.test(pathname)) {
+      return undefined; // свои заголовки ставят страницы кабинета
+    }
+    fetch(`/api/seo/meta/?path=${encodeURIComponent(pathname)}`, { credentials: "omit" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then(apply)
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
+
   return null;
 }
 
@@ -322,14 +391,12 @@ function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/about" element={<Navigate to="/" replace />} />
           <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/personal-data-consent" element={<PersonalDataConsentPage />} />
+          <Route path="/offer" element={<OfferPage />} />
+          <Route path="/contacts" element={<ContactsPage />} />
           <Route path="/messages-agreement" element={<MessagingAgreementPage />} />
           <Route path="/pricing" element={<PricingPage />} />
           <Route path="/pricing/" element={<PricingPage />} />
-          <Route path="/tasks" element={<AllTasksPage />} />
-          <Route path="/tasks/my" element={<MyTaskBankPage />} />
-          <Route path="/tasks/my/new" element={<MyTaskEditorPage />} />
-          <Route path="/tasks/my/:taskId/edit" element={<MyTaskEditorPage />} />
-          <Route path="/tasks/my/:taskId" element={<MyTaskDetailPage />} />
           <Route path="/generator" element={<Navigate to="/subject" replace />} />
           <Route path="/gotovye-uroki" element={<ReadyLessonsPage />} />
           <Route path="/gotovye-uroki/" element={<ReadyLessonsPage />} />
@@ -432,6 +499,14 @@ function App() {
             <Route path="more" element={<ParentMorePage />} />
             <Route path="settings/notifications" element={<CabinetNotificationsSettingsPage />} />
             <Route path="settings/notifications/" element={<CabinetNotificationsSettingsPage />} />
+          </Route>
+          {/* r49: банк задач открывается внутри кабинета (сайдбар + шапка); без входа — логин и возврат. */}
+          <Route path="/tasks" element={<CabinetPage />}>
+            <Route index element={<AllTasksPage />} />
+            <Route path="my" element={<MyTaskBankPage />} />
+            <Route path="my/new" element={<MyTaskEditorPage />} />
+            <Route path="my/:taskId/edit" element={<MyTaskEditorPage />} />
+            <Route path="my/:taskId" element={<MyTaskDetailPage />} />
           </Route>
           <Route path="/cabinet" element={<CabinetPage />}>
             <Route index element={<CabinetDashboard />} />
@@ -542,6 +617,7 @@ function App() {
 
       </Routes>
       </Suspense>
+      <Suspense fallback={null}><ConsentStepGate /></Suspense>
       <MeetingCallDockGate />
       </SeasonalThemeProvider>
     </BrowserRouter>
