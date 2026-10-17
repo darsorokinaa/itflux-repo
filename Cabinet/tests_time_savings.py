@@ -51,10 +51,10 @@ class FormatAndFootnoteTests(SimpleTestCase):
         rates = {c.key: c.seconds for c in time_savings.CATEGORIES}
         self.assertEqual(
             rates,
-            {"variant": 600, "interactive": 600, "auto_checked_answer": 30, "reminder": 30, "booking": 120},
+            {"variant": 600, "auto_checked_answer": 30, "reminder": 30, "booking": 120},
         )
         # Не логируются надёжно — не показываем и не оцениваем.
-        for key in ("worksheet", "ready_lesson", "journal_auto"):
+        for key in ("interactive", "worksheet", "ready_lesson", "journal_auto"):
             self.assertNotIn(key, rates)
             self.assertIn(key, time_savings.HIDDEN_CATEGORIES)
 
@@ -63,12 +63,12 @@ class FormatAndFootnoteTests(SimpleTestCase):
         self.assertTrue(note.startswith("Это оценка, а не замер. Мы учитываем только то, что платформа сделала за Вас автоматически: "))
         self.assertIn("собранные варианты, автопроверку ответов, напоминания и бронирования.", note)
         self.assertIn(
-            "вариант — 10 мин, интерактив — 10 мин, проверка одного ответа — 30 сек, "
+            "вариант — 10 мин, проверка одного ответа — 30 сек, "
             "напоминание — 30 сек, бронирование — 2 мин.",
             note,
         )
         self.assertTrue(note.endswith("Вашу собственную работу в кабинете не считаем. Реальная экономия у каждого своя."))
-        for hidden in ("рабочий лист", "готовый урок", "запись журнала", "листы", "журнал"):
+        for hidden in ("интерактив", "рабочий лист", "готовый урок", "запись журнала", "листы", "журнал"):
             self.assertNotIn(hidden, note)
         self.assertNotIn("среднем времени", note)
         self.assertNotIn("По нашей оценке", note)
@@ -170,7 +170,7 @@ class TimeSavingsDataTests(TestCase):
         self.assertEqual(counts["auto_checked_answer"], 30)
         self.assertEqual(time_savings.summarize(counts)["label"], "≈ 10 мин")
 
-    def test_interactive_reminder_booking(self):
+    def test_interactive_not_counted_reminder_booking(self):
         interactive = Interactive.objects.create(teacher=self.teacher, title="Квиз", interactive_type="quiz")
         InteractiveAssignment.objects.create(teacher=self.teacher, interactive=interactive, student=self.student)
         InteractiveAssignment.objects.create(teacher=self.teacher, interactive=interactive, student=self.student)
@@ -193,7 +193,7 @@ class TimeSavingsDataTests(TestCase):
         TeacherBooking.objects.create(status=TeacherBooking.Status.CANCELLED, **booking_kwargs)
 
         counts = time_savings.count_units(time_savings.collect_units(self.teacher))
-        self.assertEqual(counts["interactive"], 1)
+        self.assertNotIn("interactive", counts)  # r70: интерактивы не считаем совсем
         self.assertEqual(counts["reminder"], 1)
         self.assertEqual(counts["booking"], 1)
 

@@ -5,8 +5,9 @@
 * считаем только то, что платформа сделала за преподавателя автоматически;
   всё, что преподаватель делает руками, — 0;
 * у каждого действия одна фиксированная норма (минуты, которые оно заняло бы вручную);
-* повторы одного и того же объекта не считаются (вариант / интерактив — один раз,
+* повторы одного и того же объекта не считаются (вариант — один раз,
   по дате первой выдачи ученику);
+* интерактивы не считаем (решение владельца: их собирает сам преподаватель);
 * категорию, которая надёжно не логируется в БД, не показываем и не оцениваем.
 
 Используется:
@@ -37,7 +38,6 @@ class Category:
 # Порядок = порядок в разбивке и в сноске.
 CATEGORIES: tuple[Category, ...] = (
     Category("variant", 600, "Варианты", "вариант — 10 мин", "собранные варианты"),
-    Category("interactive", 600, "Интерактивы", "интерактив — 10 мин"),
     Category("auto_checked_answer", 30, "Автопроверка ответов", "проверка одного ответа — 30 сек", "автопроверку ответов"),
     Category("reminder", 30, "Напоминания", "напоминание — 30 сек", "напоминания"),
     Category("booking", 120, "Бронирования", "бронирование — 2 мин", "бронирования"),
@@ -46,6 +46,10 @@ CATEGORY_BY_KEY = {category.key: category for category in CATEGORIES}
 
 # Есть в методике, но в БД нет надёжного следа — не показываем и не оцениваем.
 HIDDEN_CATEGORIES = {
+    "interactive": (
+        "Интерактив — не считаем по решению владельца (r70): интерактивы преподаватель "
+        "собирает сам, а ручная работа = 0."
+    ),
     "worksheet": (
         "Рабочий лист (в т.ч. ИИ) — 10 мин: выдача листа ученику не хранится, "
         "«Скачать PDF» — это window.print() в браузере без записи на сервере."
@@ -192,25 +196,6 @@ def _variant_days(teacher) -> list:
     return [(day, 1) for variant_id, day in first.items() if variant_id in existing]
 
 
-def _interactive_days(teacher) -> list:
-    """Интерактив, выданный ученику или группе. Один раз на интерактив."""
-    from .choices import HomeworkTaskType
-    from .models import InteractiveAssignment
-
-    pairs = list(
-        InteractiveAssignment.objects.filter(teacher=teacher)
-        .filter(Q(student__isnull=False) | Q(group__isnull=False))
-        .exclude(student__user_id=teacher.pk)
-        .values_list("interactive_id", "assigned_at")
-    )
-    pairs += list(
-        _assigned_homework_tasks(teacher)
-        .filter(task_type=HomeworkTaskType.INTERACTIVE, interactive__isnull=False)
-        .values_list("interactive_id", "homework__created_at")
-    )
-    return [(day, 1) for day in _first_dates(pairs).values()]
-
-
 def _auto_checked_days(teacher) -> list:
     """Ответы, которые платформа сама пометила верными/неверными (0,5 мин за ответ).
 
@@ -262,7 +247,6 @@ def _booking_days(teacher) -> list:
 
 _COLLECTORS = {
     "variant": _variant_days,
-    "interactive": _interactive_days,
     "auto_checked_answer": _auto_checked_days,
     "reminder": _reminder_days,
     "booking": _booking_days,
