@@ -680,7 +680,7 @@ class LessonAdmin(AdminStoredFileDownloadMixin, admin.ModelAdmin):
 
 
 PLAN_SLUG_CHOICES = (
-    ("teacher", "Учитель"),
+    ("teacher", "Репетитор"),
     ("pro", "Профи"),
     ("premium", "Премиум"),
     ("school", "Школа"),

@@ -53,8 +53,8 @@ export type AccessGateContext = {
 /** Display names from seeded tariffs — fallback if pricing API is unavailable. */
 export const PLAN_DISPLAY_NAMES: Record<string, string> = {
   start: "Старт",
-  teacher: "Учитель",
-  repetitor: "Учитель",
+  teacher: "Репетитор",
+  repetitor: "Репетитор",
   pro: "Профи",
   profi: "Профи",
   premium: "Премиум",
@@ -395,7 +395,7 @@ export function accessGateCopy(
         title: over ? "Создание новых задач недоступно" : "Ваш банк задач заполнен",
         text: over
           ? `В вашем банке ${used} задач. Текущий тариф позволяет хранить до ${cap} новых задач. Существующие материалы сохранены.`
-          : `Вы использовали все ${cap ?? ""} мест в личном банке задач.\n\nНа тарифе «${planName || "Учитель"}» можно хранить больше задач, добавлять файлы и без ограничений копировать задания из общего банка.`,
+          : `Вы использовали все ${cap ?? ""} мест в личном банке задач.\n\nНа тарифе «${planName || "Репетитор"}» можно хранить больше задач, добавлять файлы и без ограничений копировать задания из общего банка.`,
         primary: "Посмотреть тарифы",
         secondary: "Не сейчас",
       };
@@ -447,7 +447,7 @@ export function accessGateCopy(
   }
 
   if (ctx.resourceType === "student_booking") {
-    const teacherName = planName || "Учитель";
+    const teacherName = planName || "Репетитор";
     return {
       title: "Запись учеников по ссылке",
       text:
@@ -460,7 +460,7 @@ export function accessGateCopy(
 
   if (ctx.reason === "feature_not_in_plan") {
     if (ctx.resourceType === "teacher_task_attachments") {
-      const teacherName = planName || "Учитель";
+      const teacherName = planName || "Репетитор";
       return {
         title: "Файлы к задачам",
         text: `Прикрепляйте PDF, документы и дополнительные материалы к своим заданиям на тарифе «${teacherName}».`,

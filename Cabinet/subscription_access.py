@@ -160,7 +160,7 @@ class SubscriptionAccessService:
 
     @staticmethod
     def can_use_schedule(user) -> bool:
-        """Расписание и видеозанятия через него — с тарифа «Учитель»."""
+        """Расписание и видеозанятия через него — с тарифа «Репетитор»."""
         plan = SubscriptionAccessService.get_effective_plan(user)
         if not plan:
             return False
@@ -173,14 +173,14 @@ class SubscriptionAccessService:
             return
         raise AccessDenied(
             code="SCHEDULE_REQUIRES_PAID_PLAN",
-            message="Расписание доступно начиная с тарифа «Учитель».",
+            message="Расписание доступно начиная с тарифа «Репетитор».",
             feature="schedule",
             min_plan="teacher",
         )
 
     @staticmethod
     def can_use_student_booking(user) -> bool:
-        """Самостоятельная запись учеников по ссылке — с тарифа «Учитель» и выше."""
+        """Самостоятельная запись учеников по ссылке — с тарифа «Репетитор» и выше."""
         plan = SubscriptionAccessService.get_effective_plan(user)
         if not plan:
             return False

@@ -497,7 +497,7 @@ class Material(models.Model):
         choices=ContentAccessLevel.choices,
         default=ContentAccessLevel.FREE,
         db_index=True,
-        help_text="Минимальный тариф: бесплатно после регистрации (Старт), Учитель, Профи, Премиум.",
+        help_text="Минимальный тариф: бесплатно после регистрации (Старт), Репетитор, Профи, Премиум.",
     )
     published_at = models.DateTimeField("Опубликован", null=True, blank=True)
     is_new = models.BooleanField("Новинка", default=False)

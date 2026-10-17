@@ -212,7 +212,7 @@ class ContentAccessLevel(models.TextChoices):
     """Уровни доступа к материалам библиотеки платформы."""
 
     FREE = "free", "Бесплатно"
-    TEACHER = "teacher", "Учитель"
+    TEACHER = "teacher", "Репетитор"
     PROFESSIONAL = "professional", "Профи"
     PREMIUM = "premium", "Премиум"
     CORPORATE = "corporate", "Корпоративный"

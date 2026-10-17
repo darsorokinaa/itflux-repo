@@ -123,6 +123,15 @@ function LessonCard({ lesson, onEngagementChange, onLockedOpen, onPurchaseLesson
   const lessonUrl = lessonPreviewUrl(lesson.slug);
   const priceLabel = purchaseAvailable ? lessonPurchaseLabel(lesson) : "";
   const planName = lesson.access?.required_plan_name || "";
+  const minPlanSlug = lesson.access?.min_plan || "";
+  // Бейдж на баннере не показывается для черновика/архива, открытых и бесплатных уроков.
+  const planBadgeHidden = Boolean(
+    statusLabel
+      || lesson.access?.allowed === true
+      || !minPlanSlug
+      || minPlanSlug === "start"
+      || lesson.access_level === "free",
+  );
 
   const coverUrl = mediaUrl(lesson.cover_image_url);
 
@@ -172,6 +181,7 @@ function LessonCard({ lesson, onEngagementChange, onLockedOpen, onPurchaseLesson
             minPlan={lesson.access?.min_plan}
             accessLevel={lesson.access_level}
             allowed={lesson.access?.allowed}
+            planName={planName}
           />
         )}
       </div>
@@ -211,11 +221,12 @@ function LessonCard({ lesson, onEngagementChange, onLockedOpen, onPurchaseLesson
           <p className="lesson-card-v3__ready">Можно проводить сразу</p>
         ) : null}
 
-        {priceLabel || (planName && locked) ? (
+        {/* r57b: тариф показывает бейдж на баннере; здесь только цена, без дубля строки тарифа. */}
+        {priceLabel || (planName && locked && planBadgeHidden) ? (
           <p className="lesson-card-v3__access">
             {priceLabel || null}
-            {priceLabel && planName && locked ? " · " : null}
-            {planName && locked ? `По тарифу «${planName}»` : null}
+            {priceLabel && planName && locked && planBadgeHidden ? " · " : null}
+            {planName && locked && planBadgeHidden ? `По тарифу «${planName}»` : null}
           </p>
         ) : null}
 

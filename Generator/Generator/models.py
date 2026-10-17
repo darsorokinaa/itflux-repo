@@ -910,7 +910,7 @@ class Lesson(models.Model):
 
     class AccessLevel(models.TextChoices):
         FREE = "free", "Бесплатный (Старт)"
-        TEACHER = "teacher", "Учитель"
+        TEACHER = "teacher", "Репетитор"
         PROFESSIONAL = "professional", "Профи"
         PREMIUM = "premium", "Премиум"
         CORPORATE = "corporate", "Корпоративный"
@@ -1101,7 +1101,7 @@ class InterestingItem(models.Model):
 
     class AccessLevel(models.TextChoices):
         FREE = "free", "Бесплатный (Старт)"
-        TEACHER = "teacher", "Учитель"
+        TEACHER = "teacher", "Репетитор"
         PROFESSIONAL = "professional", "Профи"
         PREMIUM = "premium", "Премиум"
         CORPORATE = "corporate", "Корпоративный"
