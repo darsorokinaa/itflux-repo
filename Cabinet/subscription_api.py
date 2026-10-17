@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 def _ensure_tariff_catalog():
-    """Если в БД нет Старт/Учитель/Профи/Премиум — заполняет каталог."""
+    """Если в БД нет Старт/Репетитор/Профи/Премиум — заполняет каталог."""
     from .management.commands.seed_tariffs import ensure_default_tariff_plans
 
     ensure_default_tariff_plans()
