@@ -43,7 +43,8 @@ class PricingMeView(APIView):
         payload["trial"] = trial_status(user)
         try:
             st = saved_time(user)
-            payload["saved"] = st if st["minutes"] > 0 else None
+            # Меньше 10 минут — блок на /pricing не показываем.
+            payload["saved"] = st if st["visible"] else None
         except Exception:
             logger.exception("saved_time failed user=%s", user.pk)
             payload["saved"] = None

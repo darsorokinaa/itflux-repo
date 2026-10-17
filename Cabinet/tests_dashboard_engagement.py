@@ -12,8 +12,6 @@ from Cabinet.dashboard_engagement import (
     build_engagement,
     crossed_recently,
     auto_checked_task_count,
-    format_approx_saved,
-    saved_seconds,
     summary_line,
     tasks_from_payload,
     walk_streak,
@@ -75,18 +73,8 @@ class EngagementMathTests(SimpleTestCase):
             note_candidates(7, day + timedelta(days=1))[0]["id"],
         )
 
-    def test_saved_time_uses_fixed_rates(self):
-        seconds = saved_seconds(
-            homework_submitted=5,
-            task_auto_checked=120,
-            ready_material_used=3,
-            interactive_used=1,
-            variant_generated=2,
-        )
-        self.assertEqual(seconds, 154 * 60)
-        self.assertEqual(format_approx_saved(seconds), "≈ 2 ч 34 мин")
-        self.assertEqual(format_approx_saved(0), "")
-        self.assertEqual(saved_seconds(ready_lesson_used=0, homework_submitted=0), 0)
+    def test_auto_checked_count_ignores_bare_counters(self):
+        # r70: нормы и округление — в Cabinet.tests_time_savings.
         self.assertEqual(auto_checked_task_count({"checked_count": 200}), 0)
         self.assertEqual(auto_checked_task_count({"checked": {"1": True, "2": False, "3": None}}), 2)
 
@@ -173,19 +161,14 @@ class EngagementDataTests(TestCase):
         self.assertEqual(stats["tasks_solved"], 4)
         self.assertEqual(stats["materials_used"], 1)
         self.assertEqual(stats["summary"], "2 урока · 1 ДЗ · 4 задания · 1 материал")
-        self.assertEqual(stats["saved_label"], "≈ 4 мин")
-        parts = {part["label"]: part for part in payload["board"]["time"]["parts"]}
-        self.assertEqual(parts["ДЗ"]["formula"], "1 × 2 мин")
-        self.assertEqual(parts["ДЗ"]["value"], "2 мин")
-        self.assertEqual(parts["Автопроверка"]["formula"], "4 × 30 сек")
-        self.assertEqual(parts["Автопроверка"]["value"], "2 мин")
-        self.assertNotIn("Готовые материалы", parts)
-        self.assertEqual(payload["board"]["time"]["value"], "≈ 4 мин")
-        self.assertEqual(payload["board"]["time"]["total"]["value"], "4 мин")
-        self.assertIn("Фактическое время может отличаться", payload["board"]["time"]["note"])
+        # r70: 4 автопроверенных ответа × 30 сек = 2 мин < 10 мин — блок скрыт,
+        # без бонуса за сдачу ДЗ и за ручную проверку.
+        self.assertEqual(stats["saved_label"], "")
+        self.assertEqual(stats["saved_minutes"], 0)
+        self.assertIsNone(payload["board"]["time"])
         self.assertTrue(any(item["id"] == "homework_on_time" for item in payload["streaks"]))
 
-    def test_ready_content_uses_separate_rates_and_lessons_do_not(self):
+    def test_lessons_and_attached_materials_do_not_save_time(self):
         day = self.today - timedelta(days=1)
         for hour in range(8):
             self._ended(day, hour=hour)
@@ -205,15 +188,11 @@ class EngagementDataTests(TestCase):
         ScheduleEventMaterial.objects.create(event=second_lesson, interactive=interactive)
 
         payload = build_engagement(self.teacher, now=self.now)
-        parts = {part["label"]: part for part in payload["board"]["time"]["parts"]}
-        self.assertEqual(parts["Готовые материалы"]["count"], 2)
-        self.assertEqual(parts["Готовые материалы"]["formula"], "2 × 12 мин")
-        self.assertEqual(parts["Готовые материалы"]["value"], "24 мин")
-        self.assertEqual(parts["Интерактив"]["formula"], "1 × 22 мин")
-        self.assertEqual(payload["board"]["time"]["value"], "≈ 46 мин")
+        # r70: материалы на занятии и само занятие не считаются; интерактив — только при выдаче ученику.
+        self.assertIsNone(payload["board"]["time"])
         self.assertEqual(payload["stats"]["lessons"], 10)
 
-    def test_catalog_lesson_is_not_also_counted_as_its_materials(self):
+    def test_catalog_lesson_is_hidden_until_it_is_logged(self):
         day = self.today - timedelta(days=1)
         plan = LessonPlan.objects.create(title="Каталог", is_public=True, status="published")
         item = LessonPlanItem.objects.create(plan=plan, title="Графики", order=1)
@@ -240,12 +219,8 @@ class EngagementDataTests(TestCase):
         ScheduleEventMaterial.objects.create(event=other, material=lesson_file)
 
         payload = build_engagement(self.teacher, now=self.now)
-        parts = {part["label"]: part for part in payload["board"]["time"]["parts"]}
-        self.assertEqual(parts["Готовый урок"]["count"], 2)
-        self.assertEqual(parts["Готовый урок"]["formula"], "2 × 30 мин")
-        self.assertEqual(parts["Готовые материалы"]["count"], 1)
-        self.assertEqual(parts["Готовые материалы"]["value"], "12 мин")
-        self.assertEqual(payload["board"]["time"]["total"]["value"], "1 ч 12 мин")
+        # r70: «готовый урок» скрыт — выдача/проведение урока каталога надёжно не логируется.
+        self.assertIsNone(payload["board"]["time"])
 
     def test_cancelled_day_breaks_planned_streak_not_teaching_streak(self):
         monday = self.today - timedelta(days=4)

@@ -2,7 +2,7 @@
 r50: новая тарифная сетка «Старт / Репетитор / Профи / Школа».
 
 * пробный «Профи» на 14 дней (один раз на аккаунт);
-* «Вы сэкономили ≈ X ч» для страницы тарифов;
+* «Вы сэкономили ≈ X ч» для страницы тарифов (r70: расчёт — Cabinet.time_savings);
 * подписанные ссылки «оплатить в один клик» и «отписаться»;
 * напоминания об окончании подписки (7/3/0 дней) и пробного периода (3/1/0).
   Реальная отправка выключена флагом SUBSCRIPTION_REMINDERS_R50_ENABLED (по умолчанию False).
@@ -38,8 +38,6 @@ OFFER_TEXT = (
 )
 OFFER_UNTIL = datetime(2026, 11, 30, 23, 59, 59)
 
-# Минуты, которые экономит одно действие (оценка владельца).
-SAVED_MINUTES = {"variant": 15, "homework_checked": 10, "journal": 5, "payment": 2}
 
 PLAN_LABELS = {"start": "Старт", "teacher": "Репетитор", "pro": "Профи", "premium": "Премиум", "materials": "Только материалы", "school": "Школа"}
 
@@ -159,28 +157,19 @@ def is_r50_trial(sub) -> bool:
 # ── «Вы сэкономили ≈ X ч» ─────────────────────────────────────────────────────
 
 def saved_time(user) -> dict:
-    from Generator.models import Variant
+    """r70: тот же расчёт, что в кабинете (Cabinet.time_savings), период — за всё время."""
+    from .time_savings import teacher_time_savings
 
-    from .billing_models import StudentPayment
-    from .choices import SubmissionStatus
-    from .journal_models import LessonJournal
-    from .models import HomeworkSubmission
-
-    counts = {
-        "variant": Variant.objects.filter(owner_teacher=user).count(),
-        "homework_checked": HomeworkSubmission.objects.filter(
-            homework__teacher=user, status=SubmissionStatus.CHECKED
-        ).count(),
-        "journal": LessonJournal.objects.filter(teacher=user).count(),
-        "payment": StudentPayment.objects.filter(billing_account__teacher=user).count(),
+    data = teacher_time_savings(user)
+    all_time = data["all_time"]
+    return {
+        "visible": all_time["visible"],
+        "label": all_time["label"],
+        "minutes": all_time["minutes"],
+        "scope": all_time["scope"],
+        "parts": all_time["parts"],
+        "footnote": data["footnote"],
     }
-    minutes = sum(SAVED_MINUTES[k] * v for k, v in counts.items())
-    hours = minutes / 60.0
-    if hours >= 10:
-        shown = int(round(hours))
-    else:
-        shown = round(hours, 1)
-    return {"minutes": minutes, "hours": shown, "counts": counts, "per_item_minutes": SAVED_MINUTES}
 
 
 # ── Подписанные ссылки ───────────────────────────────────────────────────────

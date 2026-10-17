@@ -1,0 +1,10 @@
+/* r70: разбивка сэкономленного времени (кабинет и /pricing) */
+.saved-time { margin-top: 12px; text-align: left; }
+.saved-time__summary { cursor: pointer; color: #5b6b8c; font-size: 13px; font-weight: 600; list-style-position: inside; }
+.saved-time__summary:hover, .saved-time__summary:focus-visible { color: #2d3b64; }
+.saved-time__parts { display: grid; gap: 6px; margin: 10px 0 0; padding: 0; list-style: none; }
+.saved-time__parts li { display: flex; align-items: baseline; gap: 8px; color: #5f6d89; font-size: 13px; }
+.saved-time__label { min-width: 0; }
+.saved-time__formula { margin-left: auto; color: #8a96ad; white-space: nowrap; }
+.saved-time__value { min-width: 64px; text-align: right; color: #2d3b64; font-weight: 600; white-space: nowrap; }
+.saved-time__footnote { margin: 10px 0 0; color: #7e8ca8; font-size: 12px; line-height: 1.45; }

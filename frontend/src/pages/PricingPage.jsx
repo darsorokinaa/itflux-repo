@@ -10,6 +10,7 @@ import "../r52/r52.css";
 import { PROMO_UNTIL } from "../r52/consentTexts";
 import SchoolRequestModal from "../components/SchoolRequestModal";
 import TeacherQuotesBlock from "../components/TeacherQuotesBlock";
+import SavedTimeDetails from "../components/SavedTimeDetails";
 import { ensureCsrfCookie, getCsrfToken } from "../utils/cabinetAuth";
 
 const fmt = (n) => Number(n).toLocaleString("ru-RU").replace(/\u00a0/g, " ");
@@ -213,12 +214,6 @@ const FAQ = [
   },
 ];
 
-function formatHours(h) {
-  const n = Number(h);
-  if (!n) return "0";
-  return Number.isInteger(n) ? fmt(n) : String(n).replace(".", ",");
-}
-
 export default function PricingPage() {
   const [period, setPeriod] = useState("year");
   const [schoolOpen, setSchoolOpen] = useState(false);
@@ -324,7 +319,8 @@ export default function PricingPage() {
     );
   };
 
-  const saved = teacher && me.saved && Number(me.saved.hours) > 0 ? me.saved : null;
+  // r70: тот же расчёт, что в кабинете (Cabinet.time_savings), «за всё время»; гостям — ничего персонального.
+  const saved = teacher && me?.saved?.label ? me.saved : null;
   const colIndex = useMemo(() => ({ start: 1, teacher: 2, pro: 3, school: 4 }), []);
 
   return (
@@ -348,14 +344,9 @@ export default function PricingPage() {
       {saved ? (
         <section className="pricing-saved" aria-label="Сэкономленное время">
           <p className="pricing-saved__title">
-            Вы сэкономили ≈ {formatHours(saved.hours)} ч с «Цифровым потоком»
+            Вы сэкономили {saved.label} {saved.scope || "за всё время"} с «Цифровым потоком»
           </p>
-          <p className="pricing-saved__text">
-            Время, которое не пришлось тратить на подбор вариантов, проверку ДЗ и учёт оплат.
-          </p>
-          <p className="pricing-saved__note">
-            По нашей оценке: вариант ≈ 15 мин, проверка ДЗ ≈ 10 мин, запись в журнале ≈ 5 мин, учёт оплаты ≈ 2 мин.
-          </p>
+          <SavedTimeDetails parts={saved.parts} footnote={saved.footnote} />
         </section>
       ) : null}
 

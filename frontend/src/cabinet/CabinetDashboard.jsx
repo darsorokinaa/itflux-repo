@@ -8,6 +8,7 @@ import CabinetModal from "./components/CabinetModal";
 import HomeworkAssignModal from "./components/HomeworkAssignModal";
 import TeacherOnboardingCard from "./components/TeacherOnboardingCard";
 import LessonPreviewModal from "../components/LessonPreviewModal";
+import SavedTimeDetails from "../components/SavedTimeDetails";
 import InterestingPreviewModal from "../components/InterestingPreviewModal";
 import { formatUsageItemFrac } from "./storageFormat";
 import "../styles/material-access.css";
@@ -418,27 +419,23 @@ function SuggestedMaterials({ items, onOpen, continueItems }) {
 }
 
 function SavingsPanel({ time }) {
-  const [open, setOpen] = useState(false);
-  if (!time) return null;
+  // r70: месяц крупно, «за всё время» мелко; разбивка и сноска — по клику (Cabinet.time_savings).
+  if (!time || !time.value) return null;
   const parts = time.parts || [];
   return (
     <section className="td-panel td-savings" aria-labelledby="td-savings-title">
       <div className="td-panel__head">
         <h2 id="td-savings-title">Вы сэкономили</h2>
-        <button
-          type="button"
-          className="td-icon-btn"
-          aria-expanded={open}
-          aria-label="Как рассчитывается сэкономленное время"
-          onClick={() => setOpen((value) => !value)}
-        >
-          <CabinetIcon name="help" />
-        </button>
       </div>
       <div className="td-savings__top">
         <div>
           <div className="td-savings__value">{time.value}</div>
           <p className="td-savings__period">{time.scope}</p>
+          {time.all_time ? (
+            <p className="td-savings__all-time">
+              {time.all_time.label} {time.all_time.scope}
+            </p>
+          ) : null}
         </div>
         <div className="td-savings__clock" aria-hidden="true">
           <CabinetIcon name="clock" />
@@ -450,23 +447,12 @@ function SavingsPanel({ time }) {
             <span
               key={part.key || part.label}
               className={index % 2 ? "is-lime" : ""}
-              style={{ flex: Number(part.count) || 1 }}
+              style={{ flex: Number(part.minutes) || 1 }}
             />
           ))}
         </div>
       ) : null}
-      {parts.length ? (
-        <div className="td-time-detail">
-          {parts.map((part, index) => (
-            <div key={part.key || part.label}>
-              <span className={`td-legend${index % 2 ? " is-lime" : ""}`} />
-              {part.label}
-              <strong>{part.value}</strong>
-            </div>
-          ))}
-        </div>
-      ) : null}
-      {open ? <p className="td-savings__note">{time.note || time.hint}</p> : null}
+      <SavedTimeDetails parts={parts} footnote={time.note} />
     </section>
   );
 }
