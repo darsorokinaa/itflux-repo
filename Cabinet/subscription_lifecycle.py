@@ -97,6 +97,13 @@ def process_auto_renewals(*, limit: int = 200) -> dict:
             if not locked or not locked.auto_renew or not locked.tbank_rebill_id:
                 skipped += 1
                 continue
+            # r61: списываем только при явном согласии (журнал согласий auto_renew).
+            from .r61_autorenew import has_explicit_consent
+
+            if not has_explicit_consent(locked):
+                logger.warning("auto_renew_skipped_no_consent subscription=%s", locked.pk)
+                skipped += 1
+                continue
             if locked.last_renewal_attempt_at and (
                 now - locked.last_renewal_attempt_at < MIN_RENEW_ATTEMPT_GAP
             ):
@@ -130,10 +137,13 @@ def process_auto_renewals(*, limit: int = 200) -> dict:
                 "last_renewal_error": error,
                 "updated_at": timezone.now(),
             }
-            if result.get("error") == "already_failed" or (
+            failed_payment = result.get("error") == "already_failed" or (
                 payment is not None
                 and getattr(payment, "status", None) == payment.Status.FAILED
-            ):
+            )
+            # r61: после отказа банка — ещё одна попытка через MIN_RENEW_ATTEMPT_GAP;
+            # исчерпали попытки → выключаем автопродление, по окончании периода — «Старт».
+            if failed_payment and not result.get("will_retry"):
                 fields["auto_renew"] = False
             TeacherSubscription.objects.filter(pk=locked.pk).update(**fields)
             failed += 1
@@ -237,6 +247,12 @@ def run_subscription_maintenance(*, renew: bool = True, remind: bool = True, exp
     result = {}
     if remind:
         result["reminders"] = process_expiry_reminders()
+        try:
+            from .r61_autorenew import process_renewal_notices
+
+            result["renewal_notices"] = process_renewal_notices()
+        except Exception:
+            logger.exception("r61 renewal notices failed")
     if renew:
         result["renewals"] = process_auto_renewals()
     if expire:

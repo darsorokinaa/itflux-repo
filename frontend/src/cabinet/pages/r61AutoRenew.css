@@ -1,0 +1,41 @@
+/* r61: согласие на автопродление и строка автопродления в карточке подписки */
+.upg-autorenew-consent {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 12px 0 16px;
+  padding: 12px 14px;
+  border: 1px solid #d9dee8;
+  border-radius: 12px;
+  background: #f8fafc;
+  font-size: 14px;
+  line-height: 1.45;
+  color: #1f2937;
+  cursor: pointer;
+}
+.upg-autorenew-consent input {
+  margin-top: 3px;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+.upg-autorenew-consent a {
+  color: #2563eb;
+}
+.upg-autorenew-consent small {
+  display: block;
+  margin-top: 6px;
+  color: #6b7280;
+  font-size: 13px;
+}
+.upg-autorenew-line {
+  font-weight: 600;
+  color: #166534;
+}
+.upg-card-line {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}

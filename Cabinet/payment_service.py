@@ -230,13 +230,22 @@ class PaymentProviderService:
             metadata["promotion_id"] = calc["promotion_id"]
         # Согласие на автопродление: из явного флага в metadata вызывающего слоя
         # или из текущего состояния подписки (пользователь уже включил toggle).
+        # r61: Recurrent=Y и автопродление — только при явной галочке согласия в этом checkout.
         if discount_info and isinstance(discount_info, dict):
-            if discount_info.get("auto_renew") is True:
+            if discount_info.get("auto_renew") is True or discount_info.get("consent_auto_renew") is True:
+                from .pricing_service import base_plan_price
+                from .r61_autorenew import build_consent_meta
+
                 metadata["auto_renew"] = True
-            elif discount_info.get("consent_auto_renew") is True:
-                metadata["consent_auto_renew"] = True
-        if sub.auto_renew:
-            metadata.setdefault("auto_renew", True)
+                metadata["recurrent_consent"] = True
+                metadata["auto_renew_consent"] = build_consent_meta(
+                    text=str(discount_info.get("consent_text") or ""),
+                    version=str(discount_info.get("consent_version") or ""),
+                    amount=base_plan_price(plan, billing_period),
+                    billing_period=billing_period,
+                    plan_slug=plan.slug,
+                    source="checkout",
+                )
 
         from .tbank_payment import customer_key_for_teacher
 
@@ -734,7 +743,35 @@ class PaymentProviderService:
 
                 PromoCodeService.confirm_for_payment(payment)
                 confirm_promotion(payment)
+                from .r61_autorenew import apply_auto_renew_consent
+
+                apply_auto_renew_consent(payment)
             logger.info("payment_confirmed payment_id=%s teacher=%s", payment.pk, payment.teacher_id)
+        elif new_status == "paid" and payment.status == Payment.Status.PAID:
+            # r61: уведомление банка пришло после GetState-подтверждения (или повторная доставка):
+            # тариф уже активирован, но RebillId/маску карты сохраняем и применяем согласие.
+            changed = []
+            if rebill_id and payment.rebill_id == rebill_id:
+                changed.append("rebill_id")
+            if parsed.get("customer_key"):
+                changed.append("customer_key")
+            if changed:
+                payment.save(update_fields=changed + ["updated_at"])
+            if rebill_id or parsed.get("pan_mask"):
+                cls._store_rebill_on_subscription(
+                    payment,
+                    rebill_id=rebill_id or payment.rebill_id,
+                    customer_key=payment.customer_key,
+                    pan_mask=parsed.get("pan_mask") or "",
+                )
+            from .r61_autorenew import apply_auto_renew_consent
+
+            apply_auto_renew_consent(payment)
+            logger.info(
+                "payment_notification_after_paid payment_id=%s rebill=%s",
+                payment.pk,
+                bool(rebill_id),
+            )
         elif new_status in ("failed", "cancelled", "refunded"):
             payment.status = new_status
             if parsed.get("error_code"):
@@ -761,7 +798,7 @@ class PaymentProviderService:
                 try:
                     from .subscription_notifications import notify_auto_renew_failed
 
-                    notify_auto_renew_failed(payment)
+                    notify_auto_renew_failed(payment, will_retry=cls._renewal_will_retry(payment))
                 except Exception:
                     logger.exception("notify_auto_renew_failed failed")
 
@@ -951,12 +988,15 @@ class PaymentProviderService:
         # - явный consent в metadata платежа;
         # - иначе сохраняем текущий флаг (рекуррентное продление не сбрасывает);
         # - если есть RebillId и пользователь уже включил auto_renew — оставляем True.
-        if meta.get("auto_renew") is True or meta.get("consent_auto_renew") is True:
+        # r61: True только при наличии RebillId. Согласие из checkout применяется отдельно
+        # (apply_auto_renew_consent), когда RebillId уже сохранён — возможно, позже, из webhook.
+        has_rebill = bool((sub.tbank_rebill_id or "").strip())
+        if payment.is_recurrent:
+            auto_renew = bool(sub.auto_renew) and has_rebill
+        elif (meta.get("recurrent_consent") is True) and has_rebill and payment.rebill_id:
             auto_renew = True
-        elif payment.is_recurrent:
-            auto_renew = bool(sub.auto_renew)
         else:
-            auto_renew = bool(sub.auto_renew)
+            auto_renew = bool(sub.auto_renew) and has_rebill
 
         # Если карта сохранена (rebill) и это первая оплата без явного отказа — не трогаем False.
         # Пользователь включает автопродление отдельным toggle в ЛК.
@@ -1087,6 +1127,11 @@ class PaymentProviderService:
         subscription.refresh_from_db()
         if not subscription.auto_renew:
             return {"ok": True, "skipped": True, "reason": "auto_renew_off"}
+        from .r61_autorenew import has_explicit_consent
+
+        if not has_explicit_consent(subscription):
+            # r61: без явного согласия Charge не делаем, даже если auto_renew + RebillId.
+            return {"ok": True, "skipped": True, "reason": "no_consent"}
 
         # Если следующий период уже предоплачен — Charge не нужен.
         change = DowngradeService.get_active_change(subscription)
@@ -1107,10 +1152,21 @@ class PaymentProviderService:
         if amount <= 0:
             raise ValueError("Цена тарифа должна быть больше нуля")
 
-        key = f"renew_{subscription.pk}_{subscription.expires_at.date().isoformat() if subscription.expires_at else 'na'}_{plan.slug}"
-        existing = Payment.objects.filter(idempotency_key=key).first()
-        if existing:
-            return cls._resume_recurrent_payment(existing, subscription)
+        # r61: несколько попыток на один период. Первая — прежний ключ, повторы — _retryN.
+        from .r61_autorenew import MAX_RENEW_ATTEMPTS, renewal_cycle_key
+
+        base_key = renewal_cycle_key(subscription, plan)
+        cycle = list(Payment.objects.filter(idempotency_key__startswith=base_key).order_by("id"))
+        open_or_paid = [p for p in cycle if p.status in (Payment.Status.PAID, Payment.Status.PENDING)]
+        if open_or_paid:
+            return cls._resume_recurrent_payment(open_or_paid[-1], subscription)
+        n_failed = sum(1 for p in cycle if p.status == Payment.Status.FAILED)
+        if cycle and n_failed >= MAX_RENEW_ATTEMPTS:
+            return {"ok": False, "payment": cycle[-1], "error": "already_failed", "final": True}
+        if cycle and n_failed == 0:
+            # отменённая попытка (auto_renew выключили) — не повторяем
+            return cls._resume_recurrent_payment(cycle[-1], subscription)
+        key = base_key if n_failed == 0 else f"{base_key}_retry{n_failed}"
 
         teacher = subscription.teacher
         try:
@@ -1191,14 +1247,15 @@ class PaymentProviderService:
         except Exception as exc:
             payment.refresh_from_db()
             if payment.status == Payment.Status.FAILED:
+                will_retry = cls._renewal_will_retry(payment)
                 try:
                     from .subscription_notifications import notify_auto_renew_failed
 
-                    notify_auto_renew_failed(payment)
+                    notify_auto_renew_failed(payment, will_retry=will_retry)
                 except Exception:
                     logger.exception("notify_auto_renew_failed")
-                logger.info("auto_renew_failed payment_id=%s error=%s", payment.pk, exc)
-                return {"ok": False, "payment": payment, "error": str(exc)}
+                logger.info("auto_renew_failed payment_id=%s error=%s retry=%s", payment.pk, exc, will_retry)
+                return {"ok": False, "payment": payment, "error": str(exc), "will_retry": will_retry}
             # Сеть/timeout: статус оставляем pending — следующий cron сделает GetState.
             payment.error_message = str(exc)[:512]
             payment.save(update_fields=["error_message", "updated_at"])
@@ -1236,6 +1293,20 @@ class PaymentProviderService:
         return {"ok": True, "payment": payment, "awaiting": True, "provider_status": result.get("provider_status")}
 
     @classmethod
+    def _renewal_will_retry(cls, payment) -> bool:
+        """r61: будет ли ещё попытка Charge в этом периоде (по числу FAILED-платежей цикла)."""
+        from .models import Payment
+        from .r61_autorenew import MAX_RENEW_ATTEMPTS
+
+        key = (payment.idempotency_key or "").split("_retry")[0]
+        if not key.startswith("renew_"):
+            return False
+        n_failed = Payment.objects.filter(
+            idempotency_key__startswith=key, status=Payment.Status.FAILED
+        ).count()
+        return n_failed < MAX_RENEW_ATTEMPTS
+
+    @classmethod
     def _resume_recurrent_payment(cls, existing, subscription):
         """Повтор cron по тому же billing cycle: не создаём второй Charge."""
         from .models import Payment
@@ -1243,7 +1314,8 @@ class PaymentProviderService:
         if existing.status == Payment.Status.PAID:
             return {"ok": True, "payment": existing, "duplicate": True}
         if existing.status == Payment.Status.FAILED:
-            return {"ok": False, "payment": existing, "error": "already_failed"}
+            return {"ok": False, "payment": existing, "error": "already_failed",
+                    "will_retry": cls._renewal_will_retry(existing)}
         if existing.status == Payment.Status.CANCELLED:
             return {"ok": True, "skipped": True, "reason": "cancelled", "payment": existing}
         if existing.status == Payment.Status.PENDING:

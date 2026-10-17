@@ -317,16 +317,25 @@ def notify_auto_renew_success(payment, subscription) -> bool:
     )
 
 
-def notify_auto_renew_failed(payment) -> bool:
+def notify_auto_renew_failed(payment, will_retry: bool = False) -> bool:
     plan = payment.plan
     plan_name = plan.name if plan else "тариф"
     sub = payment.subscription
     ends = _format_date(sub.expires_at) if sub and sub.expires_at else ""
     title = f"Не удалось продлить «{plan_name}»"
-    message = (
-        f"Не удалось автоматически продлить подписку «{plan_name}». "
-        f"Оплатите её вручную, чтобы сохранить доступ."
-    )
+    if will_retry:
+        # r61: первая неудачная попытка — повторим через 12 часов.
+        message = (
+            f"Не удалось списать оплату за подписку «{plan_name}» с привязанной карты. "
+            f"Мы повторим попытку примерно через 12 часов. Можно оплатить вручную или "
+            f"отключить автопродление в разделе «Подписка и оплата»."
+        )
+    else:
+        message = (
+            f"Не удалось автоматически продлить подписку «{plan_name}». "
+            f"Автопродление отключено. Оплатите подписку вручную, чтобы сохранить доступ; "
+            f"иначе после окончания периода аккаунт перейдёт на «Старт», данные сохранятся."
+        )
     if ends:
         message += f" Подписка действует до {ends}."
     event_key = f"subscription_renew_failed:{payment.pk}"

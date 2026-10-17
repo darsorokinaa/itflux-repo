@@ -42,6 +42,38 @@ async function pollLocalPaymentUntilPaid(paymentId, { attempts = 45, intervalMs 
   return last;
 }
 import { CabinetPageHeader, CabinetPageShell } from "../CabinetSectionUi";
+import "./r61AutoRenew.css";
+
+/** r61: версия текста согласия на автопродление (совпадает с Cabinet/r61_autorenew.py). */
+const AUTO_RENEW_CONSENT_VERSION = "AUTO_RENEW_V1_2026-10-17";
+
+function renewalPriceOf(plan, period) {
+  const raw = period === "year" ? plan?.price_year : plan?.price_month;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function renewalPriceText(plans, period) {
+  const per = period === "year" ? "в год" : "в месяц";
+  return (plans || [])
+    .filter((p) => !p.is_free && p.slug !== "start" && renewalPriceOf(p, period))
+    .map((p) => `«${p.name}» — ${Math.round(renewalPriceOf(p, period)).toLocaleString("ru-RU")} ₽ ${per}`)
+    .join(", ");
+}
+
+function buildAutoRenewConsentText(priceText) {
+  return (
+    `Согласен на автоматическое продление подписки: ${priceText} (полная цена тарифа, ` +
+    "без скидок по промокоду) будет списываться с привязанной карты в день окончания оплаченного " +
+    "периода, пока я не отключу автопродление. Отключить автопродление или отвязать карту можно " +
+    "в любой момент в кабинете в разделе «Подписка и оплата». Условия — в разделе 6 оферты."
+  );
+}
+
+function formatDayMonth(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+}
 
 const SCHOOL_SLUG = "school";
 
@@ -315,6 +347,7 @@ function SubscriptionStatusCard({
   onSetAutoRenew,
   onCancelSubscription,
   onCancelPending,
+  onUnbindCard,
   managing,
 }) {
   if (!subscription) return null;
@@ -435,18 +468,30 @@ function SubscriptionStatusCard({
               </button>
             </div>
           </li>
-          {autoRenewOn && nextCharge?.at ? (
-            <>
-              <li>Следующее списание: {formatDate(nextCharge.at)}</li>
-              <li>Сумма: {formatMoneyRub(nextCharge.amount)}</li>
-            </>
+          {autoRenewOn && hasPaymentMethod && nextCharge?.at ? (
+            <li className="upg-autorenew-line" data-r61="autorenew-on">
+              Автопродление включено, следующее списание {formatDayMonth(nextCharge.at)} —{" "}
+              {formatMoneyRub(nextCharge.amount)}
+            </li>
           ) : null}
           {!autoRenewOn && !isStart && !isExpired && expiresAt ? (
             <li className="upg-status__note">
               После {formatDate(expiresAt)} будет активирован тариф «Старт».
             </li>
           ) : null}
-          {paymentMask ? <li>Карта: {paymentMask}</li> : null}
+          {paymentMask || hasPaymentMethod ? (
+            <li className="upg-card-line">
+              <span>Карта: {paymentMask || "привязана"}</span>
+              <button
+                type="button"
+                className="upg-link-btn"
+                onClick={onUnbindCard}
+                disabled={Boolean(managing)}
+              >
+                {managing === "unbind_card" ? "…" : "Отвязать карту"}
+              </button>
+            </li>
+          ) : null}
         </ul>
         {isCancelled && expiresAt ? (
           <p className="upg-status__note">
@@ -475,7 +520,8 @@ function SubscriptionStatusCard({
         ) : null}
           {autoRenewOn && !hasPaymentMethod ? (
           <p className="upg-status__note">
-            Для автопродления нужна сохранённая карта. Оплатите тариф ещё раз.
+            Автопродление сработает только с привязанной картой. Оплатите тариф с отметкой
+            «Согласен на автоматическое продление» — карта привяжется при оплате.
           </p>
         ) : null}
         {pendingChange ? (
@@ -1104,6 +1150,7 @@ export default function CabinetUpgradePage() {
   const [noticeRetry, setNoticeRetry] = useState(null);
   const [period, setPeriod] = useState("month");
   const [selectedSlug, setSelectedSlug] = useState(null);
+  const [autoRenewConsent, setAutoRenewConsent] = useState(false);
   const [promoInput, setPromoInput] = useState("");
   const [promoState, setPromoState] = useState(null);
   const [promoLoading, setPromoLoading] = useState(false);
@@ -1324,6 +1371,7 @@ export default function CabinetUpgradePage() {
   };
 
   const handleSetAutoRenew = async (enabled) => {
+    let consentText = "";
     if (!enabled) {
       if (
         !window.confirm(
@@ -1332,11 +1380,21 @@ export default function CabinetUpgradePage() {
       ) {
         return;
       }
+    } else {
+      const plan = plans.find((p) => p.slug === (subscription?.plan_slug || currentPlan?.slug));
+      const per = subscription?.billing_period === "year" ? "year" : "month";
+      consentText = buildAutoRenewConsentText(renewalPriceText(plan ? [plan] : [], per) || "стоимость тарифа");
+      if (!window.confirm(`${consentText}\n\nВключить автопродление?`)) return;
     }
     setManaging(enabled ? "enable_auto_renew" : "disable_auto_renew");
     setNotice("");
     try {
-      const result = await manageSubscription("set_auto_renew", { enabled });
+      const result = await manageSubscription(
+        "set_auto_renew",
+        enabled
+          ? { enabled, consent: true, consent_text: consentText, consent_version: AUTO_RENEW_CONSENT_VERSION }
+          : { enabled },
+      );
       await refreshPlans();
       setNotice(
         result.message || (enabled ? "Автопродление включено." : "Автопродление отключено."),
@@ -1367,6 +1425,27 @@ export default function CabinetUpgradePage() {
       await refreshPlans();
     } catch (err) {
       setNotice(err?.data?.detail || err?.message || "Не удалось отключить автопродление.");
+    } finally {
+      setManaging(null);
+    }
+  };
+
+  const handleUnbindCard = async () => {
+    if (
+      !window.confirm(
+        "Отвязать карту? Автопродление выключится. Тариф продолжит действовать до конца оплаченного периода.",
+      )
+    ) {
+      return;
+    }
+    setManaging("unbind_card");
+    setNotice("");
+    try {
+      const result = await manageSubscription("unbind_card");
+      await refreshPlans();
+      setNotice(result.message || "Карта отвязана, автопродление отключено.");
+    } catch (err) {
+      setNotice(err?.data?.detail || err?.message || "Не удалось отвязать карту.");
     } finally {
       setManaging(null);
     }
@@ -1523,7 +1602,7 @@ export default function CabinetUpgradePage() {
           if (offer?.can_redeem && offer.allow_promo_codes === false) return null;
           return promoState?.valid ? promoInput.trim() : null;
         })();
-        const idemKey = `${plan.slug}:${period}`;
+        const idemKey = `${plan.slug}:${period}:${autoRenewConsent ? "ar" : "once"}`;
         if (!payIdemRef.current[idemKey]) {
           const uuid =
             typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -1531,12 +1610,20 @@ export default function CabinetUpgradePage() {
               : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
           payIdemRef.current[idemKey] = `pay_${plan.slug}_${period}_${uuid}`;
         }
+        const autoRenewOptions = autoRenewConsent
+          ? {
+              autoRenew: true,
+              consentText: buildAutoRenewConsentText(renewalPriceText([plan], period)),
+              consentVersion: AUTO_RENEW_CONSENT_VERSION,
+            }
+          : null;
         const payment = await createPayment(
           plan.slug,
           period,
           promoCode,
           payIdemRef.current[idemKey],
           activeOffer(plan, period)?.id || null,
+          autoRenewOptions,
         );
         if (payment.granted || payment.status === "paid") {
           trackValueGoal("payment_success", {
@@ -1679,6 +1766,7 @@ export default function CabinetUpgradePage() {
             onSetAutoRenew={handleSetAutoRenew}
             onCancelSubscription={handleCancelSubscription}
             onCancelPending={handleCancelPending}
+            onUnbindCard={handleUnbindCard}
             managing={managing}
           />
 
@@ -1840,6 +1928,26 @@ export default function CabinetUpgradePage() {
               <strong>Ваша скидка по приглашению — 50%</strong>
               <p>На первый месяц любого платного тарифа. Скидка действует только на первый месяц.</p>
             </div>
+          ) : null}
+
+          {paymentsEnabled && renewalPriceText(mainPlans, period) ? (
+            <label className="upg-autorenew-consent" data-r61="autorenew-consent">
+              <input
+                type="checkbox"
+                checked={autoRenewConsent}
+                onChange={(e) => setAutoRenewConsent(e.target.checked)}
+              />
+              <span>
+                {buildAutoRenewConsentText(renewalPriceText(mainPlans, period))}{" "}
+                <Link to="/offer" target="_blank" rel="noopener noreferrer">
+                  Оферта
+                </Link>
+                <small>
+                  Без отметки оплата разовая: карта не привязывается, по окончании периода аккаунт
+                  перейдёт на «Старт».
+                </small>
+              </span>
+            </label>
           ) : null}
 
           <div className="upg-grid">

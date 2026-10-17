@@ -91,6 +91,15 @@ def _ssl_verify():
     return True
 
 
+def _token_value(value: Any) -> str:
+    """r61: Т-Банк подписывает булевы значения как "true"/"false" (JSON), а не "True"/"False".
+    Из-за str(True) все уведомления (Success: true) отклонялись как invalid_tbank_token
+    и RebillId никогда не сохранялся."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
 def build_tbank_token(payload: dict[str, Any], password: str | None = None) -> str:
     """
     Token = SHA-256(конкатенация значений корневых полей + Password, ключи по алфавиту).
@@ -107,7 +116,7 @@ def build_tbank_token(payload: dict[str, Any], password: str | None = None) -> s
             continue
         pairs[str(key)] = value
     pairs["Password"] = pwd
-    concat = "".join(str(pairs[k]) for k in sorted(pairs.keys()))
+    concat = "".join(_token_value(pairs[k]) for k in sorted(pairs.keys()))
     return hashlib.sha256(concat.encode("utf-8")).hexdigest()
 
 
@@ -534,7 +543,11 @@ class TBankPaymentProvider(PaymentProviderInterface):
     def create_checkout(self, payment, plan) -> str:
         """Init платежа → PaymentURL для редиректа."""
         meta = payment.metadata if isinstance(getattr(payment, "metadata", None), dict) else {}
-        recurrent = meta.get("purpose") not in ("material", "lesson", "collection")
+        # r61: Recurrent=Y (привязка карты) только при явном согласии на автопродление в checkout.
+        recurrent = (
+            meta.get("purpose") not in ("material", "lesson", "collection")
+            and meta.get("recurrent_consent") is True
+        )
         result = self._init_payment(
             payment, plan, recurrent_parent=recurrent, include_return_urls=True
         )
@@ -692,3 +705,37 @@ class TBankPaymentProvider(PaymentProviderInterface):
             "error_code": str(payload.get("ErrorCode") or ""),
             "error_message": str(payload.get("Message") or payload.get("Details") or "")[:512],
         }
+
+
+# ── r61: привязанные карты (для отвязки из кабинета) ─────────────────────────
+
+def _signed_call(method: str, body: dict[str, Any]):
+    terminal = _terminal_key()
+    password = _password()
+    if not terminal or not password:
+        raise ValueError("Т-Банк не настроен")
+    body = {"TerminalKey": terminal, **body}
+    body["Token"] = build_tbank_token(body, password=password)
+    response = requests.post(f"{_api_base()}/{method}", json=body, timeout=20, verify=_ssl_verify())
+    return response.json()
+
+
+def get_card_list(customer_key: str) -> list[dict]:
+    """GetCardList: карты покупателя (CardId, Pan-маска, RebillId). Без ПДн карты."""
+    data = _signed_call("GetCardList", {"CustomerKey": str(customer_key)})
+    if isinstance(data, list):
+        return data
+    return []
+
+
+def remove_card_by_rebill(customer_key: str, rebill_id: str) -> bool:
+    """Удаляет у банка карту с данным RebillId (RemoveCard). True — удалена или не найдена."""
+    rebill_id = str(rebill_id or "").strip()
+    if not customer_key or not rebill_id:
+        return False
+    cards = get_card_list(customer_key)
+    target = [c for c in cards if str(c.get("RebillId") or "") == rebill_id]
+    if not target:
+        return True
+    data = _signed_call("RemoveCard", {"CustomerKey": str(customer_key), "CardId": str(target[0].get("CardId"))})
+    return bool(isinstance(data, dict) and data.get("Success"))

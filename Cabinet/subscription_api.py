@@ -204,7 +204,15 @@ def _subscription_payload(sub: TeacherSubscription) -> dict:
 
     pending_change = DowngradeService.payload_for_subscription(sub)
     next_plan = DowngradeService.effective_next_plan(sub) if is_paid_plan else None
-    if is_paid_plan and sub.auto_renew and sub.expires_at and next_plan and not is_free_plan(next_plan):
+    # r61: «следующее списание» показываем только когда списание реально возможно (есть RebillId).
+    if (
+        is_paid_plan
+        and sub.auto_renew
+        and (sub.tbank_rebill_id or "").strip()
+        and sub.expires_at
+        and next_plan
+        and not is_free_plan(next_plan)
+    ):
         from .pricing_service import base_plan_price
 
         amount = base_plan_price(next_plan, sub.billing_period or "month")
@@ -667,13 +675,38 @@ class SubscriptionManageView(APIView):
         def _set_auto_renew(enabled: bool):
             from django.db import transaction
 
+            from .r61_autorenew import log_consent, mark_user_disabled
+
+            consent_text = str(request.data.get("consent_text") or "")[:2000]
+            consent_version = str(request.data.get("consent_version") or "")[:64]
+            if enabled:
+                raw_consent = request.data.get("consent")
+                if not (raw_consent is True or str(raw_consent).strip().lower() in ("1", "true", "yes", "on")):
+                    return Response(
+                        {
+                            "detail": "Подтвердите согласие на автоматическое продление подписки.",
+                            "code": "CONSENT_REQUIRED",
+                        },
+                        status=400,
+                    )
             with transaction.atomic():
+                # of=("self",): FOR UPDATE нельзя на nullable-стороне OUTER JOIN (scheduled_plan).
                 locked = (
-                    TeacherSubscription.objects.select_for_update()
+                    TeacherSubscription.objects.select_for_update(of=("self",))
                     .select_related("plan", "scheduled_plan")
                     .get(pk=sub.pk)
                 )
-                return _set_auto_renew_locked(locked, enabled)
+                was_on = bool(locked.auto_renew)
+                response = _set_auto_renew_locked(locked, enabled)
+            if response.status_code == 200:
+                if enabled and not was_on:
+                    log_consent(request.user, granted=True, text=consent_text, version=consent_version,
+                                source="cabinet_toggle", request=request)
+                elif not enabled:
+                    mark_user_disabled(locked)
+                    if was_on:
+                        log_consent(request.user, granted=False, source="cabinet_disable", request=request)
+            return response
 
         def _set_auto_renew_locked(sub, enabled: bool):
             if enabled:
@@ -758,6 +791,48 @@ class SubscriptionManageView(APIView):
         if action == "disable_auto_renew":
             return _set_auto_renew(False)
 
+        if action == "unbind_card":
+            # r61: отвязать карту — выключает автопродление и удаляет RebillId (и карту у банка, если удастся).
+            from django.db import transaction
+
+            from .r61_autorenew import log_consent, mark_user_disabled
+
+            with transaction.atomic():
+                locked = TeacherSubscription.objects.select_for_update().get(pk=sub.pk)
+                rebill = (locked.tbank_rebill_id or "").strip()
+                customer_key = (locked.tbank_customer_key or "").strip()
+                was_on = bool(locked.auto_renew)
+                if not rebill and not locked.payment_method_mask:
+                    return Response({"ok": True, "message": "Привязанной карты нет.",
+                                     "subscription": _subscription_payload(locked)})
+                locked.auto_renew = False
+                locked.tbank_rebill_id = ""
+                locked.payment_method_mask = ""
+                locked.save(update_fields=["auto_renew", "tbank_rebill_id", "payment_method_mask", "updated_at"])
+            mark_user_disabled(locked)
+            if was_on:
+                log_consent(request.user, granted=False, source="cabinet_unbind_card", request=request)
+            bank_removed = None
+            if rebill and customer_key:
+                try:
+                    from .tbank_payment import remove_card_by_rebill
+
+                    bank_removed = remove_card_by_rebill(customer_key, rebill)
+                except Exception:
+                    logger.exception("r61 RemoveCard failed subscription=%s", locked.pk)
+                    bank_removed = False
+            ends_note = (
+                f" Тариф действует до {timezone.localtime(locked.expires_at).strftime('%d.%m.%Y')}."
+                if locked.expires_at and locked.expires_at > now
+                else ""
+            )
+            return Response({
+                "ok": True,
+                "bank_removed": bank_removed,
+                "message": f"Карта отвязана, автопродление отключено.{ends_note}",
+                "subscription": _subscription_payload(locked),
+            })
+
         if action == "cancel":
             # Переход на Старт после окончания оплаченного периода (= downgrade на start).
             start_plan = TariffPlan.objects.filter(slug="start", is_active=True).first()
@@ -793,6 +868,12 @@ class SubscriptionManageView(APIView):
                 })
             sub.auto_renew = False
             sub.cancelled_at = sub.cancelled_at or now
+            try:
+                from .r61_autorenew import mark_user_disabled
+
+                mark_user_disabled(sub)
+            except Exception:
+                logger.exception("r61 mark_user_disabled failed")
             if not sub.expires_at or sub.expires_at <= now:
                 sub.status = TeacherSubscription.Status.CANCELLED
                 if start_plan and sub.plan_id != start_plan.pk and not _plan_is_free(sub.plan):
@@ -839,7 +920,7 @@ class SubscriptionManageView(APIView):
             {
                 "detail": (
                     "Неизвестное действие. Допустимо: set_auto_renew, "
-                    "enable_auto_renew, disable_auto_renew, cancel."
+                    "enable_auto_renew, disable_auto_renew, unbind_card, cancel."
                 ),
             },
             status=400,
@@ -992,6 +1073,10 @@ class SubscriptionCreatePaymentView(APIView):
             discount_info = {"auto_renew": consent}
         elif str(consent or "").strip().lower() in ("1", "true", "yes", "on"):
             discount_info = {"auto_renew": True}
+        if discount_info and discount_info.get("auto_renew") is True:
+            # r61: текст согласия, который видел пользователь, и его версия — в метаданные платежа.
+            discount_info["consent_text"] = str(request.data.get("auto_renew_consent_text") or "")[:2000]
+            discount_info["consent_version"] = str(request.data.get("auto_renew_consent_version") or "")[:64]
 
         plan = TariffPlan.objects.filter(slug=slug, is_active=True).first()
         if not plan:
@@ -1051,6 +1136,17 @@ class SubscriptionCreatePaymentView(APIView):
             return Response({"detail": str(exc), "code": "PAYMENT_UNAVAILABLE"}, status=503)
         except NotImplementedError as exc:
             return Response({"detail": str(exc), "code": "PAYMENT_UNAVAILABLE"}, status=503)
+        if discount_info and discount_info.get("auto_renew") is True and not result.get("idempotent"):
+            from .r61_autorenew import log_consent
+
+            log_consent(
+                request.user,
+                granted=True,
+                text=discount_info.get("consent_text") or "",
+                version=discount_info.get("consent_version") or "",
+                source="checkout",
+                request=request,
+            )
         return Response(result, status=201)
 
 

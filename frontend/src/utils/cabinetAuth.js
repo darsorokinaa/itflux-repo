@@ -1917,7 +1917,7 @@ export function previewPlanChange(planSlug, billingPeriod = "month") {
   return changePlan(planSlug, billingPeriod, { preview: true });
 }
 
-export function createPayment(planSlug, billingPeriod = "month", promoCode = null, idempotencyKey = null, promotionId = null) {
+export function createPayment(planSlug, billingPeriod = "month", promoCode = null, idempotencyKey = null, promotionId = null, autoRenew = null) {
   return cabinetFetch("/subscription/create-payment/", {
     method: "POST",
     body: JSON.stringify({
@@ -1926,6 +1926,10 @@ export function createPayment(planSlug, billingPeriod = "month", promoCode = nul
       promo_code: promoCode || undefined,
       idempotency_key: idempotencyKey || undefined,
       promotion_id: promotionId || undefined,
+      // r61: согласие на автопродление (отдельная галочка). Без него — разовая оплата без привязки карты.
+      auto_renew: autoRenew?.autoRenew ? true : undefined,
+      auto_renew_consent_text: autoRenew?.autoRenew ? autoRenew.consentText : undefined,
+      auto_renew_consent_version: autoRenew?.autoRenew ? autoRenew.consentVersion : undefined,
     }),
   });
 }

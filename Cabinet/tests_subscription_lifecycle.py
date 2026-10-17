@@ -58,6 +58,10 @@ def _plan(slug: str, price: str) -> TariffPlan:
 class SubscriptionRenewalTests(TestCase):
     def setUp(self):
         self.teacher = _teacher()
+        # r61: автопродление списывает только при явном согласии (журнал согласий)
+        from Cabinet.r61_autorenew import log_consent
+
+        log_consent(self.teacher, granted=True, text="test consent", source="test")
         self.pro = _plan("pro", "2990")
         self.start = _plan("start", "0")
         self.sub = TeacherSubscription.objects.create(
