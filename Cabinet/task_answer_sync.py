@@ -144,6 +144,30 @@ def _level_subject(homework, cache: dict) -> tuple[str, str]:
     return level, subject
 
 
+def _legacy_view_answer(payload, task_id, answer: str):
+    """Снимок прежнего вида (r69): эталон следует за банком, как и до снимка; баллы не пересчитываются."""
+    if not isinstance(payload, dict) or not payload.get("legacy_view_snapshot"):
+        return None
+    grading = payload.get("grading_snapshot")
+    if not isinstance(grading, list):
+        return None
+    key = str(task_id)
+    fresh = str(answer or "")
+    changed = False
+    rows = []
+    for row in grading:
+        if isinstance(row, dict) and str(row.get("id")) == key and str(row.get("answer") or "") != fresh:
+            row = dict(row)
+            row["answer"] = fresh
+            changed = True
+        rows.append(row)
+    if not changed:
+        return False
+    data = dict(payload)
+    data["grading_snapshot"] = rows
+    return data
+
+
 def _sync_homework_attempts(task_id: int, answer: str) -> None:
     from .models import HomeworkSubmission, HomeworkSubmissionAttempt
 
@@ -158,6 +182,12 @@ def _sync_homework_attempts(task_id: int, answer: str) -> None:
         .select_related("homework")
     )
     for submission in submissions:
+        legacy = _legacy_view_answer(submission.result_payload, task_id, answer)
+        if legacy is not None:
+            if legacy:
+                submission.result_payload = legacy
+                submission.save(update_fields=["result_payload"])
+            continue
         level, subject = _level_subject(submission.homework, contexts)
         updated = _apply_attempt_answer(
             submission.result_payload,
@@ -175,6 +205,12 @@ def _sync_homework_attempts(task_id: int, answer: str) -> None:
 
     attempts = HomeworkSubmissionAttempt.objects.filter(match).select_related("submission__homework")
     for attempt in attempts:
+        legacy = _legacy_view_answer(attempt.result_payload, task_id, answer)
+        if legacy is not None:
+            if legacy:
+                attempt.result_payload = legacy
+                attempt.save(update_fields=["result_payload"])
+            continue
         homework = getattr(attempt.submission, "homework", None)
         level, subject = _level_subject(homework, contexts)
         updated = _apply_attempt_answer(

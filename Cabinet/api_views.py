@@ -3028,7 +3028,7 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
             changed_payload = True
 
             has_variant = homework_has_variant_task(submission.homework)
-            has_attempt_basis = any(
+            has_attempt_basis = not previous.get("legacy_view_snapshot") and any(
                 isinstance(previous.get(key), (dict, list)) and previous.get(key)
                 for key in ("grading_snapshot", "tasks_snapshot", "scoring")
             )

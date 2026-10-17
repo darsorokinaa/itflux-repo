@@ -17,6 +17,8 @@ import {
   homeworkTaskComment,
   homeworkTaskScore,
   homeworkTeacherAttachments,
+  inferExamTaskPart,
+  legacyViewTask,
   resolvePart1Verdict,
   taskMaxScore,
 } from "./cabinetReviewUtils";
@@ -331,8 +333,10 @@ export default function HomeworkReviewResults({
   );
 }
 
-export function HomeworkTaskReviewNote({ task, result, level, subject, part, tasks }) {
-  if (!result || typeof result !== "object" || !task) return null;
+export function HomeworkTaskReviewNote({ task: liveTask, result, level, subject, part: livePart, tasks }) {
+  if (!result || typeof result !== "object" || !liveTask) return null;
+  const task = legacyViewTask(liveTask, result);
+  const part = task !== liveTask ? (inferExamTaskPart(task, level, subject) === 2 ? 2 : 1) : livePart;
 
   const answer = homeworkTaskAnswer(result, task.id, task.number, tasks);
   const comment = homeworkTaskComment(result, task.id, task.number, tasks);

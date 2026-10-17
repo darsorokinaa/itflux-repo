@@ -594,7 +594,7 @@ function ReviewWorkspace({
         <div className="rv-summary__item">
           <span className="rv-summary__mark"><CabinetIcon name="spark" /></span>
           <div><b>{earned} <small>баллов</small></b><p>{
-            Array.isArray(result?.tasks_snapshot) && result.tasks_snapshot.length
+            Array.isArray(result?.tasks_snapshot) && result.tasks_snapshot.length && !result?.legacy_view_snapshot
               ? (scoring.preliminary ? "Предварительно" : "Подтверждено")
               : "По текущему варианту"
           } из {possible} возможных</p></div>

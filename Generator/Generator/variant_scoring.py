@@ -20,6 +20,15 @@ _NUM_RE = re.compile(r"^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$")
 
 _GRADE_KEYS = ("scores", "checked", "scoring", "manual_stats")
 
+# Метка снимка «прежнего вида» (r69): попытка без снимка, которой задним числом записан
+# состав с прежними максимумами. Это только отображение: при новой отправке ученика
+# снимок не наследуется, итог считается по текущему банку.
+LEGACY_VIEW_KEY = "legacy_view_snapshot"
+
+
+def is_legacy_view(payload) -> bool:
+    return isinstance(payload, dict) and bool(payload.get(LEGACY_VIEW_KEY))
+
 
 def task_max_points(task: dict | None) -> int:
     """Максимум задания. Пустое значение — 1, как в модели TaskList/Task."""
@@ -706,6 +715,11 @@ def attach_variant_scoring(
     только при первой фиксации или при явном refresh_from_bank.
     """
     data = dict(payload or {})
+    if data.pop(LEGACY_VIEW_KEY, None):
+        previous_snapshot = None
+        previous_grading = None
+        data.pop("tasks_snapshot", None)
+        data.pop("grading_snapshot", None)
     stored_scoring = data.get("scoring") if isinstance(data.get("scoring"), dict) else None
     data.pop("scoring", None)
     data.pop("tasks_snapshot", None)

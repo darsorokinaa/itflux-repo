@@ -114,6 +114,24 @@ export function homeworkTaskComment(result, taskId, taskNumber, tasks) {
   return String(byNum[num] || byNum[String(Number(num))] || "").trim();
 }
 
+/**
+ * Снимок прежнего вида (r69, result.legacy_view_snapshot): у старой попытки максимум
+ * и часть берутся из снимка, а не из текущего банка. Эталон остаётся живым.
+ */
+export function legacyViewTask(task, result) {
+  if (!task || !result?.legacy_view_snapshot || !Array.isArray(result.tasks_snapshot)) return task;
+  const row = result.tasks_snapshot.find((item) => item && String(item.id) === String(task.id));
+  if (!row) return task;
+  return {
+    ...task,
+    max_score: row.max_score ?? task.max_score,
+    part: row.part ?? task.part,
+    part_title: row.part_title || task.part_title || "",
+    exam_part: row.exam_part ?? task.exam_part,
+    subdivision: row.subdivision || task.subdivision || "",
+  };
+}
+
 export function taskMaxScore(task) {
   const raw = task?.max_score;
   if (raw == null || raw === "") return 1;
@@ -240,7 +258,7 @@ export function buildStudentHomeworkReviewRows(tasks, result, level, subject) {
   const teacherCommentAttachments = homeworkTeacherCommentAttachments(result);
   const part1 = [];
   const part2 = [];
-  const list = assignDisplayNumbers(tasks);
+  const list = assignDisplayNumbers(tasks.map((task) => legacyViewTask(task, result)));
   const total = list.length;
   for (const task of list) {
     const part = inferExamTaskPart(task, level, subject);

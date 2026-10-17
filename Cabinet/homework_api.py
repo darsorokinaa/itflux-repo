@@ -1322,7 +1322,7 @@ _RESULT_MAP_KEYS = (
     "comments_by_task_id",
     "comments_by_number",
 )
-_SERVER_RESULT_KEYS = ("scoring", "tasks_snapshot", "grading_snapshot")
+_SERVER_RESULT_KEYS = ("scoring", "tasks_snapshot", "grading_snapshot", "legacy_view_snapshot")
 
 
 def _scoring_rows(payload) -> list[dict]:
