@@ -1,0 +1,104 @@
+/* r58: блок «Что говорят учителя» (/, /pricing) */
+.teacher-quotes {
+  margin: 24px 0 0;
+  padding: 20px 20px 16px;
+  border-radius: 22px;
+  border: 1.5px solid #e3e8f8;
+  background: #f7f9ff;
+  box-shadow: 0 4px 14px rgba(18, 62, 173, 0.05);
+}
+
+.teacher-quotes__title {
+  margin: 0 0 14px;
+  font-family: var(--font-display, "Manrope", "Segoe UI", sans-serif);
+  font-size: clamp(18px, 2.4vw, 22px);
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: #102c78;
+}
+
+.teacher-quotes__grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.teacher-quotes__card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 16px 16px 16px 18px;
+  border-radius: 16px;
+  border: 1.5px solid #e3e8f8;
+  border-left: 3px solid rgba(29, 78, 216, 0.35);
+  background: #ffffff;
+  box-shadow: 0 4px 12px rgba(18, 62, 173, 0.06);
+}
+
+.teacher-quotes__quote {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.teacher-quotes__text {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.55;
+  color: #1c2f57;
+}
+
+.teacher-quotes__note {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: #7a88a6;
+}
+
+.teacher-quotes__caption {
+  margin: 12px 0 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: #7a88a6;
+  text-align: center;
+}
+
+@media (min-width: 700px) {
+  .teacher-quotes__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1120px) {
+  .teacher-quotes__grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .teacher-quotes {
+    padding: 16px 14px 12px;
+    border-radius: 18px;
+  }
+  .teacher-quotes__card {
+    padding: 14px 14px 14px 16px;
+  }
+  .teacher-quotes__text {
+    font-size: 14.5px;
+  }
+}
+
+/* На /pricing — в тон витрине тарифов */
+.pricing-page .teacher-quotes {
+  margin: 2rem 0 1rem;
+  background: rgba(255, 255, 255, 0.7);
+  border-color: var(--pricing-line, #e3e8f8);
+}
+.pricing-page .teacher-quotes__title {
+  font-size: 1.25rem;
+  color: var(--pricing-ink, #142033);
+}

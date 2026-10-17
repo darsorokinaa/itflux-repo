@@ -9,6 +9,7 @@ import "./pricing.css";
 import "../r52/r52.css";
 import { PROMO_UNTIL } from "../r52/consentTexts";
 import SchoolRequestModal from "../components/SchoolRequestModal";
+import TeacherQuotesBlock from "../components/TeacherQuotesBlock";
 import { ensureCsrfCookie, getCsrfToken } from "../utils/cabinetAuth";
 
 const fmt = (n) => Number(n).toLocaleString("ru-RU").replace(/\u00a0/g, " ");
@@ -439,6 +440,8 @@ export default function PricingPage() {
           Не знаете, что выбрать? Начните со «Старта» — перейти на другой тариф можно в любой момент.
         </p>
       </section>
+
+      <TeacherQuotesBlock headingId="pricing-teacher-quotes-heading" />
 
       <section className="pricing-faq" aria-labelledby="pricing-faq-title">
         <h2 id="pricing-faq-title">Вопросы и ответы</h2>

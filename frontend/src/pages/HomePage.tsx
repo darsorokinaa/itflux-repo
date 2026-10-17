@@ -8,6 +8,7 @@ import {
   Users,
 } from "lucide-react";
 import HeroSection from "../components/HeroSection";
+import TeacherQuotesBlock from "../components/TeacherQuotesBlock";
 import { type LevelId } from "../data/levels";
 import { formatTasksCount } from "../utils/formatTasksCount";
 import { formatIntRu } from "../utils/formatIntRu";
@@ -163,6 +164,7 @@ export default function HomePage() {
           </section>
 
           <TeacherWorkspaceBlock />
+          <TeacherQuotesBlock headingId="home-teacher-quotes-heading" />
         </main>
       </div>
     </div>
