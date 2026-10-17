@@ -154,25 +154,62 @@ export function parseCorrectTableAnswer(correctAnswerHtml, rows = INF_TABLE_ROWS
   return matrix;
 }
 
-export function getInfTask26Score(userMatrix, correctMatrix) {
-  const u = (userMatrix[0] || []).map((c) => normalize(c));
-  const c = (correctMatrix[0] || []).map((cell) => normalize(cell));
-  let match = 0;
-  if (u[0] === c[0]) match += 1;
-  if (u[1] === c[1]) match += 1;
-  return match === 2 ? 2 : match === 1 ? 1 : 0;
+const INF_CELL_SPLIT_RE = /[\t ]+/;
+
+function infRowTokens(line) {
+  return String(line ?? "")
+    .replace(/\u00a0/g, " ")
+    .trim()
+    .split(INF_CELL_SPLIT_RE)
+    .map((cell) => normalize(cell))
+    .filter(Boolean);
 }
 
-export function getInfTask27Score(userMatrix, correctMatrix) {
-  const rowMatch = (r) => {
-    const u = (userMatrix[r] || []).map((cell) => normalize(cell));
-    const c = (correctMatrix[r] || []).map((cell) => normalize(cell));
-    return u[0] === c[0] && u[1] === c[1];
-  };
-  const r0 = rowMatch(0);
-  const r1 = rowMatch(1);
-  if (r0 && r1) return 2;
-  if (r0 || r1) return 1;
+/** Строка ученика по позициям ячеек (таб). Одна ячейка «788 1284» — старый ввод, делим по пробелу. */
+function infUserRow(line) {
+  const cells = String(line ?? "").split("\t").map((cell) => cell.replace(/\u00a0/g, " ").trim());
+  if (cells[0] && !cells.slice(1).some(Boolean) && INF_CELL_SPLIT_RE.test(cells[0])) {
+    return infRowTokens(cells[0]);
+  }
+  const out = cells.map((cell) => normalize(cell));
+  while (out.length && out[out.length - 1] === "") out.pop();
+  return out;
+}
+
+export function parseInfUserRows(raw, rows = INF_TABLE_ROWS) {
+  const lines = String(raw || "").split(/\r?\n/);
+  const out = [];
+  for (let r = 0; r < rows; r += 1) out.push(infUserRow(lines[r] || ""));
+  return out;
+}
+
+/** Эталон: подряд идущие непустые строки до первой пустой (дальше «Справочно: …»). Ячейки — таб или пробел. */
+export function parseInfExpectedRows(correctAnswerHtml) {
+  const out = [];
+  for (const line of getTextFromHtml(correctAnswerHtml || "").split(/\r?\n/)) {
+    const tokens = infRowTokens(line);
+    if (tokens.length) out.push(tokens);
+    else if (out.length) break;
+  }
+  return out;
+}
+
+function infPairEqual(user, expected) {
+  if (!expected || !expected.length) return false;
+  if (user.length === expected.length && user.every((cell, i) => cell === expected[i])) return true;
+  // Совместимость: раньше оба числа вводили в одну ячейку слитно.
+  return user.length === 1 && expected.length > 1 && user[0] === expected.join("");
+}
+
+/** ФИПИ 2026/2027: 2 — оба числа на местах; 1 — перепутаны местами или одно верное число на своём месте. */
+function infSinglePairScore(user, expected) {
+  if (infPairEqual(user, expected)) return 2;
+  if (expected.length !== 2 || user.length > 2) return 0;
+  const [first, second] = expected;
+  const u0 = user[0] ?? "";
+  const u1 = user[1] ?? "";
+  if (u0 === second && u1 === first) return 1;
+  if (u0 === first || u1 === second) return 1;
   return 0;
 }
 
@@ -180,11 +217,17 @@ export function getInfTask27Score(userMatrix, correctMatrix) {
 export function scoreInformaticsTableTask(taskNumber, userRaw, correctHtml) {
   const num = Number(taskNumber);
   if (num !== 26 && num !== 27) return null;
-  const userMatrix = parseUserTableAnswer(userRaw);
-  const correctMatrix = parseCorrectTableAnswer(correctHtml || "");
-  return num === 26
-    ? getInfTask26Score(userMatrix, correctMatrix)
-    : getInfTask27Score(userMatrix, correctMatrix);
+  const user = parseInfUserRows(userRaw);
+  const expected = parseInfExpectedRows(correctHtml || "");
+  if (!expected.length) return 0;
+  if (num === 26 || expected.length === 1) return infSinglePairScore(user[0], expected[0]);
+  // №27 формата 2025–2026 (файлы A и B): две пары в двух строках.
+  const firstOk = infPairEqual(user[0], expected[0]);
+  const secondOk = infPairEqual(user[1], expected[1]);
+  if (firstOk && secondOk) return 2;
+  if (firstOk || secondOk) return 1;
+  if (infPairEqual(user[0], expected[1]) && infPairEqual(user[1], expected[0])) return 1;
+  return 0;
 }
 
 /**
@@ -198,13 +241,8 @@ export function computePart1TaskCorrect(task, userAnswer, subject) {
   const num = Number(task?.number);
 
   if (isTableAnswerTask(subj, num)) {
-    const userMatrix = parseUserTableAnswer(answer);
-    const correctMatrix = parseCorrectTableAnswer(task?.answer || "");
-    if (num === 26) {
-      return getInfTask26Score(userMatrix, correctMatrix) > 0;
-    }
-    if (num === 27) {
-      return getInfTask27Score(userMatrix, correctMatrix) > 0;
+    if (num === 26 || num === 27) {
+      return (scoreInformaticsTableTask(num, answer, task?.answer || "") ?? 0) > 0;
     }
     const checkValue = tableAnswerCheckString(answer);
     return isUserAnswerCorrect(checkValue, task?.answer || "", subj);

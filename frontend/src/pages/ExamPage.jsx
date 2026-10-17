@@ -29,7 +29,7 @@ import {
   sanitizeTruthTableAnswerString,
   truthTableAnswerMaxChars,
 } from "../utils/truthTable";
-import { checkVariantAnswerOnServer } from "../utils/examAnswerCheck";
+import { checkVariantAnswerOnServer, scoreInformaticsTableTask } from "../utils/examAnswerCheck";
 import { scoreVariantAttempt, taskMaxPoints } from "../utils/variantResult";
 import {
   axesNeedScoreMatrix,
@@ -1732,46 +1732,8 @@ function ExamPage() {
     return matrix.map((rowArr) => rowArr.join("\t")).join("\n");
   }
 
-  /** Парсинг эталонного ответа из HTML в матрицу rows×cols (таб/перенос строки). */
-  function parseCorrectTableAnswer(correctAnswerHtml, rows, cols) {
-    const text = getTextFromHtml(correctAnswerHtml || "");
-    const lines = text.split(/\r?\n/);
-    const matrix = [];
-    for (let r = 0; r < rows; r++) {
-      const line = lines[r] || "";
-      matrix.push(line.split(/\t/).slice(0, cols).map((s) => s.trim()));
-      while (matrix[r].length < cols) matrix[r].push("");
-    }
-    return matrix;
-  }
-
-  /** Информатика, задание 26: 2 ответа в одной строке. Оба верны → 2, один верный → 1, иначе 0. */
-  function getInfTask26Score(userMatrix, correctMatrix) {
-    const u = (userMatrix[0] || []).map((c) => normalize(c));
-    const c = (correctMatrix[0] || []).map((cell) => normalize(cell));
-    let match = 0;
-    if (u[0] === c[0]) match++;
-    if (u[1] === c[1]) match++;
-    return match === 2 ? 2 : match === 1 ? 1 : 0;
-  }
-
-  /** Информатика, задание 27: 4 числа в двух строках (2 столбца). Обе строки верны → 2, одна строка верна → 1, иначе 0. */
-  function getInfTask27Score(userMatrix, correctMatrix) {
-    const rowMatch = (r) => {
-      const u = (userMatrix[r] || []).map((cell) => normalize(cell));
-      const c = (correctMatrix[r] || []).map((cell) => normalize(cell));
-      return u[0] === c[0] && u[1] === c[1];
-    };
-    const r0 = rowMatch(0);
-    const r1 = rowMatch(1);
-    if (r0 && r1) return 2;
-    if (r0 || r1) return 1;
-    return 0;
-  }
-
   /** Проверка задания 26 или 27 по информатике: выставляет баллы 0/1/2 и помечает задание проверенным. */
   async function checkInfTask26Or27(task, rows, cols) {
-    const userMatrix = getTableAnswerString(task.id, rows, cols);
     const hasLocalAnswer = task.answer != null && String(task.answer).trim() !== "";
     let score = 0;
     if (!hasLocalAnswer && variant?.id) {
@@ -1799,13 +1761,7 @@ function ExamPage() {
         score = 0;
       }
     } else {
-      const correctMatrix = parseCorrectTableAnswer(task.answer, rows, cols);
-      score =
-        task.number === 26
-          ? getInfTask26Score(userMatrix, correctMatrix)
-          : task.number === 27
-            ? getInfTask27Score(userMatrix, correctMatrix)
-            : 0;
+      score = scoreInformaticsTableTask(task.number, getTableAnswerForCheck(task.id, rows, cols), task.answer) ?? 0;
     }
     setScores((prev) => ({ ...prev, [task.id]: score }));
     setCheckedTasks((prev) => ({ ...prev, [task.id]: score > 0 }));

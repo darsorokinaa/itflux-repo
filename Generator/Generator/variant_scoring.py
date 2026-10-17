@@ -128,41 +128,97 @@ def _cell_norm(value) -> str:
     return normalize_answer(value)
 
 
-def _parse_table(raw, rows: int = 7, cols: int = 2) -> list[list[str]]:
+_CELL_SPLIT_RE = re.compile(r"[\t ]+")
+
+
+def _row_tokens(line) -> list[str]:
+    """Ячейки строки ответа. Разделитель — таб (ячейка таблицы) или пробел (эталон банка «788 1284»)."""
+    text = str(line or "").replace("\xa0", " ").strip()
+    return [cell for cell in (_cell_norm(part) for part in _CELL_SPLIT_RE.split(text)) if cell]
+
+
+def _user_row(line) -> list[str]:
+    """Ячейки строки ученика по позициям (таб). Одна ячейка «788 1284» — старый ввод, делим по пробелу."""
+    cells = [cell.replace("\xa0", " ").strip() for cell in str(line or "").split("\t")]
+    if cells and cells[0] and not any(cells[1:]) and _CELL_SPLIT_RE.search(cells[0]):
+        return _row_tokens(cells[0])
+    out = [_cell_norm(cell) for cell in cells]
+    while out and out[-1] == "":
+        out.pop()
+    return out
+
+
+def _user_table_rows(raw, rows: int = 7) -> list[list[str]]:
+    """Строки ответа ученика по позициям (пустая строка остаётся пустой)."""
     lines = str(raw or "").splitlines()
-    matrix = []
-    for index in range(rows):
-        line = lines[index] if index < len(lines) else ""
-        cells = [cell.strip() for cell in line.split("\t")[:cols]]
-        while len(cells) < cols:
-            cells.append("")
-        matrix.append(cells)
-    return matrix
+    return [_user_row(lines[index] if index < len(lines) else "") for index in range(rows)]
+
+
+def _expected_table_rows(correct_html) -> list[list[str]]:
+    """Эталон: подряд идущие непустые строки до первой пустой (дальше — «Справочно: ...»)."""
+    out: list[list[str]] = []
+    for line in _html_to_text(correct_html).splitlines():
+        tokens = _row_tokens(line)
+        if tokens:
+            out.append(tokens)
+        elif out:
+            break
+    return out
+
+
+def _pair_equal(user: list[str], expected: list[str]) -> bool:
+    if not expected:
+        return False
+    if user == expected:
+        return True
+    # Совместимость: раньше оба числа вводили в одну ячейку слитно.
+    return len(user) == 1 and len(expected) > 1 and user[0] == "".join(expected)
+
+
+def _score_single_pair(user: list[str], expected: list[str]) -> int:
+    """ФИПИ (спецификация 2026/2027): 2 — оба числа на местах; 1 — числа перепутаны местами
+    или только одно верное число на верном месте; иначе 0."""
+    if _pair_equal(user, expected):
+        return 2
+    if len(expected) != 2:
+        return 0
+    if len(user) > 2:
+        return 0
+    first, second = expected
+    cells = list(user) + [""] * (2 - len(user))
+    if cells[0] == second and cells[1] == first:
+        return 1
+    if cells[0] == first or cells[1] == second:
+        return 1
+    return 0
 
 
 def score_informatics_table(task_number, user_raw, correct_html) -> int | None:
-    """0/1/2 для ЕГЭ информатика №26 и №27. None — обычное задание."""
+    """0/1/2 для ЕГЭ информатика №26 и №27. None — обычное задание.
+
+    Одна строка эталона (№26, №27 формата 2027): правило одной пары.
+    Две строки эталона (№27 формата 2025–2026, файлы A и B): 2 — обе пары на местах;
+    1 — одна верная пара на своей строке или обе пары, но строки перепутаны; иначе 0.
+    """
     try:
         number = int(task_number)
     except (TypeError, ValueError):
         return None
     if number not in (26, 27):
         return None
-    user = _parse_table(user_raw)
-    correct = _parse_table(_html_to_text(correct_html))
-    if number == 26:
-        left = _cell_norm((user[0] or [""])[0]) == _cell_norm((correct[0] or [""])[0])
-        right = _cell_norm((user[0] or ["", ""])[1]) == _cell_norm((correct[0] or ["", ""])[1])
-        matched = int(left) + int(right)
-        return 2 if matched == 2 else 1 if matched == 1 else 0
-    row_ok = []
-    for index in (0, 1):
-        u = user[index]
-        c = correct[index]
-        row_ok.append(_cell_norm(u[0]) == _cell_norm(c[0]) and _cell_norm(u[1]) == _cell_norm(c[1]))
-    if row_ok[0] and row_ok[1]:
+    user = _user_table_rows(user_raw)
+    expected = _expected_table_rows(correct_html)
+    if not expected:
+        return 0
+    if number == 26 or len(expected) == 1:
+        return _score_single_pair(user[0], expected[0])
+    first_ok = _pair_equal(user[0], expected[0])
+    second_ok = _pair_equal(user[1], expected[1])
+    if first_ok and second_ok:
         return 2
-    if row_ok[0] or row_ok[1]:
+    if first_ok or second_ok:
+        return 1
+    if _pair_equal(user[0], expected[1]) and _pair_equal(user[1], expected[0]):
         return 1
     return 0
 

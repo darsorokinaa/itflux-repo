@@ -171,6 +171,16 @@ describe("scoreVariantAttempt", () => {
     expect(scoreInformaticsTableTask(26, "5\t0", "5\t7")).toBe(1);
     expect(scoreInformaticsTableTask(27, "1\t2\n3\t4", "1\t2\n3\t4")).toBe(2);
     expect(scoreInformaticsTableTask(27, "1\t2\n0\t0", "1\t2\n3\t4")).toBe(1);
+    // Эталоны банка через пробел, ученик — в две ячейки; правила ФИПИ 2026/2027.
+    expect(scoreInformaticsTableTask(26, "788\t1284", "788 1284")).toBe(2);
+    expect(scoreInformaticsTableTask(26, "1284\t788", "788 1284")).toBe(1);
+    expect(scoreInformaticsTableTask(26, "\t1284", "788 1284")).toBe(1);
+    expect(scoreInformaticsTableTask(26, "1284\t1", "788 1284")).toBe(0);
+    const exp27 = "69663 192156<br/>867 161306";
+    expect(scoreInformaticsTableTask(27, "69663\t192156\n867\t161306", exp27)).toBe(2);
+    expect(scoreInformaticsTableTask(27, "867\t161306\n69663\t192156", exp27)).toBe(1);
+    expect(scoreInformaticsTableTask(27, "867161306\t\n69663192156\t", exp27)).toBe(1);
+    expect(scoreInformaticsTableTask(27, "456\t123", "123 456")).toBe(1);
     const row = task(26, { number: 26, max_score: 2, answer: "5\t7" });
     const partial = scoreVariantAttempt({
       tasks: [row],

@@ -207,6 +207,44 @@ class VariantScoringTests(SimpleTestCase):
         self.assertEqual(full["earned_points"], 2)
         self.assertEqual(full["correct_count"], 1)
 
+    def test_inf_26_27_fipi_rules_with_bank_answers(self):
+        # Эталоны банка хранятся через пробел, ученик вводит числа в две ячейки (таб).
+        self.assertEqual(score_informatics_table(26, "788\t1284", "788 1284"), 2)
+        self.assertEqual(score_informatics_table(26, "788 1284", "788 1284"), 2)
+        self.assertEqual(score_informatics_table(26, "1284\t788", "788 1284"), 1)
+        self.assertEqual(score_informatics_table(26, "788\t1", "788 1284"), 1)
+        self.assertEqual(score_informatics_table(26, "\t1284", "788 1284"), 1)
+        self.assertEqual(score_informatics_table(26, "1284\t1", "788 1284"), 0)
+        self.assertEqual(score_informatics_table(26, "7881284\t", "788 1284"), 2)
+        exp27 = "69663 192156<br/>867 161306"
+        self.assertEqual(score_informatics_table(27, "69663\t192156\n867\t161306", exp27), 2)
+        self.assertEqual(score_informatics_table(27, "69663\t192156\n0\t0", exp27), 1)
+        self.assertEqual(score_informatics_table(27, "\t\n867\t161306", exp27), 1)
+        self.assertEqual(score_informatics_table(27, "867\t161306\n69663\t192156", exp27), 1)
+        self.assertEqual(score_informatics_table(27, "192156\t69663\n867\t161306", exp27), 1)
+        self.assertEqual(score_informatics_table(27, "192156\t69663\n161306\t867", exp27), 0)
+        # Реальная сдача: строки перепутаны, числа слитно в одной ячейке.
+        self.assertEqual(score_informatics_table(27, "867161306\t\n69663192156\t", exp27), 1)
+        # Эталон учителя со «Справочно» после пустой строки.
+        teacher = "21000 18000\n76059 3450\n\nСправочно:\nцентры A: [(2.1, 1.8)]"
+        self.assertEqual(score_informatics_table(27, "21000\t18000\n76059\t3450", teacher), 2)
+        # Формат 2027: №27 — одна строка из двух чисел, правило как у №26.
+        self.assertEqual(score_informatics_table(27, "123\t456", "123 456"), 2)
+        self.assertEqual(score_informatics_table(27, "456\t123", "123 456"), 1)
+
+    def test_inf_26_27_variant_total_is_29(self):
+        tasks = [_task(i, number=i, max_score=1, exam_part=1, answer="1") for i in range(1, 26)]
+        tasks.append(_task(26, number=26, max_score=2, exam_part=1, answer="5 7"))
+        tasks.append(_task(27, number=27, max_score=2, exam_part=1, answer="1 2<br/>3 4"))
+        answers = {i: "1" for i in range(1, 26)}
+        answers[26] = "7\t5"
+        answers[27] = "1\t2\n3\t4"
+        summary = score_variant_attempt(tasks=tasks, level="ege", subject="inf", answers=answers)
+        self.assertEqual(summary["max_points"], 29)
+        self.assertEqual(summary["earned_points"], 28)
+        self.assertEqual(summary["partial_count"], 1)
+        _assert_invariant(self, summary)
+
     def test_expanded_answer_without_key_is_not_auto_zero(self):
         task = _task(8, number=13, max_score=2, exam_part=2, answer="")
         summary = score_variant_attempt(
