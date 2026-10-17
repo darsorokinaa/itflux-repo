@@ -51,8 +51,8 @@ DEMO_CONTINUATION_MESSAGE = "Продолжение доступно в полн
 
 PLAN_DISPLAY_NAMES = {
     "start": "Старт",
-    "teacher": "Учитель",
-    "repetitor": "Учитель",
+    "teacher": "Репетитор",
+    "repetitor": "Репетитор",
     "pro": "Профи",
     "profi": "Профи",
     "premium": "Премиум",

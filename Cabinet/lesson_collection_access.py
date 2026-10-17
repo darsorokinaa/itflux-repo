@@ -47,8 +47,8 @@ COLLECTION_CLICK_EVENTS = frozenset(
 
 PLAN_LABELS = {
     "start": "Старт",
-    "teacher": "Учитель",
-    "repetitor": "Учитель",
+    "teacher": "Репетитор",
+    "repetitor": "Репетитор",
     "pro": "Профи",
     "profi": "Профи",
     "professional": "Профи",
