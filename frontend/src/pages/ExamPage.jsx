@@ -2296,6 +2296,10 @@ function ExamPage() {
     const geoCorrectCount = tasks.filter(
       (task) => task.subdivision === "geom" && (effectiveScores[task.id] || 0) > 0,
     ).length;
+    // ОГЭ математика: для отметок «3»–«5» нужно ≥ 2 балла по геометрии (№15–19, 23–25).
+    const geoPoints = tasks
+      .filter((task) => task.subdivision === "geom")
+      .reduce((sum, task) => sum + (Number(effectiveScores[task.id]) || 0), 0);
     return {
       effectiveCheckedTasks,
       effectiveScores,
@@ -2303,6 +2307,7 @@ function ExamPage() {
       totalScore: hwScorePart1Only ? part1Answered : summary.earned_points,
       maxScore: hwScorePart1Only ? part1Tasks.length : summary.max_points,
       geoCorrectCount,
+      geoPoints,
       fullyCorrectTaskCount: hwScorePart1Only ? part1Answered : summary.correct_count,
       summary,
     };
@@ -2357,6 +2362,7 @@ function ExamPage() {
       totalScore: effTotalScore,
       maxScore: effMaxScore,
       geoCorrectCount,
+      geoPoints,
       fullyCorrectTaskCount: effFullyCorrect,
       summary: effSummary,
     } = getEffectiveResults({ autoCheckUnchecked: true });
@@ -2382,6 +2388,14 @@ function ExamPage() {
             effMaxScore = serverSummary.max_points;
             effCorrectCount = serverSummary.correct_count;
             effFullyCorrect = serverSummary.correct_count;
+            if (Array.isArray(serverSummary.tasks)) {
+              const geomIds = new Set(
+                tasks.filter((task) => task.subdivision === "geom").map((task) => String(task.id)),
+              );
+              geoPoints = serverSummary.tasks
+                .filter((row) => geomIds.has(String(row.id)))
+                .reduce((sum, row) => sum + (Number(row.points) || 0), 0);
+            }
             serverScoreConfirmed = true;
           }
         }
@@ -2400,7 +2414,9 @@ function ExamPage() {
     if (mode !== "test" && !hwScorePart1Only && !resultIsPreliminary) {
       const isOgeMath =
         String(level).toLowerCase() === "oge" && isMathLikeSubject(subject);
-      const geoParam = isOgeMath ? `&geo_correct=${geoCorrectCount}` : "";
+      const geoParam = isOgeMath
+        ? `&geo_correct=${geoCorrectCount}&geo_points=${geoPoints}`
+        : "";
       try {
         const res = await fetch(
           `/api/${level}/${subject}/score-conversion/?score=${effTotalScore}${geoParam}`,

@@ -27,6 +27,12 @@ export function inferExamTaskPart(task, level, subject) {
   const examPart = Number(task?.exam_part);
   if (examPart === 2) return 2;
   if (examPart === 1) return 1;
+  // ОГЭ русский №1 (сжатое изложение) в КИМ стоит в части 1, но проверяется по критериям.
+  if (
+    String(level || "").toLowerCase() === "oge"
+    && String(subject || "").toLowerCase() === "rus"
+    && Number(task?.number) === 1
+  ) return 2;
 
   const title = String(task?.part_title || "").toLowerCase();
   if (/говорен|устн|speaking|oral/.test(title)) return 2;

@@ -46,6 +46,13 @@ def logical_exam_part(task: dict | None, level: str = "", subject: str = "") -> 
         return 2
     if exam_part == 1:
         return 1
+    # ОГЭ русский №1 (сжатое изложение) в КИМ стоит в части 1, но проверяется по критериям.
+    if (
+        str(level or "").strip().lower() == "oge"
+        and str(subject or "").strip().lower() == "rus"
+        and str(task.get("number") or "").strip() == "1"
+    ):
+        return 2
 
     title = str(task.get("part_title") or "").strip().lower()
     if re.search(r"говорен|устн|speaking|oral", title):
@@ -302,6 +309,73 @@ def _is_inf_partial(task, level, subject) -> bool:
     )
 
 
+# Официальные правила оценивания кратких ответов (спецификации ФИПИ 2026):
+#   pos1    — 2 балла: верно всё; 1 балл: ошибка ровно в одной позиции; лишние символы — 0
+#             (ОГЭ физика №1, 2, 4, 12, 13);
+#   set1    — 2 балла, порядок не важен: 1 балл, если один символ неверен или один
+#             отсутствует; лишние символы — 0 (ОГЭ физика №14, 16);
+#   posdec  — максимум минус 1 за каждую неверную позицию, не меньше 0; лишние символы — 0
+#             (ЕГЭ английский письменная часть №1, 11 — 2 балла; №2, 10 — 3 балла);
+#   unordered — порядок символов не важен (ОГЭ русский №2, 3, 5–7, 10, 11).
+# Применяется только к эталонам из одних цифр; иначе — обычное сравнение.
+SHORT_ANSWER_RULES = {
+    ("oge", "phys"): {1: "pos1", 2: "pos1", 4: "pos1", 12: "pos1", 13: "pos1", 14: "set1", 16: "set1"},
+    ("ege", "eng_write"): {1: "posdec", 2: "posdec", 10: "posdec", 11: "posdec"},
+    ("oge", "rus"): {n: "unordered" for n in (2, 3, 5, 6, 7, 10, 11)},
+}
+_DIGITS_ONLY_RE = re.compile(r"^\d+$")
+
+
+def short_answer_rule(task, level, subject) -> str | None:
+    rules = SHORT_ANSWER_RULES.get(
+        (str(level or "").strip().lower(), str(subject or "").strip().lower())
+    )
+    if not rules:
+        return None
+    try:
+        number = int((task or {}).get("number"))
+    except (TypeError, ValueError):
+        return None
+    return rules.get(number)
+
+
+def score_short_answer_rule(rule, user_raw, expected_html, max_points: int):
+    """Балл по правилу или None, если правило к эталону неприменимо."""
+    from collections import Counter
+
+    from .answer_check import normalize_answer
+
+    expected = normalize_answer(expected_html)
+    if not rule or not expected or not _DIGITS_ONLY_RE.match(expected):
+        return None
+    user = normalize_answer(user_raw)
+    if not user:
+        return 0
+    if rule == "unordered":
+        return max_points if sorted(user) == sorted(expected) else 0
+    if len(user) > len(expected):
+        return 0
+    if rule in ("pos1", "posdec"):
+        wrong = sum(
+            1 for i, ch in enumerate(expected) if i >= len(user) or user[i] != ch
+        )
+        if wrong == 0:
+            return max_points
+        if rule == "pos1":
+            return 1 if wrong == 1 and max_points >= 2 else 0
+        return max(0, max_points - wrong)
+    if rule == "set1":
+        cu, ce = Counter(user), Counter(expected)
+        if cu == ce:
+            return max_points
+        missing = sum((ce - cu).values())
+        extra = sum((cu - ce).values())
+        if missing == 1 and extra <= 1 and max_points >= 2:
+            return 1
+        return 0
+    return None
+
+
 def score_variant_attempt(
     *,
     tasks: list[dict] | None,
@@ -375,6 +449,18 @@ def score_variant_attempt(
             status = _status_from_points(points, maximum) if answered else "unanswered"
             if not answered:
                 points = 0
+        elif (
+            expected.strip()
+            and answered
+            and (
+                rule_points := score_short_answer_rule(
+                    short_answer_rule(task, level, subject), text, expected, maximum
+                )
+            )
+            is not None
+        ):
+            points = _clamp(rule_points, maximum)
+            status = _status_from_points(points, maximum)
         elif expected.strip() and answered:
             ok = answers_match(text, expected, subject=subject)
             points = maximum if ok else 0

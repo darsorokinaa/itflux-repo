@@ -4460,7 +4460,46 @@ def api_score_conversion(request, level, subject):
     score_exam = mark_row.score_exam
     comment = mark_row.comment.comment_text if mark_row.comment else None
     mark_level = mark_row.comment.mark_level if (mark_row.comment and mark_row.comment.mark_level) else None
-    return JsonResponse({"score_exam": score_exam, "comment": comment, "mark_level": mark_level})
+    geometry_floor_applied = False
+    if level_norm == "oge" and subject_norm in ("math", "math_base"):
+        # Письмо Рособрнадзора от 18.02.2026 № 04-44: отметки «3», «4», «5» —
+        # при условии не менее 2 баллов за задания по геометрии (№15–19, 23–25).
+        # geo_points — сумма баллов по геометрии; geo_correct — старый клиент
+        # (число верно решённых заданий; ≥2 задания означает ≥2 балла).
+        geo_raw = request.GET.get("geo_points")
+        if geo_raw in (None, ""):
+            geo_raw = request.GET.get("geo_correct")
+        try:
+            geo_points = float(geo_raw) if geo_raw not in (None, "") else None
+        except (TypeError, ValueError):
+            geo_points = None
+        try:
+            grade = int(score_exam)
+        except (TypeError, ValueError):
+            grade = None
+        if geo_points is not None and geo_points < 2 and grade is not None and grade >= 3:
+            low = (
+                Mark.objects.filter(subject__subject_short__iexact=subject_norm, level__level__iexact=level_norm)
+                .select_related("comment")
+                .order_by("score")
+                .first()
+            )
+            score_exam = low.score_exam if low is not None else 2
+            mark_level = 1
+            comment = (
+                "Отметка «2»: за задания по геометрии (№15–19, 23–25) получено менее 2 баллов — "
+                "для отметок «3», «4», «5» нужно не менее 2 баллов по геометрии "
+                "(письмо Рособрнадзора от 18.02.2026 № 04-44)."
+            )
+            geometry_floor_applied = True
+    return JsonResponse(
+        {
+            "score_exam": score_exam,
+            "comment": comment,
+            "mark_level": mark_level,
+            "geometry_floor_applied": geometry_floor_applied,
+        }
+    )
 
 
 @require_http_methods(["GET"])

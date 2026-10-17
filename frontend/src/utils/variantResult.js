@@ -3,6 +3,7 @@ import {
   isUserAnswerCorrect,
   scoreInformaticsTableTask,
 } from "./examAnswerCheck";
+import { scoreShortAnswerRule, shortAnswerRule } from "./shortAnswerRules";
 
 /**
  * Первичный максимум задания.
@@ -168,6 +169,14 @@ export function scoreVariantAttempt({
       points = clampPoints(given, max);
       status = answered ? statusFromPoints(points, max) : "unanswered";
       if (!answered) points = 0;
+    } else if (
+      expected.trim()
+      && answered
+      && scoreShortAnswerRule(shortAnswerRule(task, level, subject), text, expected, max) != null
+    ) {
+      const rulePoints = scoreShortAnswerRule(shortAnswerRule(task, level, subject), text, expected, max);
+      points = clampPoints(rulePoints, max);
+      status = statusFromPoints(points, max);
     } else if (expected.trim() && answered) {
       const ok = isUserAnswerCorrect(text, expected, subject);
       points = ok ? max : 0;
