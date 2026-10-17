@@ -51,6 +51,8 @@ describe("buildPlanHighlights", () => {
     });
     expect(lines).toContain("группы без лимита");
     expect(lines).toContain("10 ГБ хранилища");
+    // r64: аналитики ещё нет — не обещаем её ни в одном тарифе.
+    expect(lines.join(" ")).not.toMatch(/аналитик/i);
   });
 
   it("adds personal task bank limits from plan payload", () => {

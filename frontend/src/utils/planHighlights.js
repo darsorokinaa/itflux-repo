@@ -190,7 +190,6 @@ export function buildPlanHighlights(plan, opts = {}) {
       notifications,
       ai,
       f.priority_support && "приоритетная поддержка",
-      f.analytics && "полная аналитика",
     ].filter(Boolean);
   }
 

@@ -82,8 +82,6 @@ def feature_loss_messages(from_plan, to_plan) -> list[str]:
         )
     if from_plan.content_access_rank > to_plan.content_access_rank:
         losses.append("часть библиотеки и Premium-материалов станет недоступна для новых назначений")
-    if from_plan.has_analytics and not to_plan.has_analytics:
-        losses.append("расширенная аналитика станет недоступна")
     if from_plan.has_mass_actions and not to_plan.has_mass_actions:
         losses.append("массовые действия отключатся")
     if from_plan.has_simulators and not to_plan.has_simulators:
