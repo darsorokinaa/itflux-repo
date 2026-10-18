@@ -151,11 +151,10 @@ import { CALL_FRAME_ASPECT, FLOATING_CALL_CHROME, presetCallFrame, useFloatingDr
 import FloatingResizeHandles from "../FloatingResizeHandles";
 import MiniCallBar, { FloatingCallTools } from "../components/MiniCallBar";
 import {
-  bindMeetingAutoPip,
   closeCallStayOnTop,
-  requestCallStayOnTop,
   setMeetingMediaSessionActive,
 } from "../callStayOnTop";
+import useCallPip from "../hooks/useCallPip";
 import { selectSharePinTarget } from "../jitsiScreenShare";
 import {
   deriveParticipantVideoMode,
@@ -405,6 +404,9 @@ function LessonRoomActions({
   materialsCount,
   roomFullscreen,
   onToggleFullscreen,
+  pipAvailable = false,
+  pipActive = false,
+  onTogglePip,
   canFinish,
   finishing,
   onFinish,
@@ -444,6 +446,21 @@ function LessonRoomActions({
         <CabinetIcon name="expand" />
         <span className="video-lesson-btn__label">{roomFullscreen ? "Окно" : "На весь экран"}</span>
       </button>
+      {showJitsi && pipAvailable && typeof onTogglePip === "function" ? (
+        <button
+          type="button"
+          className={`video-lesson-btn video-lesson-btn--ghost video-lesson-header__pip-btn${pipActive ? " is-active" : ""}`}
+          onClick={onTogglePip}
+          aria-pressed={pipActive}
+          aria-label={pipActive ? "Убрать видео поверх окон" : "Видео поверх окон"}
+          title={pipActive
+            ? "Убрать окно с видео поверх других окон"
+            : "Окно с видео поверх других вкладок и программ"}
+        >
+          <CabinetIcon name="pip" />
+          <span className="video-lesson-btn__label">{pipActive ? "Убрать окно" : "Поверх окон"}</span>
+        </button>
+      ) : null}
       {canFinish ? (
         <button
           type="button"
@@ -634,6 +651,7 @@ export default function VideoMeetingPage() {
   const [screenshareAnnUnavailable, setScreenshareAnnUnavailable] = useState(false);
   const pipHandleRef = useRef(null);
   const participantPipRef = useRef(null);
+  const callPipRef = useRef(null);
   const callRosterRef = useRef({ remotes: [], local: null });
   const [boardInfo, setBoardInfo] = useState({ loading: true, board: null });
   const [liveAnswers, setLiveAnswers] = useState(null);
@@ -758,39 +776,6 @@ export default function VideoMeetingPage() {
     return { iframe, participant, localId, remotes };
   }, []);
 
-  const openShareStayOnTop = useCallback(async () => {
-    const current = pipHandleRef.current;
-    if (current?.pipWindow && !current.pipWindow.closed) return current;
-    const host = callFrameRef.current;
-    if (!host) return null;
-    const iframe = apiRef.current?.getIFrame?.()
-      || containerRef.current?.querySelector?.("iframe")
-      || null;
-    const result = await requestCallStayOnTop({ host, iframe });
-    if (!result?.ok || !result.pipWindow) return result;
-    pipHandleRef.current = result;
-    setStayOnTopActive(true);
-    result.pipWindow.addEventListener?.("pagehide", () => {
-      if (pipHandleRef.current?.pipWindow === result.pipWindow) {
-        pipHandleRef.current = null;
-        setStayOnTopActive(false);
-      }
-    });
-    window.requestAnimationFrame(() => notifyJitsiContainerResize(apiRef.current));
-    return result;
-  }, []);
-
-  const closeShareStayOnTop = useCallback(async () => {
-    const current = pipHandleRef.current;
-    pipHandleRef.current = null;
-    setStayOnTopActive(false);
-    await closeCallStayOnTop({
-      pipWindow: current?.pipWindow,
-      restore: current?.restore,
-    });
-    window.requestAnimationFrame(() => notifyJitsiContainerResize(apiRef.current));
-  }, []);
-
   useEffect(() => {
     const controller = createParticipantPipController({
       onState: (snap) => {
@@ -807,20 +792,15 @@ export default function VideoMeetingPage() {
     };
   }, []);
 
+  // r72: enterpictureinpicture (уход со вкладки) регистрирует useCallPip.
+  // Раньше здесь окно PiP получало весь <main> с iframe Jitsi: перенос iframe
+  // в другое окно перезагружает конференцию.
   useEffect(() => {
     if (pageState !== "live") return undefined;
-    const unbind = bindMeetingAutoPip(() => {
-      if (!screenshareLayoutRef.current?.localSharing) {
-        void participantPipRef.current?.requestPip?.(participantPipContext());
-        return;
-      }
-      void openShareStayOnTop();
-    });
     return () => {
-      unbind();
       setMeetingMediaSessionActive({ camera: false, microphone: false });
     };
-  }, [openShareStayOnTop, pageState, participantPipContext]);
+  }, [pageState]);
 
   const disposeApi = useCallback(() => {
     noteScriptEvent("dispose_api", {
@@ -866,6 +846,11 @@ export default function VideoMeetingPage() {
     setPipNeedsGesture(false);
     void participantPipRef.current?.onParticipantLeft();
     void closeCallStayOnTop({ pipWindow: pipHandle?.pipWindow });
+    try {
+      callPipRef.current?.close?.();
+    } catch {
+      /* ignore */
+    }
     if (containerRef.current) {
       containerRef.current.innerHTML = "";
     }
@@ -1324,8 +1309,9 @@ export default function VideoMeetingPage() {
             setCallView("normal");
             setFocusCall(false);
             reportClientEvent("screen_share_started", { surface: String(snap?.displaySurface || "").slice(0, 24) });
-            void openShareStayOnTop().then((stay) => {
-              if (stay?.ok) return null;
+            // r72: окно «поверх окон» открывает Jitsi (жест даёт выбор экрана, Chrome 139+).
+            void Promise.resolve(callPipRef.current?.onLocalShareStarted?.()).then((stay) => {
+              if (stay?.ok || stay?.reason === "needs-gesture") return null;
               return participantPipRef.current?.onScreenShareChanged(true, participantPipContext());
             }).then((result) => {
               if (result?.reason === "unsupported") {
@@ -1335,7 +1321,7 @@ export default function VideoMeetingPage() {
             });
           } else if (!localSharing && wasLocalSharing) {
             setShareMiniDismissed(false);
-            void closeShareStayOnTop();
+            callPipRef.current?.onLocalShareStopped?.();
             void participantPipRef.current?.onScreenShareChanged(false, participantPipContext());
             reportClientEvent("screen_share_stopped");
           }
@@ -3670,6 +3656,34 @@ export default function VideoMeetingPage() {
     }
   }, []);
 
+  const callPip = useCallPip({
+    live: showJitsi,
+    getJitsiApi: () => apiRef.current?.api || null,
+    jitsiEpoch: conferenceBound,
+    isLiveKit: () => Boolean(liveKitActiveRef.current),
+    liveKit: Boolean(liveKitJoin),
+    getLiveKitMedia: () => liveKitApiRef.current?.getPipMedia?.() || null,
+    getLiveKitRemoteVideo: () => (
+      containerRef.current?.parentElement?.querySelector?.('video[data-call-pip-video="remote"]') || null
+    ),
+    actions: {
+      onToggleMic: () => onToggleConferenceMic(),
+      onToggleCam: () => onToggleConferenceCam(),
+      onHangup: () => onConferenceHangup(),
+    },
+    // Где Jitsi PiP нет (не Chromium) — прежнее поведение при уходе со вкладки.
+    legacyFallback: () => participantPipRef.current?.requestPip?.(participantPipContext()),
+  });
+  callPipRef.current = callPip;
+  const liveKitSharing = Boolean(liveKitJoin && liveKitUi?.sharing);
+  const liveKitSharingPrevRef = useRef(false);
+  useEffect(() => {
+    const was = liveKitSharingPrevRef.current;
+    liveKitSharingPrevRef.current = liveKitSharing;
+    if (liveKitSharing && !was) void callPipRef.current?.onLocalShareStarted?.();
+    else if (!liveKitSharing && was) callPipRef.current?.onLocalShareStopped?.();
+  }, [liveKitSharing]);
+
   const onEnableConferenceSound = useCallback(() => {
     if (liveKitActiveRef.current) {
       void liveKitApiRef.current?.startAudio();
@@ -4218,6 +4232,9 @@ export default function VideoMeetingPage() {
       materialsCount={materialsCount}
       roomFullscreen={roomFullscreen}
       onToggleFullscreen={() => void toggleRoomFullscreen()}
+      pipAvailable={callPip.manualAvailable}
+      pipActive={callPip.active}
+      onTogglePip={() => { void callPip.toggle(); }}
       canFinish={Boolean(canManage && status === "live" && showJitsi)}
       finishing={finishing}
       onFinish={() => setFinishConfirm(true)}
@@ -4730,6 +4747,9 @@ export default function VideoMeetingPage() {
               stageCameraOff={
                 !callRoster.remotes?.length && callRoster.local?.videoMuted === true
               }
+              pipAvailable={callPip.manualAvailable}
+              pipActive={callPip.active}
+              onTogglePip={() => { void callPip.toggle(); }}
               onMinimize={() => setCallView("minimized")}
               onShow={() => setCallView("normal")}
               onExpand={() => setCallView("expanded")}

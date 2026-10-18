@@ -14,6 +14,7 @@ import {
   isJitsiAuthJoinFailure,
   shouldFallbackToIframe,
 } from "./jitsiParticipants";
+import { buildJitsiPipConfigOverwrite, disableJitsiAutoIntersectionPip } from "./callPip";
 import { attachScreenSharePresence } from "./jitsiScreenShare";
 import { attachMediaWatchdog } from "./jitsiMediaWatchdog";
 import { createCallSessionId } from "./jitsiCallState";
@@ -597,6 +598,8 @@ export function buildJitsiConfigOverwrite({
     // Official Jitsi remote-control (Electron SDK). Browser cannot inject OS input.
     disableRemoteControl: false,
     ...(hosts ? { hosts } : {}),
+    // r72: «поверх окон» (Document PiP) силами Jitsi. Только Chrome/Edge/Яндекс.
+    ...(buildJitsiPipConfigOverwrite() || {}),
   };
 }
 
@@ -1475,6 +1478,8 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
     if (frameDomain !== domain) console.info("[Jitsi] same-origin frame domain", { frameDomain });
     api = new JitsiMeetExternalAPI(frameDomain, options);
     activeExternalApi = api;
+    // r72: без автопоказа PiP, когда iframe скрыт раскладкой урока.
+    disableJitsiAutoIntersectionPip(api);
   } finally {
     unhookCreate();
   }

@@ -63,6 +63,9 @@ export default function MiniCallBar({
   onShow,
   onExpand,
   onCompact,
+  pipAvailable = false,
+  pipActive = false,
+  onTogglePip,
   callSwitch = null,
 }) {
   const minimized = view === "minimized";
@@ -111,6 +114,14 @@ export default function MiniCallBar({
         </div>
         <div className="mini-call-bar__actions">
           {callSwitch}
+          {pipAvailable && typeof onTogglePip === "function" ? (
+            <WindowButton
+              label={pipActive ? "Убрать видео поверх окон" : "Видео поверх окон"}
+              icon="pip"
+              pressed={pipActive}
+              onClick={onTogglePip}
+            />
+          ) : null}
           {minimized ? (
             <WindowButton label="Показать видеозвонок" icon="video" onClick={onShow} />
           ) : null}

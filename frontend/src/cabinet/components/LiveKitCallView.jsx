@@ -13,6 +13,7 @@ import { disconnectVideoMeetingParticipant } from "../../utils/cabinetAuth";
 import { ConferenceControls, ConferenceSide } from "./ConferenceChrome";
 import { screenShareSupported } from "../conferenceCommands";
 import { participantInitials } from "../participantVideo";
+import { pickPipMedia } from "../livekitPipMedia";
 import {
   MEDIA_RESTORE_NOTICE,
   MEDIA_RESTORED_NOTICE,
@@ -35,7 +36,7 @@ function useAttachedTrack(track) {
   return ref;
 }
 
-function MediaTile({ track, muted = false, label, audio = false, avatar = false }) {
+function MediaTile({ track, muted = false, label, audio = false, avatar = false, pipRole = "" }) {
   const ref = useAttachedTrack(avatar ? null : track);
   if (audio) {
     return <audio ref={ref} autoPlay playsInline />;
@@ -50,7 +51,7 @@ function MediaTile({ track, muted = false, label, audio = false, avatar = false 
   }
   return (
     <figure className="lk-fallback-tile">
-      <video ref={ref} autoPlay playsInline muted={muted} />
+      <video ref={ref} autoPlay playsInline muted={muted} data-call-pip-video={pipRole || undefined} />
       <figcaption>{label}</figcaption>
     </figure>
   );
@@ -84,7 +85,7 @@ export function collectTiles(room, { audioOnly }) {
     const mic = participant.getTrackPublication?.(Track.Source.Microphone)?.track;
     const screen = participant.getTrackPublication?.(Track.Source.ScreenShare)?.track;
     const label = participant.name || "Участник";
-    if (camera && !audioOnly) tiles.push({ key: `${participant.identity}-camera`, track: camera, label, muted: false });
+    if (camera && !audioOnly) tiles.push({ key: `${participant.identity}-camera`, track: camera, label, muted: false, pipRole: "remote" });
     else tiles.push({ key: `${participant.identity}-avatar`, avatar: true, label });
     if (screen && !audioOnly) tiles.push({ key: `${participant.identity}-screen`, track: screen, label: `${label}: экран`, muted: false });
     if (mic) audios.push({ key: `${participant.identity}-mic`, track: mic });
@@ -684,6 +685,7 @@ const LiveKitCallView = forwardRef(function LiveKitCallView({
     retry,
     removeRemote,
     releaseMedia,
+    getPipMedia: () => pickPipMedia(roomRef.current, { dominantId, micOn, camOn }),
   };
   useImperativeHandle(ref, () => ({
     toggleMic: () => actionsRef.current.toggleMic(),
@@ -699,6 +701,7 @@ const LiveKitCallView = forwardRef(function LiveKitCallView({
     retry: () => actionsRef.current.retry(),
     removeRemote: (identity) => actionsRef.current.removeRemote(identity),
     releaseMedia: () => actionsRef.current.releaseMedia(),
+    getPipMedia: () => actionsRef.current.getPipMedia(),
   }), []);
 
   const conferenceStatus = liveKitConferenceStatus(status, notice);
@@ -777,7 +780,7 @@ const LiveKitCallView = forwardRef(function LiveKitCallView({
       <section className="lk-fallback" aria-label="Видеосвязь">
         <div className={`lk-fallback-stage${tileWide ? " lk-fallback-stage--tiles" : ""}`}>
           {tiles.length ? tiles.map((tile) => (
-            <MediaTile key={tile.key} track={tile.track} label={tile.label} muted={tile.muted} avatar={tile.avatar} />
+            <MediaTile key={tile.key} track={tile.track} label={tile.label} muted={tile.muted} avatar={tile.avatar} pipRole={tile.pipRole} />
           )) : conferenceStatus.ready ? (
             <p className="lk-fallback-wait">Камера выключена. Голос можно оставить включённым.</p>
           ) : null}
