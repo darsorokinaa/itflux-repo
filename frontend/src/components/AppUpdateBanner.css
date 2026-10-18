@@ -10,6 +10,29 @@
   width: min(560px, calc(100vw - 24px));
 }
 
+/* r73: на уроке (остаётся только баннер сбоя загрузки чанка) не кладём его
+   вниз поверх материала — там «Завершить вариант» и панель заданий. */
+.itflux-update-banner-stack--live {
+  top: calc(env(safe-area-inset-top, 0px) + 60px);
+  bottom: auto;
+  pointer-events: none;
+}
+
+.itflux-update-banner-stack--live .itflux-update-banner {
+  pointer-events: auto;
+}
+
+/* r73: на странице варианта внизу — «Завершить вариант» (боковая панель/шторка
+   «Задания»). Баннер новой версии поднимаем наверх, а при открытой шторке прячем. */
+body:has(#main-wrapper.exam-page--edu) .itflux-update-banner-stack {
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  bottom: auto;
+}
+
+body:has(.mobile-panel-backdrop) .itflux-update-banner-stack {
+  display: none;
+}
+
 .itflux-update-banner {
   display: flex;
   align-items: center;

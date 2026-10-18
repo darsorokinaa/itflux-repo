@@ -10,6 +10,7 @@ import {
   trackPageView,
 } from "../utils/analytics";
 import { markFirstVisit, trackValueGoal } from "../utils/valuePath";
+import { isEmbeddedWindow, shouldShowCookieBanner } from "../utils/cookieBanner";
 
 function Layout() {
   const { pathname, search } = useLocation();
@@ -169,7 +170,14 @@ function Layout() {
       </footer>
       ) : null}
 
-      {!cookieAccepted && !isLessonOrHomeworkContext && !isChromelessPage && (
+      {shouldShowCookieBanner({
+        cookieAccepted,
+        isLessonOrHomeworkContext,
+        isChromelessPage,
+        isVideoMeetingPage,
+        isBoardEditorPage,
+        inIframe: isEmbeddedWindow(),
+      }) && (
         <div className="cookie-banner no-print" role="alertdialog" aria-label="Уведомление об использовании файлов cookie">
           <div className="cookie-banner-inner">
             <p className="cookie-banner-text">

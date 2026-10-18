@@ -3,6 +3,7 @@ import { applyAppUpdate, getAppUpdateState, subscribeAppUpdate } from "../utils/
 import { isAppUpdateUnsafe } from "../utils/appUpdateGuard";
 import { isChunkRecoveryBlocked, subscribeChunkRecoveryBlocked } from "../utils/clientTelemetry";
 import { isLiveSessionPath, requestHardReload } from "../utils/liveSessionGuard";
+import { isEmbeddedWindow } from "../utils/cookieBanner";
 import "./AppUpdateBanner.css";
 
 export default function AppUpdateBanner() {
@@ -28,27 +29,31 @@ export default function AppUpdateBanner() {
     };
   }, []);
 
-  const showUpdate = state.updateAvailable;
+  // r73: во время урока и внутри iframe материала баннер «Доступно обновление»
+  // не показываем. Он висел внизу по центру (z-index 10050) поверх рабочей
+  // области урока и перекрывал «Завершить вариант» и панель заданий у всех,
+  // у кого открыта прошлая сборка — т.е. после каждого деплоя. Обновление и так
+  // применяется после выхода из урока; баннер появится на обычной странице.
+  const showUpdate = state.updateAvailable && !liveSession && !isEmbeddedWindow();
   const showChunk = chunkBlocked && liveSession;
   if (!showUpdate && !showChunk) return null;
 
   return (
-    <div className="itflux-update-banner-stack">
+    <div
+      className={`itflux-update-banner-stack${liveSession ? " itflux-update-banner-stack--live" : ""}`}
+      data-testid="app-update-banner-stack"
+    >
       {showUpdate ? (
         <div className="itflux-update-banner" role="status" aria-live="polite">
           <div className="itflux-update-banner__text">
-            {liveSession ? (
-              <span>Доступно обновление приложения. Чтобы не прерывать урок, оно будет применено после выхода.</span>
-            ) : (
-              <>
-                <strong>Доступна новая версия платформы</strong>
-                {unsafe ? (
-                  <span>Сохраните работу, затем обновите страницу.</span>
-                ) : (
-                  <span>Обновите, чтобы получить актуальный интерфейс и материалы.</span>
-                )}
-              </>
-            )}
+            <>
+              <strong>Доступна новая версия платформы</strong>
+              {unsafe ? (
+                <span>Сохраните работу, затем обновите страницу.</span>
+              ) : (
+                <span>Обновите, чтобы получить актуальный интерфейс и материалы.</span>
+              )}
+            </>
           </div>
           <button
             type="button"

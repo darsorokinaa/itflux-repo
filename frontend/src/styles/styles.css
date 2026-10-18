@@ -11223,6 +11223,49 @@ header.header--themed .theme-toggle > span {
     animation: cookieSlideUp 0.3s ease;
 }
 
+/* r73: на странице варианта баннер не должен перекрывать панель заданий
+   с «Завершить вариант» (mobile sheet z-index 620, панели доски выше). */
+body:has(#main-wrapper.exam-page--edu) .cookie-banner {
+    z-index: 600;
+}
+
+/* Десктоп: справа залипает панель с «Завершить вариант» — баннер карточкой слева. */
+@media (min-width: 1000px) {
+    body:has(#main-wrapper.exam-page--edu) .cookie-banner {
+        left: 68px;
+        right: auto;
+        bottom: 12px;
+        max-width: min(460px, calc(100vw - 80px));
+        border: 1px solid rgba(102, 126, 234, 0.2);
+        border-radius: 14px;
+        padding: 0.75rem 1rem;
+    }
+
+    body:has(#main-wrapper.exam-page--edu) .cookie-banner-inner {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.6rem;
+    }
+}
+
+/* Открыта шторка «Задания» — баннер и плавающие кнопки (поддержка слева,
+   сезонная тема справа) прячем: они ложились на углы «Завершить вариант». */
+body:has(.mobile-panel-backdrop) .cookie-banner,
+body:has(.mobile-panel-backdrop) .support-fab,
+body:has(.mobile-panel-backdrop) .seasonal-appearance-fab-dock {
+    display: none;
+}
+
+/* Десктоп-вариант: сезонная кнопка справа внизу перекрывала угол «Завершить вариант»
+   в залипающей панели — переносим её влево, над кнопкой поддержки. */
+@media (min-width: 1000px) {
+    body:has(#main-wrapper.exam-page--edu) .seasonal-appearance-fab-dock {
+        right: auto;
+        left: 16px;
+        bottom: 72px;
+    }
+}
+
 @keyframes cookieSlideUp {
     from { transform: translateY(100%); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
