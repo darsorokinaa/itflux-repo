@@ -28,6 +28,8 @@ import {
 } from "../cabinetReviewUtils";
 import { assignDisplayNumbers } from "../../utils/taskDocument";
 import { scoreVariantAttempt, tasksForStoredAttempt } from "../../utils/variantResult";
+import { homeworkVariantList, resultForVariant } from "../homeworkVariants";
+import ReviewVariantTabs from "../ReviewVariantTabs";
 import { SUBJECTS_BY_LEVEL, buildSubjectDefinition } from "../../data/subjects";
 import { TaskPosition } from "../../components/taskDocument/TaskNumber";
 import {
@@ -867,7 +869,8 @@ export default function CabinetReviewDetailPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const reviewListPath = location.state?.from || "/cabinet/review";
   const [review, setReview] = useState(null);
-  const [variant, setVariant] = useState(null);
+  const [variantsData, setVariantsData] = useState({});
+  const [activeVariantId, setActiveVariantId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState(null);
@@ -998,46 +1001,80 @@ export default function CabinetReviewDetailPage() {
     .map((task) => Number(task.interactive_id))
     .filter((id) => Number.isFinite(id) && id > 0);
 
-  const variantUrl = buildTeacherVariantUrl(reviewCtx);
-  const level = reviewCtx?.level;
-  const subject = reviewCtx?.subject;
+  // r75: в ДЗ может быть несколько вариантов — каждый загружаем и проверяем отдельно.
+  const variantList = useMemo(
+    () => (reviewCtx?.has_variant ? homeworkVariantList(reviewCtx) : []),
+    [reviewCtx],
+  );
+  const variantIds = useMemo(() => variantList.map((row) => row.variantId), [variantList]);
+  const multiVariant = variantList.length > 1;
+  const activeVariant = variantList.find((row) => row.variantId === activeVariantId) || variantList[0] || null;
+  const variant = activeVariant ? variantsData[activeVariant.variantId] || null : null;
+  const level = activeVariant?.level || reviewCtx?.level;
+  const subject = activeVariant?.subject || reviewCtx?.subject;
+  const variantUrl = buildTeacherVariantUrl(
+    activeVariant?.variantPath ? { variant_path: activeVariant.variantPath } : reviewCtx,
+  );
+  const variantResult = useMemo(
+    () => (activeVariant ? resultForVariant(result, activeVariant.variantId, variantIds) : result),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [submission, activeVariant, variantIds],
+  );
 
+  const variantKey = variantList.map((row) => `${row.level}/${row.subject}/${row.variantId}`).join("|");
   useEffect(() => {
-    if (!reviewCtx?.has_variant || !reviewCtx.level || !reviewCtx.subject || !reviewCtx.variant_id) {
-      setVariant(null);
+    const list = variantList.filter((row) => row.level && row.subject && row.variantId);
+    if (!list.length) {
+      setVariantsData({});
       return undefined;
     }
     const ac = new AbortController();
-    const url = `/api/${encodeURIComponent(reviewCtx.level)}/${encodeURIComponent(reviewCtx.subject)}/variant/${encodeURIComponent(String(reviewCtx.variant_id))}/`;
-    fetch(`${url}?role=teacher`, {
-      credentials: "same-origin",
-      cache: "no-store",
-      signal: ac.signal,
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => setVariant(data))
-      .catch(() => setVariant(null));
+    Promise.all(list.map((row) => {
+      const url = `/api/${encodeURIComponent(row.level)}/${encodeURIComponent(row.subject)}/variant/${encodeURIComponent(String(row.variantId))}/`;
+      return fetch(`${url}?role=teacher`, {
+        credentials: "same-origin",
+        cache: "no-store",
+        signal: ac.signal,
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .catch(() => null)
+        .then((data) => [row.variantId, data]);
+    })).then((pairs) => {
+      if (ac.signal.aborted) return;
+      const next = {};
+      for (const [id, data] of pairs) if (data) next[id] = data;
+      setVariantsData(next);
+    });
     return () => ac.abort();
-  }, [reviewCtx]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [variantKey]);
 
-  const part1Tasks = useMemo(() => {
-    if (!variant?.tasks?.length || !reviewCtx) return [];
-    return assignDisplayNumbers(variant.tasks).filter(
-      (t) => inferExamTaskPart(t, reviewCtx.level, reviewCtx.subject) === 1
-    );
-  }, [variant, reviewCtx]);
+  /** Части 1/2 каждого загруженного варианта со своим уровнем/предметом и своим срезом результата. */
+  const variantParts = useMemo(() => variantList.map((row) => {
+    const data = variantsData[row.variantId];
+    const tasks = data?.tasks?.length ? assignDisplayNumbers(data.tasks) : [];
+    const lvl = row.level || reviewCtx?.level;
+    const subj = row.subject || reviewCtx?.subject;
+    return {
+      row,
+      level: lvl,
+      subject: subj,
+      tasks: data?.tasks || [],
+      part1: tasks.filter((t) => inferExamTaskPart(t, lvl, subj) === 1),
+      part2: tasks.filter((t) => inferExamTaskPart(t, lvl, subj) === 2),
+      result: resultForVariant(result, row.variantId, variantIds),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [variantList, variantsData, submission, reviewCtx, variantIds]);
+  const activeParts = variantParts.find((p) => p.row.variantId === activeVariant?.variantId) || null;
 
-  const part2Tasks = useMemo(() => {
-    if (!variant?.tasks?.length || !reviewCtx) return [];
-    return assignDisplayNumbers(variant.tasks).filter(
-      (t) => inferExamTaskPart(t, reviewCtx.level, reviewCtx.subject) === 2
-    );
-  }, [variant, reviewCtx]);
+  const part1Tasks = useMemo(() => activeParts?.part1 || [], [activeParts]);
+  const part2Tasks = useMemo(() => activeParts?.part2 || [], [activeParts]);
   const reviewTaskTotal = (variant?.tasks || []).length;
 
   const homeworkReviewData = useMemo(() => {
     if (!reviewCtx?.has_variant || !variant?.tasks?.length || !level || !subject) return null;
-    const data = buildHomeworkReviewFromVariant(variant.tasks, result, level, subject);
+    const data = buildHomeworkReviewFromVariant(variant.tasks, variantResult, level, subject);
     if (part2Tasks.length) {
       data.part2 = data.part2.map((row) => ({
         ...row,
@@ -1045,19 +1082,43 @@ export default function CabinetReviewDetailPage() {
       }));
     }
     return data;
-  }, [reviewCtx, variant, result, level, subject, part2Tasks, scores]);
+  }, [reviewCtx, variant, variantResult, level, subject, part2Tasks, scores]);
 
   const buildAutoChecked = useCallback(() => {
+    // Автопроверка части 1 по всем вариантам ДЗ, а не только по открытому.
     const autoChecked = {};
-    const allTasks = variant?.tasks || part1Tasks;
-    part1Tasks.forEach((task) => {
-      const answer = homeworkTaskAnswer(result, task.id, task.number, allTasks);
-      const verdict = resolvePart1Verdict(task, answer, result, subject);
-      if (verdict === null) return;
-      autoChecked[String(task.id)] = verdict === true;
+    variantParts.forEach((parts) => {
+      const allTasks = parts.tasks.length ? parts.tasks : parts.part1;
+      parts.part1.forEach((task) => {
+        const answer = homeworkTaskAnswer(parts.result, task.id, task.number, allTasks);
+        const verdict = resolvePart1Verdict(task, answer, parts.result, parts.subject);
+        if (verdict === null) return;
+        autoChecked[String(task.id)] = verdict === true;
+      });
     });
     return autoChecked;
-  }, [part1Tasks, result, subject, variant?.tasks]);
+  }, [variantParts]);
+
+  /** «Проверено X из Y» по всем вариантам ДЗ. */
+  const reviewProgress = useMemo(() => {
+    let done = 0;
+    let total = 0;
+    variantParts.forEach((parts) => {
+      const all = [...parts.part1, ...parts.part2];
+      total += all.length;
+      done += parts.part1.filter((task) => resolvePart1Verdict(
+        task,
+        homeworkTaskAnswer(parts.result, task.id, task.number, all),
+        parts.result,
+        parts.subject,
+      ) != null).length;
+      done += parts.part2.filter((task) => {
+        const raw = scores[String(task.id)];
+        return raw !== "" && raw != null;
+      }).length;
+    });
+    return { done, total };
+  }, [variantParts, scores]);
 
   const buildPayload = () => {
     const payload = {
@@ -1242,7 +1303,7 @@ export default function CabinetReviewDetailPage() {
     await applyHomeworkTasksUpdate({ interactive_ids: [interactive.id] });
   };
 
-  const getPart1Verdict = (task, answer) => resolvePart1Verdict(task, answer, result, subject);
+  const getPart1Verdict = (task, answer) => resolvePart1Verdict(task, answer, variantResult, subject);
   usePageTitle(review?.title || "Проверка");
   const subjectLine = reviewSubjectLine(level, subject, reviewCtx?.subject_label);
   const statusKind = review?.status === "checked"
@@ -1540,10 +1601,21 @@ export default function CabinetReviewDetailPage() {
           </section>
         </>
       ) : reviewCtx?.has_variant ? (
+        <>
+        {multiVariant ? (
+          <ReviewVariantTabs
+            variantParts={variantParts}
+            activeId={activeVariant?.variantId}
+            onSelect={setActiveVariantId}
+            result={result}
+            scores={scores}
+          />
+        ) : null}
         <ReviewWorkspace
+          key={activeVariant?.variantId || "variant"}
           part1Tasks={part1Tasks}
           part2Tasks={part2Tasks}
-          result={result}
+          result={variantResult}
           subject={subject}
           level={level}
           scores={scores}
@@ -1569,6 +1641,7 @@ export default function CabinetReviewDetailPage() {
             onAdd: () => setResourcePickerOpen(true),
           }}
         />
+        </>
       ) : null}
 
 
@@ -1631,12 +1704,7 @@ export default function CabinetReviewDetailPage() {
       <div className="cb-review-detail__footer rv-bottom">
         {reviewCtx?.has_variant ? (
           <span className="rv-progress">
-            Проверено <b>{part1Tasks.filter((task) => (
-              getPart1Verdict(task, homeworkTaskAnswer(result, task.id, task.number, [...part1Tasks, ...part2Tasks])) != null
-            )).length + part2Tasks.filter((task) => {
-              const raw = scores[String(task.id)];
-              return raw !== "" && raw != null;
-            }).length} из {part1Tasks.length + part2Tasks.length}</b>
+            Проверено <b>{reviewProgress.done} из {reviewProgress.total}</b>
           </span>
         ) : <span />}
         <div className="rv-bottom__actions">

@@ -102,7 +102,7 @@ def submit_homework_for_student(
         _notify_homework_submitted,
         assign_submission_score,
         build_homework_review_context,
-        extract_variant_id,
+        homework_variant_ids,
         is_live_meeting_homework,
         recompute_variant_checked,
         store_variant_scoring,
@@ -162,11 +162,7 @@ def submit_homework_for_student(
             from .homework_api import preserve_correct_answers
 
             merged = preserve_correct_answers(previous, merged)
-        variant_id = None
-        for task in homework.tasks.filter(is_active=True):
-            variant_id = extract_variant_id(task.description)
-            if variant_id:
-                break
+        variant_id = homework_variant_ids(homework)
         if variant_id and not is_live_meeting_homework(homework):
             subject = ""
             try:

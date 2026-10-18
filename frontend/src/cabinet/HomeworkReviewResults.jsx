@@ -301,6 +301,7 @@ export default function HomeworkReviewResults({
   teacherComment: teacherCommentProp,
   className = "",
   id,
+  title = "Результаты проверки",
 }) {
   if (!review) return null;
   const teacherComment = teacherCommentProp || review.teacherComment || "";
@@ -318,7 +319,7 @@ export default function HomeworkReviewResults({
       id={id}
       className={`hw-review-results${className ? ` ${className}` : ""}`}
     >
-      <h2 className="hw-review-results__title">Результаты проверки</h2>
+      <h2 className="hw-review-results__title">{title || "Результаты проверки"}</h2>
       <ReviewSummary summary={summary} />
       {teacherComment || commentFiles.length ? (
         <div className="hw-review-results__teacher">

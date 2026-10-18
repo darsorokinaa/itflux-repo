@@ -699,6 +699,25 @@ def _preserve_part1_from_scoring(scoring: dict | None, scores: dict, checked: di
     return scores, checked
 
 
+def variant_level_subject(variant_id) -> tuple[str, str]:
+    """Уровень и предмет варианта из банка (для частей и правил кратких ответов)."""
+    if not variant_id:
+        return "", ""
+    from django.apps import apps
+
+    Variant = apps.get_model("Generator", "Variant")
+    variant = (
+        Variant.objects.select_related("level", "var_subject")
+        .filter(pk=int(variant_id))
+        .first()
+    )
+    if variant is None:
+        return "", ""
+    level = str(getattr(getattr(variant, "level", None), "level", "") or "")
+    subject = str(getattr(getattr(variant, "var_subject", None), "subject_short", "") or "")
+    return level, subject
+
+
 def attach_variant_scoring(
     payload: dict | None,
     variant_id: int | None,
@@ -769,19 +788,9 @@ def attach_variant_scoring(
         return data
 
     if not level or not subject:
-        from django.apps import apps
-
-        Variant = apps.get_model("Generator", "Variant")
-        variant = (
-            Variant.objects.select_related("level", "var_subject")
-            .filter(pk=int(variant_id))
-            .first()
-        )
-        if variant is not None:
-            level = level or str(getattr(getattr(variant, "level", None), "level", "") or "")
-            subject = subject or str(
-                getattr(getattr(variant, "var_subject", None), "subject_short", "") or ""
-            )
+        found_level, found_subject = variant_level_subject(variant_id)
+        level = level or found_level
+        subject = subject or found_subject
 
     scores = data.get("scores") if isinstance(data.get("scores"), dict) else {}
     checked = data.get("checked") if isinstance(data.get("checked"), dict) else {}
@@ -802,6 +811,216 @@ def attach_variant_scoring(
         data["grading_snapshot"] = grading
     data["scoring"] = scoring
     return data
+
+
+# --- Несколько вариантов в одном ДЗ (r75) ---------------------------------
+# Ответы всех вариантов лежат в одном result_payload (by_task_id — id задач банка).
+# Каждый вариант считается своим уровнем/предметом, строки снимков и scoring
+# помечаются variant_id, итог — сумма по всем вариантам. by_number в таком ДЗ
+# неоднозначен (у вариантов одинаковые номера), поэтому не используется.
+# Строки старых снимков без variant_id относятся к первому варианту ДЗ:
+# до r75 считался только он.
+
+_SUM_FIELDS = (
+    "total_tasks",
+    "correct_count",
+    "incorrect_count",
+    "partial_count",
+    "unanswered_count",
+    "pending_review_count",
+    "checked_count",
+    "earned_points",
+    "max_points",
+)
+
+
+def _as_variant_id(value):
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def normalize_variant_ids(variant_ids) -> list[int]:
+    out: list[int] = []
+    for raw in variant_ids or []:
+        vid = _as_variant_id(raw)
+        if vid and vid not in out:
+            out.append(vid)
+    return out
+
+
+def rows_by_variant(rows, variant_ids) -> dict[int, list[dict]]:
+    """Разложить строки снимка по вариантам. Без метки — первый вариант."""
+    ids = normalize_variant_ids(variant_ids)
+    groups: dict[int, list[dict]] = {vid: [] for vid in ids}
+    if not ids:
+        return groups
+    primary = ids[0]
+    for row in rows or []:
+        if not isinstance(row, dict) or row.get("id") is None:
+            continue
+        vid = _as_variant_id(row.get("variant_id")) or primary
+        if vid in groups:
+            groups[vid].append(row)
+    return groups
+
+
+def _tag_rows(rows, variant_id) -> list[dict]:
+    return [{**row, "variant_id": variant_id} for row in rows or [] if isinstance(row, dict)]
+
+
+def without_number_answers(payload: dict | None) -> dict:
+    data = dict(payload or {})
+    data.pop("by_number", None)
+    data.pop("byNumber", None)
+    return data
+
+
+def aggregate_variant_scorings(parts: list[tuple[int, str, str, dict]]) -> dict[str, Any]:
+    """Итог ДЗ из scoring каждого варианта: суммы, общий статус, строки с variant_id."""
+    totals = {key: 0 for key in _SUM_FIELDS}
+    rows: list[dict] = []
+    variants: list[dict] = []
+    for variant_id, level, subject, scoring in parts:
+        if not isinstance(scoring, dict):
+            continue
+        for key in _SUM_FIELDS:
+            try:
+                totals[key] += scoring.get(key) or 0
+            except TypeError:
+                pass
+        rows.extend(_tag_rows(scoring.get("tasks"), variant_id))
+        variants.append(
+            {
+                "variant_id": variant_id,
+                "level": level or "",
+                "subject": subject or "",
+                **(scoring_summary(scoring) or {}),
+            }
+        )
+    if totals["total_tasks"] == 0:
+        review_status = "empty"
+    elif totals["pending_review_count"]:
+        review_status = "pending_review"
+    else:
+        review_status = "final"
+    percentage = None
+    if review_status == "final" and totals["max_points"] > 0:
+        percentage = round(totals["earned_points"] * 100 / totals["max_points"], 2)
+    return {
+        **totals,
+        "percentage": percentage,
+        "review_status": review_status,
+        "preliminary": review_status == "pending_review",
+        "tasks": rows,
+        "variants": variants,
+    }
+
+
+def attach_multi_variant_scoring(
+    payload: dict | None,
+    variant_ids,
+    *,
+    previous_snapshot: list | None = None,
+    previous_grading: list | None = None,
+    refresh_from_bank: bool = False,
+) -> dict:
+    """scoring для ДЗ с несколькими вариантами. Один вариант — обычный attach_variant_scoring."""
+    ids = normalize_variant_ids(variant_ids)
+    if len(ids) <= 1:
+        return attach_variant_scoring(
+            payload,
+            ids[0] if ids else None,
+            previous_snapshot=previous_snapshot,
+            previous_grading=previous_grading,
+            refresh_from_bank=refresh_from_bank,
+        )
+    data = dict(payload or {})
+    if data.pop(LEGACY_VIEW_KEY, None):
+        previous_snapshot = None
+        previous_grading = None
+    stored_scoring = data.get("scoring") if isinstance(data.get("scoring"), dict) else None
+    data.pop("scoring", None)
+    data.pop("tasks_snapshot", None)
+    data.pop("grading_snapshot", None)
+
+    snapshot_groups = rows_by_variant(previous_snapshot, ids)
+    grading_groups = rows_by_variant(previous_grading, ids)
+    stored_groups = rows_by_variant(
+        stored_scoring.get("tasks") if stored_scoring else None, ids
+    )
+    base = without_number_answers(data)
+    parts: list[tuple[int, str, str, dict]] = []
+    all_snapshot: list[dict] = []
+    all_grading: list[dict] = []
+    for vid in ids:
+        level, subject = variant_level_subject(vid)
+        sub = dict(base)
+        if stored_groups.get(vid):
+            sub["scoring"] = {"tasks": stored_groups[vid]}
+        out = attach_variant_scoring(
+            sub,
+            vid,
+            level=level,
+            subject=subject,
+            previous_snapshot=snapshot_groups.get(vid) or None,
+            previous_grading=grading_groups.get(vid) or None,
+            refresh_from_bank=refresh_from_bank,
+        )
+        scoring = out.get("scoring")
+        if not isinstance(scoring, dict):
+            continue
+        parts.append((vid, level, subject, scoring))
+        all_snapshot.extend(_tag_rows(out.get("tasks_snapshot"), vid))
+        all_grading.extend(_tag_rows(out.get("grading_snapshot"), vid))
+    if not parts:
+        return data
+    data["tasks_snapshot"] = all_snapshot
+    if all_grading:
+        data["grading_snapshot"] = all_grading
+    data["scoring"] = aggregate_variant_scorings(parts)
+    return data
+
+
+def _rescore_tagged_grading(data: dict, grading: list, *, level: str = "", subject: str = "") -> dict:
+    """Пересчёт попытки ДЗ с несколькими вариантами по её замороженным критериям."""
+    stored = data.get("scoring") if isinstance(data.get("scoring"), dict) else {}
+    meta = {
+        _as_variant_id(row.get("variant_id")): row
+        for row in stored.get("variants") or []
+        if isinstance(row, dict) and _as_variant_id(row.get("variant_id"))
+    }
+    ids = normalize_variant_ids(
+        [row.get("variant_id") for row in grading if isinstance(row, dict)]
+    )
+    groups = rows_by_variant(grading, ids)
+    answers_source = without_number_answers(data)
+    scores = data.get("scores") if isinstance(data.get("scores"), dict) else {}
+    checked = data.get("checked") if isinstance(data.get("checked"), dict) else {}
+    parts = []
+    for vid in ids:
+        info = meta.get(vid) or {}
+        v_level = info.get("level") or ""
+        v_subject = info.get("subject") or ""
+        if not v_level or not v_subject:
+            found_level, found_subject = variant_level_subject(vid)
+            v_level = v_level or found_level or level
+            v_subject = v_subject or found_subject or subject
+        rows = groups.get(vid) or []
+        scoring = score_variant_attempt(
+            tasks=rows,
+            level=v_level,
+            subject=v_subject,
+            answers=_answers_from_payload(answers_source, rows),
+            scores=scores,
+            checked=checked,
+            attachment_ids=_attachment_ids(data),
+        )
+        parts.append((vid, v_level, v_subject, scoring))
+    return aggregate_variant_scorings(parts)
 
 
 def apply_bank_answer_to_attempt(
@@ -847,15 +1066,24 @@ def apply_bank_answer_to_attempt(
     data["grading_snapshot"] = updated_grading
     scores = data.get("scores") if isinstance(data.get("scores"), dict) else {}
     checked = dict(data.get("checked") if isinstance(data.get("checked"), dict) else {})
-    scoring = score_variant_attempt(
-        tasks=updated_grading,
-        level=level,
-        subject=subject,
-        answers=_answers_from_payload(data, updated_grading),
-        scores=scores,
-        checked=checked,
-        attachment_ids=_attachment_ids(data),
+    multi = any(
+        isinstance(row, dict) and _as_variant_id(row.get("variant_id"))
+        for row in updated_grading
     )
+    if multi:
+        # Несколько вариантов: номер не уникален между вариантами, ключ — только id.
+        scoring = _rescore_tagged_grading(data, updated_grading, level=level, subject=subject)
+        number = None
+    else:
+        scoring = score_variant_attempt(
+            tasks=updated_grading,
+            level=level,
+            subject=subject,
+            answers=_answers_from_payload(data, updated_grading),
+            scores=scores,
+            checked=checked,
+            attachment_ids=_attachment_ids(data),
+        )
     target = next((row for row in scoring.get("tasks") or [] if str(row.get("id")) == key), None)
     if isinstance(target, dict) and int(target.get("part") or 1) == 1:
         keys = [key]

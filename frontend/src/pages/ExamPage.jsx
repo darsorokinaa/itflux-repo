@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useLocation, Link, useNavigate } from "react-router-dom";
+import {
+  homeworkVariantList,
+  otherVariantsWithoutAnswers,
+  resultForVariant,
+  variantLabel,
+} from "../cabinet/homeworkVariants";
 import MathContent from "../components/MathContent";
 import EducationalLoading, { LOADING_MESSAGES } from "../components/EducationalLoading";
 import { devApiBase } from "../utils/devApiBase";
@@ -1269,8 +1275,14 @@ function ExamPage() {
       const nk = String(t.number);
       if ((numberCounts.get(nk) || 0) === 1) m.set(nk, t);
     }
-    const { userAnswers: ua, scores: sc, checkedTasks: ch } = homeworkResultToUiState(
+    // r75: в ДЗ с несколькими вариантами by_number другого варианта не подставляем.
+    const scopedResult = resultForVariant(
       picked.result,
+      variant.id,
+      homeworkVariantList(hwApiRaw).map((row) => row.variantId),
+    );
+    const { userAnswers: ua, scores: sc, checkedTasks: ch } = homeworkResultToUiState(
+      scopedResult,
       m,
       variant.tasks,
     );
@@ -1994,11 +2006,14 @@ function ExamPage() {
       );
       return;
     }
-    if (
-      !window.confirm(
-        "Отправить работу на проверку? После отправки изменить ответы нельзя — учитель проверит часть 2."
-      )
-    ) {
+    // r75: в ДЗ несколько вариантов, а сдача одна — предупреждаем о нерешённых.
+    const untouched = otherVariantsWithoutAnswers(homeworkVariantList(hwApiRaw), variant?.id);
+    const confirmText = untouched.length
+      ? `В этом домашнем задании есть ещё ${untouched.length === 1 ? "вариант" : "варианты"} без ответов: ${
+        untouched.map((row, index) => `«${variantLabel(row, index)}»`).join(", ")
+      }. Работа сдаётся целиком: после отправки решить ${untouched.length === 1 ? "его" : "их"} будет нельзя. Отправить сейчас?`
+      : "Отправить работу на проверку? После отправки изменить ответы нельзя — учитель проверит часть 2.";
+    if (!window.confirm(confirmText)) {
       return;
     }
     setHwActionBusy(true);
@@ -2141,7 +2156,11 @@ function ExamPage() {
   const hRead = homeworkIsReadonly(hwSt, isTeacherHomeworkView);
   const hSol = homeworkShowSolutions(hwSt);
   const showHomeworkReviewedResults = isHomework && !isTeacherHomeworkView && hwSt === "reviewed";
-  const hwResultPayload = parseMaybeJsonObject(hwPicked?.result) || {};
+  const hwResultPayload = resultForVariant(
+    parseMaybeJsonObject(hwPicked?.result) || {},
+    variant?.id,
+    homeworkVariantList(hwApiRaw).map((row) => row.variantId),
+  ) || {};
   const homeworkReviewData = showHomeworkReviewedResults && variant?.tasks?.length
     ? buildHomeworkReviewFromVariant(variant.tasks, hwResultPayload, level, subject)
     : null;

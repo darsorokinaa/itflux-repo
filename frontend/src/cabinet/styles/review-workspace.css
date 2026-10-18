@@ -830,3 +830,36 @@
   .rv-summary { grid-template-columns: 1fr 1fr; }
   .rv-bottom { flex-wrap: wrap; }
 }
+
+/* r75: несколько вариантов в одном ДЗ */
+.rv-variant-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 20px 0 0;
+}
+
+.rv-variant-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 180px;
+  padding: 10px 14px;
+  border: 1px solid var(--rv-line);
+  border-radius: 11px;
+  background: #fff;
+  color: var(--rv-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rv-variant-tab small {
+  color: var(--rv-muted);
+  font-size: 12px;
+}
+
+.rv-variant-tab.is-on {
+  border-color: var(--rv-blue);
+  box-shadow: 0 0 0 1px var(--rv-blue) inset;
+}

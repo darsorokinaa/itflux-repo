@@ -1740,6 +1740,9 @@ class HomeworkSubmissionSerializer(serializers.ModelSerializer):
 
         ensure_payload_migrated(instance)
         payload = overlay_payload_attachments(instance, data.get("result_payload") or {})
+        from .homework_api import scope_result_for_homework
+
+        payload = scope_result_for_homework(getattr(instance, "homework", None), payload)
         data["result_payload"] = payload
         data["task_attachments"] = payload.get("task_attachments") or {"tasks": {}, "comment": []}
         return data

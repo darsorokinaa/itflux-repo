@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { fetchStudentResultDetail, fetchStudentResults } from "../../../utils/cabinetAuth";
 import { usePageTitle } from "../../hooks/usePageTitle";
 import { TaskPosition } from "../../../components/taskDocument/TaskNumber";
+import { journalRowKey, startsVariantGroup } from "../../homeworkVariants";
 import "../../styles/journal.css";
 
 const ATTENDANCE_RU = {
@@ -174,7 +175,13 @@ function HomeworkResultBlock({ result }) {
             </thead>
             <tbody>
               {tasks.map((task, index) => (
-                <tr key={`hw-${result.homework_id}-${task.id || task.number}`}>
+                <Fragment key={journalRowKey(`hw-${result.homework_id}`, task)}>
+                {startsVariantGroup(tasks, index) ? (
+                  <tr className="jl-variant-result__group">
+                    <td colSpan={3}>Вариант №{task.variant_id}</td>
+                  </tr>
+                ) : null}
+                <tr>
                   <td>
                     <TaskPosition
                       mode="result"
@@ -194,6 +201,7 @@ function HomeworkResultBlock({ result }) {
                     )}
                   </td>
                 </tr>
+                </Fragment>
               ))}
             </tbody>
           </table>

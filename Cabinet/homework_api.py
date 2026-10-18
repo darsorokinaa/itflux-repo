@@ -66,6 +66,66 @@ def homework_has_variant_task(homework: Homework) -> bool:
     return any(task_is_variant(task) for task in homework.tasks.filter(is_active=True))
 
 
+def homework_variant_ids(homework) -> list[int]:
+    """Все варианты активных заданий ДЗ по порядку заданий, без повторов (r75).
+
+    Первый — тот же, что раньше возвращал поиск «первого варианта».
+    """
+    if homework is None:
+        return []
+    ids: list[int] = []
+    for task in homework.tasks.all():
+        if not getattr(task, "is_active", True):
+            continue
+        vid = extract_variant_id(task.description)
+        if vid and vid not in ids:
+            ids.append(vid)
+    return ids
+
+
+def homework_variants_meta(homework) -> list[dict]:
+    """Варианты ДЗ для экранов результатов: id, уровень, предмет, ссылка, задание ДЗ."""
+    out: list[dict] = []
+    seen: set[int] = set()
+    if homework is None:
+        return out
+    for task in homework.tasks.all():
+        if not getattr(task, "is_active", True):
+            continue
+        resource = (task.description or "").strip()
+        vid = extract_variant_id(resource)
+        if not vid or vid in seen:
+            continue
+        seen.add(vid)
+        match = VARIANT_PATH_RE.search(resource)
+        out.append(
+            {
+                "variant_id": vid,
+                "homework_task_id": task.pk,
+                "title": task.title or "",
+                "level": (match.group("level") if match else "") or "",
+                "subject": (match.group("subject") if match else "") or "",
+                "variant_path": normalize_variant_spa_url(resource),
+            }
+        )
+    return out
+
+
+def scope_result_for_homework(homework, result):
+    """В ДЗ с несколькими вариантами by_number неоднозначен (у вариантов одни и те же
+    номера) — не отдаём его, чтобы ответ одного варианта не показался в другом."""
+    if not isinstance(result, dict):
+        return result
+    if len(homework_variant_ids(homework)) <= 1:
+        return result
+    if "by_number" not in result and "byNumber" not in result:
+        return result
+    scoped = dict(result)
+    scoped.pop("by_number", None)
+    scoped.pop("byNumber", None)
+    return scoped
+
+
 def _lesson_secret() -> str:
     # Без LESSON_SECRET live-ссылки на вариант не получают lesson_token —
     # ученик не может сохранить ответы. Fallback на SECRET_KEY для локалки.
@@ -857,13 +917,22 @@ def store_variant_scoring(
     """Записать снимок состава, эталон и единый scoring. Без варианта payload не меняется."""
     if not isinstance(payload, dict) or homework is None:
         return payload
-    variant_id = None
-    for task in homework.tasks.filter(is_active=True):
-        variant_id = extract_variant_id(task.description)
-        if variant_id:
-            break
-    if not variant_id:
+    variant_ids = homework_variant_ids(homework)
+    if not variant_ids:
         return payload
+    if len(variant_ids) > 1:
+        try:
+            from Generator.variant_scoring import attach_multi_variant_scoring
+        except Exception:
+            from Generator.Generator.variant_scoring import attach_multi_variant_scoring
+        return attach_multi_variant_scoring(
+            payload,
+            variant_ids,
+            previous_snapshot=previous_snapshot,
+            previous_grading=previous_grading,
+            refresh_from_bank=refresh_from_bank,
+        )
+    variant_id = variant_ids[0]
     attach = _import_attach_variant_scoring()
     return attach(
         payload,
@@ -921,7 +990,8 @@ def preview_variant_rescore(submission) -> dict:
 
     payload = submission.result_payload if isinstance(getattr(submission, "result_payload", None), dict) else {}
     stored = scoring_summary(payload.get("scoring") if isinstance(payload.get("scoring"), dict) else None)
-    variant_id = _variant_id_for_homework(getattr(submission, "homework", None))
+    variant_ids = homework_variant_ids(getattr(submission, "homework", None))
+    variant_id = variant_ids[0] if variant_ids else None
     base = {
         "submission_id": getattr(submission, "pk", None),
         "applied": False,
@@ -930,7 +1000,9 @@ def preview_variant_rescore(submission) -> dict:
     }
     if not variant_id:
         return {**base, "applicable": False, "reason": "no_variant", "proposed": None, "changed": False}
-    live_tasks = load_variant_tasks_for_scoring(variant_id)
+    live_tasks = []
+    for vid in variant_ids:
+        live_tasks.extend(load_variant_tasks_for_scoring(vid))
     proposed_payload = store_variant_scoring(
         dict(payload),
         submission.homework,
@@ -979,11 +1051,22 @@ def assign_submission_score(submission, payload) -> None:
         submission.score = computed
 
 
-def recompute_variant_checked(result: dict | None, variant_id: int | None, *, subject: str = "") -> dict | None:
+def recompute_variant_checked(result: dict | None, variant_id, *, subject: str = "") -> dict | None:
     """
     Пересчитать checked по эталону варианта.
     Ученику answer в JSON не отдаётся → клиент часто шлёт checked=false даже при верном ответе.
+
+    variant_id может быть списком (ДЗ с несколькими вариантами): эталон ищется по id
+    задачи в каждом варианте; номер задания между вариантами не уникален и не используется.
     """
+    if isinstance(variant_id, (list, tuple)):
+        ids = [int(v) for v in variant_id if v]
+        if len(ids) == 1:
+            variant_id = ids[0]
+        elif ids:
+            return _recompute_multi_variant_checked(result, ids, subject=subject)
+        else:
+            variant_id = None
     if not result or not isinstance(result, dict) or not variant_id:
         return result
     checked = result.get("checked")
@@ -1045,18 +1128,84 @@ def recompute_variant_checked(result: dict | None, variant_id: int | None, *, su
     return updated
 
 
+def _recompute_multi_variant_checked(result, variant_ids: list[int], *, subject: str = ""):
+    if not result or not isinstance(result, dict):
+        return result
+    checked = result.get("checked")
+    if not isinstance(checked, dict) or not checked:
+        return result
+    try:
+        from Generator.answer_check import answers_equal, expected_answer_for_variant_task
+    except Exception:
+        try:
+            from Generator.Generator.answer_check import answers_equal, expected_answer_for_variant_task
+        except Exception:
+            logger.exception("recompute_variant_checked: cannot import answer_check")
+            return result
+    by_id = result.get("by_task_id") or result.get("byTaskId") or {}
+    if not isinstance(by_id, dict):
+        by_id = {}
+    out_checked = dict(checked)
+    for key in list(checked.keys()):
+        key_s = str(key)
+        try:
+            task_id = int(key_s)
+        except (TypeError, ValueError):
+            continue
+        answer = by_id.get(key_s, by_id.get(key))
+        if isinstance(answer, dict) and "text" in answer:
+            answer = str(answer.get("text") or "")
+        else:
+            answer = str(answer or "")
+        if not answer.strip():
+            continue
+        expected = ""
+        for vid in variant_ids:
+            expected = expected_answer_for_variant_task(int(vid), task_id=task_id, task_number_key="")
+            if str(expected or "").strip():
+                break
+        if not str(expected or "").strip():
+            continue
+        out_checked[key_s] = answers_equal(answer, expected, subject=subject)
+    updated = dict(result)
+    updated["checked"] = out_checked
+    return updated
+
+
+def _variants_with_progress(homework, variant_ids: list[int], result) -> list[dict]:
+    """Варианты ДЗ; при нескольких — сколько заданий каждого уже с ответом (для предупреждения
+    перед отправкой: после сдачи остальные варианты станут только для чтения)."""
+    meta = homework_variants_meta(homework)
+    if len(variant_ids) <= 1:
+        return meta
+    try:
+        from Generator.variant_scoring import load_variant_tasks_for_scoring
+    except Exception:
+        from Generator.Generator.variant_scoring import load_variant_tasks_for_scoring
+    by_id = (result or {}).get("by_task_id") if isinstance(result, dict) else None
+    by_id = by_id if isinstance(by_id, dict) else {}
+    for row in meta:
+        ids = [str(task.get("id")) for task in load_variant_tasks_for_scoring(row["variant_id"])]
+        answered = 0
+        for key in ids:
+            value = by_id.get(key)
+            if isinstance(value, dict):
+                value = value.get("text")
+            if str(value or "").strip():
+                answered += 1
+        row["task_count"] = len(ids)
+        row["answered_count"] = answered
+    return meta
+
+
 def serialize_assignment_payload(
     *,
     homework: Homework,
     submission: HomeworkSubmission | None,
     for_student: bool = False,
 ) -> dict:
-    variant_id = None
-    for task in homework.tasks.filter(is_active=True):
-        vid = extract_variant_id(task.description)
-        if vid:
-            variant_id = vid
-            break
+    variant_ids = homework_variant_ids(homework)
+    variant_id = variant_ids[0] if variant_ids else None
 
     result = submission.result_payload if submission and submission.result_payload else None
     if submission is not None:
@@ -1071,6 +1220,7 @@ def serialize_assignment_payload(
         if for_student:
             result = visible_teacher_result(submission, result)
         result = apply_scoring_checked(result)
+        result = scope_result_for_homework(homework, result)
     score = float(submission.score) if submission and submission.score is not None else None
     if score is None and result:
         computed = compute_score_percent(result)
@@ -1093,6 +1243,8 @@ def serialize_assignment_payload(
         "deadline": homework.due_at.isoformat() if homework.due_at else None,
         "deadline_at": homework.due_at.isoformat() if homework.due_at else None,
         "variant_id": variant_id,
+        "variant_ids": variant_ids,
+        "variants": _variants_with_progress(homework, variant_ids, result),
         "score": score,
         "score_percent": score,
         "answer_text": submission.answer_text if submission else "",
@@ -2030,11 +2182,7 @@ class HomeworkAssignmentSaveDraftView(HomeworkAssignmentBaseView):
             merged = _merge_result_payload(previous, result)
             if submission.status in (SubmissionStatus.RETURNED, SubmissionStatus.NEEDS_REVISION):
                 merged = preserve_correct_answers(previous, merged)
-            variant_id = None
-            for task in homework.tasks.filter(is_active=True):
-                variant_id = extract_variant_id(task.description)
-                if variant_id:
-                    break
+            variant_id = homework_variant_ids(homework)
             if not is_live_meeting_homework(homework):
                 subject = ""
                 try:
@@ -2069,7 +2217,7 @@ class HomeworkAssignmentSaveDraftView(HomeworkAssignmentBaseView):
             {
                 "ok": True,
                 "status": submission_api_status(submission),
-                "result": redact_student_result(merged),
+                "result": scope_result_for_homework(homework, redact_student_result(merged)),
             }
         )
 
@@ -2603,6 +2751,7 @@ def build_homework_review_context(homework: Homework) -> dict:
             subject = match.group("subject")
         break
     tasks = serialize_homework_tasks(homework, homework_id=homework.id, token=None)
+    variants = homework_variants_meta(homework)
     from .homework_attachments import list_homework_attachments
 
     attachments = list_homework_attachments(homework)
@@ -2619,6 +2768,8 @@ def build_homework_review_context(homework: Homework) -> dict:
         "due_at": homework.due_at.isoformat() if homework.due_at else None,
         "has_variant": homework_has_variant_task(homework),
         "variant_id": variant_id,
+        "variant_ids": [row["variant_id"] for row in variants],
+        "variants": variants,
         "variant_path": variant_path,
         "level": level,
         "subject": subject,
@@ -2643,6 +2794,7 @@ def build_homework_review_list_context(homework: Homework) -> dict:
     subject = ""
     has_variant = False
     tasks_count = 0
+    variant_ids: list[int] = []
     for task in homework.tasks.all():
         if not getattr(task, "is_active", True):
             continue
@@ -2651,6 +2803,8 @@ def build_homework_review_list_context(homework: Homework) -> dict:
         if task_is_variant(task):
             has_variant = True
         vid = extract_variant_id(resource)
+        if vid and vid not in variant_ids:
+            variant_ids.append(vid)
         if vid and not variant_id:
             variant_id = vid
             match = VARIANT_PATH_RE.search(resource)
@@ -2666,6 +2820,7 @@ def build_homework_review_list_context(homework: Homework) -> dict:
         "due_at": homework.due_at.isoformat() if homework.due_at else None,
         "has_variant": has_variant,
         "variant_id": variant_id,
+        "variant_ids": variant_ids,
         "level": level,
         "subject": subject,
         "subject_label": subject_label,

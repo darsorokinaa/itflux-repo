@@ -740,17 +740,22 @@ HOMEWORK_STATUS_LABELS = {
 
 
 def _homework_variant_meta(homework: Homework) -> tuple[int | None, list[dict]]:
-    from .homework_api import extract_variant_id, homework_has_variant_task
+    from .homework_api import homework_has_variant_task
     from .meeting_present import _variant_tasks_answer_key
+
+    from .homework_api import homework_variant_ids
 
     if not homework_has_variant_task(homework):
         return None, []
-    variant_id = None
-    for task in homework.tasks.all():
-        variant_id = extract_variant_id(task.description)
-        if variant_id:
-            break
-    return variant_id, _variant_tasks_answer_key(variant_id)
+    variant_ids = homework_variant_ids(homework)
+    if len(variant_ids) <= 1:
+        variant_id = variant_ids[0] if variant_ids else None
+        return variant_id, _variant_tasks_answer_key(variant_id)
+    # r75: несколько вариантов в одном ДЗ — строки всех вариантов, с меткой варианта.
+    tasks: list[dict] = []
+    for vid in variant_ids:
+        tasks.extend({**row, "variant_id": vid} for row in _variant_tasks_answer_key(vid))
+    return variant_ids[0], tasks
 
 
 def _answer_rows_from_submission(
@@ -771,6 +776,10 @@ def _answer_rows_from_submission(
         nk = str(task.get("number")) if task.get("number") is not None else ""
         if nk:
             number_counts[nk] = number_counts.get(nk, 0) + 1
+    if len({task.get("variant_id") for task in tasks if task.get("variant_id")}) > 1:
+        # Несколько вариантов: номер не уникален между ними, ответ ищем только по id.
+        by_num = {}
+        number_counts = {key: 2 for key in number_counts}
 
     rows = []
     for task in tasks:
@@ -800,6 +809,8 @@ def _answer_rows_from_submission(
             "student_answer": student_answer,
             "ok": ok,
         }
+        if task.get("variant_id"):
+            row["variant_id"] = task.get("variant_id")
         if not for_student:
             row["correct_answer"] = _strip_answer_html(expected_raw)
         rows.append(row)
@@ -817,6 +828,17 @@ def resolve_homework_for_journal_record(
     if event is None:
         return None
     return previous_homework_for_student(journal.teacher, student, event)
+
+
+def _task_variant_ids(tasks: list[dict], variant_id) -> list[int]:
+    ids: list[int] = []
+    for task in tasks or []:
+        vid = task.get("variant_id")
+        if vid and vid not in ids:
+            ids.append(vid)
+    if not ids and variant_id:
+        ids.append(variant_id)
+    return ids
 
 
 def _rows_from_stored_scoring(payload: dict, *, for_student: bool) -> list[dict]:
@@ -851,6 +873,8 @@ def _rows_from_stored_scoring(payload: dict, *, for_student: bool) -> list[dict]
             "student_answer": str(by_id.get(key) or by_id.get(row.get("id")) or ""),
             "ok": ok,
         }
+        if row.get("variant_id"):
+            item["variant_id"] = row.get("variant_id")
         if not for_student:
             item["correct_answer"] = answers.get(key, "")
         rows.append(item)
@@ -991,6 +1015,7 @@ def build_homework_result_payload(
         "has_attached_file": submission_has_files(submission),
         "has_variant": bool(tasks),
         "variant_id": variant_id,
+        "variant_ids": _task_variant_ids(tasks, variant_id),
         "checked_count": checked_count or None,
         "correct_count": correct_count if checked_count else None,
         "earned_points": scoring.get("earned_points") if scoring else None,

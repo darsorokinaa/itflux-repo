@@ -1548,7 +1548,9 @@ class StudentAssignmentDetailView(StudentScopedView):
         from .homework_api import (
             homework_has_variant_task,
             homework_instruction_text,
+            homework_variants_meta,
             issue_homework_token,
+            scope_result_for_homework,
             apply_scoring_checked,
             redact_student_result,
             serialize_homework_tasks,
@@ -1616,12 +1618,14 @@ class StudentAssignmentDetailView(StudentScopedView):
                 student_result = redact_student_result(
                     apply_scoring_checked(visible_teacher_result(submission, overlaid))
                 )
+                student_result = scope_result_for_homework(hw, student_result)
         card.update({
             "description": homework_instruction_text(hw),
             "tasks": tasks,
             "attachments": attachments,
             "attachments_count": len(attachments),
             "has_variant": homework_has_variant_task(hw),
+            "variants": homework_variants_meta(hw),
             "answer_text": submission.answer_text if submission else "",
             "attached_file_url": attached_files[0]["url"] if attached_files else "",
             "attached_file_name": attached_name,

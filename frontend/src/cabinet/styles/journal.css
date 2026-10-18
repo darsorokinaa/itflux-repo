@@ -4806,3 +4806,11 @@ button.jg-topic-field--view:disabled {
     min-width: 980px;
   }
 }
+
+/* r75: заголовок варианта в таблице ДЗ с несколькими вариантами */
+.jl-variant-result__group td {
+  padding-top: 10px;
+  font-weight: 600;
+  color: #3c577d;
+  background: #f6f8fc;
+}

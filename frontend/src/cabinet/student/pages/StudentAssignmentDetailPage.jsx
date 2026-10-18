@@ -15,6 +15,11 @@ import {
 } from "../../cabinetReviewUtils";
 import CabinetIcon from "../../CabinetIcons";
 import {
+  homeworkVariantListFromTasks,
+  resultForVariant,
+  variantLabel,
+} from "../../homeworkVariants";
+import {
   extraHomeworkText,
   isOpenableUrl,
   resolveTaskHref,
@@ -217,6 +222,7 @@ export default function StudentAssignmentDetailPage() {
   const [submitting, setSubmitting] = useState(false);
   const [validationMsg, setValidationMsg] = useState("");
   const [msg, setMsg] = useState("");
+  // r75: задания каждого варианта ДЗ — { [variantId]: tasks }.
   const [variantTasks, setVariantTasks] = useState(null);
   const [filePreview, setFilePreview] = useState(null);
   const isDirtyRef = useRef(false);
@@ -274,17 +280,24 @@ export default function StudentAssignmentDetailPage() {
       setVariantTasks(null);
       return undefined;
     }
-    const variantTask = (item.tasks || []).find((t) => t.is_variant);
-    const apiUrl = parseVariantApiUrl(variantTask?.open_url);
-    if (!apiUrl) {
+    const variants = homeworkVariantListFromTasks(item.tasks)
+      .map((row) => ({ ...row, apiUrl: parseVariantApiUrl(row.openUrl) }))
+      .filter((row) => row.apiUrl);
+    if (!variants.length) {
       setVariantTasks(null);
       return undefined;
     }
     const ac = new AbortController();
-    fetch(apiUrl, { signal: ac.signal })
+    Promise.all(variants.map((row) => fetch(row.apiUrl, { signal: ac.signal })
       .then((res) => (res.ok ? res.json() : null))
-      .then((data) => setVariantTasks(Array.isArray(data?.tasks) ? data.tasks : null))
-      .catch(() => setVariantTasks(null));
+      .catch(() => null)
+      .then((data) => [row.variantId, Array.isArray(data?.tasks) ? data.tasks : null])))
+      .then((pairs) => {
+        if (ac.signal.aborted) return;
+        const next = {};
+        for (const [variantId, tasks] of pairs) if (tasks?.length) next[variantId] = tasks;
+        setVariantTasks(Object.keys(next).length ? next : null);
+      });
     return () => ac.abort();
   }, [item]);
 
@@ -309,19 +322,29 @@ export default function StudentAssignmentDetailPage() {
   const isChecked = item?.status === "checked";
   const showReview = item ? studentShowsPublishedReview(item) : false;
   const dueLabel = item?.due_at ? formatDueDate(item.due_at) : "";
-  const homeworkReview = useMemo(() => {
-    if (!item?.result || !variantTasks?.length) return null;
-    if (item.status !== "checked" && item.status !== "needs_fix") return null;
-    const variantTask = (item.tasks || []).find((t) => t.is_variant);
-    const meta = parseVariantMeta(variantTask?.open_url);
-    if (!meta) return null;
-    return buildHomeworkReviewFromVariant(
-      variantTasks,
-      item.result,
-      meta.level,
-      meta.subject
-    );
+  // r75: разбор по каждому варианту ДЗ, а не только по первому.
+  const homeworkReviews = useMemo(() => {
+    if (!item?.result || !variantTasks) return [];
+    if (item.status !== "checked" && item.status !== "needs_fix") return [];
+    const variants = homeworkVariantListFromTasks(item.tasks);
+    const ids = variants.map((row) => row.variantId);
+    return variants.map((row, index) => {
+      const tasks = variantTasks[row.variantId];
+      const meta = parseVariantMeta(row.openUrl);
+      if (!tasks?.length || !meta) return null;
+      return {
+        row,
+        title: variants.length > 1 ? `Результаты: ${variantLabel(row, index)}` : undefined,
+        review: buildHomeworkReviewFromVariant(
+          tasks,
+          resultForVariant(item.result, row.variantId, ids),
+          meta.level,
+          meta.subject,
+        ),
+      };
+    }).filter(Boolean);
   }, [item, variantTasks]);
+  const homeworkReview = homeworkReviews[0]?.review || null;
 
   const scrollToResults = () => {
     document.getElementById(STUDENT_HW_RESULTS_ID)?.scrollIntoView({
@@ -743,13 +766,15 @@ export default function StudentAssignmentDetailPage() {
                 </section>
               ) : null}
 
-              {homeworkReview ? (
+              {homeworkReviews.map((entry, index) => (
                 <HomeworkReviewResults
-                  review={homeworkReview}
-                  teacherComment={reviewComment}
+                  key={entry.row.variantId}
+                  review={index === 0 ? entry.review : { ...entry.review, teacherComment: "", teacherCommentAttachments: [] }}
+                  teacherComment={index === 0 ? reviewComment : ""}
+                  title={entry.title}
                   className="st-hw-review"
                 />
-              ) : null}
+              ))}
             </div>
           ) : null}
 
