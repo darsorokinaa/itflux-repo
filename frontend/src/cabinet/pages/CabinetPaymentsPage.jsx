@@ -30,6 +30,7 @@ import {
   formatShortDate,
   formatTransactionAmount,
 } from "../billing/billingFormat";
+import { buildWeekSeries } from "../billing/weekSeries";
 import "../styles/payments.css";
 
 function monthBounds(cursor) {
@@ -177,29 +178,6 @@ function detailPresentation(account, currency, monthPrep) {
     ? `Остаток: ${formatMoney(credit, currency)}`
     : `Баланс: ${formatMoney(0, currency)}`;
   return { primary, secondary };
-}
-
-function buildWeekSeries(txs, cursor) {
-  const year = cursor.getFullYear();
-  const month = cursor.getMonth();
-  const last = new Date(year, month + 1, 0).getDate();
-  const labels = ["1–7", "8–14", "15–21", `22–${last}`];
-  const buckets = labels.map((label) => ({ label, received: 0, charged: 0 }));
-  (txs || []).forEach((tx) => {
-    if (!tx?.occurred_at || tx.is_reversal || tx.is_reversed) return;
-    const dt = new Date(tx.occurred_at);
-    if (Number.isNaN(dt.getTime())) return;
-    if (dt.getFullYear() !== year || dt.getMonth() !== month) return;
-    const day = dt.getDate();
-    const idx = day <= 7 ? 0 : day <= 14 ? 1 : day <= 21 ? 2 : 3;
-    const amount = Math.abs(Number(tx.amount) || 0);
-    if (tx.transaction_type === "payment" || tx.transaction_type === "package_purchase") {
-      buckets[idx].received += amount;
-    } else if (tx.transaction_type === "charge") {
-      buckets[idx].charged += amount;
-    }
-  });
-  return buckets;
 }
 
 function niceAxisMax(series) {
@@ -547,7 +525,7 @@ function CabinetPaymentsPageInner() {
 
   const monthPrep = monthPrepositional(monthCursor);
   const monthLower = monthSwitcherLabel.replace(/ \d{4}$/, "").replace(/^./, (ch) => ch.toLowerCase());
-  const weekSeries = useMemo(() => buildWeekSeries(monthTxs, monthCursor), [monthTxs, monthCursor]);
+  const weekSeries = useMemo(() => buildWeekSeries(monthTxs, monthCursor, dashboard?.timezone), [monthTxs, monthCursor, dashboard?.timezone]);
   const statusStats = useMemo(() => {
     const stats = { paid: 0, partial: 0, debt: 0, advance: 0 };
     accounts.forEach((account) => {

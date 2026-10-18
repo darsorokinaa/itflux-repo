@@ -13,6 +13,7 @@ from typing import Any, Iterable, Optional
 from django.contrib.auth.models import User
 from django.db import IntegrityError, transaction
 from django.db.models import Case, Count, F, Q, Sum, Value, When
+from django.db.models.functions import Coalesce
 from django.db.models.fields import DecimalField
 from django.utils import timezone
 
@@ -97,6 +98,87 @@ def D_units(value) -> Decimal:
     if isinstance(value, Decimal):
         return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+# r74: денежная оценка абонементных операций.
+# Списание урока из абонемента уменьшает баланс на цену единицы абонемента
+# (purchase_amount / total_units); возврат единиц — увеличивает. Последняя единица
+# забирает остаток, чтобы полностью израсходованный абонемент давал ровно purchase_amount.
+PACKAGE_MONEY_TYPES = (
+    "package_consumption",
+    "package_return",
+)
+
+
+def package_unit_price(package: Optional[LessonPackage]) -> Decimal:
+    if package is None:
+        return ZERO
+    total = D_units(package.total_units or 0)
+    purchase = D(package.purchase_amount or 0)
+    if total <= 0 or purchase <= 0:
+        return ZERO
+    return D(purchase / total)
+
+
+def package_consumed_value(package: LessonPackage, *, exclude_tx_id=None) -> Decimal:
+    """Чистая денежная сумма списаний по абонементу (списания − возвраты, со сторно)."""
+    qs = BillingTransaction.objects.filter(
+        package=package,
+        transaction_type__in=(TransactionType.PACKAGE_CONSUMPTION, TransactionType.PACKAGE_RETURN),
+    )
+    if exclude_tx_id is not None:
+        qs = qs.exclude(pk=exclude_tx_id)
+    total = ZERO
+    for tx_type, amount in qs.values_list("transaction_type", "amount"):
+        if tx_type == TransactionType.PACKAGE_CONSUMPTION:
+            total += D(amount)
+        else:
+            total -= D(amount)
+    return D(total)
+
+
+def package_consumption_amount(
+    package: LessonPackage,
+    units: Decimal,
+    *,
+    remaining_after: Optional[Decimal] = None,
+    exclude_tx_id=None,
+) -> Decimal:
+    """Сколько денег «съедает» списание units единиц абонемента."""
+    price = package_unit_price(package)
+    if price <= 0:
+        return ZERO
+    amount = D(price * D_units(units))
+    purchase = D(package.purchase_amount or 0)
+    if remaining_after is not None and D_units(remaining_after) <= 0:
+        left = D(purchase - package_consumed_value(package, exclude_tx_id=exclude_tx_id))
+        amount = left if left > 0 else ZERO
+    else:
+        left = D(purchase - package_consumed_value(package, exclude_tx_id=exclude_tx_id))
+        if left < amount:
+            amount = left if left > 0 else ZERO
+    return D(amount)
+
+
+def ledger_signed_amount(transaction_type: str, amount) -> Decimal:
+    """Вклад операции в баланс счёта (>0 — в пользу ученика)."""
+    amount = D(amount or 0)
+    if transaction_type in (
+        TransactionType.PAYMENT,
+        TransactionType.PACKAGE_PURCHASE,
+        TransactionType.ADJUSTMENT,
+        TransactionType.DISCOUNT,
+        TransactionType.PACKAGE_RETURN,
+    ):
+        return amount
+    if transaction_type in (
+        TransactionType.CHARGE,
+        TransactionType.WRITE_OFF,
+        TransactionType.REFUND,
+        TransactionType.PACKAGE_CONSUMPTION,
+    ):
+        return D(-amount)
+    return ZERO
 
 
 def event_duration_minutes(event: ScheduleEvent) -> int:
@@ -510,7 +592,8 @@ def _record_in_unpaid_list(record) -> bool:
 def compute_account_balance(account: BillingAccount) -> dict:
     """Баланс > 0 — переплата/аванс; < 0 — задолженность.
 
-    К оплате = валидные начисления − платежи + корректировки − возвраты.
+    Баланс = платежи + корректировки − валидные начисления − возвраты
+    − стоимость занятий, списанных из абонементов (r74).
     Переносы и непроведённые занятия в расчёт не входят.
     """
     cached_txs = getattr(account, "_itflux_transactions", None)
@@ -519,6 +602,7 @@ def compute_account_balance(account: BillingAccount) -> dict:
         charges = ZERO
         refunds = ZERO
         adjustments = ZERO
+        package_used = ZERO
         for tx in cached_txs:
             amount = D(tx.amount)
             if tx.transaction_type in (TransactionType.PAYMENT, TransactionType.PACKAGE_PURCHASE):
@@ -537,10 +621,15 @@ def compute_account_balance(account: BillingAccount) -> dict:
                 refunds += amount
             elif tx.transaction_type in (TransactionType.ADJUSTMENT, TransactionType.DISCOUNT):
                 adjustments += amount
-        balance = payments - charges - refunds + adjustments
+            elif tx.transaction_type == TransactionType.PACKAGE_CONSUMPTION:
+                package_used += amount
+            elif tx.transaction_type == TransactionType.PACKAGE_RETURN:
+                package_used -= amount
+        balance = payments - charges - refunds + adjustments - package_used
         return {
             "paid": payments,
             "charged": charges,
+            "package_used": D(package_used),
             "refunded": refunds,
             "adjustments": adjustments,
             "balance": D(balance),
@@ -567,14 +656,22 @@ def compute_account_balance(account: BillingAccount) -> dict:
     adjustments = qs.filter(
         transaction_type__in=(TransactionType.ADJUSTMENT, TransactionType.DISCOUNT)
     ).aggregate(t=Sum("amount"))["t"] or ZERO
+    consumed = qs.filter(
+        transaction_type=TransactionType.PACKAGE_CONSUMPTION
+    ).aggregate(t=Sum("amount"))["t"] or ZERO
+    returned = qs.filter(
+        transaction_type=TransactionType.PACKAGE_RETURN
+    ).aggregate(t=Sum("amount"))["t"] or ZERO
+    package_used = D(consumed) - D(returned)
     payments = D(payments)
     charges = D(charges)
     refunds = D(refunds)
     adjustments = D(adjustments)
-    balance = payments - charges - refunds + adjustments
+    balance = payments - charges - refunds + adjustments - package_used
     return {
         "paid": payments,
         "charged": charges,
+        "package_used": D(package_used),
         "refunded": refunds,
         "adjustments": adjustments,
         "balance": D(balance),
@@ -1229,11 +1326,15 @@ def consume_package(
         locked.remaining_units = ZERO
         locked.status = PackageStatus.EXHAUSTED
     locked.save(update_fields=["remaining_units", "status", "updated_at"])
+    consumption_amount = package_consumption_amount(
+        locked, units, remaining_after=locked.remaining_units
+    )
     try:
         tx = _append_tx(
             billing_account=account,
             student=student,
             transaction_type=TransactionType.PACKAGE_CONSUMPTION,
+            amount=consumption_amount,
             package_units=units,
             currency=account.currency,
             created_by=created_by,
@@ -1342,10 +1443,15 @@ def return_package_units(
     if locked.status == PackageStatus.EXHAUSTED and locked.remaining_units > 0:
         locked.status = PackageStatus.ACTIVE
     locked.save(update_fields=["remaining_units", "status", "updated_at"])
+    return_amount = D(package_unit_price(locked) * units)
+    consumed = package_consumed_value(locked)
+    if return_amount > consumed:
+        return_amount = consumed if consumed > 0 else ZERO
     return _append_tx(
         billing_account=account,
         student=student,
         transaction_type=TransactionType.PACKAGE_RETURN,
+        amount=return_amount,
         package_units=units,
         currency=account.currency,
         created_by=created_by,
@@ -2351,13 +2457,27 @@ def finalize_event_billing(
                     else planned
                 )
                 # Если у абонемента задана длительность — списываем только при совпадении.
-                if (
+                duration_mismatch = bool(
                     package.lesson_duration_minutes
                     and int(package.lesson_duration_minutes) > 0
                     and int(use_duration or 0) > 0
                     and int(package.lesson_duration_minutes) != int(use_duration)
-                ):
-                    financial_action = "charge"
+                )
+                if duration_mismatch and auto_package_charge:
+                    # r74: раньше урок молча начислялся деньгами при живом оплаченном
+                    # абонементе (другая длительность). Теперь — «Требует решения»:
+                    # учитель сам выбирает «списать из абонемента» или «начислить».
+                    record.financial_status = FinancialStatus.NEEDS_DECISION
+                    record.charged_amount = ZERO
+                    record.finalized_at = None
+                    record.price_source_label = (
+                        f"Длительность урока {int(use_duration)} мин ≠ "
+                        f"{int(package.lesson_duration_minutes)} мин в абонементе "
+                        f"«{package.title}» — спишите из абонемента или начислите"
+                    )
+                    record.save()
+                    results.append(record)
+                    continue
                 else:
                     units = package_units_for_lesson(
                         settings=settings, package=package, duration_minutes=use_duration
@@ -3394,6 +3514,12 @@ def register_payment(
         reason=purpose,
     )
 
+    # r74: привязка «висящих» оплат к абонементам — здесь, а не при GET.
+    try:
+        reconcile_package_payments(account)
+    except Exception:
+        pass
+
     # Notify teacher if prefs allow
     try:
         from .billing_notifications import notify_payment_received
@@ -3480,6 +3606,11 @@ def create_package(
             "purchase_amount": str(purchase_amount),
         },
     )
+    # r74: привязать ранее внесённые «висящие» оплаты к новому абонементу.
+    try:
+        reconcile_package_payments(account)
+    except Exception:
+        pass
     return package
 
 
@@ -3535,6 +3666,15 @@ def create_package_and_cover_past(
 
 
 @transaction.atomic
+def release_record_payment_allocations(record: EventBillingRecord) -> Decimal:
+    """Снять привязки оплат с урока. Платежи остаются (уходят в свободный остаток)."""
+    released = ZERO
+    for alloc in StudentPaymentAllocation.objects.filter(event_billing=record):
+        released = D(released + D(alloc.amount))
+        alloc.delete()
+    return released
+
+
 def reverse_transaction(
     *,
     teacher: User,
@@ -3576,6 +3716,8 @@ def reverse_transaction(
         TransactionType.ADJUSTMENT,
         TransactionType.DISCOUNT,
         TransactionType.WRITE_OFF,
+        TransactionType.PACKAGE_CONSUMPTION,
+        TransactionType.PACKAGE_RETURN,
     ):
         reverse_amount = D(-tx.amount)
 
@@ -3610,6 +3752,11 @@ def reverse_transaction(
         record = EventBillingRecord.objects.select_for_update().get(pk=tx.event_billing_id)
         if tx.transaction_type == TransactionType.CHARGE:
             record.charged_amount = D(max(ZERO, record.charged_amount - tx.amount))
+            # r74: начисление снято — оплата по уроку больше не «съедена» им и
+            # возвращается в свободный остаток (аванс), а не висит на уроке.
+            released = release_record_payment_allocations(record)
+            if released > 0:
+                record.paid_amount = D(max(ZERO, D(record.paid_amount or 0) - released))
         if tx.transaction_type == TransactionType.PACKAGE_CONSUMPTION:
             record.package_units = ZERO
             record.package = None
@@ -4106,7 +4253,8 @@ def build_account_ui_meta(
 
 
 def serialize_account(account: BillingAccount, *, include_history: bool = False) -> dict:
-    reconcile_package_payments(account)
+    # r74: привязка «висящих» оплат к абонементам выполняется при записи
+    # (register_payment / create_package), а не при чтении карточки.
     settings = account.settings
     balance = compute_account_balance(account)
     package = active_package_for_account(account)
@@ -4242,7 +4390,7 @@ def serialize_account(account: BillingAccount, *, include_history: bool = False)
         status_label = "оплата не настроена"
     elif needs:
         status_label = "требуется оформление"
-    elif unpaid_amount > 0 or balance["debt"] > 0:
+    elif balance["debt"] > 0:
         status_label = "есть задолженность"
     elif package and (
         (
@@ -4274,11 +4422,17 @@ def serialize_account(account: BillingAccount, *, include_history: bool = False)
         status_label = "условия заданы"
 
     credit = D(balance.get("credit") or 0)
+    # r74: долг и аванс — из одного источника (журнал). Сумма по неоплаченным
+    # урокам остаётся детализацией; если оплата внесена, но не распределена по
+    # урокам, долг по журналу меньше суммы по урокам.
+    lessons_due_amount = D(unpaid_amount)
+    ledger_debt = D(balance.get("debt") or 0)
+    unallocated_payments = D(max(ZERO, lessons_due_amount - ledger_debt))
     ui = build_account_ui_meta(
         has_tariff=has_tariff,
         needs_decision=needs,
         unpaid_count=unpaid_count,
-        unpaid_amount=D(unpaid_amount),
+        unpaid_amount=ledger_debt,
         balance=balance,
         package=package,
         settings=settings,
@@ -4350,8 +4504,10 @@ def serialize_account(account: BillingAccount, *, include_history: bool = False)
         "primary_action": ui["primary_action"],
         "primary_label": ui["primary_label"],
         "suggested_actions": ui["suggested_actions"],
-        "debt_amount": str(D(unpaid_amount)),
+        "debt_amount": str(ledger_debt),
         "credit_amount": str(credit),
+        "lessons_due_amount": str(lessons_due_amount),
+        "unallocated_payments_amount": str(unallocated_payments),
         "charged_total": str(D(balance.get("charged") or 0)),
         "paid_total": str(D(balance.get("paid") or 0)),
         "lesson_stats": {
@@ -4431,7 +4587,7 @@ def serialize_account(account: BillingAccount, *, include_history: bool = False)
             "available_units": str(remaining_units_total),
             "used_units": str(used_units_total),
             "unpaid_completed_lessons": unpaid_count,
-            "debt_amount": str(D(unpaid_amount)),
+            "debt_amount": str(D(balance.get("debt") or 0)),
             "active_packages_count": len(available_packages),
             "last_payment_at": (
                 last_payment.paid_at.isoformat() if last_payment and last_payment.paid_at else None
@@ -4547,7 +4703,7 @@ def serialize_package(
     package: LessonPackage,
     *,
     include_history: bool = True,
-    reconcile: bool = True,
+    reconcile: bool = False,
 ) -> dict:
     if reconcile:
         reconcile_package_payments(package.billing_account)
@@ -4728,9 +4884,21 @@ def get_lesson_financial_state(record: EventBillingRecord | None) -> dict:
     return data
 
 
-def _month_bounds(year=None, month=None):
+def billing_zoneinfo(teacher: Optional[User] = None):
+    """Часовой пояс учителя (профиль), по умолчанию — TIME_ZONE проекта."""
+    if teacher is None:
+        return timezone.get_current_timezone()
+    try:
+        from .notification_time import user_zoneinfo
+
+        return user_zoneinfo(teacher)
+    except Exception:
+        return timezone.get_current_timezone()
+
+
+def _month_bounds(year=None, month=None, teacher: Optional[User] = None):
     """Return (month_start, month_end, label) in teacher-local timezone."""
-    now = timezone.localtime()
+    now = timezone.localtime(timezone.now(), billing_zoneinfo(teacher))
     y = int(year) if year else now.year
     m = int(month) if month else now.month
     month_start = now.replace(year=y, month=m, day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -4758,10 +4926,33 @@ def _estimate_event_student_price_detail(teacher, event, student) -> tuple[Decim
         account = None
         package = None
     if record:
+        # r74: бесплатные/пробные, «не начисляется», отменённые и перенесённые
+        # записи не дают планового дохода (раньше падали в fallback по тарифу).
+        rescheduled = record.delivery_status == DeliveryStatus.RESCHEDULED
+        if rescheduled:
+            # Перенос: служебная запись «не начисляется», но урок ещё состоится.
+            skip = event.status not in (ScheduleEvent.Status.MOVED, ScheduleEvent.Status.PLANNED)
+        else:
+            skip = (
+                record.is_free
+                or record.price_source == PriceSource.FREE_TRIAL
+                or record.financial_status in (FinancialStatus.NOT_BILLABLE, FinancialStatus.REFUNDED)
+                or record.delivery_status in CANCELLED_DELIVERY_STATUSES
+            )
+        if skip:
+            if not (D(record.charged_amount or 0) > 0):
+                return ZERO, "Не начисляется"
         amt = D(record.charged_amount or 0) or D(record.calculated_amount or 0)
         if amt > 0:
             label = (record.price_source_label or "").strip() or "По расчёту урока"
             return amt, label
+        if record.financial_status == FinancialStatus.PAID_FROM_PACKAGE and record.package_id:
+            pkg = record.package if cache is None else None
+            if pkg is None:
+                pkg = LessonPackage.objects.filter(pk=record.package_id).first()
+            unit = D(package_unit_price(pkg) * D_units(record.package_units or 1))
+            if unit > 0:
+                return unit, f"Из абонемента «{pkg.title}»"
     if account is None:
         account = get_or_create_billing_account(teacher, student)
         package = active_package_for_account(account)
@@ -4872,7 +5063,7 @@ def _bind_planned_price_cache(teacher, events):
 
 def dashboard_planned_income_details(teacher: User, *, year=None, month=None) -> dict:
     """Breakdown of planned income by lesson × student for the month."""
-    month_start, month_end, month_label = _month_bounds(year, month)
+    month_start, month_end, month_label = _month_bounds(year, month, teacher)
     teacher_settings = get_or_create_teacher_settings(teacher)
     items = []
     total = ZERO
@@ -4941,7 +5132,7 @@ def dashboard_planned_income_details(teacher: User, *, year=None, month=None) ->
 
 def dashboard_received_details(teacher: User, *, year=None, month=None) -> dict:
     """Payments and package purchases in the month (incl. reversals with negative amounts)."""
-    month_start, month_end, month_label = _month_bounds(year, month)
+    month_start, month_end, month_label = _month_bounds(year, month, teacher)
     teacher_settings = get_or_create_teacher_settings(teacher)
     txs = list(
         BillingTransaction.objects.filter(
@@ -4993,9 +5184,53 @@ def dashboard_received_details(teacher: User, *, year=None, month=None) -> dict:
     }
 
 
+def ledger_account_balances(teacher: User, *, include_archived: bool = False) -> dict:
+    """{billing_account_id: balance} по журналу — та же формула, что compute_account_balance."""
+    qs = BillingTransaction.objects.filter(billing_account__teacher=teacher)
+    if not include_archived:
+        qs = qs.exclude(billing_account__student__status=StudentStatus.ARCHIVED)
+    valid_charge = (
+        Q(event_billing__isnull=True)
+        | Q(event_billing__delivery_status__in=CHARGEABLE_DELIVERY_STATUSES)
+        | Q(
+            event_billing__delivery_status__in=CANCELLED_DELIVERY_STATUSES,
+            event_billing__charged_amount__gt=0,
+        )
+    )
+    signed = Case(
+        When(
+            transaction_type__in=(
+                TransactionType.PAYMENT,
+                TransactionType.PACKAGE_PURCHASE,
+                TransactionType.ADJUSTMENT,
+                TransactionType.DISCOUNT,
+                TransactionType.PACKAGE_RETURN,
+            ),
+            then=F("amount"),
+        ),
+        When(
+            Q(transaction_type__in=(TransactionType.CHARGE, TransactionType.WRITE_OFF)) & valid_charge,
+            then=-F("amount"),
+        ),
+        When(
+            transaction_type__in=(TransactionType.REFUND, TransactionType.PACKAGE_CONSUMPTION),
+            then=-F("amount"),
+        ),
+        default=Value(0),
+        output_field=DecimalField(max_digits=12, decimal_places=2),
+    )
+    return {
+        row["billing_account_id"]: D(row["bal"] or 0)
+        for row in qs.values("billing_account_id").annotate(bal=Sum(signed))
+    }
+
+
 def dashboard_summary(teacher: User, *, year=None, month=None) -> dict:
-    month_start, month_end, month_label = _month_bounds(year, month)
-    day_start = timezone.localtime().replace(hour=0, minute=0, second=0, microsecond=0)
+    tz = billing_zoneinfo(teacher)
+    month_start, month_end, month_label = _month_bounds(year, month, teacher)
+    day_start = timezone.localtime(timezone.now(), tz).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
     archived_student = Q(student__status=StudentStatus.ARCHIVED) | Q(
         billing_account__student__status=StudentStatus.ARCHIVED
     )
@@ -5008,14 +5243,27 @@ def dashboard_summary(teacher: User, *, year=None, month=None) -> dict:
         occurred_at__lt=month_end,
     ).aggregate(t=Sum("amount"))["t"] or ZERO
 
-    month_charged = BillingTransaction.objects.filter(
+    # r74: «Начислено» — по дате урока (для операций без урока — по дате операции),
+    # включая стоимость занятий, списанных из абонементов.
+    lesson_date = Coalesce(F("event__starts_at"), F("occurred_at"))
+    charged_qs = BillingTransaction.objects.filter(
         billing_account__teacher=teacher,
-        transaction_type=TransactionType.CHARGE,
-        occurred_at__gte=month_start,
-        occurred_at__lt=month_end,
+    ).annotate(_lesson_at=lesson_date).filter(
+        _lesson_at__gte=month_start,
+        _lesson_at__lt=month_end,
     ).exclude(
         event_billing__delivery_status__in=(DeliveryStatus.RESCHEDULED, DeliveryStatus.PLANNED),
+    )
+    month_money_charged = charged_qs.filter(
+        transaction_type=TransactionType.CHARGE,
     ).aggregate(t=Sum("amount"))["t"] or ZERO
+    month_package_used = (
+        D(charged_qs.filter(transaction_type=TransactionType.PACKAGE_CONSUMPTION).aggregate(
+            t=Sum("amount"))["t"] or ZERO)
+        - D(charged_qs.filter(transaction_type=TransactionType.PACKAGE_RETURN).aggregate(
+            t=Sum("amount"))["t"] or ZERO)
+    )
+    month_charged = D(month_money_charged) + D(month_package_used)
 
     today_paid = BillingTransaction.objects.filter(
         billing_account__teacher=teacher,
@@ -5034,22 +5282,26 @@ def dashboard_summary(teacher: User, *, year=None, month=None) -> dict:
         delivery_status=DeliveryStatus.RESCHEDULED,
     ).exclude(archived_student)
     awaiting_count = awaiting.count()
-    awaiting_sum = awaiting.aggregate(t=Sum("charged_amount"))["t"] or ZERO
-    awaiting_paid = awaiting.aggregate(t=Sum("paid_amount"))["t"] or ZERO
-    expected = D(awaiting_sum) - D(awaiting_paid)
-    if expected < 0:
-        expected = ZERO
 
-    # Неоплаченные проведённые уроки — тот же фильтр, что record_is_debt().
+    # Неоплаченные проведённые уроки (счётчик/детализация) — как record_is_debt().
     unpaid_qs = EventBillingRecord.objects.filter(
         billing_account__teacher=teacher,
     ).filter(debt_records_q()).exclude(archived_student)
     unpaid_count = unpaid_qs.count()
-    unpaid_charged = unpaid_qs.aggregate(t=Sum("charged_amount"))["t"] or ZERO
-    unpaid_paid = unpaid_qs.aggregate(t=Sum("paid_amount"))["t"] or ZERO
-    unpaid_amount = D(unpaid_charged) - D(unpaid_paid)
-    if unpaid_amount < 0:
-        unpaid_amount = ZERO
+    lessons_due = ZERO
+    for charged, paid in unpaid_qs.values_list("charged_amount", "paid_amount"):
+        due = D(charged or 0) - D(paid or 0)
+        if due > 0:
+            lessons_due += due
+
+    # r74: долг и аванс — из одного источника (журнал), по каждому ученику.
+    debt_total = ZERO
+    credit_total = ZERO
+    for bal in ledger_account_balances(teacher).values():
+        if bal > 0:
+            credit_total += bal
+        elif bal < 0:
+            debt_total += -bal
 
     needs_decision = EventBillingRecord.objects.filter(
         billing_account__teacher=teacher,
@@ -5068,11 +5320,12 @@ def dashboard_summary(teacher: User, *, year=None, month=None) -> dict:
         elif pkg.unit_type == PackageUnitType.MINUTE and pkg.remaining_units <= thr_m:
             low_packages += 1
 
+    # r74: проведённые — по дате урока, а не по дате оформления.
     conducted = EventBillingRecord.objects.filter(
         billing_account__teacher=teacher,
         delivery_status=DeliveryStatus.CONDUCTED,
-        finalized_at__gte=month_start,
-        finalized_at__lt=month_end,
+        event__starts_at__gte=month_start,
+        event__starts_at__lt=month_end,
     ).count()
 
     # Плановый доход — стоимость запланированных и проведённых уроков месяца (без отменённых).
@@ -5090,50 +5343,23 @@ def dashboard_summary(teacher: User, *, year=None, month=None) -> dict:
     finally:
         _planned_price_cache.reset(price_token)
 
-    credit_total = ZERO
-    type_sign = Case(
-        When(
-            transaction_type__in=(TransactionType.PAYMENT, TransactionType.PACKAGE_PURCHASE),
-            then=F("amount"),
-        ),
-        When(
-            transaction_type__in=(
-                TransactionType.CHARGE,
-                TransactionType.WRITE_OFF,
-                TransactionType.REFUND,
-            ),
-            then=-F("amount"),
-        ),
-        When(
-            transaction_type__in=(TransactionType.ADJUSTMENT, TransactionType.DISCOUNT),
-            then=F("amount"),
-        ),
-        default=Value(0),
-        output_field=DecimalField(max_digits=12, decimal_places=2),
-    )
-    for row in (
-        BillingTransaction.objects.filter(billing_account__teacher=teacher)
-        .exclude(billing_account__student__status=StudentStatus.ARCHIVED)
-        .values("billing_account_id")
-        .annotate(bal=Sum(type_sign))
-    ):
-        bal = D(row["bal"] or 0)
-        if bal > 0:
-            credit_total += bal
-
     return {
         "currency": teacher_settings.currency,
+        "timezone": str(getattr(tz, "key", tz)),
         "year": month_start.year,
         "month": month_start.month,
         "month_label": month_label,
         "planned_income": str(D(planned_income)),
         "month_received": str(D(month_paid)),
         "month_charged": str(D(month_charged)),
+        "month_charged_money": str(D(month_money_charged)),
+        "month_charged_packages": str(D(month_package_used)),
         "unpaid_lessons_count": unpaid_count,
-        "unpaid_lessons_amount": str(D(unpaid_amount) if unpaid_amount > 0 else ZERO),
-        "debt_total": str(D(unpaid_amount) if unpaid_amount > 0 else ZERO),
+        "unpaid_lessons_amount": str(D(debt_total)),
+        "lessons_due_amount": str(D(lessons_due)),
+        "debt_total": str(D(debt_total)),
         "credit_total": str(D(credit_total)),
-        "expected_incoming": str(D(expected)),
+        "expected_incoming": str(D(debt_total)),
         "conducted_billable_lessons": conducted,
         "low_packages": low_packages,
         "active_packages": LessonPackage.objects.filter(
@@ -5142,7 +5368,7 @@ def dashboard_summary(teacher: User, *, year=None, month=None) -> dict:
         "ending_packages": low_packages,
         "needs_decision": needs_decision,
         "awaiting_payment_count": awaiting_count,
-        "expected_amount": str(D(expected)),
+        "expected_amount": str(D(debt_total)),
         "today_received": str(D(today_paid)),
     }
 

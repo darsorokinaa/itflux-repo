@@ -101,6 +101,42 @@ def _parse_dt(value):
     return None
 
 
+def _parse_paid_at(value, teacher=None):
+    """r74: дата оплаты без времени → 12:00 по часовому поясу учителя.
+
+    Раньше сохранялось 00:00 по Москве, и у учителей западнее МСК оплата
+    «1-го числа» уезжала в прошлый месяц на графике.
+    """
+    if not value or isinstance(value, datetime) or not _is_date_only(value):
+        return _parse_dt(value)
+    d = parse_date(str(value).strip())
+    if not d:
+        return None
+    from datetime import time as _time
+
+    from .billing_service import billing_zoneinfo
+
+    return datetime.combine(d, _time(12, 0)).replace(tzinfo=billing_zoneinfo(teacher))
+
+
+def _parse_dt_teacher(value, teacher=None):
+    """Дата без времени → полночь по часовому поясу учителя (r74)."""
+    if _is_date_only(value):
+        from .billing_service import billing_zoneinfo
+
+        d = parse_date(str(value))
+        return datetime.combine(d, datetime.min.time()).replace(tzinfo=billing_zoneinfo(teacher))
+    return _parse_dt(value)
+
+
+_DATE_ONLY_RE = __import__("re").compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _is_date_only(value) -> bool:
+    # parse_datetime в Django 5 принимает и «YYYY-MM-DD», поэтому — по формату строки.
+    return bool(value) and not isinstance(value, datetime) and bool(_DATE_ONLY_RE.match(str(value).strip()))
+
+
 def _dec(value, default=None):
     if value is None or value == "":
         return default
@@ -280,8 +316,8 @@ class BillingTransactionsView(APIView):
         )
         student_id = request.query_params.get("student_id")
         tx_type = request.query_params.get("type")
-        date_from = _parse_dt(request.query_params.get("from"))
-        date_to = _parse_dt(request.query_params.get("to"))
+        date_from = _parse_dt_teacher(request.query_params.get("from"), request.user)
+        date_to = _parse_dt_teacher(request.query_params.get("to"), request.user)
         only_reversals = request.query_params.get("reversals") == "1"
         only_adjustments = request.query_params.get("adjustments") == "1"
         if student_id:
@@ -291,7 +327,11 @@ class BillingTransactionsView(APIView):
         if date_from:
             qs = qs.filter(occurred_at__gte=date_from)
         if date_to:
-            qs = qs.filter(occurred_at__lte=date_to)
+            # r74: «to=YYYY-MM-01» — граница следующего месяца, не включительно.
+            if _is_date_only(request.query_params.get("to")):
+                qs = qs.filter(occurred_at__lt=date_to)
+            else:
+                qs = qs.filter(occurred_at__lte=date_to)
         if only_reversals:
             qs = qs.filter(is_reversal=True)
         if only_adjustments:
@@ -314,7 +354,7 @@ class BillingPaymentsView(APIView):
                 teacher=request.user,
                 student=student,
                 amount=_dec(data.get("amount")),
-                paid_at=_parse_dt(data.get("paid_at")),
+                paid_at=_parse_paid_at(data.get("paid_at"), request.user),
                 method=data.get("method") or "",
                 purpose=data.get("purpose") or "",
                 comment=data.get("comment") or "",
@@ -348,7 +388,7 @@ class BillingPaymentDetailView(APIView):
                 teacher=request.user,
                 payment=payment,
                 amount=_dec(data.get("amount")) if data.get("amount") is not None else None,
-                paid_at=_parse_dt(data.get("paid_at")),
+                paid_at=_parse_paid_at(data.get("paid_at"), request.user),
                 comment=data.get("comment") if "comment" in data else None,
             )
         except BillingError as exc:
@@ -837,7 +877,7 @@ class BillingEventBillingMarkPaidView(APIView):
                 teacher=request.user,
                 event_billing=record,
                 amount=_dec(data.get("amount"), Decimal("0")),
-                paid_at=_parse_dt(data.get("paid_at")),
+                paid_at=_parse_paid_at(data.get("paid_at"), request.user),
                 method=data.get("method") or "",
                 comment=data.get("comment") or "",
             )
