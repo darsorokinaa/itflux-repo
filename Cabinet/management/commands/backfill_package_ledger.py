@@ -194,6 +194,15 @@ class Command(BaseCommand):
             with transaction.atomic():
                 before_acc = account_snapshot(teacher_ids)
                 before = {tid: teacher_metrics(teachers[tid], year, month) for tid in teacher_ids}
+                # 0. привязать «висящие» оплаты к абонементам (раньше делалось при чтении карточки)
+                rstats = 0
+                acc_qs = BillingAccount.objects.exclude(pk__in=exclude_accounts)
+                if o.get("teacher"):
+                    acc_qs = acc_qs.filter(teacher_id=o["teacher"])
+                for acc in acc_qs:
+                    linked_before = StudentPayment.objects.filter(billing_account=acc, package__isnull=False).count()
+                    bs.reconcile_package_payments(acc)
+                    rstats += StudentPayment.objects.filter(billing_account=acc, package__isnull=False).count() - linked_before
                 vstats, manual = value_packages(exclude_accounts, o.get("teacher"))
                 astats = allocate_free_payments(exclude_accounts, o.get("teacher")) if o["allocate_payments"] else {}
                 after_acc = account_snapshot(teacher_ids)
@@ -207,6 +216,7 @@ class Command(BaseCommand):
                 report.update({
                     "valuation": {k: v for k, v in vstats.items() if not k.startswith("accounts:")},
                     "allocation": dict(astats),
+                    "payments_linked_to_packages": rstats,
                     "manual": manual,
                     "excluded_accounts": sorted(exclude_accounts),
                     "metrics_before": before,
@@ -226,6 +236,6 @@ class Command(BaseCommand):
             with open(o["report_json"], "w") as fh:
                 fh.write(text)
         s = report
-        self.stdout.write(f"dry_run={s['dry_run']} valuation={s['valuation']} allocation={s['allocation']}")
+        self.stdout.write(f"dry_run={s['dry_run']} valuation={s['valuation']} allocation={s['allocation']} linked={s.get('payments_linked_to_packages')}")
         self.stdout.write(f"changed accounts: {len(s['changed_accounts'])}, teachers: {len(s['changed_teachers'])}")
         self.stdout.write(f"manual (skipped): {len(s['manual'])}; excluded accounts: {s['excluded_accounts']}")

@@ -311,8 +311,9 @@ class PackageTests(BillingTestBase):
         self.assertTrue(data["is_paid"])
 
     def test_reconcile_existing_orphan_payment_on_serialize(self):
+        # r74: привязка выполняется при записи/в backfill, не при чтении карточки.
         from Cabinet.billing_models import StudentPayment, StudentPaymentStatus
-        from Cabinet.billing_service import serialize_account
+        from Cabinet.billing_service import reconcile_package_payments, serialize_account
 
         pkg = create_package(
             teacher=self.teacher,
@@ -335,6 +336,7 @@ class PackageTests(BillingTestBase):
             package=None,
             created_by=self.teacher,
         )
+        reconcile_package_payments(self.account)
         data = serialize_account(self.account)
         self.assertIsNotNone(data["package"])
         self.assertEqual(Decimal(data["package"]["paid_amount"]), Decimal("3000.00"))
