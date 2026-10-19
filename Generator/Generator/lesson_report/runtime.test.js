@@ -77,8 +77,14 @@ test("типичная ошибка распознаётся по ответу �
 test("плейсхолдеры подставляются, имя по умолчанию «Ученик»", () => {
   const data = lesson(report5, 1);
   const m = R.computeReport({ data, variant: data.variants[0], selected: answers([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) });
-  assert.match(m.band.summary, /^Ученик набрал\(а\) 10 из 14 баллов \(71%\)/);
+  assert.match(m.band.summary, /10 из 14 баллов \(71%\)/);
   assert.doesNotMatch(m.band.summary, /\{\w+\}/);
+  // {student_name} по-прежнему поддерживается: без имени в уроке — «Ученик»
+  const r2 = JSON.parse(JSON.stringify(report5));
+  r2.result_bands.forEach((b) => { b.summary = "{student_name}: {total_score}/{max_score}"; });
+  const d2 = lesson(r2, 1);
+  const m2 = R.computeReport({ data: d2, variant: d2.variants[0], selected: answers([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) });
+  assert.equal(m2.band.summary, "Ученик: 10/14");
 });
 
 test("весь контент экранируется (plain text)", () => {

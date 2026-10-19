@@ -76,6 +76,45 @@ class ReportContentTests(SimpleTestCase):
             self.assertEqual(v.errors, [], slug)
             c = embed.cross_check(r, lesson_data_for(r), slug=slug)
             self.assertEqual(c.errors, [], slug)
+            self.assertEqual(c.warnings, [], slug)
+
+    # Задание 9, 6 кл. по HTML урока 54: (вариант, угол, тип, число, что найти, верный ответ)
+    G6_T9 = [(1, 180, "diff", 40, "big", 110), (2, 180, "diff", 30, "small", 75), (3, 180, "times", 2, "big", 120),
+             (4, 90, "diff", 20, "big", 55), (5, 180, "diff", 50, "big", 115), (6, 180, "times", 3, "small", 45),
+             (7, 90, "times", 2, "big", 60), (8, 180, "diff", 70, "small", 55), (9, 180, "times", 4, "big", 144),
+             (10, 90, "diff", 30, "small", 30), (11, 180, "diff", 24, "big", 102), (12, 180, "times", 5, "small", 30)]
+
+    @staticmethod
+    def _angles(total, kind, n):
+        if kind == "diff":
+            return (total + n) / 2, (total - n) / 2
+        small = total / (n + 1)
+        return small * n, small
+
+    def test_grade6_task9_typical_errors_match_variant(self):
+        """Ответы в typical_errors задания 9 (6 кл.) пересчитаны по условию каждого варианта."""
+        t9 = [t for t in load(SLUG6)["tasks"] if t["task_id"] == 9][0]
+        checked = 0
+        for vid, total, kind, n, ask, correct in self.G6_T9:
+            big, small = self._angles(total, kind, n)
+            self.assertEqual(big if ask == "big" else small, correct)
+            ob, osm = self._angles(270 - total, kind, n)
+            for e in embed.effective_task(t9, vid).get("typical_errors", []):
+                if not e.get("answer"):
+                    continue
+                ans, c = float(e["answer"]), e["comment"]
+                self.assertNotEqual(ans, correct, f"v{vid}: ошибка совпала с верным ответом")
+                if c.startswith("Перепутаны виды углов"):
+                    exp = ob if ask == "big" else osm
+                elif c.startswith("Найден"):
+                    exp = small if ask == "big" else big
+                elif c.startswith("Из градусной меры"):
+                    exp = total - n
+                else:  # «… разделено на k, а нужно на k+1»
+                    exp = total / n
+                self.assertEqual(ans, exp, f"v{vid}: {c[:40]}")
+                checked += 1
+        self.assertGreaterEqual(checked, 30)
 
     def test_grade5_task12_overrides_and_points(self):
         r = load(SLUG5)
