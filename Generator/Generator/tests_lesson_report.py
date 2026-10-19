@@ -3,6 +3,7 @@
 import copy
 import io
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -116,29 +117,44 @@ class ReportContentTests(SimpleTestCase):
                 checked += 1
         self.assertGreaterEqual(checked, 30)
 
-    def test_bundled_texts_have_no_promises_and_consistent_timeframes(self):
-        """Нет обещаний результата; сроки: 6 кл. только «3–4 недели», 5 кл. ещё «6–8 недель» (вычислительный блок)."""
-        import re
-        promise = re.compile(r"достаточно|гарантир|получится|будет выше|будет лучше|станет лучше", re.I)
-        weeks = re.compile(r"(\d+\s*[–-]\s*\d+)\s*недел", re.I)
+    # Правило владельца (2026-10-19.4): в рекомендациях нет сроков, количества/частоты занятий
+    # и обещаний результата — только что повторить и как себя проверить.
+    FORBIDDEN = re.compile(
+        r"недел|\bсут(ки|ок) подряд|ежедневн|еженедельн|раз\w* в (день|недел|месяц)|месяц|в течение"
+        r"|через\s+(\d|недел|месяц|день|год)|\d+\s*[–-]\s*\d+\s*(заняти|урок|минут|час)|\d+\s*(заняти|урок)"
+        r"|четверт(и|ью)\b|занятия? в|занятий"
+        r"|помож|помога|полезн|закреп|получится|сможешь|станет|станешь|улучш|повыс|гарант|достаточн"
+        r"|обязательно получ|результат будет|будет (выше|лучше)",
+        re.I,
+    )
+    # Поля с содержанием задач (условия, ошибки, планируемые результаты) не проверяем:
+    # там «минуты», «часы», «путь первого дня» — это математика, а не сроки.
+    SKIP_KEYS = {"typical_errors", "planned_result", "topic", "subtopic", "title"}
 
-        def strings(x):
-            if isinstance(x, dict):
-                for v in x.values():
-                    yield from strings(v)
-            elif isinstance(x, list):
-                for v in x:
-                    yield from strings(v)
-            elif isinstance(x, str):
-                yield x
+    def _advice_texts(self, x, path=""):
+        if isinstance(x, dict):
+            for k, v in x.items():
+                if k not in self.SKIP_KEYS:
+                    yield from self._advice_texts(v, f"{path}/{k}")
+        elif isinstance(x, list):
+            for i, v in enumerate(x):
+                yield from self._advice_texts(v, f"{path}/{i}")
+        elif isinstance(x, str):
+            yield path, x
 
-        allowed = {SLUG5: {"3–4", "6–8"}, SLUG6: {"3–4"}}
+    def test_bundled_texts_have_no_timeframes_lesson_counts_or_promises(self):
         for slug in (SLUG5, SLUG6):
-            texts = list(strings(load(slug)))
-            self.assertEqual([t for t in texts if promise.search(t)], [], slug)
-            found = {re.sub(r"\s|-", lambda m: "" if m.group().isspace() else "–", w)
-                     for t in texts for w in weeks.findall(t)}
-            self.assertEqual(found, allowed[slug], slug)
+            bad = [(p, m.group(0)) for p, t in self._advice_texts(load(slug)) for m in [self.FORBIDDEN.search(t)] if m]
+            self.assertEqual(bad, [], slug)
+
+    def test_forbidden_rule_catches_old_wording(self):
+        for t in ("2–3 коротких занятия в неделю будет достаточно", "Через 3–4 недели выполни мини-диагностику",
+                  "устный счёт 5–7 минут", "повторение 1–2 урока", "это поможет подготовиться",
+                  "в следующий раз результат будет выше", "Стоит закрепить"):
+            self.assertTrue(self.FORBIDDEN.search(t), t)
+        for t in ("В часе 60 минут, а не 100.", "Не учтён путь второго дня.", "это четверть книги",
+                  "Для самопроверки реши другой вариант", "После повторения тем рекомендуется повторная проверка"):
+            self.assertFalse(self.FORBIDDEN.search(t), t)
 
     def test_grade5_task12_overrides_and_points(self):
         r = load(SLUG5)
