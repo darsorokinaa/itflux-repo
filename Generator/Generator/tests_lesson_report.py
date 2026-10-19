@@ -116,6 +116,30 @@ class ReportContentTests(SimpleTestCase):
                 checked += 1
         self.assertGreaterEqual(checked, 30)
 
+    def test_bundled_texts_have_no_promises_and_consistent_timeframes(self):
+        """Нет обещаний результата; сроки: 6 кл. только «3–4 недели», 5 кл. ещё «6–8 недель» (вычислительный блок)."""
+        import re
+        promise = re.compile(r"достаточно|гарантир|получится|будет выше|будет лучше|станет лучше", re.I)
+        weeks = re.compile(r"(\d+\s*[–-]\s*\d+)\s*недел", re.I)
+
+        def strings(x):
+            if isinstance(x, dict):
+                for v in x.values():
+                    yield from strings(v)
+            elif isinstance(x, list):
+                for v in x:
+                    yield from strings(v)
+            elif isinstance(x, str):
+                yield x
+
+        allowed = {SLUG5: {"3–4", "6–8"}, SLUG6: {"3–4"}}
+        for slug in (SLUG5, SLUG6):
+            texts = list(strings(load(slug)))
+            self.assertEqual([t for t in texts if promise.search(t)], [], slug)
+            found = {re.sub(r"\s|-", lambda m: "" if m.group().isspace() else "–", w)
+                     for t in texts for w in weeks.findall(t)}
+            self.assertEqual(found, allowed[slug], slug)
+
     def test_grade5_task12_overrides_and_points(self):
         r = load(SLUG5)
         t12 = [t for t in r["tasks"] if t["task_id"] == 12][0]
