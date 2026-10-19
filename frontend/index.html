@@ -55,6 +55,46 @@
       background-size: 32px 32px !important;
     }
   </style>
+  <style id="itflux-cdn-hint-style">
+    #itflux-cdn-hint{position:fixed;left:12px;right:12px;bottom:12px;z-index:2147483000;max-width:560px;margin:0 auto;display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:#1e293b;color:#fff;font:14px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.25)}
+    #itflux-cdn-hint a{color:#93c5fd;font-weight:600;text-decoration:underline}
+    #itflux-cdn-hint button{margin-left:auto;flex:none;border:0;background:transparent;color:#cbd5e1;font-size:20px;line-height:1;cursor:pointer;padding:2px 6px}
+  </style>
+  <script id="itflux-cdn-hint-script">
+    /* Подсказка про запасной адрес, если приложение не отрисовалось за ~10 с. Без внешних запросов. */
+    (function () {
+      try {
+        var CDN = "cdn.itflux-academy.ru";
+        var host = String(location.hostname || "").toLowerCase();
+        if (host !== "itflux-academy.ru" && host !== "www.itflux-academy.ru") return;
+        try { if (sessionStorage.getItem("itfluxCdnHintDismissed")) return; } catch (e) { /* ignore */ }
+        var ms = Number(window.__ITFLUX_CDN_HINT_MS) || 10000;
+        setTimeout(function () {
+          if (window.__ITFLUX_BOOTED || document.getElementById("itflux-cdn-hint") || !document.body) return;
+          var box = document.createElement("div");
+          box.id = "itflux-cdn-hint";
+          box.setAttribute("role", "status");
+          var text = document.createElement("span");
+          text.appendChild(document.createTextNode("Сайт грузится медленно? "));
+          var a = document.createElement("a");
+          a.href = "https://" + CDN + location.pathname + location.search + location.hash;
+          a.textContent = "Откройте через запасной адрес";
+          text.appendChild(a);
+          var close = document.createElement("button");
+          close.type = "button";
+          close.setAttribute("aria-label", "Закрыть");
+          close.textContent = "\u00d7";
+          close.onclick = function () {
+            try { sessionStorage.setItem("itfluxCdnHintDismissed", "1"); } catch (e) { /* ignore */ }
+            if (box.parentNode) box.parentNode.removeChild(box);
+          };
+          box.appendChild(text);
+          box.appendChild(close);
+          document.body.appendChild(box);
+        }, ms);
+      } catch (err) { /* подсказка не блокирует запуск */ }
+    })();
+  </script>
   <script src="/boot-watchdog.js"></script>
 
   <!-- Яндекс.Метрика подключается только после согласия на cookie (см. utils/analytics.js). -->
