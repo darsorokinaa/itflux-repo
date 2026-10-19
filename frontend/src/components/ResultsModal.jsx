@@ -405,7 +405,8 @@ function deriveHeroPresentation(r) {
   }
 
   const lvl = String(level || "").toLowerCase();
-  if (scoreExam != null && lvl === "oge") {
+  // r76: отметка «2»–«5» — ОГЭ и ЕГЭ по базовой математике (scale="mark" из score-conversion).
+  if (scoreExam != null && (lvl === "oge" || r.scoreScale === "mark")) {
     const m = Math.round(Number(scoreExam));
     let tier = "bad";
     if (m >= 4) tier = "good";

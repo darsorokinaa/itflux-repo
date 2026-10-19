@@ -2426,6 +2426,7 @@ function ExamPage() {
     let scoreExam = null;
     let scoreComment = null;
     let markLevel = null;
+    let scoreScale = null;
     const resultIsPreliminary = Boolean(effSummary?.preliminary) || effSummary?.review_status === "pending_review";
 
     // В режиме тренировки по номерам конвертация в баллы/оценку не нужна; в ДЗ — только часть 1.
@@ -2446,6 +2447,7 @@ function ExamPage() {
           scoreExam = data.score_exam !== undefined ? data.score_exam : null;
           scoreComment = data.comment ?? null;
           markLevel = data.mark_level ?? null;
+          scoreScale = data.scale ?? null;
         }
       } catch {
         /* ignore conversion API errors */
@@ -2466,6 +2468,7 @@ function ExamPage() {
       scoreExam,
       scoreComment,
       markLevel,
+      scoreScale,
       tasks: documentTasks,
       startTime: startTimeRef.current,
       endTime: endTimeRef.current,

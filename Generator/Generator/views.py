@@ -4428,6 +4428,13 @@ def variant_detail_short_url(request, level, subject, variant_id):
     return react_app(request)
 
 
+def score_scale_is_mark(level, subject):
+    """r76: перевод в отметку «2»–«5» (не в тестовые баллы): ОГЭ и ЕГЭ по математике базового уровня."""
+    lv = (level or "").strip().lower()
+    sub = (subject or "").strip().lower()
+    return lv == "oge" or (lv == "ege" and sub == "math_base")
+
+
 @require_http_methods(["GET"])
 def api_score_conversion(request, level, subject):
     """Конвертация первичных баллов в вторичные по таблице Mark. Работает для всех предметов (subject_short в Mark)."""
@@ -4455,8 +4462,10 @@ def api_score_conversion(request, level, subject):
         )
     ).order_by("-level_match", "-score")
     mark_row = qs.first()
+    # r76: шкала-отметка (2–5) — ОГЭ и ЕГЭ по базовой математике; иначе тестовые баллы (0–100).
+    scale = "mark" if score_scale_is_mark(level_norm, subject_norm) else "test"
     if mark_row is None:
-        return JsonResponse({"score_exam": None, "comment": None, "mark_level": None})
+        return JsonResponse({"score_exam": None, "comment": None, "mark_level": None, "scale": scale})
     score_exam = mark_row.score_exam
     comment = mark_row.comment.comment_text if mark_row.comment else None
     mark_level = mark_row.comment.mark_level if (mark_row.comment and mark_row.comment.mark_level) else None
@@ -4498,6 +4507,7 @@ def api_score_conversion(request, level, subject):
             "comment": comment,
             "mark_level": mark_level,
             "geometry_floor_applied": geometry_floor_applied,
+            "scale": scale,
         }
     )
 
@@ -5953,6 +5963,7 @@ def report_pdf(request, level, subject):
         "pdf_css": pdf_utils.get_pdf_css(),
         "score_comment_class": score_comment_class,
         "favicon_url": request.build_absolute_uri("/favicon.png"),
+        "score_is_mark": score_scale_is_mark(level, subject),
     }
 
     html_string = render_to_string("report_template.html", context)

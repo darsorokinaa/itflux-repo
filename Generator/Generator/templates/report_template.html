@@ -473,9 +473,9 @@
                 </tr>
                 {% if not is_vpr and score_exam is not None %}
                 <tr>
-                    <td class="sk">{% if is_oge %}Оценка{% else %}Вторичные баллы{% endif %}</td>
+                    <td class="sk">{% if is_oge or score_is_mark %}Оценка{% else %}Вторичные баллы{% endif %}</td>
                     <td class="sv">
-                        {% if is_oge %}{{ score_exam }} из 5{% else %}{{ score_exam }} из 100{% endif %}
+                        {% if is_oge or score_is_mark %}{{ score_exam }} из 5{% else %}{{ score_exam }} из 100{% endif %}
                     </td>
                 </tr>
                 {% endif %}
