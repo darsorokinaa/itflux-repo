@@ -5,6 +5,7 @@ import {
   BOARD_IMAGE_INSERT_ERROR,
   fileLooksLikeBoardImage,
   isAllowedBoardImageMime,
+  isGifMime,
   isHeicMime,
   resolveBoardImageMime,
 } from "./boardImageMime";
@@ -124,7 +125,10 @@ async function decodeNaturalSize(blob: Blob): Promise<{ width: number; height: n
   }
 }
 
-async function reencodeToJpeg(blob: Blob): Promise<{ blob: Blob; width: number; height: number } | null> {
+async function reencodeToJpeg(
+  blob: Blob,
+  outType: "image/jpeg" | "image/png" = "image/jpeg",
+): Promise<{ blob: Blob; width: number; height: number } | null> {
   const size = await decodeNaturalSize(blob);
   if (!size) return null;
   try {
@@ -155,7 +159,7 @@ async function reencodeToJpeg(blob: Blob): Promise<{ blob: Blob; width: number; 
       }
     }
     const jpeg = await new Promise<Blob | null>((resolve) => {
-      canvas.toBlob((next) => resolve(next), "image/jpeg", 0.92);
+      canvas.toBlob((next) => resolve(next), outType, outType === "image/jpeg" ? 0.92 : undefined);
     });
     if (!jpeg || jpeg.size <= 0) return null;
     return { blob: jpeg, width: size.width, height: size.height };
@@ -166,7 +170,11 @@ async function reencodeToJpeg(blob: Blob): Promise<{ blob: Blob; width: number; 
 
 export async function prepareBoardImageFile(
   file: File | Blob,
-  opts: { generateId?: (file: File) => string | Promise<string> } = {},
+  opts: {
+    generateId?: (file: File) => string | Promise<string>;
+    /** Сервер конвертирует HEIC/GIF, если браузер не умеет (Chrome/Firefox и HEIC). */
+    convertRemote?: (file: File) => Promise<Blob | null>;
+  } = {},
 ): Promise<BoardImageInsertOk | BoardImageInsertError> {
   if (!file || file.size <= 0) {
     return { ok: false, reason: "empty", message: BOARD_IMAGE_INSERT_ERROR };
@@ -197,11 +205,29 @@ export async function prepareBoardImageFile(
   let natural = await decodeNaturalSize(outBlob);
 
   if (isHeicMime(outMime) || !isAllowedBoardImageMime(outMime)) {
-    const converted = await reencodeToJpeg(outBlob);
+    // GIF → PNG (первый кадр, прозрачность), HEIC → JPEG.
+    const target = isGifMime(outMime) ? "image/png" : "image/jpeg";
+    const converted = await reencodeToJpeg(outBlob, target);
     if (converted) {
       outBlob = converted.blob;
-      outMime = "image/jpeg";
+      outMime = target;
       natural = { width: converted.width, height: converted.height };
+    } else if (opts.convertRemote && (isHeicMime(outMime) || isGifMime(outMime))) {
+      try {
+        const remote = await opts.convertRemote(new File([bytes.slice().buffer as ArrayBuffer], fileName || "image", { type: outMime }));
+        if (remote && remote.size > 0) {
+          const remoteBytes = new Uint8Array(await remote.arrayBuffer());
+          const remoteMime = resolveBoardImageMime(remote.type, remoteBytes);
+          if (isAllowedBoardImageMime(remoteMime)) {
+            outBlob = new Blob([remoteBytes], { type: remoteMime });
+            outMime = remoteMime;
+            natural = await decodeNaturalSize(outBlob);
+          }
+        }
+      } catch (err) {
+        const message = (err as { message?: string })?.message;
+        return { ok: false, reason: "format", message: message || BOARD_IMAGE_FORMAT_ERROR };
+      }
     }
   }
 

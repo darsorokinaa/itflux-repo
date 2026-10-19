@@ -1,8 +1,10 @@
 /** Вынос dataURL/blob из сцены в защищённые asset URL через API. */
 
-import { BOARD_IMAGE_ALLOWED_MIME, resolveBoardImageMime } from "./boardImageMime";
-
-const ALLOWED_MIME = BOARD_IMAGE_ALLOWED_MIME;
+import {
+  boardImageExtForMime,
+  isUploadableBoardImageMime,
+  resolveBoardImageMime,
+} from "./boardImageMime";
 
 /** Стабильный URL для persist/live — не blob/data. */
 const STABLE_URL_KEY = "itfluxStableURL";
@@ -174,15 +176,16 @@ export async function externalizeSceneFiles(
     }
     if (!parsed) continue;
     const mime = resolveBoardImageMime(parsed.mime, parsed.bytes);
-    if (!ALLOWED_MIME.has(mime)) {
-      throw new Error("Допустимы только PNG, JPEG и WebP. SVG не поддерживается.");
+    // GIF/HEIC сервер конвертирует сам (GIF → PNG, HEIC → JPEG).
+    if (!isUploadableBoardImageMime(mime)) {
+      throw new Error("Допустимы PNG, JPEG, WebP, GIF и HEIC. SVG не поддерживается.");
     }
     parsed = { ...parsed, mime };
 
     const form = new FormData();
-    const blob = new Blob([parsed.bytes.buffer as ArrayBuffer], { type: parsed.mime });
-    const ext = parsed.mime === "image/jpeg" ? "jpg" : parsed.mime.split("/")[1];
-    form.append("file", blob, `${fileId}.${ext}`);
+    const view = parsed.bytes;
+    const blob = new Blob([view.slice().buffer as ArrayBuffer], { type: parsed.mime });
+    form.append("file", blob, `${fileId}.${boardImageExtForMime(parsed.mime)}`);
     form.append("id", fileId);
 
     const uploaded = await upload(form);

@@ -6,7 +6,9 @@ import base64
 import binascii
 import copy
 import hashlib
+import io
 import json
+import logging
 import mimetypes
 import os
 import re
@@ -45,6 +47,8 @@ from .models import (
 )
 from .schedule_events import parse_local_event_id
 from .upload_validation import UploadValidationError, validate_uploaded_file, validate_uploaded_image
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_optional_pk(value):
@@ -229,10 +233,64 @@ def _referenced_file_ids(elements: list) -> set[str]:
     return ids
 
 
+STROKE_POINT_DECIMALS = 2
+STROKE_PRESSURE_DECIMALS = 3
+_STROKE_TYPES = frozenset({"freedraw", "line", "arrow"})
+
+
+def _round_num(value, ndigits: int):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return value
+    if isinstance(value, int):
+        return value
+    r = round(value, ndigits)
+    return int(r) if r == int(r) else r
+
+
+def _quantize_stroke_element(el: dict) -> dict | None:
+    """
+    Точки штриха iPad/iPhone приходят как float32 с ~15 знаками
+    (-9.59991455078125). 0.01 px визуально неотличимо, а JSON становится
+    в 2+ раза меньше. Возвращает новый элемент или None, если менять нечего.
+    """
+    if el.get("type") not in _STROKE_TYPES or el.get("isDeleted"):
+        return None
+    points = el.get("points")
+    pressures = el.get("pressures")
+    new_points = None
+    if isinstance(points, list):
+        out = []
+        diff = False
+        for pt in points:
+            if isinstance(pt, list) and len(pt) >= 2:
+                q = [_round_num(pt[0], STROKE_POINT_DECIMALS), _round_num(pt[1], STROKE_POINT_DECIMALS), *pt[2:]]
+                if q[0] != pt[0] or q[1] != pt[1] or type(q[0]) is not type(pt[0]) or type(q[1]) is not type(pt[1]):
+                    diff = True
+                out.append(q)
+            else:
+                out.append(pt)
+        if diff:
+            new_points = out
+    new_pressures = None
+    if isinstance(pressures, list):
+        out_p = [_round_num(v, STROKE_PRESSURE_DECIMALS) for v in pressures]
+        if any(a != b or type(a) is not type(b) for a, b in zip(out_p, pressures)):
+            new_pressures = out_p
+    if new_points is None and new_pressures is None:
+        return None
+    next_el = dict(el)
+    if new_points is not None:
+        next_el["points"] = new_points
+    if new_pressures is not None:
+        next_el["pressures"] = new_pressures
+    return next_el
+
+
 def compact_scene_data(scene: dict) -> tuple[dict, bool]:
     """
-    Идемпотентно сжимает сцену: tombstones вместо геометрии deleted-элементов
-    и удаление files без ссылок. Живые элементы не меняются.
+    Идемпотентно сжимает сцену: tombstones вместо геометрии deleted-элементов,
+    удаление files без ссылок, округление точек живых штрихов до 0.01 px
+    (version/versionNonce не меняются — для collab это тот же элемент).
     """
     if not isinstance(scene, dict):
         return empty_board_scene(), False
@@ -248,6 +306,11 @@ def compact_scene_data(scene: dict) -> tuple[dict, bool]:
     for raw in elements_in:
         if isinstance(raw, dict) and _is_bulky_deleted_element(raw):
             elements.append(_compact_deleted_element(raw))
+            changed = True
+            continue
+        quantized = _quantize_stroke_element(raw) if isinstance(raw, dict) else None
+        if quantized is not None:
+            elements.append(quantized)
             changed = True
         else:
             elements.append(raw)
@@ -461,6 +524,133 @@ def validate_board_image_upload(uploaded) -> None:
                 "Допустимы только PNG, JPEG и WebP. SVG не поддерживается.",
                 "FILE_TYPE_NOT_ALLOWED",
             ) from exc
+
+
+BOARD_IMAGE_CONVERTIBLE_MIMES = frozenset({"image/gif", "image/heic", "image/heif"})
+_HEIC_BRANDS = frozenset({b"heic", b"heix", b"heif", b"heis", b"mif1", b"msf1", b"hevc", b"hevx"})
+# Защита от «бомб»: GIF/HEIC больше этого числа пикселей не конвертируем.
+BOARD_IMAGE_MAX_CONVERT_PIXELS = 60_000_000
+
+
+def sniff_board_image_mime(content: bytes) -> str | None:
+    """Сигнатура файла: PNG/JPEG/WebP (как есть) и GIF/HEIC/HEIF (конвертируем)."""
+    mime = detect_raster_mime(content)
+    if mime:
+        return mime
+    if not content or len(content) < 12:
+        return None
+    if content[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if content[4:8] == b"ftyp" and content[8:12].lower() in _HEIC_BRANDS:
+        return "image/heif" if content[8:12].lower() in (b"heif", b"mif1", b"msf1") else "image/heic"
+    return None
+
+
+def _convert_board_image(content: bytes, mime: str) -> tuple[bytes, str]:
+    """GIF → PNG (первый кадр, прозрачность сохраняется); HEIC/HEIF → JPEG."""
+    from PIL import Image
+
+    if mime in ("image/heic", "image/heif"):
+        try:
+            import pillow_heif  # type: ignore
+
+            pillow_heif.register_heif_opener()
+        except Exception as exc:  # pragma: no cover - зависит от окружения
+            raise UploadValidationError(
+                "Формат HEIC не поддерживается на сервере. Сохраните фото как JPEG или PNG.",
+                "HEIC_NOT_SUPPORTED",
+            ) from exc
+    try:
+        with Image.open(io.BytesIO(content)) as img:
+            if img.width * img.height > BOARD_IMAGE_MAX_CONVERT_PIXELS:
+                raise UploadValidationError("Изображение слишком большое.", "IMAGE_TOO_LARGE")
+            img.seek(0)
+            out = io.BytesIO()
+            if mime == "image/gif":
+                frame = img.convert("RGBA")
+                frame.save(out, format="PNG", optimize=True)
+                return out.getvalue(), "image/png"
+            try:
+                from PIL import ImageOps
+
+                img = ImageOps.exif_transpose(img)
+            except Exception:
+                pass
+            frame = img.convert("RGB")
+            frame.save(out, format="JPEG", quality=90)
+            return out.getvalue(), "image/jpeg"
+    except UploadValidationError:
+        raise
+    except Exception as exc:
+        raise UploadValidationError(
+            "Не удалось прочитать изображение. Попробуйте сохранить его как JPEG или PNG.",
+            "IMAGE_DECODE_FAILED",
+        ) from exc
+
+
+def normalize_board_image_upload(uploaded) -> tuple[bytes, str]:
+    """
+    Тип определяется по содержимому, а не по имени/Content-Type:
+    буфер обмена iOS/macOS присылает «image»/«blob» без расширения или octet-stream.
+    PNG/JPEG/WebP сохраняются как есть, GIF/HEIC/HEIF конвертируются. SVG — отказ.
+    """
+    if not uploaded:
+        raise UploadValidationError("Файл не передан", "FILE_REQUIRED")
+    name = getattr(uploaded, "name", "") or "file"
+    ext = os.path.splitext(name)[1].lower()
+    content_type = (getattr(uploaded, "content_type", "") or "").split(";", 1)[0].strip().lower()
+    if ext == ".svg" or content_type == "image/svg+xml":
+        raise UploadValidationError(
+            "SVG не поддерживается. Допустимы PNG, JPEG, WebP, GIF и HEIC.",
+            "FILE_TYPE_NOT_ALLOWED",
+        )
+    if hasattr(uploaded, "seek"):
+        uploaded.seek(0)
+    raw = uploaded.read()
+    if not raw:
+        raise UploadValidationError("Файл пустой", "FILE_REQUIRED")
+    mime = sniff_board_image_mime(raw)
+    if not mime:
+        raise UploadValidationError(
+            "Не удалось распознать изображение. Допустимы PNG, JPEG, WebP, GIF и HEIC.",
+            "FILE_TYPE_NOT_ALLOWED",
+        )
+    if mime in BOARD_IMAGE_CONVERTIBLE_MIMES:
+        raw, mime = _convert_board_image(raw, mime)
+    return raw, mime
+
+
+def validate_uploaded_file_size(uploaded) -> None:
+    from Cabinet.upload_validation import get_max_upload_bytes
+
+    if not uploaded:
+        raise UploadValidationError("Файл не передан", "FILE_REQUIRED")
+    limit = get_max_upload_bytes()
+    size = getattr(uploaded, "size", None)
+    if limit and size is not None and size > limit:
+        mb = max(1, limit // (1024 * 1024))
+        raise UploadValidationError(f"Файл слишком большой (макс. {mb} МБ)", "FILE_TOO_LARGE")
+
+
+def log_board_image_rejection(board_id, user, uploaded, exc) -> None:
+    head = b""
+    try:
+        if uploaded is not None and hasattr(uploaded, "seek"):
+            uploaded.seek(0)
+            head = uploaded.read(16)
+    except Exception:
+        head = b""
+    logger.warning(
+        "board_image_rejected board=%s user=%s name=%r content_type=%r size=%s head=%s code=%s msg=%s",
+        board_id,
+        getattr(user, "pk", None),
+        getattr(uploaded, "name", None),
+        getattr(uploaded, "content_type", None),
+        getattr(uploaded, "size", None),
+        head[:16].hex(),
+        getattr(exc, "code", ""),
+        getattr(exc, "message", str(exc)),
+    )
 
 
 def detect_pdf_mime(content: bytes) -> str | None:
@@ -1197,7 +1387,10 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
         qs = user_accessible_boards_qs(self.request.user)
         if self.action == "list":
             qs = boards_list_queryset(qs)
-        elif self.action == "retrieve":
+        else:
+            # Ни одно detail-действие не читает scene_data через get_object():
+            # PATCH/clear/duplicate берут её из select_for_update() или лениво.
+            # Иначе upload-image/assets/access тянут JSON доски (до 18 МБ).
             qs = boards_open_queryset(qs)
         params = self.request.query_params
 
@@ -1719,25 +1912,16 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
 
         uploaded = request.FILES.get("file") or request.FILES.get("image")
         try:
-            validate_board_image_upload(uploaded)
+            validate_uploaded_file_size(uploaded)
+            raw, mime = normalize_board_image_upload(uploaded)
         except UploadValidationError as exc:
+            log_board_image_rejection(board.pk, request.user, uploaded, exc)
             return Response(
                 {"detail": exc.message, "code": exc.code},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         file_id = request.data.get("id") or str(uuid.uuid4())
-        raw = uploaded.read()
-        try:
-            mime = validate_board_image_bytes(
-                raw,
-                (getattr(uploaded, "content_type", "") or "").split(";", 1)[0],
-            )
-        except UploadValidationError as exc:
-            return Response(
-                {"detail": exc.message, "code": exc.code},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
 
         try:
             asset, _created = get_or_create_board_asset(

@@ -152,6 +152,8 @@ import {
   type BoardLoadPhase,
 } from "../boards/boardLifecycle";
 import { compactBoardScene } from "../boards/boardSceneCompact";
+import { quantizeSceneElementsForPersist } from "../boards/boardStrokeQuantize";
+import { fileNeedsBoardImageInterception, uploadErrorMessage } from "../boards/boardImageUploadUi";
 import ConnectionRecoveryBanner from "../components/ConnectionRecoveryBanner";
 import {
   RESUME_TIMING,
@@ -490,6 +492,7 @@ export default function CabinetBoardEditorPage() {
     ) => void) | null
   >(null);
   const [imageUploadStatus, setImageUploadStatus] = useState<"idle" | "uploading" | "error">("idle");
+  const [imageUploadError, setImageUploadError] = useState("");
   gridStyleRef.current = gridStyle;
   bgColorRef.current = bgColor;
   boardThemeRef.current = boardTheme;
@@ -631,7 +634,12 @@ export default function CabinetBoardEditorPage() {
         };
       }
 
-      const payload: BoardScenePayload = { ...snapshot, files: persistFiles };
+      // Точки штрихов float32 (~15 знаков) → 0.01 px: JSON доски в 2+ раза меньше.
+      const payload: BoardScenePayload = {
+        ...snapshot,
+        elements: quantizeSceneElementsForPersist(snapshot.elements) as BoardScenePayload["elements"],
+        files: persistFiles,
+      };
       boardLog("persist:sending", {
         files: Object.fromEntries(
           Object.entries(persistFiles).map(([id, meta]) => {
@@ -1350,7 +1358,10 @@ export default function CabinetBoardEditorPage() {
       setImageUploadStatus("error");
       const error = err as { message?: string };
       boardLog("upload:error", { ids: pendingIds, message: error?.message || "unknown" });
-      showNotice(BOARD_IMAGE_INSERT_ERROR);
+      // Причина отказа сервера (detail), а не общий текст: «HEIC не поддерживается…».
+      const reason = uploadErrorMessage(err, BOARD_IMAGE_INSERT_ERROR);
+      setImageUploadError(reason);
+      showNotice(reason);
       // Не публикуем blob:/data: пирам — только локальный предпросмотр. Элемент не удаляем.
       return scene;
     }
@@ -3198,6 +3209,19 @@ export default function CabinetBoardEditorPage() {
     }
   }, [boardHostEl, generateIdForFile, packedPdf, showNotice, viewModeEnabled]);
 
+  const convertImageOnServer = useCallback(async (file: File): Promise<Blob | null> => {
+    if (!boardId) return null;
+    const form = new FormData();
+    form.append("file", file, file.name || "image");
+    // Ошибка (detail сервера) пробрасывается и показывается пользователю.
+    const uploaded = await uploadInteractiveBoardImage(boardId, form);
+    const url = uploaded?.dataURL || uploaded?.url;
+    if (!url) return null;
+    const res = await fetch(url, { credentials: "same-origin", cache: "no-store" });
+    if (!res.ok) return null;
+    return res.blob();
+  }, [boardId]);
+
   const insertImagesFromFileList = useCallback(async (list: File[]) => {
     if (!canEditRef.current || viewModeEnabled || !list.length) return;
     if (insertingImageRef.current) return;
@@ -3221,7 +3245,10 @@ export default function CabinetBoardEditorPage() {
         return;
       }
       for (const file of cloned) {
-        const result = await prepareBoardImageFile(file, { generateId: generateIdForFile });
+        const result = await prepareBoardImageFile(file, {
+          generateId: generateIdForFile,
+          convertRemote: convertImageOnServer,
+        });
         if (!result.ok) {
           logBoardImage({
             fileName: file.name,
@@ -3243,7 +3270,7 @@ export default function CabinetBoardEditorPage() {
     } finally {
       insertingImageRef.current = false;
     }
-  }, [generateIdForFile, insertPdfsFromFileList, insertPreparedImage, showNotice, viewModeEnabled]);
+  }, [convertImageOnServer, generateIdForFile, insertPdfsFromFileList, insertPreparedImage, showNotice, viewModeEnabled]);
 
   const repairNewLocalImages = useCallback(async (
     images: Record<string, unknown>[],
@@ -3353,7 +3380,8 @@ export default function CabinetBoardEditorPage() {
       if (!onBoardCanvas(event)) return;
       const files = filesFromDataTransfer(event.dataTransfer);
       const pdfs = files.filter((file) => fileLooksLikePdf(file));
-      if (!pdfs.length) return;
+      // HEIC/GIF/без типа Excalidraw не вставит сам — ведём через наш конвертер.
+      if (!pdfs.length && !files.some(fileNeedsBoardImageInterception)) return;
       event.preventDefault();
       event.stopPropagation();
       const images = files.filter((file) => !fileLooksLikePdf(file));
@@ -3362,13 +3390,18 @@ export default function CabinetBoardEditorPage() {
     const onPaste = (event: ClipboardEvent) => {
       const files = event.clipboardData?.files ? Array.from(event.clipboardData.files) : [];
       const pdfs = files.filter((file) => fileLooksLikePdf(file));
-      if (!pdfs.length) return;
+      const special = files.filter((file) => !fileLooksLikePdf(file) && fileNeedsBoardImageInterception(file));
+      if (!pdfs.length && !special.length) return;
       if (!onBoardCanvas(event) && document.activeElement !== document.body) {
         const active = document.activeElement as HTMLElement | null;
         if (active && !active.closest?.(".cb-board-editor")) return;
       }
       event.preventDefault();
       event.stopPropagation();
+      if (special.length) {
+        void insertImagesFromFileList([...pdfs, ...files.filter((file) => !fileLooksLikePdf(file))]);
+        return;
+      }
       void insertPdfsFromFileList(pdfs);
     };
 
@@ -4194,13 +4227,13 @@ export default function CabinetBoardEditorPage() {
         <div className="cb-soon-toast" role="status">Загрузка изображения…</div>
       ) : null}
       {imageUploadStatus === "error" ? (
-        <div className="cb-soon-toast" role="status">{BOARD_IMAGE_INSERT_ERROR}</div>
+        <div className="cb-soon-toast" role="alert">{imageUploadError || BOARD_IMAGE_INSERT_ERROR}</div>
       ) : null}
 
       {/* Скрытый input: e2e/setInputFiles и наш capture-listener на document. */}
       <input
         type="file"
-        accept="image/png,image/jpeg,image/jpg,image/webp,image/heic,image/heif,.png,.jpg,.jpeg,.webp,.heic,.heif,.pdf,application/pdf"
+        accept="image/png,image/jpeg,image/jpg,image/webp,image/gif,image/heic,image/heif,.png,.jpg,.jpeg,.webp,.gif,.heic,.heif,.pdf,application/pdf"
         data-testid="board-image-input"
         style={{ display: "none" }}
         aria-hidden="true"

@@ -3,7 +3,30 @@
 export const BOARD_IMAGE_ALLOWED_MIME = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 export const BOARD_IMAGE_INSERT_ERROR = "Не удалось добавить изображение. Попробуйте другое фото.";
-export const BOARD_IMAGE_FORMAT_ERROR = "Допустимы форматы PNG, JPEG и WebP";
+export const BOARD_IMAGE_FORMAT_ERROR = "Допустимы форматы PNG, JPEG, WebP, GIF и HEIC";
+
+/** Форматы, которые сервер принимает и конвертирует (GIF → PNG, HEIC/HEIF → JPEG). */
+export const BOARD_IMAGE_SERVER_CONVERTIBLE_MIME = new Set(["image/gif", "image/heic", "image/heif"]);
+
+export function isGifMime(mime: string): boolean {
+  return normalizeBoardImageMime(mime) === "image/gif";
+}
+
+/** Можно ли отправить файл на upload-image (как есть или с конвертацией на сервере). */
+export function isUploadableBoardImageMime(mime: string): boolean {
+  const n = normalizeBoardImageMime(mime);
+  return BOARD_IMAGE_ALLOWED_MIME.has(n) || BOARD_IMAGE_SERVER_CONVERTIBLE_MIME.has(n) || isHeicMime(n);
+}
+
+/** Расширение имени файла для FormData по MIME (буфер обмена даёт «image»/«blob»). */
+export function boardImageExtForMime(mime: string): string {
+  const n = normalizeBoardImageMime(mime);
+  if (n === "image/jpeg") return "jpg";
+  if (n === "image/heic" || n === "image/heic-sequence") return "heic";
+  if (n === "image/heif" || n === "image/heif-sequence") return "heif";
+  const sub = n.split("/")[1] || "";
+  return /^[a-z0-9]+$/.test(sub) ? sub : "png";
+}
 
 const HEIC_BRANDS = new Set(["heic", "heix", "heif", "heis", "mif1", "msf1", "hevc", "hevx"]);
 
@@ -43,6 +66,8 @@ export function sniffBoardImageMime(bytes: Uint8Array | null | undefined): strin
   ) {
     return "image/webp";
   }
+  const gif = latin1(bytes, 0, 6);
+  if (gif === "GIF87a" || gif === "GIF89a") return "image/gif";
   if (latin1(bytes, 4, 4) === "ftyp") {
     const brand = latin1(bytes, 8, 4).replace(/\0/g, "").trim().toLowerCase();
     if (HEIC_BRANDS.has(brand)) return "image/heic";
