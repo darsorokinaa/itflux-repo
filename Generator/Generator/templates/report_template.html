@@ -457,12 +457,6 @@
                     <td class="sk">Процент выполнения</td>
                     <td class="sv">{{ percent }}%</td>
                 </tr>
-                {% if not is_vpr %}
-                <tr>
-                    <td class="sk">Тестовые баллы</td>
-                    <td class="sv">{{ total_score }} / {{ max_score }}</td>
-                </tr>
-                {% endif %}
                 <tr>
                     <td class="sk">Верных заданий</td>
                     <td class="sv">{{ correct_count }} из {{ tasks_count }}</td>
@@ -471,12 +465,16 @@
                     <td class="sk">Среднее время на задание</td>
                     <td class="sv">{% if tasks_count %}{{ avg_time_seconds }} сек{% else %}—{% endif %}</td>
                 </tr>
+                {# r82: строка перевода — только по шкале из score-conversion; первичные баллы здесь не дублируются #}
                 {% if not is_vpr and score_exam is not None %}
                 <tr>
-                    <td class="sk">{% if is_oge or score_is_mark %}Оценка{% else %}Вторичные баллы{% endif %}</td>
-                    <td class="sv">
-                        {% if is_oge or score_is_mark %}{{ score_exam }} из 5{% else %}{{ score_exam }} из 100{% endif %}
-                    </td>
+                    {% if score_is_mark %}
+                    <td class="sk">Оценка</td>
+                    <td class="sv">{{ score_exam }} из 5</td>
+                    {% else %}
+                    <td class="sk">Тестовые баллы</td>
+                    <td class="sv">{{ score_exam }} из 100</td>
+                    {% endif %}
                 </tr>
                 {% if score_note %}
                 <tr>

@@ -63,6 +63,26 @@ def _fill_template(text: str, ctx: dict[str, Any]) -> str:
     return out
 
 
+# Подтемы-заглушки: не описывают тему, поэтому не годятся ни для сопоставления, ни для текста.
+PLACEHOLDER_SUBTOPICS = frozenset({"все задачи", "все задания", "разное", "прочее", "-", "—"})
+
+
+def _informative(title: str) -> str:
+    t = (title or "").strip()
+    return "" if _norm(t) in PLACEHOLDER_SUBTOPICS else t
+
+
+def neutral_recommendation(subtopic: str, topic: str) -> str:
+    """r82: нейтральная рекомендация, когда в БД нет записи для темы задания.
+
+    Правило владельца: без обещаний результата, сроков и количества занятий — только «что повторить».
+    """
+    name = _informative(subtopic) or (topic or "").strip()
+    if name:
+        return f"Повторить тему «{name}»."
+    return RECOMMENDATION_FALLBACK
+
+
 def _pick_recommendation(
     subject_label: str,
     exam_level: str,
@@ -70,37 +90,36 @@ def _pick_recommendation(
     topic: str,
     skill_group: str,
 ) -> PedagogicalRecommendation | None:
-    base = PedagogicalRecommendation.objects.filter(
-        is_active=True,
-        subject=subject_label,
-        exam_level=exam_level,
-    ).order_by("priority", "id")
-    st = _norm(subtopic)
+    """Точное сопоставление рекомендации с заданием (r82).
+
+    Порядок: подтема (если у записи указана тема — она должна совпадать с темой задания) →
+    тема (только записи уровня темы, без подтемы) → группа навыка (только записи без темы и подтемы).
+    Если ничего не совпало — None: чужую «первую» рекомендацию предмета больше не подставляем.
+    """
+    rows = list(
+        PedagogicalRecommendation.objects.filter(
+            is_active=True,
+            subject=subject_label,
+            exam_level=exam_level,
+        ).order_by("priority", "id")
+    )
+    st = _norm(_informative(subtopic))
     tp = _norm(topic)
     sg = _norm(skill_group)
 
     if st:
-        rec = base.filter(subtopic__iexact=subtopic.strip()).first()
-        if rec:
-            return rec
-        for r in base:
-            if _norm(r.subtopic) == st:
+        for r in rows:
+            if _norm(r.subtopic) == st and (not _norm(r.topic) or _norm(r.topic) == tp):
                 return r
     if tp:
-        rec = base.filter(topic__iexact=topic.strip()).first()
-        if rec:
-            return rec
-        for r in base:
-            if _norm(r.topic) == tp:
+        for r in rows:
+            if not _norm(r.subtopic) and _norm(r.topic) == tp:
                 return r
     if sg:
-        rec = base.filter(skill_group__iexact=skill_group.strip()).first()
-        if rec:
-            return rec
-        for r in base:
-            if _norm(r.skill_group) == sg:
+        for r in rows:
+            if not _norm(r.subtopic) and not _norm(r.topic) and _norm(r.skill_group) == sg:
                 return r
-    return base.first()
+    return None
 
 
 def _result_level(percent: int) -> str:
@@ -336,7 +355,9 @@ def build_pedagogical_report_context(
             pr = _pick_recommendation(
                 subject_label, exam_level, subtopic_title, topic_title, ""
             )
-            rec = (pr.short_recommendation if pr else RECOMMENDATION_FALLBACK).strip()
+            rec = (pr.short_recommendation or "").strip() if pr else ""
+            if not rec:
+                rec = neutral_recommendation(subtopic_title, topic_title or title)
 
         rows.append(
             TaskReportRow(
@@ -369,11 +390,13 @@ def build_pedagogical_report_context(
     weak_topics: list[str] = []
     seen = set()
     for r in rows:
-        if r.status != "Верно" and r.subtopic_title:
-            k = r.subtopic_title.strip().casefold()
+        # r82: подтема-заглушка («Все задачи») заменяется темой номера задания.
+        name = _informative(r.subtopic_title) or (r.topic_title or r.title or "").strip()
+        if r.status != "Верно" and name:
+            k = name.casefold()
             if k not in seen:
                 seen.add(k)
-                weak_topics.append(r.subtopic_title.strip())
+                weak_topics.append(name)
         if len(weak_topics) >= 7:
             break
     weak_topics_str = ", ".join(weak_topics) if weak_topics else "—"

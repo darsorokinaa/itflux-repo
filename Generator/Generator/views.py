@@ -4449,6 +4449,25 @@ def score_scale_is_mark(level, subject):
     return lv == "oge" or (lv == "ege" and sub == "math_base")
 
 
+def report_score_exam_value(raw):
+    """r82: балл/отметка по шкале для PDF-отчёта; пустое и нечисловое — None (строку не показываем)."""
+    if raw is None or isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        val = raw
+    else:
+        txt = str(raw).strip().replace(",", ".")
+        if not txt:
+            return None
+        try:
+            val = float(txt)
+        except ValueError:
+            return None
+    if val != val or val < 0:  # NaN / отрицательное
+        return None
+    return int(val) if float(val).is_integer() else val
+
+
 @require_http_methods(["GET"])
 def api_score_conversion(request, level, subject):
     """Конвертация первичных баллов в вторичные по таблице Mark. Работает для всех предметов (subject_short в Mark)."""
@@ -5879,7 +5898,7 @@ def report_pdf(request, level, subject):
     tasks = data.get("tasks") or []
     total_score = data.get("totalScore", 0)
     max_score = data.get("maxScore", 0)
-    score_exam = data.get("scoreExam")
+    score_exam = report_score_exam_value(data.get("scoreExam"))
     score_comment = data.get("scoreComment") or ""
     mark_level = data.get("markLevel")
 
