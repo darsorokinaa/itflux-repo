@@ -98,6 +98,9 @@ input[type=number]{background:white;color:#3e4554;padding:6px 9px;border:1px sol
 .figure.center{width:54mm;margin:2mm auto}
 .figure img,.figure svg{display:block;width:100%;height:auto;max-height:125mm;object-fit:contain}
 .prompt-text img.illustration{display:block;width:100%;max-width:100%;height:auto;max-height:125mm;margin:2.5mm auto;object-fit:contain}
+.task img.formula{display:inline-block !important;vertical-align:middle !important;width:auto !important;max-width:100% !important;height:auto !important;max-height:3.2em !important;margin:0 .05em !important;border:0 !important;object-fit:contain}
+.task img.formula.formula-glyph{height:1.15em !important;max-height:1.15em !important}
+.task img.formula-figure{display:block !important;width:auto !important;max-width:100% !important;height:auto !important;max-height:125mm !important;margin:2mm auto !important;object-fit:contain}
 .figure figcaption{font-size:8pt;text-align:center;margin-top:1mm}
 .figure svg text{font-family:ExamTimes,"Times New Roman",NimbusFallback,serif;font-style:italic}
 .task-materials{margin:2.4mm 0 0;display:flex;flex-direction:column;gap:1.8mm}
@@ -1844,6 +1847,8 @@ async function prepareAssets(elements){
  const holder=node('div','logical-page');holder.style.width='117mm';holder.style.height='auto';for(const e of elements)holder.append(e);$('measure-root').append(holder);
  const imgs=[...holder.querySelectorAll('img')];
  await Promise.all(imgs.map(img=>new Promise(resolve=>{if(img.complete){if(!img.naturalWidth)errors.push('Не удалось загрузить рисунок: '+(img.alt||'без подписи'));return resolve();}const timer=setTimeout(()=>{errors.push('Рисунок не загрузился за 15 секунд. Используйте data URL.');resolve();},15000);img.onload=()=>{clearTimeout(timer);resolve();};img.onerror=()=>{clearTimeout(timer);errors.push('Не удалось загрузить рисунок: '+(img.alt||'без подписи'));resolve();};})));
+ // Буквы и формулы ФИПИ в строке: мелкая картинка = высота строки, крупная = обычный рисунок.
+ for(const img of imgs){if(!img.classList.contains('formula')||!img.naturalHeight)continue;const h=img.naturalHeight,w=img.naturalWidth;if(h>64||w>480){img.classList.remove('formula');img.classList.add('formula-figure');}else if(h<=26&&w<=60)img.classList.add('formula-glyph');}
  await document.fonts.ready;for(const e of elements)e.remove();holder.remove();
 }
 function answerKey(){

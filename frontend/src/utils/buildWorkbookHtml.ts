@@ -526,6 +526,42 @@ function replacePre(el: Element): void {
   el.replaceWith(paragraph);
 }
 
+const INLINE_IMG_BLOCKS = "p, li, td, th, div, figure, h1, h2, h3, h4, h5, h6, caption";
+const INLINE_IMG_MAX_ATTR_WIDTH = 120;
+const INLINE_IMG_MAX_ATTR_HEIGHT = 64;
+
+function numericAttr(img: Element, name: string): number | null {
+  const value = Number.parseFloat(String(img.getAttribute(name) || ""));
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function rawAlt(value: string | null): string {
+  const alt = String(value || "").trim();
+  return alt === "undefined" || alt === "null" ? "" : alt;
+}
+
+/** alt из одной буквы (A, B, x) печатаем текстом вместо картинки. */
+function singleLetterAlt(value: string | null): string {
+  const alt = rawAlt(value);
+  return /^[A-Za-z\u0391-\u03C9\u0410-\u044F]$/.test(alt) ? alt : "";
+}
+
+/** Картинка стоит в строке текста (буква события, формула ФИПИ), а не отдельным рисунком. */
+function isInlineTextImage(img: Element): boolean {
+  if (img.classList.contains("teacher-task-img") || img.classList.contains("oge-math-fipi-diagram")) return false;
+  const width = numericAttr(img, "width");
+  const height = numericAttr(img, "height");
+  if (width != null && width > INLINE_IMG_MAX_ATTR_WIDTH) return false;
+  if (height != null && height > INLINE_IMG_MAX_ATTR_HEIGHT) return false;
+  if (img.classList.contains("oge-math-fipi-inline-letter") || img.classList.contains("oge-math-fipi-inline-frac")) {
+    return true;
+  }
+  const block = img.parentElement?.closest(INLINE_IMG_BLOCKS);
+  if (!block) return false;
+  const text = (block.textContent || "").replace(/[\s\u00a0]+/g, "");
+  return text.length > 0;
+}
+
 function isInformaticsTaskOne(subject: string | undefined, taskNumber: number | null | undefined): boolean {
   const code = String(subject || "").toLowerCase();
   return (code === "inf" || code === "informatics") && Number(taskNumber) === 1;
@@ -570,7 +606,8 @@ function sanitizeTaskHtml(
     const parent = img.parentElement;
     const inTable = Boolean(img.closest("table"));
     const parentText = (parent?.textContent || "").replace(/\s+/g, " ").trim();
-    const alt = figureAlt(img.getAttribute("alt"));
+    const sourceAlt = img.getAttribute("alt");
+    const alt = figureAlt(sourceAlt);
     if (img.getAttribute("alt") !== alt) img.setAttribute("alt", alt);
     const blockParent = parent && ["p", "div", "figure"].includes(parent.localName) && parent !== root;
     const onlyImage =
@@ -596,6 +633,22 @@ function sanitizeTaskHtml(
         alt,
       };
       parent.remove();
+      continue;
+    }
+    // Буквы событий и формулы-картинки ФИПИ внутри строки текста: в печати держим их
+    // строчными (высота строки), а не растягиваем до 320px.
+    if (isInlineTextImage(img)) {
+      const letter = singleLetterAlt(sourceAlt);
+      if (letter) {
+        const italic = document.createElement("i");
+        italic.textContent = letter;
+        img.replaceWith(italic);
+        continue;
+      }
+      img.removeAttribute("width");
+      img.removeAttribute("height");
+      img.classList.add("formula");
+      img.setAttribute("alt", rawAlt(sourceAlt));
       continue;
     }
     if (!img.getAttribute("width")) img.setAttribute("width", "320");

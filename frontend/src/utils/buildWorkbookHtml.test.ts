@@ -147,6 +147,58 @@ describe("buildExamTemplateDocument", () => {
     expect(template).toContain("illustration");
   });
 
+  it("prints FIPI event letters inside the text as inline formula images, keeps the Euler diagram as a figure", () => {
+    const fipi = "https://oge.fipi.ru/docs/X/questions/Y";
+    const doc = buildExamTemplateDocument(
+      [
+        {
+          id: 11217,
+          task_number: 10,
+          text:
+            `<div class="task-html-block"><p>На рисунке изображена диаграмма Эйлера для случайных событий <span><img alt="" src="${fipi}/innerimg0.gif"/> </span> и ` +
+            `<span><img alt="" src="${fipi}/innerimg1.gif"/> </span> в некотором опыте. Найдите вероятность события <a><span><img alt="undefined" src="${fipi}/innerimg2.gif"/> </span></a>.</p>` +
+            `<p><img alt="" src="${fipi}/innerimg3.gif"/> </p></div>`,
+        },
+      ],
+      { title: "Рабочая тетрадь", mode: "workbook", subject: "math", level: "oge" }
+    );
+    const task = doc.tasks[0];
+    const html = task?.html || "";
+    expect(html.match(/<img[^>]*class="[^"]*\bformula\b[^"]*"/g)?.length).toBe(3);
+    expect(html).not.toContain("Рисунок к заданию");
+    expect(html).not.toMatch(/width="320"/);
+    expect(html).not.toMatch(/innerimg3/);
+    expect(task?.figure?.src).toBe(`${fipi}/innerimg3.gif`);
+  });
+
+  it("prints a one-letter alt as text and leaves a wide inline picture alone", () => {
+    const doc = buildExamTemplateDocument(
+      [
+        {
+          id: 5,
+          task_number: 10,
+          text:
+            '<p>События <img alt="A" src="/media/task_files/a.png"> и <img alt="B" src="/media/task_files/b.png">.</p>' +
+            '<p>Схема <img class="teacher-task-img" src="/media/tasks/teacher_1/scheme.png" width="400"></p>',
+        },
+      ],
+      { title: "Тетрадь", mode: "workbook", subject: "phys", level: "oge" }
+    );
+    const html = doc.tasks[0]?.html || "";
+    expect(html).toContain("<i>A</i>");
+    expect(html).toContain("<i>B</i>");
+    expect(html).not.toMatch(/a\.png|b\.png/);
+    expect(html).toMatch(/<img[^>]*scheme\.png/);
+    expect(html).not.toMatch(/scheme\.png[^>]*formula/);
+  });
+
+  it("styles inline formula images at text height in the print template", () => {
+    const template = readFileSync(templatePath, "utf8");
+    expect(template).toContain(".task img.formula{display:inline-block !important");
+    expect(template).toContain(".task img.formula.formula-glyph{height:1.15em");
+    expect(template).toMatch(/classList\.contains\('formula'\)/);
+  });
+
   it("keeps the bank id and turns it on with the task-id checkbox", () => {
     const tasks = [{ id: 1842, task_number: 6, text: "Какое из чисел принадлежит промежутку?" }];
     const hidden = buildExamTemplateDocument(tasks, { title: "Лист", mode: "workbook", subject: "math" });
