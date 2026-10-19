@@ -478,6 +478,12 @@
                         {% if is_oge or score_is_mark %}{{ score_exam }} из 5{% else %}{{ score_exam }} из 100{% endif %}
                     </td>
                 </tr>
+                {% if score_note %}
+                <tr>
+                    <td class="sk">Примечание</td>
+                    <td class="sv">{{ score_note }}</td>
+                </tr>
+                {% endif %}
                 {% endif %}
             </table>
         </div>

@@ -2427,6 +2427,7 @@ function ExamPage() {
     let scoreComment = null;
     let markLevel = null;
     let scoreScale = null;
+    let scoreNote = null;
     const resultIsPreliminary = Boolean(effSummary?.preliminary) || effSummary?.review_status === "pending_review";
 
     // В режиме тренировки по номерам конвертация в баллы/оценку не нужна; в ДЗ — только часть 1.
@@ -2448,6 +2449,7 @@ function ExamPage() {
           scoreComment = data.comment ?? null;
           markLevel = data.mark_level ?? null;
           scoreScale = data.scale ?? null;
+          scoreNote = data.note ?? null;
         }
       } catch {
         /* ignore conversion API errors */
@@ -2469,6 +2471,7 @@ function ExamPage() {
       scoreComment,
       markLevel,
       scoreScale,
+      scoreNote,
       tasks: documentTasks,
       startTime: startTimeRef.current,
       endTime: endTimeRef.current,

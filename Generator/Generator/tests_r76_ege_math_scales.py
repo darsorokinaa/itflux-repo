@@ -52,4 +52,45 @@ class EgeMathBaseConversionTests(TestCase):
     def test_profile_untouched(self):
         data = self._get("math", 20)
         self.assertEqual(data["scale"], "test")
-        self.assertNotEqual(data["score_exam"], 5)
+        self.assertNotEqual(data["score_exam"], 5)  # профиль — тестовые баллы, не отметка
+
+
+MIG77 = importlib.import_module("Generator.migrations.0113_r77_ege_math_profile_scale_2026")
+
+
+class EgeMathProfileScaleTests(TestCase):
+    def setUp(self):
+        from Generator.models import Level, Subject
+
+        Subject.objects.get_or_create(subject_short="math", defaults={"subject_name": "Математика"})
+        Level.objects.get_or_create(level="ege", defaults={"level_rus": "ЕГЭ"})
+        MIG77.forwards(django_apps, None)
+
+    def _get(self, subject, score):
+        return self.client.get(f"/api/ege/{subject}/score-conversion/?score={score}").json()
+
+    def test_official_points(self):
+        # Таблица № 6 Рособрнадзора 2026; 33 — кэп по верхнему значению.
+        for primary, test in {0: 0, 4: 22, 5: 27, 12: 70, 20: 86, 29: 99, 30: 100, 32: 100, 33: 100}.items():
+            data = self._get("math", primary)
+            self.assertEqual(data["score_exam"], test, primary)
+            self.assertEqual(data["scale"], "test")
+            self.assertIn("2027", data["note"])
+        self.assertEqual(len(MIG77.EGE_MATH_TEST), 34)
+
+    def test_threshold_level(self):
+        self.assertEqual(self._get("math", 4)["mark_level"], 1)
+        self.assertEqual(self._get("math", 5)["mark_level"], 2)
+
+    def test_other_subjects_have_no_note(self):
+        self.assertIsNone(self.client.get("/api/ege/inf/score-conversion/?score=10").json().get("note"))
+        self.assertIsNone(self.client.get("/api/oge/math/score-conversion/?score=10").json().get("note"))
+
+    def test_reverse(self):
+        from Generator.models import Mark
+
+        MIG77.forwards(django_apps, None)
+        qs = Mark.objects.filter(subject__subject_short="math", level__level="ege")
+        self.assertEqual(qs.count(), 34)
+        MIG77.backwards(django_apps, None)
+        self.assertEqual(qs.count(), 0)

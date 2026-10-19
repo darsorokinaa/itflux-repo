@@ -419,7 +419,7 @@ function deriveHeroPresentation(r) {
       mainNum: String(scoreExam),
       suffix: " из 5",
       variant: tier,
-      note: null,
+      note: r.scoreNote || null,
     };
   }
 
@@ -435,7 +435,7 @@ function deriveHeroPresentation(r) {
       mainNum: String(scoreExam),
       suffix: " из 100",
       variant: tier,
-      note: null,
+      note: r.scoreNote || null,
     };
   }
 
@@ -452,7 +452,7 @@ function deriveHeroPresentation(r) {
       mainNum: String(scoreExam),
       suffix: " из 100",
       variant: tier,
-      note: null,
+      note: r.scoreNote || null,
     };
   }
 

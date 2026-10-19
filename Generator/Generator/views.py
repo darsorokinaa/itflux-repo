@@ -4428,6 +4428,20 @@ def variant_detail_short_url(request, level, subject, variant_id):
     return react_app(request)
 
 
+# r77: оговорки к шкалам перевода (отдаются в score-conversion как note, показываются в окне
+# результатов и PDF). Убрать запись, когда появится официальная шкала под структуру варианта.
+SCALE_NOTES = {
+    ("ege", "math"): (
+        "Перевод по официальной шкале ЕГЭ 2026 (максимум 32 первичных балла). "
+        "Вариант собран по структуре 2027 года, поэтому перевод приблизительный."
+    ),
+}
+
+
+def score_scale_note(level, subject):
+    return SCALE_NOTES.get(((level or "").strip().lower(), (subject or "").strip().lower()))
+
+
 def score_scale_is_mark(level, subject):
     """r76: перевод в отметку «2»–«5» (не в тестовые баллы): ОГЭ и ЕГЭ по математике базового уровня."""
     lv = (level or "").strip().lower()
@@ -4465,7 +4479,7 @@ def api_score_conversion(request, level, subject):
     # r76: шкала-отметка (2–5) — ОГЭ и ЕГЭ по базовой математике; иначе тестовые баллы (0–100).
     scale = "mark" if score_scale_is_mark(level_norm, subject_norm) else "test"
     if mark_row is None:
-        return JsonResponse({"score_exam": None, "comment": None, "mark_level": None, "scale": scale})
+        return JsonResponse({"score_exam": None, "comment": None, "mark_level": None, "scale": scale, "note": None})
     score_exam = mark_row.score_exam
     comment = mark_row.comment.comment_text if mark_row.comment else None
     mark_level = mark_row.comment.mark_level if (mark_row.comment and mark_row.comment.mark_level) else None
@@ -4508,6 +4522,7 @@ def api_score_conversion(request, level, subject):
             "mark_level": mark_level,
             "geometry_floor_applied": geometry_floor_applied,
             "scale": scale,
+            "note": score_scale_note(level_norm, subject_norm),
         }
     )
 
@@ -5964,6 +5979,7 @@ def report_pdf(request, level, subject):
         "score_comment_class": score_comment_class,
         "favicon_url": request.build_absolute_uri("/favicon.png"),
         "score_is_mark": score_scale_is_mark(level, subject),
+        "score_note": score_scale_note(level, subject),
     }
 
     html_string = render_to_string("report_template.html", context)
