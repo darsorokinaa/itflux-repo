@@ -1,0 +1,97 @@
+/* r92b: постоянный слой звонка. Режимы меняют только CSS — iframe Jitsi
+   остаётся тем же DOM-узлом (перенос узла перезагрузил бы конференцию). */
+.meeting-persist--full,
+.meeting-persist--full .meeting-persist__viewport,
+.meeting-persist--full .meeting-persist__stage {
+  display: contents;
+}
+
+.meeting-persist--mini {
+  --mp-scale: 0.25;
+  --mp-stage-w: 1280px;
+  --mp-stage-h: 760px;
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 11040;
+  width: calc(var(--mp-stage-w) * var(--mp-scale));
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0f172a;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.35);
+  touch-action: none;
+}
+
+.meeting-persist__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  color: #fff;
+  font-size: 13px;
+  cursor: grab;
+  user-select: none;
+}
+
+.meeting-persist__live {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  flex: 0 0 auto;
+}
+
+.meeting-persist__title {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meeting-persist__return {
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 8px;
+  padding: 4px 10px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.meeting-persist--mini .meeting-persist__viewport {
+  position: relative;
+  width: 100%;
+  height: calc(var(--mp-stage-h) * var(--mp-scale));
+  overflow: hidden;
+  cursor: pointer;
+}
+
+/* transform делает stage контейнером для position:fixed страницы встречи:
+   вся комната рисуется в 1280×760 и уменьшается до мини-плеера. */
+.meeting-persist--mini .meeting-persist__stage {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--mp-stage-w);
+  height: var(--mp-stage-h);
+  transform: scale(var(--mp-scale));
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+
+.meeting-persist--mini .video-lesson-page {
+  height: 100%;
+  max-height: 100%;
+}
+
+@media (max-width: 640px) {
+  .meeting-persist--mini {
+    --mp-scale: 0.2;
+    right: 8px;
+    bottom: 72px;
+  }
+}

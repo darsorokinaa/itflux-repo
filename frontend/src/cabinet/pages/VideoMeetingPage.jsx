@@ -215,7 +215,8 @@ import {
   startMainThreadWatchdog,
 } from "../pwa/runtimeResources";
 import { reportClientEvent } from "../../utils/clientTelemetry";
-import { acquireLiveCallKeepAlive, installLiveMeetingLinkGuard } from "../liveMeetingGuard";
+import { acquireLiveCallKeepAlive } from "../liveMeetingGuard";
+import { clearActiveLiveMeeting, inAppPathForSameTab, setActiveLiveMeeting } from "../liveMeetingSession";
 import { COLLAB_STATUS_GRACE_MS } from "../collabConnectionUi";
 import "../styles/video-meeting.css";
 import "../styles/live-variant-answers.css";
@@ -557,8 +558,9 @@ function CallKindSwitch({ kind, busy, phase, compact = false, onRetry, onSelect 
   );
 }
 
-export default function VideoMeetingPage() {
-  const { meetingUuid } = useParams();
+export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", presentation = "full" } = {}) {
+  const routeParams = useParams();
+  const meetingUuid = meetingUuidProp || routeParams.meetingUuid;
   const navigate = useNavigate();
   const containerRef = useRef(null);
   const apiRef = useRef(null);
@@ -904,6 +906,7 @@ export default function VideoMeetingPage() {
 
   const leaveStudentRoom = useCallback(() => {
     intentionalLeaveRef.current = true;
+    clearActiveLiveMeeting(meetingUuid);
     try {
       resumeControllerRef.current?.detach?.();
     } catch {
@@ -2246,18 +2249,30 @@ export default function VideoMeetingPage() {
     };
   }, [pageState]);
 
-  // r92: пока звонок живой — ссылки кабинета/вариантов/журнала открываем в новой
-  // вкладке (уход со страницы размонтировал Jitsi), и держим Web Lock, чтобы
-  // браузер не замораживал фоновую вкладку со звонком.
+  // r92b: живой звонок регистрируется в постоянном слое (PersistentMeetingHost):
+  // при уходе на другие маршруты приложения страница не размонтируется, а
+  // сворачивается в мини-плеер. Web Lock держит фоновую вкладку от заморозки.
   useEffect(() => {
     if (pageState !== "live" || !meetingUuid) return undefined;
-    const removeLinkGuard = installLiveMeetingLinkGuard({ meetingUuid });
+    if (!intentionalLeaveRef.current) setActiveLiveMeeting(meetingUuid);
     const releaseKeepAlive = acquireLiveCallKeepAlive(meetingUuid);
     return () => {
-      removeLinkGuard();
       releaseKeepAlive();
     };
   }, [meetingUuid, pageState]);
+
+  useEffect(() => {
+    if (pageState === "live") return;
+    clearActiveLiveMeeting(meetingUuid);
+  }, [meetingUuid, pageState]);
+
+  useEffect(() => () => clearActiveLiveMeeting(meetingUuid), [meetingUuid]);
+
+  useEffect(() => {
+    if (presentation !== "full") return;
+    // Возврат из мини-плеера: Jitsi пересчитывает раскладку под новый размер.
+    window.requestAnimationFrame(() => notifyJitsiContainerResize(apiRef.current));
+  }, [presentation]);
 
   useEffect(() => {
     if (pageState !== "live") return undefined;
@@ -3374,8 +3389,15 @@ export default function VideoMeetingPage() {
 
   const onOpenInNewTab = useCallback((row) => {
     const url = resolveMaterialOpenUrl(row, meetingUuid, presented, { forEmbed: false });
-    if (url) window.open(url, "_blank", "noopener,noreferrer");
-  }, [meetingUuid, presented]);
+    if (!url) return;
+    // r92b: во время звонка — SPA-переход в этой же вкладке, звонок уходит в мини-плеер.
+    const inApp = pageState === "live" ? inAppPathForSameTab(url) : "";
+    if (inApp) {
+      navigate(inApp);
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+  }, [meetingUuid, navigate, pageState, presented]);
 
   const onOpenBoardLocally = useCallback((board) => {
     if (!board?.id) return;

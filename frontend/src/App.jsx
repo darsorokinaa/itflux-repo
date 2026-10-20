@@ -95,6 +95,7 @@ import { ensureSiteFavicon } from "./utils/ensureSiteFavicon";
 import { markUpdateFromClientRequired } from "./utils/appUpdate";
 import { SeasonalThemeProvider } from "./seasonal/SeasonalThemeProvider";
 import { importWithRetry } from "./utils/importWithRetry";
+import { useActiveLiveMeeting } from "./cabinet/liveMeetingSession";
 
 const ExamPage = lazy(() => import("./pages/ExamPage"));
 const CabinetReviewDetailPage = lazy(() => import("./cabinet/pages/CabinetReviewDetailPage"));
@@ -105,14 +106,22 @@ const HomeworkPublishedNotebookPage = lazy(() =>
     default: mod.HomeworkPublishedNotebookPage,
   })),
 );
-const VideoMeetingPage = lazy(() => importWithRetry(() => import("./cabinet/pages/VideoMeetingPage")));
+const PersistentMeetingHost = lazy(() => importWithRetry(() => import("./cabinet/components/PersistentMeetingHost")));
+
+/** Страницу встречи рисует PersistentMeetingHost (r92b) — маршрут лишь занимает место. */
+function MeetingRouteSlot() {
+  return <div className="meeting-route-slot" aria-hidden="true" />;
+}
 const JaasBareProbe = lazy(() => import("./cabinet/pages/JaasBareProbe"));
 const MeetingCallDock = lazy(() => import("./cabinet/components/MeetingCallDock"));
 
 function MeetingCallDockGate() {
   const location = useLocation();
+  const activeLive = useActiveLiveMeeting();
   const meeting = new URLSearchParams(location.search).get("meeting");
   if (!meeting) return null;
+  // Звонок уже живёт в этой вкладке (мини-плеер r92b) — второй Jitsi не поднимаем.
+  if (activeLive && activeLive === meeting) return null;
   return (
     <Suspense fallback={null}>
       <MeetingCallDock />
@@ -457,11 +466,7 @@ function App() {
           />
           <Route
             path="/cabinet/meetings/:meetingUuid"
-            element={(
-              <ErrorBoundary kind="room" homeHref="/cabinet">
-                <VideoMeetingPage />
-              </ErrorBoundary>
-            )}
+            element={<MeetingRouteSlot />}
           />
           <Route path="/cabinet/student" element={<StudentCabinetPage />}>
             <Route index element={<StudentDashboard />} />
@@ -618,6 +623,7 @@ function App() {
       </Routes>
       </Suspense>
       <Suspense fallback={null}><ConsentStepGate /></Suspense>
+      <Suspense fallback={null}><PersistentMeetingHost /></Suspense>
       <MeetingCallDockGate />
       </SeasonalThemeProvider>
     </BrowserRouter>
