@@ -2321,10 +2321,16 @@ def api_tasks(request, level, subject):
         })
 
     linked_task_number_sets = {frozenset(item["task_numbers"]) for item in linked_group_items}
-    for gd in group_dict.values():
+    # r88: одна карточка на набор номеров — без LinkedTaskGroup каждая TaskGroup (напр. ЕГЭ инф. 19–21)
+    # шла отдельным пунктом. Оставляем группу с наименьшим id; вариант строится по tasklist_id, не по group_id.
+    seen_group_number_sets = set(linked_task_number_sets)
+    for group_id in sorted(group_dict):
+        gd = group_dict[group_id]
         gd_nums = frozenset(gd.get("task_numbers") or [])
-        if gd_nums not in linked_task_number_sets:
-            result.append(gd)
+        if gd_nums in seen_group_number_sets:
+            continue
+        seen_group_number_sets.add(gd_nums)
+        result.append(gd)
     # Дедупликация linked_group по task_numbers (на случай дублей в БД или разных TaskList для одних номеров)
     seen_task_nums = set()
     deduped_linked = []
