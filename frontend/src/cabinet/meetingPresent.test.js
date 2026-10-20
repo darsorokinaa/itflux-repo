@@ -112,3 +112,15 @@ describe("live variant workspace identity", () => {
     })).toBe(true);
   });
 });
+
+describe("r91 personal variant link", () => {
+  it("replaces shared (tokenless) variant with personal lesson_token link", async () => {
+    const { shouldReplaceWorkspaceMaterial, lessonTokenFromUrl } = await import("./meetingPresent.js");
+    const shared = { kind: "variant", homeworkId: 826, url: "/oge/inf/variant/1825?cabinet_assignment=826&homework_mode=1" };
+    const personal = { kind: "variant", homeworkId: 826, url: "/oge/inf/variant/1825?cabinet_assignment=826&lesson_token=abc" };
+    expect(lessonTokenFromUrl(personal.url)).toBe("abc");
+    expect(shouldReplaceWorkspaceMaterial(shared, personal)).toBe(true);
+    expect(shouldReplaceWorkspaceMaterial(personal, shared)).toBe(false);
+    expect(shouldReplaceWorkspaceMaterial(personal, { ...personal, url: personal.url + "x" })).toBe(false);
+  });
+});

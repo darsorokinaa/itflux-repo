@@ -1223,8 +1223,19 @@ function ExamPage() {
       setLiveViewerSettled(false);
       return undefined;
     }
+    // Ученик (персональный lesson_token) не должен опрашивать live-answers: это
+    // эндпоинт учителя, ответ всегда 403. Опрос только для преподавателя.
+    if (lessonEmbedParams.token) {
+      setIsLiveTeacherView(false);
+      setLiveAnswers(null);
+      setLiveViewerSettled(true);
+      return undefined;
+    }
     let cancelled = false;
+    let stopped = false;
+    let intervalId = 0;
     const tick = async () => {
+      if (stopped) return;
       const my = ++liveAnswersSeqRef.current;
       setLiveAnswersLoading(true);
       try {
@@ -1241,6 +1252,9 @@ function ExamPage() {
         if (status === 401 || status === 403) {
           setIsLiveTeacherView(false);
           setLiveAnswers(null);
+          // Не учитель — больше не опрашиваем (раньше был 403 каждые 2 с).
+          stopped = true;
+          if (intervalId) window.clearInterval(intervalId);
         }
       } finally {
         if (!cancelled && my === liveAnswersSeqRef.current) {
@@ -1250,12 +1264,12 @@ function ExamPage() {
       }
     };
     void tick();
-    const id = window.setInterval(tick, 2000);
+    intervalId = window.setInterval(tick, 2000);
     return () => {
       cancelled = true;
-      window.clearInterval(id);
+      window.clearInterval(intervalId);
     };
-  }, [meetingUuid]);
+  }, [meetingUuid, lessonEmbedParams.token]);
 
   useEffect(() => {
     if (!variant?.tasks || !hwApiRaw || isLiveTeacherView) return;

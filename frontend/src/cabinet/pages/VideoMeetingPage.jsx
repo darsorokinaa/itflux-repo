@@ -35,6 +35,7 @@ import {
   resolveJitsiDisplayName,
   setMeetingCameraEnabled,
   setMeetingMicEnabled,
+  JOIN_KEEP_TAB_HINT,
 } from "../jitsiMeet";
 import {
   CALL_STATES,
@@ -253,6 +254,25 @@ function materialSessionIsBoard(material) {
     || url.includes("/cabinet/boards/");
 }
 const LIVE_ANSWERS_POLL_MS = 2000;
+
+/** После стольких таймаутов входа подряд — сигнал на переключение в резервную связь. */
+const JOIN_TIMEOUTS_BEFORE_FAILOVER = 2;
+/** Автоповторов входа, если вкладку сворачивали во время подключения. */
+const JOIN_HIDDEN_MAX_RETRIES = 2;
+
+function waitForVisibleTab() {
+  if (typeof document === "undefined" || document.visibilityState === "visible") {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const onVis = () => {
+      if (document.visibilityState !== "visible") return;
+      document.removeEventListener("visibilitychange", onVis);
+      resolve();
+    };
+    document.addEventListener("visibilitychange", onVis);
+  });
+}
 
 function mapJoinError(err) {
   const code = err?.code || err?.data?.code || err?.category;
@@ -547,6 +567,8 @@ export default function VideoMeetingPage() {
   const jitsiInitRef = useRef(false);
   const mediaGenerationRef = useRef(0);
   const failoverModeRef = useRef("");
+  const joinTimeoutCountRef = useRef(0);
+  const joinHiddenRetryRef = useRef(0);
   const recoveringMediaRef = useRef(false);
   const liveKitActiveRef = useRef(false);
   const liveKitApiRef = useRef(null);
@@ -1035,6 +1057,8 @@ export default function VideoMeetingPage() {
           recovering: recoveringMediaRef.current,
         });
         recoveringMediaRef.current = false;
+        joinTimeoutCountRef.current = 0;
+        joinHiddenRetryRef.current = 0;
         setPageState("live");
         setJoinState("joined");
         setVideoServiceUnreachable(false);
@@ -1432,6 +1456,26 @@ export default function VideoMeetingPage() {
         if (initGenRef.current !== retryGen + 1) return false;
         return initializeJitsi();
       }
+      if (err?.code === "jitsi_join_timeout") {
+        joinTimeoutCountRef.current += 1;
+        // После N неудачных входов просим сервер переключить на резервную связь (LiveKit).
+        if (joinTimeoutCountRef.current >= JOIN_TIMEOUTS_BEFORE_FAILOVER) {
+          void reportExhaustedMediaRef.current?.("jitsi_join_timeout");
+        }
+        if (err?.hiddenDuringJoin && joinHiddenRetryRef.current < JOIN_HIDDEN_MAX_RETRIES) {
+          joinHiddenRetryRef.current += 1;
+          const retryGen = initGenRef.current;
+          disposeApi();
+          setConnectionHint(`${JOIN_KEEP_TAB_HINT}. Повторяем подключение…`);
+          await waitForVisibleTab();
+          await new Promise((resolve) => {
+            window.setTimeout(resolve, 600);
+          });
+          if (shouldIgnoreReconnect(intentionalLeaveRef.current)) return false;
+          if (initGenRef.current !== retryGen + 1) return false;
+          return initializeJitsi();
+        }
+      }
       if (recoveryRemountRef.current) {
         callStateRef.current?.transition(CALL_STATES.failed, err?.code || "recovery-join");
         setPageState("live");
@@ -1488,7 +1532,8 @@ export default function VideoMeetingPage() {
       if (err?.code === "jitsi_script" || err?.code === "jitsi_script_timeout" || err?.message === "Не удалось загрузить Jitsi Meet") {
         setError(mapJoinError({ ...err, code: err?.code || "jitsi_script" }));
       } else if (err?.message === "jitsi_join_timeout" || err?.code === "jitsi_join_timeout") {
-        setError(mapJoinError({ ...err, code: "jitsi_join_timeout" }));
+        const mapped = mapJoinError({ ...err, code: "jitsi_join_timeout" });
+        setError(err?.hiddenDuringJoin ? `${mapped} ${JOIN_KEEP_TAB_HINT}.` : mapped);
       } else {
         setError(mapJoinError(err));
       }
@@ -2944,9 +2989,24 @@ export default function VideoMeetingPage() {
       onPresented: (presentedPayload, meta) => {
         setPresented(presentedPayload || null);
         if (materialSyncReplayKeepsWorkspace(workspaceMaterialRef.current, meta)) return;
-        applyStudentPresentedRef.current(presentedPayload, {
-          source: meta?.replay ? "socket-replay" : "socket",
-        });
+        const source = meta?.replay ? "socket-replay" : "socket";
+        // WS-рассылка общая (ссылка учителя без lesson_token). Ученику для варианта
+        // берём персональную ссылку из status, иначе ответы не сохраняются.
+        if (!canManageRef.current && presentedPayload?.kind === "variant") {
+          fetchVideoMeetingStatus(meetingUuid)
+            .then((st) => {
+              const personal = st?.presented;
+              applyStudentPresentedRef.current(
+                personal?.kind === "variant" ? personal : presentedPayload,
+                { source: `${source}-personal` },
+              );
+            })
+            .catch(() => {
+              applyStudentPresentedRef.current(presentedPayload, { source });
+            });
+          return;
+        }
+        applyStudentPresentedRef.current(presentedPayload, { source });
       },
       onOpened: () => {
         if (!canManageRef.current) {
@@ -3657,7 +3717,9 @@ export default function VideoMeetingPage() {
   }, []);
 
   const callPip = useCallPip({
-    live: showJitsi,
+    // Не открываем PiP до входа в конференцию: скрытая вкладка во время входа
+    // останавливает подключение (r91, uid 50).
+    live: showJitsi && (joinState === "joined" || joinState === "embedded"),
     getJitsiApi: () => apiRef.current?.api || null,
     jitsiEpoch: conferenceBound,
     isLiveKit: () => Boolean(liveKitActiveRef.current),

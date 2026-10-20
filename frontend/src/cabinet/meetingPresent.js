@@ -170,13 +170,30 @@ export function materialRowIdentityKey(row, presented) {
   return `${row.kind}:${String(row.url || row.text || "").split("?")[0]}`;
 }
 
+export function lessonTokenFromUrl(url) {
+  const raw = String(url || "").trim();
+  if (!raw) return "";
+  try {
+    const abs = raw.startsWith("http") ? new URL(raw) : new URL(raw, "https://local.invalid");
+    return String(abs.searchParams.get("lesson_token") || "").trim();
+  } catch {
+    return "";
+  }
+}
+
 export function shouldReplaceWorkspaceMaterial(current, incoming) {
   if (!incoming) return false;
   if (!current) return true;
   const a = workspaceMaterialIdentityKey(current);
   const b = workspaceMaterialIdentityKey(incoming);
   if (!a || !b) return true;
-  return a !== b;
+  if (a !== b) return true;
+  // Тот же вариант, но у ученика пришла персональная ссылка с lesson_token, а открыта
+  // общая (из WS-рассылки) — без токена ответы не сохраняются (401 save-draft).
+  if (current.kind === "variant" && lessonTokenFromUrl(incoming.url) && !lessonTokenFromUrl(current.url)) {
+    return true;
+  }
+  return false;
 }
 
 /**

@@ -57,6 +57,7 @@ export const JOIN_FATAL_TIMEOUT_MS = 60000;
 export const JOIN_SLOW_HINT = "Подключение занимает больше времени…";
 /** Историческое имя: мягкий порог join и лимит пробы связи. Не fatal для урока. */
 export const JOIN_TIMEOUT_MS = JOIN_SLOW_THRESHOLD_MS;
+export const JOIN_KEEP_TAB_HINT = "Не сворачивайте вкладку до подключения";
 /**
  * Загрузка external_api.js с 8x8.vc. Не равна hint в 15 с:
  * на медленном канале скрипт легитимно идёт дольше, fatal join — 60 с.
@@ -1280,6 +1281,7 @@ const JOIN_OUTCOME = {
 function waitForConferenceJoined(api, {
   signal,
   onSlow,
+  onHidden,
   slowMs = JOIN_SLOW_THRESHOLD_MS,
   fatalMs = JOIN_FATAL_TIMEOUT_MS,
 } = {}) {
@@ -1289,6 +1291,23 @@ function waitForConferenceJoined(api, {
     let slowTimer = 0;
     let fatalTimer = 0;
     const joinListeners = [];
+    // Вкладка свёрнута/скрыта во время входа: браузер душит таймеры iframe,
+    // lib-jitsi-meet не успевает отправить запрос focus (uid 50, YaBrowser).
+    let hiddenDuringJoin = typeof document !== "undefined" && document.visibilityState === "hidden";
+    const onVisibility = () => {
+      if (typeof document === "undefined") return;
+      if (document.visibilityState === "hidden") {
+        hiddenDuringJoin = true;
+        onHidden?.();
+      }
+    };
+    const onPageHide = () => {
+      hiddenDuringJoin = true;
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibility);
+      window.addEventListener("pagehide", onPageHide);
+    }
 
     const listen = (name, handler) => {
       api.addListener(name, handler);
@@ -1301,6 +1320,10 @@ function waitForConferenceJoined(api, {
       slowTimer = 0;
       fatalTimer = 0;
       signal?.removeEventListener?.("abort", onAbort);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibility);
+        window.removeEventListener("pagehide", onPageHide);
+      }
       for (const [name, handler] of joinListeners) {
         try {
           api.removeListener?.(name, handler);
@@ -1315,7 +1338,7 @@ function waitForConferenceJoined(api, {
       if (settled) return;
       settled = true;
       cleanup();
-      resolve({ outcome, conferenceJoined });
+      resolve({ outcome, conferenceJoined, hiddenDuringJoin });
     };
 
     const onAbort = () => finish(JOIN_OUTCOME.aborted);
@@ -1568,8 +1591,11 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
 
   // participants>=1 — не доказательство входа. Ждём videoConferenceJoined.
   // 15 с без join ≠ fatal: только hint. Dispose только на explicit failure / abort / fatal watchdog.
-  const { outcome, conferenceJoined } = await waitForConferenceJoined(api, {
+  const { outcome, conferenceJoined, hiddenDuringJoin } = await waitForConferenceJoined(api, {
     signal: hooks.signal,
+    onHidden: () => {
+      hooks.onConnectionHint?.(JOIN_KEEP_TAB_HINT);
+    },
     onSlow: () => {
       logJitsiDiagnostic("jitsi_join_slow", {
         meetingUuid: diagnostics.meetingUuid,
@@ -1607,7 +1633,9 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
           ? "fatal_timeout"
           : outcome,
     );
-    throw joinFailureFromOutcome(outcome, { signal: hooks.signal, iframeCreated });
+    const joinErr = joinFailureFromOutcome(outcome, { signal: hooks.signal, iframeCreated });
+    joinErr.hiddenDuringJoin = Boolean(hiddenDuringJoin);
+    throw joinErr;
   }
 
   unhookAppend();
