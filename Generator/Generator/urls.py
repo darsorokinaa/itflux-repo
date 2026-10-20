@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.http import HttpResponseForbidden
 from django.urls import path, include, re_path
+from django.views.generic import RedirectView
 from django.conf import settings
 from django.views.static import serve
 
@@ -304,6 +305,11 @@ urlpatterns = [
     path("robots.txt", views.robots_txt),
     path("sitemap.xml", views.sitemap_xml),
     path("api/seo/meta/", views.api_seo_meta, name="api_seo_meta"),
+    # r87: дубль /gotovye-uroki -> 301 /lessons (query сохраняется); хабы /zadaniya
+    re_path(r"^gotovye-uroki/?$", RedirectView.as_view(url="/lessons", permanent=True, query_string=True)),
+    path("zadaniya", seo_tasks.zadaniya_root),
+    path("zadaniya/", seo_tasks.zadaniya_root),
+    re_path(r"^zadaniya/(?P<level>oge|ege)/?$", seo_tasks.zadaniya_level),
     # r36: SEO-страницы заданий из банка
     path("zadaniya/<str:level>/<slug:subject>/", seo_tasks.task_hub),
     path("zadaniya/<str:level>/<slug:subject>", seo_tasks.task_hub),
@@ -406,3 +412,6 @@ urlpatterns += [
 urlpatterns += [
     re_path(r'^.*$', views.react_app, name='react_app'),
 ]
+
+
+handler404 = "Generator.views.page_not_found"  # r87

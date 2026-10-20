@@ -86,12 +86,23 @@ STATIC_PAGES = {
 }
 
 # Алиасы: страница открывается, но каноническим считается другой адрес.
-CANONICAL_ALIASES = {"/gotovye-uroki": "/lessons", "/for-teachers": "/teachers", "/about": "/", "/generator": "/subject", "/vpr": "/subject/vpr", "/login": "/cabinet/login"}
+CANONICAL_ALIASES = {"/for-teachers": "/teachers", "/about": "/", "/generator": "/subject", "/vpr": "/subject/vpr", "/login": "/cabinet/login"}
 
 # Служебные разделы: не индексируются.
 NOINDEX_RE = re.compile(
     r"^/(cabinet|teacher|book|invite|community|parent|lesson/join|search|search-variant|dev|tasks/my|worksheets)(/|$)"
 )
+
+# r87: /gotovye-uroki -> 301 /lessons (urls.py); параметры, не меняющие содержимое страницы.
+REDIRECTS = {"/gotovye-uroki": "/lessons"}
+NOINDEX_PARAMS = ("preview",)
+CLEAN_PARAMS = ("preview", "_itflux_v")
+MIRROR_HOSTS = ("cdn.itflux-academy.ru",)  # r87: зеркало-ретранслятор: canonical на основной домен + noindex
+TITLE_MAX = 70
+# r87: продвигаем пока только математику и информатику (sitemap, хабы /zadaniya, меню SEO-страниц)
+FOCUS_SUBJECTS = ("math", "math_base", "inf")
+FOCUS_LESSON_SUBJECT_RE = re.compile(r"^(математик|алгебр|геометр|теория вероятност|информатик)", re.I)
+NON_FOCUS_TITLE_RE = re.compile(r"хими|русск|фразеолог|\bн и нн\b|ударени|граммати|физическ|камертон|струн", re.I)
 
 SITEMAP_STATIC = ("/", "/pricing", "/repetitor", "/lessons", "/interesting", "/tasks", "/subject", "/teachers", "/privacy", "/personal-data-consent", "/offer", "/contacts")
 
@@ -101,6 +112,76 @@ def _norm(path):
     if len(path) > 1:
         path = path.rstrip("/") or "/"
     return path
+
+
+def _is_mirror(request):
+    try:
+        return request.get_host().split(":")[0].lower() in MIRROR_HOSTS
+    except Exception:
+        return False
+
+
+class MirrorNoindexMiddleware:
+    """r87: на cdn-зеркале всё отдаётся с X-Robots-Tag: noindex (canonical и так на основной домен)."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        resp = self.get_response(request)
+        if _is_mirror(request):
+            resp["X-Robots-Tag"] = "noindex, nofollow"
+        return resp
+
+
+def _stem(w):
+    return w.lower().strip("«»\"'.,:;()!?—–-")[:7]
+
+
+def short_title(core, *extras, sep=" — ", limit=TITLE_MAX):
+    """r87: «core — extras | Цифровой поток» ≤ limit символов; слова из extras, уже есть в core, не повторяем."""
+    core = re.sub(r"\s+", " ", str(core or "")).strip()
+    suffix = " | " + BRAND
+    have = {_stem(w) for w in core.split()}
+    parts = []
+    for e in extras:
+        ws = [w for w in str(e or "").split() if _stem(w) and _stem(w) not in have]
+        if ws:
+            parts.append(" ".join(ws))
+            have.update(_stem(w) for w in ws)
+    while parts and len(core + sep + " ".join(parts) + suffix) > limit:
+        parts.pop()
+    full = (core + (sep + " ".join(parts) if parts else "")).strip()
+    room = limit - len(suffix)
+    if len(full) > room:
+        cut = full[: room - 1]
+        cut = cut.rsplit(" ", 1)[0] if " " in cut[20:] else cut
+        full = cut.rstrip(" ,.:;—–-(«") + "…"
+    return full + suffix
+
+
+def is_focus_lesson(les):
+    return bool(FOCUS_LESSON_SUBJECT_RE.match((les.subject or "").strip()))
+
+
+def _lesson_task_link(les):
+    """r87: урок ОГЭ/ЕГЭ с номером задания -> ссылка на страницу /zadaniya (если она есть)."""
+    if les.exam_type not in ("oge", "ege") or not les.task_number:
+        return None
+    subj = (les.subject or "").lower()
+    short = "inf" if subj.startswith("информатик") else ("math" if subj.startswith("математик") and "базов" not in subj else None)
+    if not short:
+        return None
+    try:
+        from . import seo_tasks
+        u = seo_tasks._unit_of(seo_tasks.units(les.exam_type, short), int(les.task_number))
+    except Exception:
+        return None
+    if not u:
+        return None
+    word = "Задания" if u["gids"] else "Задание"
+    return (f"{word} {u['label']} {LEVEL_NAMES[les.exam_type]} по {'информатике' if short == 'inf' else 'математике'}",
+            f"/zadaniya/{les.exam_type}/{short}/{u['slug']}")
 
 
 def _clip(text, n=200):
@@ -171,7 +252,10 @@ def resolve(path):
         exam = LEVEL_NAMES.get(les.exam_type or "", "")
         desc = _clip(les.short_description or les.teacher_goal or
                      f"Готовый урок «{les.title}» по предмету {les.subject}.")
-        meta.update(title=f"{les.title} — готовый урок{(' ' + exam) if exam else ''} по предмету {les.subject} — {BRAND}"[:180],
+        if les.short_description and (Lesson.objects.filter(short_description=les.short_description,
+                                                            status=Lesson.Status.PUBLISHED).exclude(pk=les.pk).exists()):
+            desc = _clip(f"{les.title}: {les.short_description}")  # r87: без дублей description
+        meta.update(title=short_title(les.title, "урок", exam, (les.subject or "").lower()),
                     description=desc, canonical=f"{SITE_ORIGIN}/lessons/{les.slug}/view",
                     image=_abs_media(les.cover_image) or DEFAULT_OG_IMAGE, h1=les.title)
         ld = {"@context": "https://schema.org", "@type": "LearningResource", "name": les.title,
@@ -186,6 +270,9 @@ def resolve(path):
         if meta["image"] != DEFAULT_OG_IMAGE:
             ld["image"] = meta["image"]
         meta["ld"].append(ld)
+        link = _lesson_task_link(les)
+        if link:
+            meta["links"] = [link]
         return meta
 
     m = re.fullmatch(r"/lessons/collections/([^/]+)", p)
@@ -194,7 +281,7 @@ def resolve(path):
         if not col:
             return None
         desc = _clip(col.short_description or col.description or f"Курс «{col.title}».")
-        meta.update(title=f"{col.title} — курс уроков — {BRAND}", description=desc,
+        meta.update(title=short_title(col.title, "курс уроков"), description=desc,
                     canonical=f"{SITE_ORIGIN}/lessons/collections/{col.slug}",
                     image=_abs_media(col.cover_image) or DEFAULT_OG_IMAGE, h1=col.title)
         meta["ld"].append({"@context": "https://schema.org", "@type": "Course", "name": col.title,
@@ -208,7 +295,7 @@ def resolve(path):
         if not it:
             return None
         desc = _clip(it.short_description or f"Интерактивный тренажёр «{it.title}».")
-        meta.update(title=f"{it.title} — онлайн-тренажёр — {BRAND}", description=desc,
+        meta.update(title=short_title(it.title, "тренажёр"), description=desc,
                     canonical=f"{SITE_ORIGIN}/interesting/{it.slug}/view",
                     image=_abs_media(it.cover_image) or DEFAULT_OG_IMAGE, h1=it.title)
         meta["ld"].append({"@context": "https://schema.org", "@type": "LearningResource", "name": it.title,
@@ -242,11 +329,11 @@ def resolve(path):
             return None
         ln = LEVEL_NAMES[m.group(1)]
         if m.group(3):
-            meta.update(title=f"Вариант №{m.group(3)} {ln} по предмету {name} — {BRAND}",
+            meta.update(title=short_title(f"Вариант №{m.group(3)} {ln}: {name}"),
                         description=f"Вариант {ln} по предмету {name}: решайте задания онлайн, проверяйте ответы и скачивайте PDF.",
                         canonical=f"{SITE_ORIGIN}{p}", noindex=True)
         else:
-            meta.update(title=f"{ln} {name}: задания и генератор вариантов — {BRAND}",
+            meta.update(title=short_title(f"{ln} {name}: задания", "и генератор вариантов", sep=" "),
                         description=f"Задания {ln} по предмету {name} по номерам КИМ: банк задач, ответы, "
                                     f"генератор вариантов и PDF для учителя.",
                         canonical=f"{SITE_ORIGIN}{p}")
@@ -312,13 +399,19 @@ def inject(index_html, path, meta):
             f'<p style="font-size:16px;margin:0 0 12px">{html.escape(desc)}</p>'
             '<nav style="font-size:15px"><a href="/">Главная</a> · <a href="/pricing">Тарифы</a> · '
             '<a href="/lessons">Готовые уроки</a> · <a href="/interesting">Тренажёры</a> · '
-            '<a href="/tasks">Банк задач</a> · <a href="/subject">Генератор вариантов</a></nav></div>'
+            '<a href="/tasks">Банк задач</a> · <a href="/zadaniya">Задания ОГЭ и ЕГЭ</a> · '
+            '<a href="/subject">Генератор вариантов</a></nav>'
+            + "".join(f'<p style="font-size:15px;margin:12px 0 0"><a href="{_attr(href)}">{html.escape(label)}</a></p>'
+                      for label, href in (meta.get("links") or []))
+            + '</div>'
         )
         doc = doc.replace('<div id="root"></div>', block + '\n  <div id="root"></div>', 1)
     return doc
 
 
-def robots_txt_body():
+def robots_txt_body(mirror=False):
+    if mirror:  # r87: cdn-зеркало не индексируется
+        return "User-agent: *\nDisallow: /\n"
     return (
         "User-agent: *\n"
         "Disallow: /cabinet/\n"
@@ -355,44 +448,75 @@ def robots_txt_body():
         "Disallow: /search\n"
         "Allow: /\n"
         "Clean-param: utm_source&utm_medium&utm_campaign&utm_content&utm_term&yclid&gclid&from\n"
-        f"Host: https://{SITE_HOST}\n"
+        "Clean-param: " + "&".join(CLEAN_PARAMS) + "\n"
         "\n"
         f"Sitemap: {SITE_ORIGIN}/sitemap.xml\n"
     )
 
 
-def sitemap_xml_body():
-    from .models import InterestingItem, Lesson, LessonCollection, TaskList
+def _d(dt):
+    return dt.date().isoformat() if dt else None
 
-    today = timezone.now().date().isoformat()
+
+def sitemap_rows():
+    """r87: только математика и информатика; lastmod — из updated_at в БД (без «сегодня» для всего подряд)."""
+    from django.db.models import Max
+    from .models import InterestingItem, Lesson, LessonCollection, Task, TaskList
+
+    lessons = [les for les in Lesson.objects.filter(status=Lesson.Status.PUBLISHED)
+               .exclude(access_level=Lesson.AccessLevel.PRIVATE).only("slug", "updated_at", "subject").order_by("id")
+               if is_focus_lesson(les)]
+    items = [it for it in InterestingItem.objects.filter(status=InterestingItem.Status.PUBLISHED)
+             .only("slug", "updated_at", "title").order_by("id") if not NON_FOCUS_TITLE_RE.search(it.title or "")]
+    by_pair = {}
+    for lvl, subj, m in (Task.objects.filter(is_active=True, scope="global", task__subject__subject_short__in=FOCUS_SUBJECTS)
+                         .values_list("task__level__level", "task__subject__subject_short").annotate(m=Max("updated_at"))
+                         .values_list("task__level__level", "task__subject__subject_short", "m")):
+        by_pair[(lvl, subj)] = m
+    by_tl = dict(Task.objects.filter(is_active=True, scope="global", task__subject__subject_short__in=FOCUS_SUBJECTS)
+                 .values("task_id").annotate(m=Max("updated_at")).values_list("task_id", "m"))
+    les_lm = max((les.updated_at for les in lessons), default=None)
+    it_lm = max((it.updated_at for it in items), default=None)
+    content_lm = max([x for x in [les_lm, it_lm] + list(by_pair.values()) if x], default=None)
+
     rows = []
     prio = {"/": "1.0", "/pricing": "0.9", "/repetitor": "0.9", "/lessons": "0.9", "/interesting": "0.9",
             "/tasks": "0.8", "/subject": "0.8"}
+    static_lm = {"/lessons": les_lm, "/interesting": it_lm, "/": content_lm, "/tasks": content_lm, "/subject": content_lm}
     for p in SITEMAP_STATIC:
-        rows.append((SITE_ORIGIN + p, today, "weekly", prio.get(p, "0.5")))
+        rows.append((SITE_ORIGIN + p, _d(static_lm.get(p)), "weekly", prio.get(p, "0.5")))
     for lvl in ("oge", "ege", "vpr"):
-        rows.append((f"{SITE_ORIGIN}/subject/{lvl}", today, "weekly", "0.8"))
-    pairs = (TaskList.objects.values_list("level__level", "subject__subject_short").distinct())
-    for lvl, subj in sorted(set(pairs)):
+        lm = max([m for (l, _), m in by_pair.items() if l == lvl and m], default=None)
+        rows.append((f"{SITE_ORIGIN}/subject/{lvl}", _d(lm), "weekly", "0.8"))
+    for (lvl, subj), m in sorted(by_pair.items()):
         if lvl in LEVEL_NAMES and subj and re.fullmatch(r"[a-z0-9_-]+", subj):
-            rows.append((f"{SITE_ORIGIN}/{lvl}/{subj}", today, "weekly", "0.7"))
-    for les in (Lesson.objects.filter(status=Lesson.Status.PUBLISHED).exclude(access_level=Lesson.AccessLevel.PRIVATE)
-                .only("slug", "updated_at").order_by("id")):
-        rows.append((f"{SITE_ORIGIN}/lessons/{les.slug}/view", les.updated_at.date().isoformat(), "monthly", "0.7"))
+            rows.append((f"{SITE_ORIGIN}/{lvl}/{subj}", _d(m), "weekly", "0.7"))
+    for les in lessons:
+        rows.append((f"{SITE_ORIGIN}/lessons/{les.slug}/view", _d(les.updated_at), "monthly", "0.7"))
     for col in LessonCollection.objects.filter(status=LessonCollection.Status.PUBLISHED).order_by("id"):
-        lm = getattr(col, "updated_at", None)
-        rows.append((f"{SITE_ORIGIN}/lessons/collections/{col.slug}", lm.date().isoformat() if lm else today, "monthly", "0.7"))
-    for it in InterestingItem.objects.filter(status=InterestingItem.Status.PUBLISHED).only("slug", "updated_at").order_by("id"):
-        rows.append((f"{SITE_ORIGIN}/interesting/{it.slug}/view", it.updated_at.date().isoformat(), "monthly", "0.7"))
-    try:  # r36: страницы «Задание N»
+        rows.append((f"{SITE_ORIGIN}/lessons/collections/{col.slug}", _d(getattr(col, "updated_at", None)), "monthly", "0.7"))
+    for it in items:
+        rows.append((f"{SITE_ORIGIN}/interesting/{it.slug}/view", _d(it.updated_at), "monthly", "0.7"))
+    try:  # r36/r87: страницы «Задание N» (только фокусные предметы)
         from . import seo_tasks
-        for p in seo_tasks.sitemap_paths():
-            rows.append((SITE_ORIGIN + p, today, "weekly", "0.6"))
+        z_lm = max([m for m in by_pair.values() if m], default=None)
+        rows.append((SITE_ORIGIN + "/zadaniya", _d(z_lm), "weekly", "0.8"))
+        for lvl in ("oge", "ege"):
+            lm = max([m for (l, _), m in by_pair.items() if l == lvl and m], default=None)
+            rows.append((f"{SITE_ORIGIN}/zadaniya/{lvl}", _d(lm), "weekly", "0.7"))
+        for p, lm in seo_tasks.sitemap_entries(by_tl, by_pair):
+            rows.append((SITE_ORIGIN + p, _d(lm), "weekly", "0.6"))
     except Exception:
-        pass
+        import logging
+        logging.getLogger(__name__).exception("sitemap zadaniya failed")
+    return rows
+
+
+def sitemap_xml_body():
+    rows = sitemap_rows()
     body = "\n".join(
-        f"  <url>\n    <loc>{html.escape(loc)}</loc>\n    <lastmod>{lm}</lastmod>\n"
-        f"    <changefreq>{cf}</changefreq>\n    <priority>{pr}</priority>\n  </url>"
+        f"  <url>\n    <loc>{html.escape(loc)}</loc>\n" + (f"    <lastmod>{lm}</lastmod>\n" if lm else "")
+        + f"    <changefreq>{cf}</changefreq>\n    <priority>{pr}</priority>\n  </url>"
         for loc, lm, cf, pr in rows
     )
     return ('<?xml version="1.0" encoding="UTF-8"?>\n'

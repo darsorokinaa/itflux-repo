@@ -997,7 +997,7 @@ def app_version_json(request):
 def robots_txt(request):
     # r35: фиксированный главный домен, закрыты служебные разделы.
     from . import seo as _seo
-    resp = HttpResponse(_seo.robots_txt_body(), content_type="text/plain; charset=UTF-8")
+    resp = HttpResponse(_seo.robots_txt_body(mirror=_seo._is_mirror(request)), content_type="text/plain; charset=UTF-8")
     resp["Cache-Control"] = "public, max-age=3600"
     return resp
 
@@ -1083,6 +1083,30 @@ def yandex_webmaster_verification(request, filename="yandex_ef13ec5e267d285b.htm
     return HttpResponse("Verification file not found", status=404, content_type="text/plain; charset=UTF-8")
 
 
+def page_not_found(request, exception=None):
+    """r87: handler404 — для страниц сайта та же SPA-оболочка с мета «Страница не найдена» и статусом 404;
+    /api/, /admin/, /media/, /static/, /ws/ — стандартный ответ Django."""
+    from django.views import defaults as _defaults
+    try:
+        host = request.get_host().split(":")[0].lower()
+    except Exception:
+        host = ""
+    if (host not in ("itflux-academy.ru", "www.itflux-academy.ru", "cdn.itflux-academy.ru")
+            or re.match(r"^/(api|admin|media|static|ws|assets|vendor|fonts)(/|$)", request.path or "/")):
+        return _defaults.page_not_found(request, exception)
+    frontend_dir = getattr(django_settings, 'FRONTEND_DIR', django_settings.BASE_DIR.parent / 'frontend' / 'dist')
+    try:
+        from . import seo as _seo
+        with open(frontend_dir / 'index.html', 'r', encoding='utf-8') as f:
+            body = _seo.inject(f.read(), request.path, _seo.NOT_FOUND_META)
+    except Exception:
+        logger.exception("404 page render failed for %s", request.path)
+        return _defaults.page_not_found(request, exception)
+    resp = HttpResponse(body, content_type='text/html; charset=utf-8', status=404)
+    resp["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return resp
+
+
 def react_app(request):
     frontend_dir = getattr(django_settings, 'FRONTEND_DIR', django_settings.BASE_DIR.parent / 'frontend' / 'dist')
     index_path = frontend_dir / 'index.html'
@@ -1099,6 +1123,9 @@ def react_app(request):
                 meta = _seo.NOT_FOUND_META
             else:
                 status = 200
+                # r87: ?preview=… — превью (canonical и так без параметров) не индексируется; зеркало cdn — тоже.
+                if any(k in request.GET for k in _seo.NOINDEX_PARAMS) or _seo._is_mirror(request):
+                    meta = dict(meta, noindex=True)
             index_html = _seo.inject(index_html, request.path, meta)
         except Exception:
             logger.exception("seo inject failed for %s", request.path)

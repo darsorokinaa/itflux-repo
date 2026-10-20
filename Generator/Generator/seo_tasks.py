@@ -47,6 +47,20 @@ def sitemap_paths():
             yield f"{hub}/{u['slug']}"
 
 
+def sitemap_entries(by_tl, by_pair):
+    """r87: (путь, lastmod) — только математика и информатика; lastmod = max(Task.updated_at)."""
+    seen = set()
+    for tl in published_tasklists():
+        lvl, subj = tl.level.level, tl.subject.subject_short
+        if subj not in seo.FOCUS_SUBJECTS or (lvl, subj) in seen:
+            continue
+        seen.add((lvl, subj))
+        hub = f"/zadaniya/{lvl}/{subj}"
+        yield hub, by_pair.get((lvl, subj))
+        for u in units(lvl, subj):
+            yield f"{hub}/{u['slug']}", max([by_tl[t.id] for t in u["tls"] if by_tl.get(t.id)], default=None)
+
+
 MIN_GROUPS = 3
 
 
@@ -320,7 +334,7 @@ PAGE = """<!doctype html>
 {css}
 </style></head><body>
 <header class="zt-head"><div class="zt-wrap"><a class="zt-brand" href="/"><img src="/static/favicon.png?v=1" alt="" width="32" height="32"><span>Цифровой поток</span></a>
-<nav class="zt-nav" aria-label="Разделы"><a href="/tasks">Все задачи</a><a href="/generator">Генератор вариантов</a><a href="/lessons">Готовые уроки</a><a href="/interesting">Тренажёры и интерактивы</a><a href="/pricing">Тарифы</a></nav>
+<nav class="zt-nav" aria-label="Разделы"><a href="/zadaniya">Задания ОГЭ и ЕГЭ</a><a href="/tasks">Все задачи</a><a href="/generator">Генератор вариантов</a><a href="/lessons">Готовые уроки</a><a href="/interesting">Тренажёры и интерактивы</a><a href="/pricing">Тарифы</a></nav>
 <a class="zt-cab" href="/cabinet/login">Личный кабинет</a></div></header>
 <main class="zt-wrap">{body}</main>
 <footer class="zt-foot"><div class="zt-wrap"><span>© Цифровой поток — генератор вариантов ОГЭ и ЕГЭ, уроки и кабинет учителя</span>
@@ -382,11 +396,11 @@ def task_hub(request, level, subject):
     total = sum(tl.n for tl in tls)
     ntop = (Task.objects.filter(task__in=tls, is_active=True, scope="global").exclude(subtopic=None)
             .values("subtopic").distinct().count())
-    title = f"Задания {ln} по {subj_dat(sname)}: все номера с задачами по темам — Цифровой поток"
+    title = seo.short_title(f"Задания {ln} по {subj_dat(sname)}: все номера", "с темами", sep=" ")
     desc = (f"{_fmt(total)} {_plural(total, 'задача', 'задачи', 'задач')} {ln} по {subj_dat(sname)} в банке "
             f"«Цифрового потока»: {len(tls)} {_plural(len(tls), 'номер', 'номера', 'номеров')} с темами и генератор вариантов.")
     canonical = f"{seo.SITE_ORIGIN}/zadaniya/{level}/{subject}"
-    ld_c, crumbs = _crumbs([("Главная", "/"), (f"Задания {ln}", f"/subject/{level}"), (sname, f"/zadaniya/{level}/{subject}")])
+    ld_c, crumbs = _crumbs([("Главная", "/"), ("Задания", "/zadaniya"), (f"{ln}", f"/zadaniya/{level}"), (sname, f"/zadaniya/{level}/{subject}")])
     us = units(level, subject)
     def _card(u):
         n_t = sum(t.n for t in u["tls"])
@@ -474,12 +488,12 @@ def task_page(request, level, subject, number):
                 if ln in it.title and num_re.search(it.title)][:6]
 
     h1 = f"Задание {n} {ln} по {sd}" + (f": {lc_first(topic)}" if topic else "")
-    title = h1 + " — задачи с темами | Цифровой поток"
+    title = seo.short_title(h1)
     topic_part = f" Темы: {', '.join(t['subtopic__title'] for t in topics[:3])}." if topics else ""
     desc = (f"Задание {n} {ln} по {sd}" + (f" ({lc_first(topic)})" if topic else "") + f": {_fmt(tl.n)} "
             f"{_plural(tl.n, 'задача', 'задачи', 'задач')} в банке, максимальный балл — {tl.max_score}.{topic_part}")[:300]
     canonical = f"{seo.SITE_ORIGIN}/zadaniya/{level}/{subject}/{n}"
-    ld_c, crumbs = _crumbs([("Главная", "/"), (f"Задания {ln}", f"/subject/{level}"),
+    ld_c, crumbs = _crumbs([("Главная", "/"), ("Задания", "/zadaniya"), (f"{ln}", f"/zadaniya/{level}"),
                             (sname, f"/zadaniya/{level}/{subject}"), (f"Задание {n}", f"/zadaniya/{level}/{subject}/{n}")])
     stats = (f"<div class='zt-stats'><div class='zt-stat'><b>{_fmt(tl.n)}</b><span>{_plural(tl.n, 'задача', 'задачи', 'задач')} к заданию {n}</span></div>"
              + (f"<div class='zt-stat'><b>{len(topics)}</b><span>{_plural(len(topics), 'тема', 'темы', 'тем')}</span></div>" if topics else "")
@@ -590,14 +604,14 @@ def group_page(request, level, subject, a, b):
             samples.append((sub, rendered))
 
     h1 = f"Задания {label} {ln} по {sd}" + (f": {lc_first(topic)}" if topic else "")
-    title = h1 + " — блоки с общим условием | Цифровой поток"
+    title = seo.short_title(h1)
     topic_part = f" Темы: {', '.join(t for t, _ in topics[:3])}." if topics else ""
     desc = (f"Задания {label} {ln} по {sd}" + (f" ({lc_first(topic)})" if topic else "") +
             f" — блок с общим условием: {_fmt(n_blocks)} {_plural(n_blocks, 'блок', 'блока', 'блоков')} в банке, "
             f"{_fmt(n_tasks)} {_plural(n_tasks, 'задача', 'задачи', 'задач')}, до {max_sum} "
             f"{_plural(max_sum, 'балла', 'баллов', 'баллов')}.{topic_part}")[:300]
     canonical = f"{seo.SITE_ORIGIN}/zadaniya/{level}/{subject}/{u['slug']}"
-    ld_c, crumbs = _crumbs([("Главная", "/"), (f"Задания {ln}", f"/subject/{level}"),
+    ld_c, crumbs = _crumbs([("Главная", "/"), ("Задания", "/zadaniya"), (f"{ln}", f"/zadaniya/{level}"),
                             (sname, f"/zadaniya/{level}/{subject}"), (f"Задания {label}", f"/zadaniya/{level}/{subject}/{u['slug']}")])
     stats = (f"<div class='zt-stats'><div class='zt-stat'><b>{_fmt(n_blocks)}</b><span>{_plural(n_blocks, 'блок', 'блока', 'блоков')} с общим условием</span></div>"
              f"<div class='zt-stat'><b>{_fmt(n_tasks)}</b><span>{_plural(n_tasks, 'задача', 'задачи', 'задач')} к заданиям {label}</span></div>"
@@ -655,3 +669,101 @@ def group_page(request, level, subject, a, b):
                "provider": {"@type": "Organization", "name": seo.BRAND, "url": seo.SITE_ORIGIN + "/"}}
     math = any(re.search(r"\\\(|\\\[|\$", body) for _, r in samples for _, body, _ in r)
     return _render(title, desc, canonical, "".join(parts), [ld_c, ld_page], math=math)
+
+
+# ---------- r87: хабы /zadaniya и /zadaniya/<level> + FAQ ----------
+
+def _focus_index(levels):
+    """[(level, ln, [(subject_short, subject_name, units, n_tasks)])] — только фокусные предметы."""
+    tls = list(published_tasklists())
+    out = []
+    for level in levels:
+        subs = []
+        for subj in seo.FOCUS_SUBJECTS:
+            mine = [t for t in tls if t.level.level == level and t.subject.subject_short == subj]
+            if mine:
+                subs.append((subj, mine[0].subject.subject_name, units(level, subj), sum(t.n for t in mine)))
+        if subs:
+            out.append((level, LEVELS[level], subs))
+    return out
+
+
+def _faq(idx):
+    """Только факты из БД и из того, что уже есть на страницах; без обещаний результатов и сроков."""
+    total = sum(n for _, _, subs in idx for _, _, _, n in subs)
+    names = ", ".join(f"{ln} по {subj_dat(name)}" for _, ln, subs in idx for _, name, _, _ in subs)
+    qa = [
+        ("Что есть в разделе «Задания»?",
+         f"Страницы по номерам заданий ({names}): темы номера, примеры задач из банка «Цифрового потока» "
+         f"и ссылки на соседние номера, тренажёры и готовые уроки."),
+        ("Сколько задач в банке по этим номерам?",
+         f"Сейчас в банке {_fmt(total)} {_plural(total, 'активная задача', 'активные задачи', 'активных задач')} к этим номерам; "
+         f"число на каждой странице считается по базе задач."),
+        ("Есть ли ответы к задачам?",
+         "На страницах раздела ответы скрыты. Проверить решение можно на платформе."),
+        ("Можно ли собрать вариант из этих задач?",
+         "Да. В генераторе вариантов можно выбрать номера и темы, собрать вариант в формате КИМ и скачать PDF."),
+    ]
+    grp = next((u for _, _, subs in idx for _, _, us, _ in subs for u in us if u["gids"]), None)
+    if grp:
+        qa.append(("Что значит «блок с общим условием»?",
+                   "Некоторые номера идут одним блоком: одно общее условие и несколько вопросов к нему. "
+                   f"Такие номера собраны на одной странице (например, «Задания {grp['label']}»), "
+                   "и генератор берёт блок целиком."))
+    ld = {"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [
+        {"@type": "Question", "name": q, "acceptedAnswer": {"@type": "Answer", "text": a}} for q, a in qa]}
+    htm = ("<section class='zt-sec'><h2>Частые вопросы</h2>" + "".join(
+        f"<details class='zt-card' style='margin:0 0 10px'><summary><b>{html.escape(q)}</b></summary>"
+        f"<p>{html.escape(a)}</p></details>" for q, a in qa) + "</section>")
+    return ld, htm
+
+
+def _subject_block(level, ln, subj, name, us, n):
+    cells = "".join(f"<a href='/zadaniya/{level}/{subj}/{u['slug']}' title='{html.escape(clean_topic(u['tls'][0].task_title), quote=True)}'>"
+                    f"{u['label']}</a>" for u in us)
+    return (f"<section class='zt-sec'><h2><a href='/zadaniya/{level}/{subj}'>{ln} по {html.escape(subj_dat(name))}</a></h2>"
+            f"<p class='zt-sub'>{_fmt(n)} {_plural(n, 'задача', 'задачи', 'задач')} в банке · {len(us)} "
+            f"{_plural(len(us), 'страница', 'страницы', 'страниц')} заданий</p><div class='zt-nums'>{cells}</div>"
+            f"<p><a href='/zadaniya/{level}/{subj}'>Все задания {ln} по {html.escape(subj_dat(name))} →</a></p></section>")
+
+
+def zadaniya_root(request):
+    idx = _focus_index(("oge", "ege"))
+    if not idx:
+        raise Http404
+    title = seo.short_title("Задания ОГЭ и ЕГЭ по математике и информатике")
+    desc = ("Все номера заданий ОГЭ и ЕГЭ по математике и информатике: темы, примеры задач из банка "
+            "«Цифрового потока», уроки и тренажёры по номерам.")
+    canonical = f"{seo.SITE_ORIGIN}/zadaniya"
+    ld_c, crumbs = _crumbs([("Главная", "/"), ("Задания", "/zadaniya")])
+    ld_faq, faq = _faq(idx)
+    blocks = "".join(f"<h2 style='margin-top:28px'><a href='/zadaniya/{level}'>Задания {ln}</a></h2>"
+                     + "".join(_subject_block(level, ln, *sub) for sub in subs) for level, ln, subs in idx)
+    body = (f"{crumbs}<section class='zt-hero'><div><span class='zt-eyebrow'>ОГЭ · ЕГЭ</span>"
+            f"<h1>Задания ОГЭ и ЕГЭ по математике и информатике</h1><p>{html.escape(desc)}</p>"
+            "<div class='zt-btns'><a class='zt-btn zt-btn--lime' href='/zadaniya/oge'>Задания ОГЭ</a>"
+            "<a class='zt-btn zt-btn--glass' href='/zadaniya/ege'>Задания ЕГЭ</a></div></div></section>"
+            + blocks + _how("ОГЭ и ЕГЭ") + faq)
+    return _render(title, desc, canonical, body, [ld_c, ld_faq])
+
+
+def zadaniya_level(request, level):
+    if level not in LEVELS:
+        raise Http404
+    idx = _focus_index((level,))
+    if not idx:
+        raise Http404
+    ln = LEVELS[level]
+    title = seo.short_title(f"Задания {ln} по математике и информатике")
+    desc = (f"Номера заданий {ln} по математике и информатике: темы, примеры задач из банка «Цифрового потока», "
+            f"уроки и тренажёры по номерам.")
+    canonical = f"{seo.SITE_ORIGIN}/zadaniya/{level}"
+    ld_c, crumbs = _crumbs([("Главная", "/"), ("Задания", "/zadaniya"), (ln, f"/zadaniya/{level}")])
+    ld_faq, faq = _faq(idx)
+    other = "ege" if level == "oge" else "oge"
+    body = (f"{crumbs}<section class='zt-hero'><div><span class='zt-eyebrow'>{ln}</span>"
+            f"<h1>Задания {ln} по математике и информатике</h1><p>{html.escape(desc)}</p>"
+            f"<div class='zt-btns'><a class='zt-btn zt-btn--lime' href='/subject/{level}'>Генератор вариантов {ln}</a>"
+            f"<a class='zt-btn zt-btn--glass' href='/zadaniya/{other}'>Задания {LEVELS[other]} →</a></div></div></section>"
+            + "".join(_subject_block(level, ln, *sub) for sub in idx[0][2]) + _how(ln) + faq)
+    return _render(title, desc, canonical, body, [ld_c, ld_faq])

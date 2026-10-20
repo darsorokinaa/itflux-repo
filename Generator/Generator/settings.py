@@ -307,6 +307,7 @@ MIDDLEWARE = [
     "Generator.middleware.MinimumClientVersionMiddleware",
     "Generator.middleware.PerformanceTimingMiddleware",
     "Generator.middleware.LargeJsonContextMiddleware",
+    "Generator.seo.MirrorNoindexMiddleware",  # r87
 ]
 
 # Django admin TOTP (python manage.py setup_admin_totp <user>)
