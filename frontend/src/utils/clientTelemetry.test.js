@@ -99,3 +99,13 @@ describe("clientTelemetry", () => {
     expect(reportClientEvent("SW_CONTROLLER_CHANGE")).toBe(true);
   });
 });
+
+describe("isOpaqueCrossOriginScriptError (r92)", () => {
+  it("flags only detail-less cross-origin Script error events", async () => {
+    const { isOpaqueCrossOriginScriptError } = await import("./clientTelemetry");
+    expect(isOpaqueCrossOriginScriptError({ message: "Script error.", filename: "", lineno: 0, error: null })).toBe(true);
+    expect(isOpaqueCrossOriginScriptError({ message: "Script error.", filename: "https://itflux-academy.ru/assets/a.js", lineno: 3 })).toBe(false);
+    expect(isOpaqueCrossOriginScriptError({ message: "boom", error: new Error("boom") })).toBe(false);
+    expect(isOpaqueCrossOriginScriptError(null)).toBe(false);
+  });
+});

@@ -495,8 +495,10 @@ export function attachMediaWatchdog(api, {
     }
   };
 
+  let deferredHardReason = "";
   const markRecovered = (why = "recovered") => {
     if (disposed) return;
+    deferredHardReason = "";
     const hadCycle = cycleOpen;
     clearGrace();
     cycleOpen = false;
@@ -516,6 +518,13 @@ export function attachMediaWatchdog(api, {
   const requestHardReconnect = (reason) => {
     if (disposed || intentionalClose || hardRequestedThisCycle) return;
     if (typeof shouldReconnect === "function" && !shouldReconnect()) return;
+    // r92: в скрытой вкладке браузер душит таймеры iframe — пересоздание Jitsi
+    // там не доходит до conference_joined и плодит попытки. Ждём видимости.
+    if (readVisibility() === "hidden") {
+      deferredHardReason = reason;
+      return;
+    }
+    deferredHardReason = "";
     hardRequestedThisCycle = true;
     state = WATCHDOG_STATES.hard_reconnect_required;
     telemetry("media_recovery_failed", { reason, jitsiParticipantId: localParticipantId });
@@ -725,6 +734,14 @@ export function attachMediaWatchdog(api, {
   const handleLifecycleEvent = (reason = "visibilitychange") => {
     if (disposed || intentionalClose) return;
     if (reason === "visibilitychange" && readVisibility() !== "visible") return;
+    if (deferredHardReason && readVisibility() === "visible") {
+      const deferred = deferredHardReason;
+      deferredHardReason = "";
+      if (cycleOpen) {
+        requestHardReconnect(deferred);
+        return;
+      }
+    }
     tick();
     if (!iframeConnected()) {
       startNetworkRecovery("iframe_detached");

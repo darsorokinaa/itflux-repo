@@ -548,3 +548,48 @@ describe("attachMediaWatchdog", () => {
 });
 
 const WATCHDOG_SAFE_TICK = 20000;
+
+describe("hidden tab hard reconnect deferral (r92)", () => {
+  const setVisibility = (value) => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => value });
+  };
+  afterEach(() => {
+    setVisibility("visible");
+    vi.useRealTimers();
+  });
+
+  it("defers hard reconnect while hidden and fires once when visible again", () => {
+    vi.useFakeTimers();
+    const api = createApi();
+    const onReconnectRequired = vi.fn();
+    const handle = attachMediaWatchdog(api, { onReconnectRequired });
+    api.emit("videoConferenceJoined", { id: "local" });
+    setVisibility("hidden");
+    api.emit("videoConferenceLeft");
+    vi.advanceTimersByTime(NETWORK_RECOVERY_GRACE_MS * 3);
+    expect(onReconnectRequired).not.toHaveBeenCalled();
+    setVisibility("visible");
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(onReconnectRequired).toHaveBeenCalledTimes(1);
+    expect(onReconnectRequired.mock.calls[0][0].reason).toBe("videoConferenceLeft");
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(onReconnectRequired).toHaveBeenCalledTimes(1);
+    handle.dispose();
+  });
+
+  it("drops the deferred reconnect if Jitsi rejoined on its own while hidden", () => {
+    vi.useFakeTimers();
+    const api = createApi();
+    const onReconnectRequired = vi.fn();
+    const handle = attachMediaWatchdog(api, { onReconnectRequired });
+    api.emit("videoConferenceJoined", { id: "local" });
+    setVisibility("hidden");
+    api.emit("videoConferenceLeft");
+    vi.advanceTimersByTime(NETWORK_RECOVERY_GRACE_MS * 2);
+    api.emit("videoConferenceJoined", { id: "local" });
+    setVisibility("visible");
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(onReconnectRequired).not.toHaveBeenCalled();
+    handle.dispose();
+  });
+});

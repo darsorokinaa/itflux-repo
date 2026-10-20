@@ -215,6 +215,7 @@ import {
   startMainThreadWatchdog,
 } from "../pwa/runtimeResources";
 import { reportClientEvent } from "../../utils/clientTelemetry";
+import { acquireLiveCallKeepAlive, installLiveMeetingLinkGuard } from "../liveMeetingGuard";
 import { COLLAB_STATUS_GRACE_MS } from "../collabConnectionUi";
 import "../styles/video-meeting.css";
 import "../styles/live-variant-answers.css";
@@ -2244,6 +2245,19 @@ export default function VideoMeetingPage() {
       window.removeEventListener("pageshow", onPageShow);
     };
   }, [pageState]);
+
+  // r92: пока звонок живой — ссылки кабинета/вариантов/журнала открываем в новой
+  // вкладке (уход со страницы размонтировал Jitsi), и держим Web Lock, чтобы
+  // браузер не замораживал фоновую вкладку со звонком.
+  useEffect(() => {
+    if (pageState !== "live" || !meetingUuid) return undefined;
+    const removeLinkGuard = installLiveMeetingLinkGuard({ meetingUuid });
+    const releaseKeepAlive = acquireLiveCallKeepAlive(meetingUuid);
+    return () => {
+      removeLinkGuard();
+      releaseKeepAlive();
+    };
+  }, [meetingUuid, pageState]);
 
   useEffect(() => {
     if (pageState !== "live") return undefined;

@@ -358,6 +358,14 @@ export function reportClientEvent(event, extra = {}) {
   return true;
 }
 
+/** window.onerror без деталей: браузер скрыл ошибку чужого (cross-origin) скрипта. */
+export function isOpaqueCrossOriginScriptError(event) {
+  if (!event) return false;
+  const message = String(event.message || "");
+  if (message !== "Script error." && message !== "Script error") return false;
+  return !event.error && !event.filename && !event.lineno;
+}
+
 export function startClientTelemetry() {
   if (started || typeof window === "undefined") return () => {};
   started = true;
@@ -372,9 +380,14 @@ export function startClientTelemetry() {
       recoverChunkLoadOnce();
       return;
     }
+    // «Script error.» без stack/filename — непрозрачная ошибка чужого скрипта
+    // (расширение браузера, внешний iframe/скрипт без CORS). Не фатальна для
+    // приложения: помечаем opaque, чтобы не путать с нашими падениями.
+    const opaque = isOpaqueCrossOriginScriptError(event);
     reportClientEvent("APP_FATAL_ERROR", {
       message: String(err?.message || event?.message || "error").slice(0, 240),
       stack: String(err?.stack || "").slice(0, 800),
+      ...(opaque ? { opaque: "cross_origin" } : {}),
     });
   };
   const onRejection = (event) => {
