@@ -3,6 +3,73 @@
 
 <head>
   <meta charset="UTF-8" />
+  <script id="itflux-cdn-hint-script">
+    /* r86: запасной адрес cdn.itflux-academy.ru (TLS-релей). Без внешних запросов.
+       Основной хост: флаг в localStorage (7 дней) — сразу на cdn; если приложение не загрузилось за 10 с —
+       ставим флаг, показываем подсказку и переходим на cdn. ?itflux_nocdn=1 — снять флаг и остаться.
+       cdn: обратно автоматически НЕ уводим (без петли); через 15 с без загрузки — подсказка со ссылкой. */
+    (function () {
+      try {
+        var CDN = "cdn.itflux-academy.ru", MAIN = "itflux-academy.ru", KEY = "itfluxPreferCdn";
+        var TTL = 7 * 24 * 3600 * 1000;
+        var host = String(location.hostname || "").toLowerCase();
+        var onMain = host === MAIN || host === "www." + MAIN;
+        var onCdn = host === CDN;
+        if (!onMain && !onCdn) return;
+        var tail = location.pathname + location.search + location.hash;
+        var cdnUrl = "https://" + CDN + tail;
+        var ls = null;
+        try { ls = window.localStorage; } catch (e) { ls = null; }
+        function get() { try { return ls ? Number(ls.getItem(KEY)) || 0 : 0; } catch (e) { return 0; } }
+        function set(v) { try { if (!ls) return false; if (v) ls.setItem(KEY, String(v)); else ls.removeItem(KEY); return true; } catch (e) { return false; } }
+        function go(url) { try { (window.__ITFLUX_NAVIGATE || function (u) { location.replace(u); })(url); } catch (e) { /* ignore */ } }
+        if (onMain) {
+          if (/[?&]itflux_nocdn=1(&|$)/.test(location.search)) { set(0); window.__ITFLUX_NO_CDN = 1; }
+          else {
+            var ts = get(), now = Date.now();
+            if (ts && now - ts >= 0 && now - ts < TTL) { window.__ITFLUX_CDN_REDIRECTING = 1; go(cdnUrl); return; }
+            if (ts) set(0);
+          }
+        }
+        var dismissKey = "itfluxCdnHintDismissed";
+        function dismissed() { try { return !!sessionStorage.getItem(dismissKey); } catch (e) { return false; } }
+        function banner(label, href) {
+          if (document.getElementById("itflux-cdn-hint") || !document.body) return;
+          var box = document.createElement("div");
+          box.id = "itflux-cdn-hint";
+          box.setAttribute("role", "status");
+          var text = document.createElement("span");
+          text.appendChild(document.createTextNode("Сайт грузится медленно? "));
+          var a = document.createElement("a");
+          a.href = href;
+          a.textContent = label;
+          text.appendChild(a);
+          var close = document.createElement("button");
+          close.type = "button";
+          close.setAttribute("aria-label", "Закрыть");
+          close.textContent = "\u00d7";
+          close.onclick = function () {
+            try { sessionStorage.setItem(dismissKey, "1"); } catch (e) { /* ignore */ }
+            if (box.parentNode) box.parentNode.removeChild(box);
+          };
+          box.appendChild(text);
+          box.appendChild(close);
+          document.body.appendChild(box);
+        }
+        var ms = Number(window.__ITFLUX_CDN_HINT_MS) || (onCdn ? 15000 : 10000);
+        setTimeout(function () {
+          if (window.__ITFLUX_BOOTED) return;
+          if (onMain) {
+            if (!dismissed()) banner("Откройте через запасной адрес", cdnUrl);
+            if (!window.__ITFLUX_NO_CDN && set(Date.now())) go(cdnUrl);
+          } else if (!dismissed()) {
+            var sep = location.search ? "&" : "?";
+            banner("Попробуйте основной адрес", "https://" + MAIN + location.pathname + location.search + sep + "itflux_nocdn=1" + location.hash);
+          }
+        }, ms);
+      } catch (err) { /* подсказка не блокирует запуск */ }
+    })();
+  </script>
   <script>
     (function () {
       if (window.__itfluxBootMark) return;
@@ -60,41 +127,6 @@
     #itflux-cdn-hint a{color:#93c5fd;font-weight:600;text-decoration:underline}
     #itflux-cdn-hint button{margin-left:auto;flex:none;border:0;background:transparent;color:#cbd5e1;font-size:20px;line-height:1;cursor:pointer;padding:2px 6px}
   </style>
-  <script id="itflux-cdn-hint-script">
-    /* Подсказка про запасной адрес, если приложение не отрисовалось за ~10 с. Без внешних запросов. */
-    (function () {
-      try {
-        var CDN = "cdn.itflux-academy.ru";
-        var host = String(location.hostname || "").toLowerCase();
-        if (host !== "itflux-academy.ru" && host !== "www.itflux-academy.ru") return;
-        try { if (sessionStorage.getItem("itfluxCdnHintDismissed")) return; } catch (e) { /* ignore */ }
-        var ms = Number(window.__ITFLUX_CDN_HINT_MS) || 10000;
-        setTimeout(function () {
-          if (window.__ITFLUX_BOOTED || document.getElementById("itflux-cdn-hint") || !document.body) return;
-          var box = document.createElement("div");
-          box.id = "itflux-cdn-hint";
-          box.setAttribute("role", "status");
-          var text = document.createElement("span");
-          text.appendChild(document.createTextNode("Сайт грузится медленно? "));
-          var a = document.createElement("a");
-          a.href = "https://" + CDN + location.pathname + location.search + location.hash;
-          a.textContent = "Откройте через запасной адрес";
-          text.appendChild(a);
-          var close = document.createElement("button");
-          close.type = "button";
-          close.setAttribute("aria-label", "Закрыть");
-          close.textContent = "\u00d7";
-          close.onclick = function () {
-            try { sessionStorage.setItem("itfluxCdnHintDismissed", "1"); } catch (e) { /* ignore */ }
-            if (box.parentNode) box.parentNode.removeChild(box);
-          };
-          box.appendChild(text);
-          box.appendChild(close);
-          document.body.appendChild(box);
-        }, ms);
-      } catch (err) { /* подсказка не блокирует запуск */ }
-    })();
-  </script>
   <script src="/boot-watchdog.js"></script>
 
   <!-- Яндекс.Метрика подключается только после согласия на cookie (см. utils/analytics.js). -->
