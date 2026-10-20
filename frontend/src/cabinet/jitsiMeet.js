@@ -573,14 +573,25 @@ export function buildJitsiConfigOverwrite({
     replaceParticipant: true,
     channelLastN: 8,
     resolution: JITSI_CAMERA_MAX_HEIGHT,
-    startBitrate: 1500,
+    startBitrate: 2500,
     disableSimulcast: false,
     enableNoAudioDetection: true,
     enableNoisyMicDetection: true,
     enableIceRestart: true,
     stereo: false,
     constraints: jitsiCameraConstraints(),
+    // Демонстрация экрана: 5–15 fps, VP9 SVC, высокий битрейт для чёткого текста.
+    desktopSharingFrameRate: { min: 5, max: 15 },
     videoQuality: {
+      codecPreferenceOrder: ["VP9", "VP8", "H264"],
+      mobileCodecPreferenceOrder: ["VP8", "H264", "VP9"],
+      screenshareCodec: "VP9",
+      mobileScreenshareCodec: "VP8",
+      enableAdaptiveMode: false,
+      // Камера ограничена 1.5 Мбит/с, чтобы не отнимать полосу у экрана у слабых учеников.
+      vp8: { maxBitratesVideo: { low: 200000, standard: 500000, high: 1200000, fullHd: 1500000, ssHigh: 3500000 } },
+      vp9: { maxBitratesVideo: { low: 100000, standard: 300000, high: 1000000, fullHd: 1500000, ssHigh: 3000000 } },
+      h264: { maxBitratesVideo: { low: 200000, standard: 500000, high: 1200000, fullHd: 1500000, ssHigh: 3500000 } },
       maxFullResolution: JITSI_CAMERA_MAX_HEIGHT,
       minHeightForQualityLvl: {
         360: "standard",
