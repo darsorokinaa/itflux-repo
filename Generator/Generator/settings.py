@@ -308,7 +308,12 @@ MIDDLEWARE = [
     "Generator.middleware.PerformanceTimingMiddleware",
     "Generator.middleware.LargeJsonContextMiddleware",
     "Generator.seo.MirrorNoindexMiddleware",  # r87
+    "Generator.cdn_users.CdnUsersMiddleware",  # r90: кто ходит через cdn-зеркало
 ]
+
+# r90: лог пользователей cdn.itflux-academy.ru (1 строка/польз./10 мин), см. Generator/cdn_users.py
+CDN_USERS_LOG = os.environ.get("CDN_USERS_LOG", "/var/log/itflux/cdn-users.log")
+CDN_USERS_THROTTLE_SECONDS = int(os.environ.get("CDN_USERS_THROTTLE_SECONDS", "600"))
 
 # Django admin TOTP (python manage.py setup_admin_totp <user>)
 _admin_otp = (os.environ.get("ADMIN_OTP_REQUIRED") or "").strip().lower()
