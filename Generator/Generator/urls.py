@@ -1,3 +1,4 @@
+from vkfunnel.views import vk_callback
 from django.contrib import admin
 from django.http import HttpResponseForbidden
 from django.urls import path, include, re_path
@@ -49,6 +50,7 @@ urlpatterns = [
     path("admin/logout/", views.admin_logout_to_public_home, name="generator_admin_logout"),
     path('admin/', admin.site.urls),
 
+    path("api/vk/callback/", vk_callback, name="vk_callback"),  # vkfunnel
     path("api/csrf/", views.api_csrf, name="api_csrf"),
     path("api/teacher-applications/", api_teacher_application, name="api_teacher_applications"),
     path("api/school-requests/", api_school_request, name="api_school_requests"),
