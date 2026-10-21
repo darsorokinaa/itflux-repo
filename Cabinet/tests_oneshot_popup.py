@@ -207,3 +207,15 @@ class R62Tests(TestCase):
         r62.send_one("n1", sb, self.now, promo=False)
         self.assertEqual(list(OneShotPopup.objects.filter(user=b).values_list("kind", flat=True)), ["payment_unfinished"])
         self.assertTrue(Notification.objects.filter(recipient_user=b, event_type="subscription_r62_n1").exists())
+
+
+class R62ScheduledPaidTests(TestCase):
+    def test_n1_skips_scheduled_paid_plan(self):
+        now = timezone.now()
+        a = _teacher("prem_to_pro"); _sub(a, "premium", now + timedelta(days=3), scheduled_plan=_plan("pro", "1990"))
+        b = _teacher("prem_to_start"); _sub(b, "premium", now + timedelta(days=3), scheduled_plan=_plan("start"))
+        c = _teacher("prem_plain"); _sub(c, "premium", now + timedelta(days=3))
+        ids = {s.teacher_id for s in r62.n1_subscriptions(now)}
+        self.assertNotIn(a.pk, ids)
+        self.assertIn(b.pk, ids)
+        self.assertIn(c.pk, ids)

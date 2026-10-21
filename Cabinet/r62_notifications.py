@@ -137,7 +137,13 @@ def n1_subscriptions(now):
                 status__in=[TeacherSubscription.Status.ACTIVE, TeacherSubscription.Status.TRIAL])
         .order_by("expires_at", "pk")
     )
-    return [s for s in qs if s.is_valid() and not _excluded(s)]
+    return [s for s in qs if s.is_valid() and not _excluded(s) and not _scheduled_paid(s)]
+
+
+def _scheduled_paid(sub) -> bool:
+    """21.10.2026: N1 не шлём, если уже запланирован переход на платный тариф."""
+    plan = getattr(sub, "scheduled_plan", None)
+    return bool(plan and not plan.is_free and plan.slug not in ("start",) and (plan.price_month or plan.price_year))
 
 
 def n2_subscriptions(now):
