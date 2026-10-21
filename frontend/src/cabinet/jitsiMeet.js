@@ -17,6 +17,7 @@ import {
 } from "./jitsiParticipants";
 import { buildJitsiPipConfigOverwrite, disableJitsiAutoIntersectionPip } from "./callPip";
 import { attachScreenSharePresence } from "./jitsiScreenShare";
+import { attachRemoteShareFocus } from "./jitsiRemoteShareFocus"; // r94
 import { attachMediaWatchdog } from "./jitsiMediaWatchdog";
 import { createCallSessionId } from "./jitsiCallState";
 import {
@@ -1153,6 +1154,8 @@ function wireParticipantListeners(api, hooks) {
   const screenShare = attachScreenSharePresence(api, {
     onChange: hooks.onScreenShare,
   });
+  // r94: получатель демонстрации — экран на сцене и 1080p независимо от размера плитки
+  const remoteShareFocus = attachRemoteShareFocus(api);
   const watchdog = attachMediaWatchdog(api, {
     diagnostics: hooks.diagnostics,
     getIntended: hooks.getIntendedMedia,
@@ -1203,6 +1206,7 @@ function wireParticipantListeners(api, hooks) {
         }
       }
       extraListeners.length = 0;
+      remoteShareFocus.dispose();
     },
   };
 }
