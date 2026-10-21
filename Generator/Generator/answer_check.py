@@ -12,6 +12,14 @@ _SUBJECTS_WITH_OR = frozenset({"math", "math_base", "chem", "history"})
 _ZERO_WIDTH_RE = re.compile(r"[\u200b-\u200d\ufeff\u00ad]")
 _WS_RE = re.compile(r"\s+")
 _OR_SPLIT_RE = re.compile(r"\s+или\s+", re.IGNORECASE)
+_SINGLE_DECIMAL_RE = re.compile(r"^[-−]?\d+(?:[.,]\d+)?$")
+
+
+def _decimal_key(norm: str) -> str:
+    """Одно десятичное число: «0,95» и «0.95» -> один ключ. Списки («1,2,3»), №11/№19 — без изменений."""
+    if _SINGLE_DECIMAL_RE.match(norm):
+        return norm.replace("−", "-").replace(",", ".")
+    return norm
 
 
 def normalize_answer(value) -> str:
@@ -37,9 +45,9 @@ def answers_equal(student_answer, expected_answer, *, subject: str = "") -> bool
         alternatives = [normalize_answer(part) for part in _OR_SPLIT_RE.split(expected_raw)]
         alternatives = [a for a in alternatives if a]
         if alternatives:
-            return user_norm in alternatives
+            return _decimal_key(user_norm) in {_decimal_key(a) for a in alternatives}
 
-    return user_norm == expected_norm
+    return _decimal_key(user_norm) == _decimal_key(expected_norm)
 
 
 def expected_answer_for_variant_task(variant_id: int, task_id: int | None = None, task_number_key: str = "") -> str:

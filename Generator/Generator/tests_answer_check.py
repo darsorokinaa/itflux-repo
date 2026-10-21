@@ -19,3 +19,19 @@ class AnswerCheckTests(SimpleTestCase):
 
     def test_mismatch(self):
         self.assertFalse(answers_equal("гуава", "дядя"))
+
+    def test_decimal_separator_equal(self):
+        self.assertTrue(answers_equal("0,95", "0.95", subject="math"))
+        self.assertTrue(answers_equal("0.95", "<p>0,95</p>", subject="math"))
+        self.assertTrue(answers_equal("-0,7", "-0.7"))
+        self.assertTrue(answers_equal("0.5", "0,4 или 0,5", subject="math"))
+        self.assertFalse(answers_equal("0,95", "0.96"))
+        self.assertFalse(answers_equal("0,950", "0.95"))  # строгое строковое сравнение после замены разделителя
+
+    def test_lists_and_digit_strings_unchanged(self):
+        self.assertFalse(answers_equal("1.2.3", "1,2,3"))
+        self.assertTrue(answers_equal("1,2,3", "1,2,3"))
+        self.assertFalse(answers_equal("132", "1,32"))
+        self.assertFalse(answers_equal("13", "31"))
+        self.assertFalse(answers_equal("312", "3.12"))
+        self.assertFalse(answers_equal("-3;-1", "-3.-1"))
