@@ -5499,3 +5499,4 @@ class SocialAccount(models.Model):
         return f"{self.provider}:{self.uid} → {self.user_id}"
 
 from .r50_models import EmailOptOut, SubscriptionReminderLog, TrialGrant  # noqa: E402, F401
+from .oneshot_models import OneShotPopup  # noqa: E402, F401

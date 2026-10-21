@@ -32,8 +32,9 @@ EXCLUDED_USER_IDS = {2}
 N1_URL = "https://itflux-academy.ru/pricing?utm_source=platform&utm_medium=notification&utm_campaign=tariffs_oct&utm_content=premium"
 N2_URL = "https://itflux-academy.ru/pricing?utm_source=platform&utm_medium=notification&utm_campaign=tariffs_oct&utm_content=profi_old"
 
-N1_TITLE = "Ваш «Премиум» заканчивается {date}"
-N1_BUTTON = "Посмотреть тарифы"
+# 21.10.2026: текст N1 заменён одобренным текстом разового окна А (Cabinet.oneshot_popups), без промокодов.
+N1_TITLE = "Ваш «Премиум» заканчивается {date}"  # старый формат (уже отправленные уведомления)
+N1_BUTTON = "Тарифы"
 N1_P1 = (
     "{greet} Это Дарья. Тарифа «Премиум» больше нет, а Ваш действует до {date}. После этого аккаунт перейдёт "
     "на бесплатный «Старт»: до 5 учеников, весь кабинет, банк ФИПИ, 10 вариантов в месяц и 30 токенов Цифрика. "
@@ -94,12 +95,16 @@ def has_consent(user) -> bool:
     return has_promo_consent(user, "inapp_marketing")
 
 
-def render(which: str, user, end_dt, promo: bool) -> dict:
+def render(which: str, user, end_dt, promo: bool, now=None) -> dict:
     d = fmt_date(end_dt)
     g = greeting(user)
     if which == "n1":
-        paras = [N1_P1.format(greet=g, date=d)] + ([N1_PROMO] if promo else []) + [SIGNATURE]
-        title, button, url = N1_TITLE.format(date=d), N1_BUTTON, N1_URL
+        from .oneshot_popups import A_TEXT, A_TITLE, SIGNATURE as A_SIGNATURE, premium_when
+
+        when = premium_when(end_dt, now or timezone.now()) or "Сегодня"
+        paras = [A_TEXT.format(when=when), A_SIGNATURE]
+        title, button, url = A_TITLE.format(when=when), N1_BUTTON, N1_URL
+        promo = False  # окно А и N1 — без промокодов
     else:
         paras = [N2_P1.format(greet=g, date=d)] + ([N2_PROMO] if promo else []) + [N2_P3, SIGNATURE]
         title, button, url = N2_TITLE, N2_BUTTON, N2_URL
@@ -196,7 +201,7 @@ def send_one(which, sub, now, promo) -> str:
     from .models import Notification, SubscriptionReminderLog
     from .r50_tariffs import _local_date
 
-    r = render(which, sub.teacher, sub.expires_at, promo)
+    r = render(which, sub.teacher, sub.expires_at, promo, now)
     end = _local_date(sub.expires_at)
     try:
         with transaction.atomic():
@@ -229,7 +234,20 @@ def send_one(which, sub, now, promo) -> str:
     except IntegrityError:
         return "duplicate"
     logger.info("r62_notification_sent which=%s sub=%s user=%s version=%s", which, sub.pk, sub.teacher_id, r["version"])
+    if which == "n1":
+        _place_popup(sub, now)
     return "sent"
+
+
+def _place_popup(sub, now) -> str:
+    """Разовое окно А вместе с N1 (или колокольчик, если у человека уже есть окно В/Б)."""
+    from .oneshot_popups import place_premium
+
+    try:
+        return place_premium(sub, now)
+    except Exception:  # окно не должно ломать отправку N1
+        logger.exception("r62 oneshot popup failed sub=%s", sub.pk)
+        return "popup_failed"
 
 
 def run(now=None, *, dry_run=False, only=("n1", "n2")) -> dict:
@@ -243,6 +261,9 @@ def run(now=None, *, dry_run=False, only=("n1", "n2")) -> dict:
             row["result"] = send_one(row["which"], row["sub"], now, row["consent"])
         else:
             row["result"] = row["state"]
+        if row["which"] == "n1" and row["state"] == "already_sent" and not dry_run:
+            # N1 ушло раньше (в т. ч. в старом формате) — окно А один раз при следующем входе
+            stats[f"n1:popup_{_place_popup(row['sub'], now)}"] += 1
         stats[f"{row['which']}:{row['result']}"] += 1
     return {"now_msk": msk(now).isoformat(timespec="minutes"), "in_window": in_send_window(now),
             "dry_run": dry_run, "stats": dict(stats), "rows": rows}
