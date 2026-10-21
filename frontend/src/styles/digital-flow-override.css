@@ -3056,3 +3056,12 @@ table:has(> tbody > tr > td > mjx-container):not(.bank-task-table):not(.wb-layou
     animation-duration: 1.6s;
   }
 }
+
+/* Формульные mtable (cases, системы, матрицы в скобках) — без рамок; настоящие array/tabular остаются в сетке */
+#root .all-tasks-item__html mjx-mtable.bank-task-mjx-layout,
+#root .all-tasks-item__html mjx-mtable.bank-task-mjx-layout :is(mjx-table, mjx-mtr, mjx-mtd),
+.task-text mjx-mtable.bank-task-mjx-layout :is(mjx-table, mjx-mtr, mjx-mtd),
+.exam-task-card__text mjx-mtable.bank-task-mjx-layout :is(mjx-table, mjx-mtr, mjx-mtd) {
+  border: none !important;
+}
+mjx-container > .mjx-trailing-punct { display: inline; margin-left: 0.1em; }

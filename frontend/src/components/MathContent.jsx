@@ -353,6 +353,7 @@ function typesetMathInElement(el, { plainHtml = false } = {}) {
     })
     .then(() => {
       if (plainHtml) polishBankTaskMathJaxTables(el);
+      else attachTrailingPunctuationToBlockMath(el);
     });
   return mathJaxPromise;
 }
@@ -994,11 +995,56 @@ function polishBankTaskTables(root) {
 }
 
 /** MathJax array/tabular: полная сетка границ (после typesetPromise). */
+/**
+ * mtable внутри скобки (cases, \\left\\{ array, pmatrix, совокупность […]) или
+ * внутри mjx-cases — это вёрстка формулы, а не таблица: без рамок.
+ */
+function isLayoutMathJaxTable(mtable) {
+  if (!mtable) return false;
+  if (mtable.closest("mjx-cases")) return true;
+  const isMo = (el) => !!el && el.tagName && el.tagName.toLowerCase() === "mjx-mo";
+  if (isMo(mtable.previousElementSibling) || isMo(mtable.nextElementSibling)) return true;
+  const parent = mtable.parentElement;
+  if (parent && /^mjx-(mrow|inferredmrow|texatom)$/i.test(parent.tagName)) {
+    if (isMo(parent.firstElementChild) || isMo(parent.lastElementChild)) return true;
+  }
+  return false;
+}
+
+/** Точка/запятая после блочной формулы не должна уходить отдельной строкой. */
+function attachTrailingPunctuationToBlockMath(root) {
+  if (!root || typeof window === "undefined") return;
+  for (const container of root.querySelectorAll("mjx-container")) {
+    if (container.querySelector(":scope > .mjx-trailing-punct")) continue;
+    let display = "";
+    try { display = window.getComputedStyle(container).display; } catch { display = ""; }
+    if (display !== "block" && container.getAttribute("display") !== "true") continue;
+    const next = container.nextSibling;
+    if (!next || next.nodeType !== 3) continue;
+    const m = /^\s*([.,;:]+)/.exec(next.nodeValue || "");
+    if (!m) continue;
+    next.nodeValue = next.nodeValue.slice(m[0].length);
+    const punct = container.ownerDocument.createElement("span");
+    punct.className = "mjx-trailing-punct";
+    punct.textContent = m[1];
+    container.appendChild(punct);
+  }
+}
+
 function polishBankTaskMathJaxTables(root) {
   if (!root) return;
 
+  const layoutTables = new Set();
   for (const mtable of root.querySelectorAll("mjx-mtable")) {
-    if (mtable.closest("mjx-cases")) continue;
+    if (isLayoutMathJaxTable(mtable)) {
+      layoutTables.add(mtable);
+      mtable.classList.remove("bank-task-mjx-table");
+      mtable.classList.add("bank-task-mjx-layout");
+      for (const cell of mtable.querySelectorAll("mjx-mtd")) {
+        if (cell.closest("mjx-mtable") === mtable) cell.style.removeProperty("border");
+      }
+      continue;
+    }
     mtable.style.setProperty("border-collapse", "collapse", "important");
     mtable.style.setProperty("border-spacing", "0", "important");
     mtable.style.setProperty("overflow", "visible", "important");
@@ -1006,14 +1052,14 @@ function polishBankTaskMathJaxTables(root) {
   }
 
   for (const table of root.querySelectorAll("mjx-mtable > mjx-table")) {
-    if (table.closest("mjx-cases")) continue;
+    if (layoutTables.has(table.parentElement)) continue;
     table.style.setProperty("border-collapse", "collapse", "important");
     table.style.setProperty("border-spacing", "0", "important");
     table.style.setProperty("overflow", "visible", "important");
   }
 
   for (const cell of root.querySelectorAll("mjx-mtd")) {
-    if (cell.closest("mjx-cases")) continue;
+    if (layoutTables.has(cell.closest("mjx-mtable"))) continue;
     for (const prop of [
       "border",
       "border-left",
@@ -1041,7 +1087,7 @@ function polishBankTaskMathJaxTables(root) {
       container.style.setProperty("text-align", "center", "important");
       container.style.setProperty("max-height", "none", "important");
     }
-  }
+  }  attachTrailingPunctuationToBlockMath(root);
 }
 
 function parseHtmlFragmentForTables(html) {
