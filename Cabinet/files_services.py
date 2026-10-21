@@ -201,7 +201,10 @@ def user_can_read_file(user, file_obj: CabinetFile) -> bool:
         Q(student_id__in=students) | Q(group__students__in=students),
     ).filter(hw_file_q).exists():
         return True
-    return False
+    # Экран ожидания урока: материалы урока ученику этого урока, только в окне.
+    from .early_room import student_can_read_file_via_waiting_room
+
+    return student_can_read_file_via_waiting_room(user, file_obj)
 
 
 def get_readable_file(user, file_id) -> CabinetFile:
@@ -1592,7 +1595,10 @@ def student_can_access_material_file(user, material: Material) -> bool:
             tasks__description__in=task_urls,
         ).exists():
             return True
-    return False
+    # Экран ожидания урока: материалы урока ученику этого урока, только в окне.
+    from .early_room import student_can_access_waiting_material
+
+    return student_can_access_waiting_material(user, material)
 
 
 def _legacy_material_file_api_url(material: Material, *, for_student: bool, inline: bool) -> str:

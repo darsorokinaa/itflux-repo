@@ -273,3 +273,104 @@ class EarlyRoomTests(TestCase):
         self.assertEqual(payload["pageUrl"], f"/cabinet/student/lessons/room/{self.event.pk}")
         self.assertTrue(payload["earlyEntry"]["eligible"])
         self.assertFalse(payload["earlyEntry"]["open"])
+
+
+@override_settings(**JITSI)
+class EarlyRoomAttachedMaterialsTests(TestCase):
+    """Материалы, прикреплённые к уроку в расписании/плане, — только ученику урока и в окне."""
+
+    setUp = EarlyRoomTests.setUp
+    _event = EarlyRoomTests._event
+
+    def _material(self, title, **kw):
+        from Cabinet.models import Material
+
+        return Material.objects.create(
+            owner=self.teacher, teacher=self.teacher, title=title, status="published", **kw
+        )
+
+    def _attach(self, material, event=None):
+        from Cabinet.models import ScheduleEventMaterial
+
+        ScheduleEventMaterial.objects.create(event=event or self.event, material=material)
+
+    def _waiting(self, user, now):
+        with mock.patch("Cabinet.early_room.timezone.now", return_value=now):
+            meeting = VideoMeeting.objects.filter(schedule_event=self.event).first() or \
+                get_or_create_meeting_for_event(event=self.event, created_by=self.teacher)[0]
+            self.client.force_login(user)
+            return self.client.get(f"/api/video-meetings/{meeting.uuid}/waiting-room/")
+
+    def test_schedule_material_shown_in_window_with_student_link(self):
+        m = self._material("Конспект", external_url="https://example.org/konspekt")
+        self._attach(m)
+        res = self._waiting(self.student_user, self.starts - timedelta(minutes=5))
+        self.assertEqual(res.status_code, 200, res.data)
+        mats = res.data["materials"]
+        self.assertEqual([x["id"] for x in mats], [m.id])
+        self.assertEqual(mats[0]["href"], "https://example.org/konspekt")
+
+    def test_draft_and_foreign_teacher_material_hidden(self):
+        draft = self._material("Черновик")
+        type(draft).objects.filter(pk=draft.pk).update(status="draft")
+        other_teacher = _user("er_t2", Profile.Role.TEACHER)
+        from Cabinet.models import Material
+
+        foreign = Material.objects.create(owner=other_teacher, teacher=other_teacher, title="Чужой", status="published")
+        self._attach(draft)
+        self._attach(foreign)
+        res = self._waiting(self.student_user, self.starts)
+        self.assertEqual(res.data["materials"], [])
+
+    def test_file_access_rule_only_in_window_and_only_for_lesson_student(self):
+        from Cabinet.files_services import student_can_access_material_file
+
+        m = self._material("Файл урока", file="cabinet/materials/x.pdf")
+        self._attach(m)
+        get_or_create_meeting_for_event(event=self.event, created_by=self.teacher)
+        with mock.patch("Cabinet.early_room.timezone.now", return_value=self.starts - timedelta(minutes=30)):
+            self.assertFalse(student_can_access_material_file(self.student_user, m))
+        with mock.patch("Cabinet.early_room.timezone.now", return_value=self.starts - timedelta(minutes=10)):
+            self.assertTrue(student_can_access_material_file(self.student_user, m))
+            self.assertFalse(student_can_access_material_file(self.other_user, m))
+        with mock.patch("Cabinet.early_room.timezone.now", return_value=self.ends + timedelta(minutes=1)):
+            self.assertFalse(student_can_access_material_file(self.student_user, m))
+        # Вид ссылки — авторизованный адрес ученика, не публичный /media/.
+        res = self._waiting(self.student_user, self.starts)
+        self.assertEqual(res.data["materials"][0]["href"], f"/api/cabinet/student/materials/{m.id}/preview/")
+
+    def test_material_download_endpoint_enforces_window(self):
+        m = self._material("Файл урока 2", file="cabinet/materials/y.pdf")
+        self._attach(m)
+        get_or_create_meeting_for_event(event=self.event, created_by=self.teacher)
+        self.client.force_login(self.other_user)
+        with mock.patch("Cabinet.early_room.timezone.now", return_value=self.starts):
+            res = self.client.get(f"/api/cabinet/student/materials/{m.id}/file/")
+        self.assertEqual(res.status_code, 403)
+        self.client.force_login(self.student_user)
+        with mock.patch("Cabinet.early_room.timezone.now", return_value=self.starts - timedelta(hours=1)):
+            res = self.client.get(f"/api/cabinet/student/materials/{m.id}/file/")
+        self.assertEqual(res.status_code, 403)
+
+    def test_plan_item_material_included(self):
+        from types import SimpleNamespace
+
+        from Cabinet.models import Material
+
+        m = self._material("Из плана")
+        item = SimpleNamespace(materials=Material.objects.filter(pk=m.pk))
+        with mock.patch("Cabinet.plan_schedule.resolve_plan_item_for_event", return_value=(item, 1)):
+            res = self._waiting(self.student_user, self.starts)
+        self.assertEqual([x["id"] for x in res.data["materials"]], [m.id])
+        self.assertEqual(res.data["materials"][0]["href"], "")
+
+    def test_cabinet_file_rule(self):
+        from Cabinet.early_room import student_can_access_waiting_material
+
+        m = self._material("Без файла")
+        self._attach(m)
+        get_or_create_meeting_for_event(event=self.event, created_by=self.teacher)
+        with mock.patch("Cabinet.early_room.timezone.now", return_value=self.starts):
+            self.assertTrue(student_can_access_waiting_material(self.student_user, m))
+            self.assertFalse(student_can_access_waiting_material(self.other_user, m))
+            self.assertFalse(student_can_access_waiting_material(self.teacher, m))

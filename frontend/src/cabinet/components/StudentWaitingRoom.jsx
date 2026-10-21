@@ -70,7 +70,14 @@ export default function StudentWaitingRoom({ meetingUuid }) {
           <ul className="video-waiting-room__list">
             {materials.map((item) => (
               <li key={`m-${item.id}`}>
-                <Link to={item.href}>{item.title}</Link>
+                {item.href?.startsWith("/cabinet/") ? (
+                  <Link to={item.href}>{item.title}</Link>
+                ) : item.href ? (
+                  // Файл/ссылка — в этой же вкладке; права проверяет сервер.
+                  <a href={item.href}>{item.title}</a>
+                ) : (
+                  <span>{item.title}</span>
+                )}
                 {item.typeLabel ? <span className="video-waiting-room__meta"> · {item.typeLabel}</span> : null}
               </li>
             ))}

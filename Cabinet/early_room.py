@@ -237,26 +237,127 @@ def _previous_topic(students, event: ScheduleEvent) -> dict | None:
     return {"topic": topic, "text": f"Повторите тему «{topic}»."}
 
 
-def _lesson_materials(students, event: ScheduleEvent) -> list[dict]:
-    """Только материалы, уже открытые ученику: опубликованные материалы урока,
-    выданного ему/группе (LessonAssignment). Материалы плана/события учитель
-    показывает сам на уроке — до урока их не раскрываем."""
-    from .student_api import _assignment_id_for_event, _published_materials_for_lesson
+def event_attached_materials(event: ScheduleEvent) -> list:
+    """Материалы, прикреплённые учителем к этому уроку: в расписании
+    (ScheduleEventMaterial), в пункте плана урока и в выданном уроке (Lesson).
+    Только опубликованные; ДЗ-материалы плана сюда не входят."""
+    from .choices import MaterialStatus
+    from .models import Material, ScheduleEventMaterial
+    from .plan_schedule import resolve_plan_item_for_event
 
-    if not students or not event.lesson_id:
+    ids: list[int] = []
+    for mid in (
+        ScheduleEventMaterial.objects.filter(event=event, material__isnull=False)
+        .order_by("order", "id")
+        .values_list("material_id", flat=True)
+    ):
+        ids.append(mid)
+    try:
+        plan_item, _num = resolve_plan_item_for_event(event)
+    except Exception:
+        plan_item = None
+    if plan_item is not None:
+        ids.extend(plan_item.materials.values_list("id", flat=True))
+    if event.lesson_id:
+        ids.extend(event.lesson.materials.values_list("id", flat=True))
+    seen, ordered = set(), []
+    for mid in ids:
+        if mid not in seen:
+            seen.add(mid)
+            ordered.append(mid)
+    by_id = {
+        m.id: m
+        for m in Material.objects.filter(
+            id__in=ordered, status=MaterialStatus.PUBLISHED, teacher_id=event.owner_id
+        ).select_related("cabinet_file")
+    }
+    return [by_id[mid] for mid in ordered if mid in by_id]
+
+
+def _event_q_for_students(student_ids):
+    from django.db.models import Q
+
+    return (
+        Q(student_id__in=student_ids)
+        | Q(group__students__id__in=student_ids)
+        | Q(participants__student_id__in=student_ids)
+    )
+
+
+def open_waiting_events_for_user(user: User, *, now=None) -> list:
+    """Уроки, где пользователь — ученик и окно раннего входа (или урок live) сейчас открыто."""
+    from .models import Student
+    from .video_meeting_service import resolve_access
+
+    if not user or not getattr(user, "is_authenticated", False):
         return []
-    assignment_id = _assignment_id_for_event(event, students)
-    if not assignment_id:
+    student_ids = list(Student.objects.filter(user=user, status="active").values_list("id", flat=True))
+    if not student_ids:
         return []
-    href = f"/cabinet/student/lessons/{assignment_id}"
+    now = now or timezone.now()
+    candidates = (
+        ScheduleEvent.objects.filter(
+            status=ScheduleEvent.Status.PLANNED,
+            starts_at__lte=now + EARLY_ENTRY_BEFORE,
+            ends_at__gte=now - timedelta(hours=3),
+        )
+        .filter(_event_q_for_students(student_ids))
+        .select_related("owner", "lesson", "group")
+        .distinct()[:10]
+    )
     out = []
-    for material in _published_materials_for_lesson(event.lesson)[:MAX_MATERIALS]:
+    for event in candidates:
+        meeting = VideoMeeting.objects.filter(schedule_event=event).first()
+        live = meeting is not None and meeting.status == VideoMeeting.Status.LIVE
+        if not live and early_entry_state(event, meeting, now=now) != "open":
+            continue
+        if resolve_access(user, event).role != "student":
+            continue
+        out.append(event)
+    return out
+
+
+def student_can_access_waiting_material(user: User, material, *, now=None) -> bool:
+    """Доп. правило доступа к файлу/ссылке материала: материал прикреплён к уроку,
+    где пользователь — ученик, и окно урока открыто сейчас. Вне окна — нет."""
+    if material is None:
+        return False
+    for event in open_waiting_events_for_user(user, now=now):
+        if any(m.id == material.id for m in event_attached_materials(event)):
+            return True
+    return False
+
+
+def student_can_read_file_via_waiting_room(user: User, file_obj, *, now=None) -> bool:
+    from .models import Material
+
+    materials = list(Material.objects.filter(cabinet_file=file_obj))
+    return any(student_can_access_waiting_material(user, m, now=now) for m in materials)
+
+
+def _lesson_materials(students, event: ScheduleEvent) -> list[dict]:
+    """Материалы к уроку (расписание, план, выданный урок). Ссылки — через
+    обычные авторизованные адреса ученика; права на файл проверяются там же
+    (files_services), включая правило окна раннего входа."""
+    from .files_services import material_file_url, material_view_url
+
+    if not students:
+        return []
+    out = []
+    for material in event_attached_materials(event)[:MAX_MATERIALS]:
+        view_url = material_view_url(material, for_student=True)
+        file_url = material_file_url(material, for_student=True)
+        external = (material.external_url or "").strip()
+        href = view_url or file_url or external
+        if href and not (href.startswith("/api/cabinet/student/") or href.startswith("https://")):
+            href = ""
         out.append(
             {
                 "id": material.id,
                 "title": material.title or "Материал",
                 "typeLabel": material.get_material_type_display(),
                 "href": href,
+                "downloadUrl": file_url if file_url.startswith("/api/cabinet/student/") else "",
             }
         )
     return out
