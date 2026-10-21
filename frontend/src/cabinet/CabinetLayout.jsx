@@ -18,6 +18,7 @@ import { CabinetCallProvider } from "./CabinetCallContext";
 import CabinetGlobalSearch from "./components/CabinetGlobalSearch";
 import CabinetNotificationsBell from "./components/CabinetNotificationsBell";
 import CabinetGuideModal from "./components/CabinetGuideModal";
+import OneShotPopup from "./components/OneShotPopup";
 import ConfirmActionModal from "./components/ConfirmActionModal";
 import ConnectionCheckHost from "./connectionCheck/ConnectionCheckHost";
 import CabinetFloatingMenu from "./components/CabinetFloatingMenu";
@@ -682,6 +683,7 @@ export default function CabinetLayout() {
         })}
       </nav>
       <CabinetGuideModal open={guideOpen} onClose={closeGuide} onComplete={completeGuide} />
+      <OneShotPopup enabled={user.role === "teacher" && !guideOpen} />
       <ConnectionCheckHost />
       <TimewebAiEmbed
         enabled={!subscription.loading && planHasTimewebAi(subscription.currentPlan)}

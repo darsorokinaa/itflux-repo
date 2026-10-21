@@ -8,6 +8,7 @@ from . import (
 from .worksheet_ai import api as worksheet_ai_api
 from . import r50_api
 from . import r52_api
+from . import oneshot_api
 from . import (
     api_views,
     availability_api,
@@ -519,6 +520,9 @@ urlpatterns = [
     # Тарифная система
     path("subscription/current/", subscription_api.SubscriptionCurrentView.as_view(), name="subscription_current"),
     path("subscription/usage/", subscription_api.SubscriptionUsageView.as_view(), name="subscription_usage"),
+    path("oneshot-popup/", oneshot_api.OneShotPopupNextView.as_view(), name="oneshot_popup_next"),
+    path("oneshot-popup/<int:popup_id>/seen/", oneshot_api.OneShotPopupSeenView.as_view(), name="oneshot_popup_seen"),
+    path("oneshot-popup/<int:popup_id>/close/", oneshot_api.OneShotPopupCloseView.as_view(), name="oneshot_popup_close"),
     path("subscription/plans/", subscription_api.SubscriptionPlansView.as_view(), name="subscription_plans"),
     path("pricing/plans/", subscription_api.PublicPricingPlansView.as_view(), name="pricing_plans_public"),
     path("r50/pricing-me/", r50_api.PricingMeView.as_view(), name="r50_pricing_me"),
