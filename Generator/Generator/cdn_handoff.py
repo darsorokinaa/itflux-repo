@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 
 CDN_ORIGIN = "https://cdn.itflux-academy.ru"
 PREF_TTL = 7 * 24 * 3600
-ALLOWED_REASONS = {"call_drops", "join_timeout"}
+ALLOWED_REASONS = {"call_drops", "join_timeout", "pinned"}
 _VERSION_PARAM = re.compile(r"(^|&)_itflux_v=[^&]*")
 
 
@@ -62,6 +62,8 @@ def safe_next(value) -> str:
 
 def set_pref(user, reason: str) -> None:
     from Cabinet.cdn_handoff_models import CdnPreference
+    if CdnPreference.objects.filter(user=user, reason="pinned").exists():
+        return  # закреплён вручную (pin_cdn_user) — не понижаем до 7 дней
     CdnPreference.objects.update_or_create(
         user=user, defaults={"reason": reason, "until": dj_tz.now() + timedelta(seconds=PREF_TTL)})
 
@@ -131,8 +133,11 @@ def api_issue(request):
             return JsonResponse({"error": "rate"}, status=429)
     except ValueError:
         pass
+    if reason == "pinned" and not prefers_cdn(user):
+        return JsonResponse({"error": "not_pinned"}, status=403)
     token = issue_token(request, user, body.get("next") or "/cabinet/", reason)
-    set_pref(user, reason)
+    if reason != "pinned":
+        set_pref(user, reason)
     log_switch(request, user, reason)
     url = f"{CDN_ORIGIN}/api/cdn-handoff/redeem/?" + urlencode({"t": token})
     return JsonResponse({"url": url, "ttl": ttl()})
@@ -173,4 +178,9 @@ def api_redeem(request):
 @never_cache
 @require_GET
 def api_pref(request):
-    return JsonResponse({"prefer_cdn": prefers_cdn(request.user)})
+    pref = prefers_cdn(request.user)
+    reason = ""
+    if pref:
+        from Cabinet.cdn_handoff_models import CdnPreference
+        reason = CdnPreference.objects.filter(user=request.user).values_list("reason", flat=True).first() or ""
+    return JsonResponse({"prefer_cdn": pref, "reason": reason})

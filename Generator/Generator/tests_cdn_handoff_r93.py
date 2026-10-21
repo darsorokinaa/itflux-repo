@@ -108,3 +108,24 @@ class CdnHandoffR93Tests(TestCase):
         self.assertEqual(cdn_handoff.safe_next("https://evil/x"), "/cabinet/")
         self.assertEqual(cdn_handoff.safe_next("//evil"), "/cabinet/")
         self.assertEqual(cdn_handoff.safe_next("/a?_itflux_v=1&_itflux_v=2&itflux_nocdn=1"), "/a")
+
+
+@override_settings(ALLOWED_HOSTS=HOSTS)
+class CdnPinnedR93bTests(TestCase):
+    def test_pinned_pref_and_issue(self):
+        from datetime import timedelta
+        from django.utils import timezone as tz
+        from Cabinet.cdn_handoff_models import CdnPreference
+        u = get_user_model().objects.create_user("r93p", password="x")
+        c = Client(HTTP_USER_AGENT=UA)
+        c.force_login(u)
+        body = json.dumps({"next": "/cabinet/", "reason": "pinned"})
+        r = c.post("/api/cdn-handoff/issue/", data=body, content_type="application/json", HTTP_HOST="itflux-academy.ru")
+        self.assertEqual(r.status_code, 403)  # не закреплён — нельзя
+        CdnPreference.objects.create(user=u, reason="pinned", until=tz.now() + timedelta(days=3650))
+        r = c.get("/api/cdn-handoff/pref/", HTTP_HOST="itflux-academy.ru")
+        self.assertEqual(r.json(), {"prefer_cdn": True, "reason": "pinned"})
+        r = c.post("/api/cdn-handoff/issue/", data=json.dumps({"next": "/cabinet/", "reason": "call_drops"}),
+                   content_type="application/json", HTTP_HOST="itflux-academy.ru")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(CdnPreference.objects.get(user=u).reason, "pinned")  # не понижен до 7 дней

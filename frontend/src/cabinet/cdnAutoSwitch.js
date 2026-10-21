@@ -110,7 +110,7 @@ export async function switchToCdn(reason = "call_drops", {
   } catch {
     /* ignore */
   }
-  showSwitchNotice(win.document);
+  if (reason !== "pinned") showSwitchNotice(win.document);
   let target = `https://${CDN_HOST}${next}`;
   for (let attempt = 0; attempt < 2 && fetchImpl; attempt += 1) {
     try {
@@ -176,4 +176,21 @@ export function attachCdnAutoSwitch(api, { detector = createDropDetector(), onSw
       }
     }
   };
+}
+
+/** r93b: серверный флаг cdn (закреплён вручную или недавние обрывы) — сразу на cdn с токеном. */
+export async function redirectIfServerPrefersCdn({
+  win = typeof window !== "undefined" ? window : null,
+  fetchImpl = typeof fetch !== "undefined" ? fetch : null,
+} = {}) {
+  if (!fetchImpl || !cdnSwitchAllowed(win)) return false;
+  try {
+    const res = await fetchImpl("/api/cdn-handoff/pref/", { credentials: "same-origin" });
+    if (!res?.ok) return false;
+    const data = await res.json();
+    if (!data?.prefer_cdn) return false;
+    return switchToCdn(data.reason === "pinned" ? "pinned" : "call_drops", { win, fetchImpl, delayMs: 0 });
+  } catch {
+    return false;
+  }
 }

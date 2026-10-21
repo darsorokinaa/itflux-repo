@@ -32,6 +32,7 @@ import { openSupport } from "./support";
 import SoonModal from "../components/SoonModal";
 import EducationalLoading, { LOADING_MESSAGES } from "../components/EducationalLoading";
 import { rememberReturnPath, safeReturnPath } from "../accessGate/accessGate";
+import { redirectIfServerPrefersCdn } from "./cdnAutoSwitch"; // r93b
 import TimewebAiEmbed, { planHasTimewebAi } from "./TimewebAiEmbed";
 import "../styles/cabinet-dashboard.css";
 import "./styles/teacher-cabinet.css";
@@ -134,6 +135,10 @@ export default function CabinetLayout() {
   const [soonTitle, setSoonTitle] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
+  // r93b: закреплённым за cdn (серверный флаг) — сразу на cdn с одноразовым токеном
+  useEffect(() => {
+    if (user?.id) void redirectIfServerPrefersCdn();
+  }, [user?.id]);
   const [navOpen, setNavOpen] = useState(false);
   const [headerMoreOpen, setHeaderMoreOpen] = useState(false);
   const [isMobileShell, setIsMobileShell] = useState(false);

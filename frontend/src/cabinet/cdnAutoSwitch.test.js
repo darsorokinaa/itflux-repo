@@ -78,3 +78,23 @@ describe("r93 drop detector", () => {
     expect(stripVersionParam("?_itflux_v=1")).toBe("");
   });
 });
+
+describe("r93b pinned redirect", () => {
+  it("redirects pinned user without notice", async () => {
+    const { redirectIfServerPrefersCdn } = await import("./cdnAutoSwitch");
+    const win = fakeWin({ path: "/cabinet/" });
+    win.document.body.appendChild = vi.fn();
+    const fetchImpl = vi.fn(async (u) => ({ ok: true, json: async () => (u.includes("pref")
+      ? { prefer_cdn: true, reason: "pinned" }
+      : { url: "https://cdn.itflux-academy.ru/api/cdn-handoff/redeem/?t=Y" }) }));
+    // модульный флаг switching уже выставлен предыдущим тестом в этом файле — проверяем только вызов pref
+    await redirectIfServerPrefersCdn({ win, fetchImpl });
+    expect(fetchImpl.mock.calls[0][0]).toBe("/api/cdn-handoff/pref/");
+  });
+  it("no-op on cdn host", async () => {
+    const { redirectIfServerPrefersCdn } = await import("./cdnAutoSwitch");
+    const fetchImpl = vi.fn();
+    expect(await redirectIfServerPrefersCdn({ win: fakeWin({ host: "cdn.itflux-academy.ru" }), fetchImpl })).toBe(false);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
