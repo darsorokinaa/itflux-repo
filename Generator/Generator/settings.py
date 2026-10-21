@@ -249,7 +249,6 @@ INSTALLED_APPS = [
     'Board',
     'Cabinet.apps.CabinetConfig',
     'messaging',
-    'vkfunnel.apps.VkFunnelConfig',
     'corsheaders',
     "django_ckeditor_5",
 ]
@@ -653,16 +652,6 @@ TIMEWEB_AI_WORKSHEET_AGENT_TOKEN = (os.environ.get("TIMEWEB_AI_WORKSHEET_AGENT_T
 VAPID_PUBLIC_KEY = (os.environ.get("VAPID_PUBLIC_KEY") or "").strip()
 VAPID_PRIVATE_KEY = (os.environ.get("VAPID_PRIVATE_KEY") or "").strip()
 VAPID_ADMIN_EMAIL = (os.environ.get("VAPID_ADMIN_EMAIL") or "mailto:admin@itflux.ru").strip()
-
-
-# VK-воронка сообщества (vkfunnel). По умолчанию ВЫКЛЮЧЕНА: callback отвечает ok, ничего не пишет в БД и не отправляет.
-VK_FUNNEL_ENABLED = os.environ.get("VK_FUNNEL_ENABLED", "0").strip()
-VK_GROUP_TOKEN = (os.environ.get("VK_GROUP_TOKEN", "") or os.environ.get("VK_ACCESS_TOKEN", "")).strip()
-VK_API_VERSION = os.environ.get("VK_API_VERSION", "5.131").strip()
-VK_FUNNEL_GROUP_ID = int(os.environ.get("VK_FUNNEL_GROUP_ID", "233679646") or "233679646")
-VK_CALLBACK_CONFIRMATION = os.environ.get("VK_CALLBACK_CONFIRMATION", "").strip()
-VK_CALLBACK_SECRET = os.environ.get("VK_CALLBACK_SECRET", "").strip()
-VK_FUNNEL_CONTACT_EMAIL = os.environ.get("VK_FUNNEL_CONTACT_EMAIL", "itflux.academy@yandex.com").strip()
 
 # r94: домены, ссылки на которые разрешены в мессенджере (с поддоменами: cdn., lesson., www.).
 MESSAGING_LINK_ALLOWLIST = ["itflux-academy.ru", "itflux.ru"]

@@ -1,9 +1,0 @@
-[Unit]
-Description=Run VK funnel follow-ups hourly 09:00–20:00 MSK
-
-[Timer]
-OnCalendar=*-*-* 06..17:05:00 UTC
-Persistent=false
-
-[Install]
-WantedBy=timers.target
