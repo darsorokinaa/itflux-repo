@@ -358,6 +358,11 @@ def _lesson_assignment_for_event(students, event):
 def _video_meeting_payload(event):
     """Краткие данные Jitsi-комнаты для карточек ученика."""
     try:
+        from .early_room import (
+            event_supports_platform_room,
+            serialize_early_entry,
+            student_room_entry_path,
+        )
         from .models import VideoMeeting
         from .video_meeting_service import meeting_join_window_state, ui_state_message
 
@@ -365,6 +370,20 @@ def _video_meeting_payload(event):
     except Exception:
         return None, event.meeting_url or ""
     if vm is None:
+        # Ранний вход: комнаты ещё нет, но урок на платформенной комнате —
+        # отдаём страницу-переходник (комната создаётся в окне −15 мин … конец).
+        if event.status == ScheduleEvent.Status.PLANNED and event_supports_platform_room(event):
+            entry_path = student_room_entry_path(event)
+            payload = {
+                "uuid": None,
+                "status": "scheduled",
+                "statusLabel": "Запланирована",
+                "joinState": meeting_join_window_state(event, None),
+                "joinStateLabel": "",
+                "pageUrl": entry_path,
+                "earlyEntry": serialize_early_entry(event, None),
+            }
+            return payload, event.meeting_url or ""
         return None, event.meeting_url or ""
     join_state = meeting_join_window_state(event, vm)
     payload = {
@@ -374,6 +393,7 @@ def _video_meeting_payload(event):
         "joinState": join_state,
         "joinStateLabel": ui_state_message(join_state),
         "pageUrl": f"/cabinet/meetings/{vm.uuid}",
+        "earlyEntry": serialize_early_entry(event, vm),
     }
     # При наличии VideoMeeting — только страница платформы (JWT выдаётся join-config).
     # Сырой URL Jitsi без токена даёт «неверный пароль» / отдельную MUC.

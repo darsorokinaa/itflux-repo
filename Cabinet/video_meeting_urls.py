@@ -14,6 +14,16 @@ urlpatterns = [
         name="video_meeting_for_event",
     ),
     path(
+        "for-event/<int:event_id>/early-entry/",
+        video_meeting_api.VideoMeetingEarlyEntryView.as_view(),
+        name="video_meeting_early_entry",
+    ),
+    path(
+        "<uuid:meeting_uuid>/waiting-room/",
+        video_meeting_api.VideoMeetingWaitingRoomView.as_view(),
+        name="video_meeting_waiting_room",
+    ),
+    path(
         "<uuid:meeting_uuid>/status/",
         video_meeting_api.VideoMeetingStatusView.as_view(),
         name="video_meeting_status",

@@ -54,6 +54,7 @@ import {
 import { stopAllConnectionCheckStreams } from "../connectionCheck/mediaCleanup";
 import { clearPrimedMedia } from "../connectionCheck/mediaDevices";
 import ConfirmActionModal from "../components/ConfirmActionModal";
+import StudentWaitingRoom from "../components/StudentWaitingRoom";
 import {
   ConferenceControls,
   ConferenceSide,
@@ -1939,6 +1940,11 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
         const status = statusPayload?.status;
         if (status === "live") {
           stopPolling();
+          // Учитель начал урок: закрываем проверку связи и освобождаем камеру/микрофон до входа в Jitsi.
+          closeConnectionCheck();
+          abortJitsiConnectionProbe();
+          clearPrimedMedia();
+          stopAllConnectionCheckStreams();
           setDetail((prev) => (
             prev
               ? {
@@ -4634,6 +4640,7 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
                   <p className="video-lesson-state__text">
                     Подождите, пока учитель начнёт занятие. Страница обновится автоматически.
                   </p>
+                  <StudentWaitingRoom meetingUuid={meetingUuid} />
                   <Link to={returnUrl} className="video-lesson-btn">
                     Вернуться к уроку
                   </Link>

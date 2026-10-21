@@ -61,10 +61,17 @@ export function isJitsiMeetPageUrl(href) {
  * internal path — router navigate; external — публичные invite/Telemost;
  * jitsi — не открывать top-level.
  */
+/** Страница-переходник раннего входа ученика: /cabinet/student/lessons/room/<eventId>. */
+export const STUDENT_EARLY_ROOM_PATH_RE = /^\/cabinet\/student\/lessons\/room\/(\d+)$/;
+
 export function resolveAuthenticatedMeetingNavigation(href) {
   const path = cabinetMeetingPathFromHref(href);
   if (path) {
     return { kind: "internal", href: path };
+  }
+  const rawPath = typeof href === "string" ? href.trim().split(/[?#]/)[0] : "";
+  if (STUDENT_EARLY_ROOM_PATH_RE.test(rawPath)) {
+    return { kind: "internal", href: rawPath };
   }
   if (isJitsiMeetPageUrl(href)) {
     return { kind: "jitsi-embed", href: "" };

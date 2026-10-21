@@ -71,6 +71,16 @@ def _error_response(exc: VideoMeetingError, *, meeting=None) -> Response:
     return Response(payload, status=exc.status)
 
 
+def _early_entry_or_none(event, meeting):
+    try:
+        from .early_room import serialize_early_entry
+
+        return serialize_early_entry(event, meeting)
+    except Exception:
+        logger.exception("early_entry_serialize_failed event=%s", getattr(event, "pk", None))
+        return None
+
+
 class VideoMeetingForEventView(APIView):
     """GET — статус комнаты; POST — создать (или вернуть существующую) комнату для урока."""
 
@@ -117,6 +127,49 @@ class VideoMeetingForEventView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class VideoMeetingEarlyEntryView(APIView):
+    """POST — ученик урока в окне [начало −15 мин, конец] получает страницу комнаты.
+
+    Комната создаётся в статусе scheduled (если учитель её ещё не создал);
+    JWT здесь не выдаётся, урок не стартует.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, event_id: int):
+        from .early_room import ensure_meeting_for_student_early_entry, serialize_early_entry
+
+        try:
+            event = get_event_for_teacher(event_id, request.user)
+            meeting = ensure_meeting_for_student_early_entry(user=request.user, event=event)
+        except VideoMeetingError as exc:
+            return _error_response(exc)
+        return Response({
+            "success": True,
+            "meeting": serialize_meeting_compact(meeting),
+            "pageUrl": f"/cabinet/meetings/{meeting.uuid}",
+            "earlyEntry": serialize_early_entry(event, meeting),
+        })
+
+
+class VideoMeetingWaitingRoomView(APIView):
+    """GET — содержимое экрана ожидания ученика (напоминания, материалы)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, meeting_uuid):
+        from .early_room import build_waiting_room_payload
+
+        try:
+            meeting = get_meeting_by_uuid(meeting_uuid)
+            payload = build_waiting_room_payload(user=request.user, meeting=meeting)
+        except VideoMeetingError as exc:
+            return _error_response(exc)
+        response = Response(payload)
+        response["Cache-Control"] = "no-store"
+        return response
 
 
 class VideoMeetingDetailView(APIView):
@@ -172,6 +225,7 @@ class VideoMeetingDetailView(APIView):
             },
             "joinState": state,
             "joinStateLabel": ui_state_message(state),
+            "earlyEntry": _early_entry_or_none(event, meeting),
             "canManage": can_manage,
             "konturTalk": kontur_talk_public_status(),
             "viewerUserId": request.user.pk,

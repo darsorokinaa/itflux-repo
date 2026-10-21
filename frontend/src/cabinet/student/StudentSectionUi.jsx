@@ -293,10 +293,25 @@ export function canShowLessonConnectButton(startsAt, endsAt, now = Date.now(), m
   return now >= start - LESSON_CONNECT_BEFORE_MS && now <= end;
 }
 
-export function lessonMeetingHref(event) {
-  const status = event?.video_meeting?.status || event?.videoMeeting?.status;
-  // Пока учитель не начал урок — не отдаём ссылку для «Подключиться».
-  if (status && status !== "live") return "";
+/** Окно раннего входа ученика [начало −15 мин, конец] открыто сейчас (по часам клиента). */
+export function isEarlyEntryOpen(event, now = Date.now()) {
+  const vm = event?.video_meeting || event?.videoMeeting;
+  const early = vm?.earlyEntry;
+  if (!early?.eligible || !early.opensAt || !early.closesAt) return false;
+  const opens = new Date(early.opensAt).getTime();
+  const closes = new Date(early.closesAt).getTime();
+  if (Number.isNaN(opens) || Number.isNaN(closes)) return false;
+  return now >= opens && now <= closes;
+}
+
+export function lessonMeetingHref(event, now = Date.now()) {
+  const vm = event?.video_meeting || event?.videoMeeting;
+  const status = vm?.status;
+  // Пока учитель не начал урок — ссылка только в окне раннего входа (экран ожидания).
+  if (status && status !== "live") {
+    if (!isEarlyEntryOpen(event, now)) return "";
+    return cabinetMeetingPathFromHref(vm?.pageUrl) || earlyEntryPath(vm?.pageUrl);
+  }
   const candidates = [
     event?.video_meeting?.pageUrl,
     event?.videoMeeting?.pageUrl,
@@ -314,6 +329,11 @@ export function lessonMeetingHref(event) {
     if (nav.kind === "external") return nav.href;
   }
   return "";
+}
+
+function earlyEntryPath(raw) {
+  const value = String(raw || "");
+  return /^\/cabinet\/student\/lessons\/room\/\d+$/.test(value) ? value : "";
 }
 
 export function isInternalMeetingHref(href) {

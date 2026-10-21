@@ -553,6 +553,16 @@ export function ensureVideoMeetingForEvent(eventId) {
   return videoMeetingFetch(`/for-event/${eventId}/`, { method: "POST", body: "{}" });
 }
 
+/** Ранний вход ученика (окно −15 мин … конец урока): комната без старта урока и без JWT. */
+export function enterLessonRoomEarly(eventId) {
+  return videoMeetingFetch(`/for-event/${eventId}/early-entry/`, { method: "POST", body: "{}" });
+}
+
+/** Экран ожидания ученика: напоминания о ДЗ, тема прошлого урока, материалы. */
+export function fetchVideoMeetingWaitingRoom(meetingUuid) {
+  return videoMeetingFetch(`/${meetingUuid}/waiting-room/`, { method: "GET" });
+}
+
 export function fetchVideoMeetingDetail(meetingUuid) {
   return videoMeetingFetch(`/${meetingUuid}/`, { method: "GET" });
 }

@@ -78,6 +78,7 @@ const StudentCabinetPage = lazy(() => import("./pages/StudentCabinetPage"));
 const StudentDashboard = lazy(() => import("./cabinet/student/pages/StudentDashboard"));
 const StudentLessonsPage = lazy(() => import("./cabinet/student/pages/StudentLessonsPage"));
 const StudentLessonDetailPage = lazy(() => import("./cabinet/student/pages/StudentLessonDetailPage"));
+const StudentLessonRoomEntryPage = lazy(() => import("./cabinet/student/pages/StudentLessonRoomEntryPage"));
 const StudentAssignmentsPage = lazy(() => import("./cabinet/student/pages/StudentAssignmentsPage"));
 const StudentAssignmentDetailPage = lazy(() => import("./cabinet/student/pages/StudentAssignmentDetailPage"));
 const StudentInteractivePlayPage = lazy(() => import("./cabinet/student/pages/StudentInteractivePlayPage"));
@@ -473,6 +474,7 @@ function App() {
             {/* === Основные вкладки MVP === */}
             <Route path="lessons"          element={<StudentLessonsPage />} />
             <Route path="lessons/:id"      element={<StudentLessonDetailPage />} />
+            <Route path="lessons/room/:eventId" element={<StudentLessonRoomEntryPage />} />
             <Route path="assignments"      element={<StudentAssignmentsPage />} />
             <Route path="assignments/:id"  element={<StudentAssignmentDetailPage />} />
             <Route path="results"          element={<StudentResultsPage />} />

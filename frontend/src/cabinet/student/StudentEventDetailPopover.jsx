@@ -15,7 +15,7 @@ import {
 } from "../lessonCardContent";
 import { fetchStudentScheduleEvent } from "../../utils/cabinetAuth";
 import { studentTimezoneNote } from "../timezones";
-import { formatLessonTimeRange, StudentLoadingState, useLessonConnectAvailable } from "./StudentSectionUi";
+import { formatLessonTimeRange, isEarlyEntryOpen, StudentLoadingState, useLessonConnectAvailable } from "./StudentSectionUi";
 import { LOADING_MESSAGES } from "../../components/EducationalLoading";
 import { resolveAuthenticatedMeetingNavigation } from "../meetingNavigation";
 
@@ -175,7 +175,8 @@ export default function StudentEventDetailPopover({ eventId, onClose }) {
   const meetingStatus = event.videoMeeting?.status || null;
   const hasMeetingLink = Boolean(meetingHref);
   const isLiveMeeting = meetingStatus === "live";
-  const hasLink = hasMeetingLink && canConnect && (isLiveMeeting || !meetingStatus);
+  const earlyOpen = isEarlyEntryOpen(event);
+  const hasLink = hasMeetingLink && canConnect && (isLiveMeeting || !meetingStatus || earlyOpen);
   const isDone = event.status === "done" || event.status === "completed";
   const assignmentId = event.assignment_id;
 
@@ -210,7 +211,7 @@ export default function StudentEventDetailPopover({ eventId, onClose }) {
       isDone={isDone}
       canStart={event.format === "Онлайн" && !isDone && canConnect}
       hasLink={hasLink}
-      hasMeetingLinkPending={hasMeetingLink && meetingStatus === "scheduled"}
+      hasMeetingLinkPending={hasMeetingLink && meetingStatus === "scheduled" && !earlyOpen}
       canEditLink={false}
       materials={materials}
       homework={homework}
