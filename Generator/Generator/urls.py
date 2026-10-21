@@ -6,6 +6,7 @@ from django.conf import settings
 from django.views.static import serve
 
 from . import views
+from . import cdn_handoff  # r93
 from . import seo_tasks  # r36
 from . import seasonal_theme_api
 from . import variant_theme_api
@@ -65,6 +66,9 @@ urlpatterns = [
     path("api/<str:level>/subject-catalog/", views.api_level_subject_catalog, name="api_level_subject_catalog"),
     path("ckeditor/upload/", views.ckeditor_upload, name="ckeditor_upload"),
     path("api/lk-nav-unlock/", views.api_lk_nav_unlock, name="api_lk_nav_unlock"),
+    path("api/cdn-handoff/issue/", cdn_handoff.api_issue, name="cdn_handoff_issue"),  # r93
+    path("api/cdn-handoff/redeem/", cdn_handoff.api_redeem, name="cdn_handoff_redeem"),
+    path("api/cdn-handoff/pref/", cdn_handoff.api_pref, name="cdn_handoff_pref"),
     path("api/cabinet/", include("Cabinet.urls")),
     path(
         "payments/webhook/<str:provider>/",

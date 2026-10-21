@@ -31,7 +31,7 @@ import { useSeasonalTheme } from "../seasonal/SeasonalThemeProvider";
 import { openSupport } from "./support";
 import SoonModal from "../components/SoonModal";
 import EducationalLoading, { LOADING_MESSAGES } from "../components/EducationalLoading";
-import { rememberReturnPath } from "../accessGate/accessGate";
+import { rememberReturnPath, safeReturnPath } from "../accessGate/accessGate";
 import TimewebAiEmbed, { planHasTimewebAi } from "./TimewebAiEmbed";
 import "../styles/cabinet-dashboard.css";
 import "./styles/teacher-cabinet.css";
@@ -337,7 +337,8 @@ export default function CabinetLayout() {
   }
 
   if (!user) {
-    const from = `${location.pathname}${location.search || ""}`;
+    // r93: без _itflux_v и вложенных next (петля входа на cdn)
+    const from = safeReturnPath(`${location.pathname}${location.search || ""}`) || location.pathname;
     rememberReturnPath(from);
     return (
       <Navigate

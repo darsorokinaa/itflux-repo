@@ -5500,3 +5500,4 @@ class SocialAccount(models.Model):
 
 from .r50_models import EmailOptOut, SubscriptionReminderLog, TrialGrant  # noqa: E402, F401
 from .oneshot_models import OneShotPopup  # noqa: E402, F401
+from .cdn_handoff_models import CdnHandoffToken, CdnPreference  # noqa: E402, F401

@@ -98,6 +98,17 @@ function reloadWithCacheBust(target, { manual = false, reason = "app-update", so
       try {
         const url = new URL(window.location.href);
         url.searchParams.set(VERSION_QUERY, String(target || Date.now()));
+        // r93: _itflux_v только на верхнем уровне, не внутри next
+        const nx = url.searchParams.get("next");
+        if (nx) {
+          try {
+            const inner = new URL(nx, url.origin);
+            inner.searchParams.delete(VERSION_QUERY);
+            url.searchParams.set("next", inner.pathname + inner.search + inner.hash);
+          } catch {
+            /* ignore */
+          }
+        }
         window.location.replace(url.href);
       } catch {
         window.location.reload();
@@ -114,6 +125,11 @@ export function applyAppUpdate({
   source = "applyAppUpdate",
 } = {}) {
   const target = remoteVersion || getAppVersion();
+  // r93: страницу входа не перезагружаем принудительно по смене версии (петля входа на cdn).
+  if (!manual && typeof window !== "undefined" && String(window.location?.pathname || "").startsWith("/cabinet/login")) {
+    markUpdateAvailable(target);
+    return false;
+  }
   // Fail-safe: a live lesson is never auto-reloaded, even if a caller passes force.
   if (!manual && isLiveSessionPath()) {
     markUpdateAvailable(target);

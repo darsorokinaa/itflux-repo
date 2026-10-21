@@ -8,6 +8,7 @@
  * в разные MUC (token vs guest) и не видят друг друга.
  */
 
+import { attachCdnAutoSwitch, switchToCdn } from "./cdnAutoSwitch"; // r93
 import {
   attachConferencePresence,
   createBrowserTabSessionId,
@@ -862,6 +863,11 @@ export function buildJitsiExternalApiOptions({
 }
 
 export function registerJoinDiagnostics(api, { onMediaWarning, diagnostics } = {}) {
+  try {
+    attachCdnAutoSwitch(api); // r93: повторные обрывы на основном хосте → cdn
+  } catch {
+    /* ignore */
+  }
   const events = [
     "videoConferenceJoined",
     "videoConferenceLeft",
@@ -1623,6 +1629,7 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
 
   if (outcome !== JOIN_OUTCOME.joined || !conferenceJoined) {
     if (outcome === JOIN_OUTCOME.fatal) {
+      void switchToCdn("join_timeout"); // r93
       logJitsiDiagnostic("jitsi_join_fatal_timeout", {
         meetingUuid: diagnostics.meetingUuid,
         roomSuffix: roomName.slice(-8),

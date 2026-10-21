@@ -114,7 +114,29 @@ export function safeReturnPath(path: unknown): string {
     return "";
   }
   if (trimmed.includes("://") || trimmed.includes("\\")) return "";
-  return trimmed;
+  return stripReturnNoise(trimmed);
+}
+
+/** r93: убираем _itflux_v (в т.ч. во вложенных next) и не даём next вкладываться в next. */
+export function stripReturnNoise(path: string, depth = 0): string {
+  const hashAt = path.indexOf("#");
+  const hash = hashAt >= 0 ? path.slice(hashAt) : "";
+  const noHash = hashAt >= 0 ? path.slice(0, hashAt) : path;
+  const q = noHash.indexOf("?");
+  if (q < 0) return path;
+  const base = noHash.slice(0, q);
+  const params = new URLSearchParams(noHash.slice(q + 1));
+  params.delete("_itflux_v");
+  const inner = params.get("next");
+  if (inner !== null) {
+    if (base.startsWith("/cabinet/login") && depth < 5 && inner.startsWith("/") && !inner.startsWith("//")) {
+      // /cabinet/login?next=/cabinet/login?next=/x → /x (без вложенности)
+      return stripReturnNoise(inner, depth + 1);
+    }
+    params.set("next", stripReturnNoise(inner, depth + 1));
+  }
+  const qs = params.toString();
+  return `${base}${qs ? `?${qs}` : ""}${hash}`;
 }
 
 export function rememberReturnPath(path: unknown) {
