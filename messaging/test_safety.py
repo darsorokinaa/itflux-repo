@@ -199,3 +199,20 @@ class MessageSafetyApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["code"], "MESSAGE_BLOCKED")
         self.assertEqual(Message.objects.filter(conversation_id=conversation_id, text="Файл к уроку").count(), 0)
+
+
+class PlatformDomainLinksR94Tests(TestCase):
+    """r94: ссылки на бронирование/уроки на itflux-academy.ru (и cdn.) не блокируются."""
+
+    def test_platform_links_allowed(self):
+        from messaging.safety import _verdict_for_url
+        for url in ("https://itflux-academy.ru/book/AbC123xyz", "https://cdn.itflux-academy.ru/book/AbC123xyz/",
+                    "https://www.itflux-academy.ru/cabinet/meetings/1/", "itflux-academy.ru/book/x",
+                    "https://itflux.ru/book/x"):
+            self.assertIsNone(_verdict_for_url(url), url)
+
+    def test_lookalike_domains_still_blocked(self):
+        from messaging.safety import _verdict_for_url
+        for url in ("https://itflux-academy.ru.evil.com/book/x", "https://evilitflux-academy.ru/x",
+                    "https://itflux-academy.ru@evil.com/x", "https://google.com/"):
+            self.assertIsNotNone(_verdict_for_url(url), url)

@@ -663,3 +663,6 @@ VK_FUNNEL_GROUP_ID = int(os.environ.get("VK_FUNNEL_GROUP_ID", "233679646") or "2
 VK_CALLBACK_CONFIRMATION = os.environ.get("VK_CALLBACK_CONFIRMATION", "").strip()
 VK_CALLBACK_SECRET = os.environ.get("VK_CALLBACK_SECRET", "").strip()
 VK_FUNNEL_CONTACT_EMAIL = os.environ.get("VK_FUNNEL_CONTACT_EMAIL", "itflux.academy@yandex.com").strip()
+
+# r94: домены, ссылки на которые разрешены в мессенджере (с поддоменами: cdn., lesson., www.).
+MESSAGING_LINK_ALLOWLIST = ["itflux-academy.ru", "itflux.ru"]

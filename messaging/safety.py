@@ -186,7 +186,7 @@ def _for_links(plain: str) -> str:
 
 
 def link_allowlist() -> tuple[str, ...]:
-    raw = getattr(settings, "MESSAGING_LINK_ALLOWLIST", None) or ("itflux.ru",)
+    raw = getattr(settings, "MESSAGING_LINK_ALLOWLIST", None) or ("itflux-academy.ru", "itflux.ru")  # r94
     return tuple(item.strip().casefold().rstrip(".") for item in raw if str(item).strip())
 
 
