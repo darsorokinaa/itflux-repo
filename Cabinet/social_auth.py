@@ -72,7 +72,8 @@ def oauth_start(request, provider):
         "provider": provider,
         "state": state,
         "next": _safe_next(request.GET.get("next")),
-        "role": role if role in (Profile.Role.TEACHER, Profile.Role.STUDENT) else Profile.Role.TEACHER,
+        # r91: роль задаётся только явно (страница регистрации). Без неё новый email -> экран выбора роли.
+        "role": role if role in (Profile.Role.TEACHER, Profile.Role.STUDENT) else "",
         # r52: галочки со страницы регистрации (ПД — обязательно, реклама — по желанию).
         "pd": request.GET.get("pd") == "1",
         "mkt": request.GET.get("mkt") == "1",
@@ -159,33 +160,53 @@ def oauth_callback(request, provider):
         else:
             user = User.objects.filter(email__iexact=ident["email"]).first() if ident["email"] else None
             if user is None:
-                user = User.objects.create_user(
-                    username=_unique_username((ident["email"].split("@")[0] if ident["email"] else f"{provider}{ident['uid']}")),
-                    email=ident["email"],
-                )
-                user.set_unusable_password()
-                user.save(update_fields=["password"])
-                profile = user.profile
-                profile.name = ident["first_name"][:100]
-                profile.surname = ident["last_name"][:100]
-                profile.role = ctx.get("role") or Profile.Role.TEACHER
-                profile.save(update_fields=["name", "surname", "role"])
-                if profile.role == Profile.Role.TEACHER:
-                    try:
-                        from .activation_events import TEACHER_REGISTERED, record_event
-                        record_event(TEACHER_REGISTERED, user, source=f"oauth_{provider}", request=request)
-                    except Exception:
-                        pass
+                role = ctx.get("role") or ""
+                if role not in (Profile.Role.TEACHER, Profile.Role.STUDENT):
+                    # r91: не создаём молча аккаунт учителя — сначала выбор «ученик / преподаватель».
+                    from .r91_oauth import stash_pending
+
+                    stash_pending(request, provider, ident, ctx)
+                    return HttpResponseRedirect("/cabinet/oauth/role?" + urlencode({"next": ctx.get("next") or "/cabinet"}))
+                user = create_oauth_user(provider, ident, role, request)
             SocialAccount.objects.create(user=user, provider=provider, uid=ident["uid"], email=ident["email"])
 
+    err = finish_login(request, user, provider, ctx)
+    if err:
+        return _fail(err)
+    return HttpResponseRedirect(ctx.get("next") or "/cabinet")
+
+
+def create_oauth_user(provider, ident, role, request):
+    user = User.objects.create_user(
+        username=_unique_username((ident["email"].split("@")[0] if ident["email"] else f"{provider}{ident['uid']}")),
+        email=ident["email"],
+    )
+    user.set_unusable_password()
+    user.save(update_fields=["password"])
+    profile = user.profile
+    profile.name = (ident.get("first_name") or "")[:100]
+    profile.surname = (ident.get("last_name") or "")[:100]
+    profile.role = role
+    profile.save(update_fields=["name", "surname", "role"])
+    if profile.role == Profile.Role.TEACHER:
+        try:
+            from .activation_events import TEACHER_REGISTERED, record_event
+            record_event(TEACHER_REGISTERED, user, source=f"oauth_{provider}", request=request)
+        except Exception:
+            pass
+    return user
+
+
+def finish_login(request, user, provider, ctx):
+    """Проверки профиля + login + согласия. Возвращает текст ошибки или None."""
     try:
         profile = user.profile
     except Profile.DoesNotExist:
-        return _fail("У этой учётной записи нет профиля кабинета")
+        return "У этой учётной записи нет профиля кабинета"
     if profile.account_blocked:
-        return _fail("Аккаунт заблокирован")
+        return "Аккаунт заблокирован"
     if not profile.account_active:
-        return _fail("Аккаунт неактивен")
+        return "Аккаунт неактивен"
     login(request, user, backend="django.contrib.auth.backends.ModelBackend")
     logger.info("oauth login provider=%s user=%s", provider, user.id)
     try:
@@ -197,4 +218,4 @@ def oauth_callback(request, provider):
             grant_marketing(user, "email_marketing", source=f"registration_{provider}", request=request)
     except Exception:
         logger.exception("r52 oauth consent failed user=%s", user.id)
-    return HttpResponseRedirect(ctx.get("next") or "/cabinet")
+    return None

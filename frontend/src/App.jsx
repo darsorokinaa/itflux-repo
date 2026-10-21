@@ -30,6 +30,7 @@ const ForTeachersPage = lazy(() => import("./pages/ForTeachersPage"));
 const TutorLandingPage = lazy(() => import("./pages/TutorLandingPage"));
 const TeacherBookingPage = lazy(() => import("./pages/TeacherBookingPage"));
 const CabinetAuthPage = lazy(() => import("./pages/CabinetAuthPage"));
+const OAuthRolePage = lazy(() => import("./r91/OAuthRolePage"));
 const CabinetJoinPage = lazy(() => import("./cabinet/pages/CabinetJoinPage"));
 const CabinetNotificationsSettingsPage = lazy(() => import("./cabinet/pages/CabinetNotificationsSettingsPage"));
 const CabinetPage = lazy(() => import("./pages/CabinetPage"));
@@ -422,6 +423,7 @@ function App() {
           <Route path="/teachers" element={<ForTeachersPage />} />
           <Route path="/for-teachers" element={<Navigate to="/teachers" replace />} />
           <Route path="/cabinet/login" element={<CabinetAuthPage />} />
+          <Route path="/cabinet/oauth/role" element={<OAuthRolePage />} />
           <Route path="/book/:token" element={<TeacherBookingPage />} />
           <Route path="/book/:token/" element={<TeacherBookingPage />} />
           <Route path="/invite/:token" element={<CabinetJoinPage />} />

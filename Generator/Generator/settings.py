@@ -300,6 +300,7 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django_otp.middleware.OTPMiddleware',
+    "Cabinet.r91_session.RollingSessionMiddleware",  # r91: продление сессии при активности
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     "Generator.middleware.ContentSecurityPolicyReportOnlyMiddleware",
@@ -403,6 +404,9 @@ for _canonical_host in _CANONICAL_PUBLIC_HOSTS:
 CSRF_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_HTTPONLY = False  # React должен читать cookie
 SESSION_COOKIE_SAMESITE = 'Lax'
+# r91: 14 дней с последней активности (продление — Cabinet.r91_session, не чаще раза в сутки).
+SESSION_COOKIE_AGE = int(os.environ.get("SESSION_COOKIE_AGE", str(14 * 24 * 3600)))
+SESSION_ROLLING_REFRESH_SECONDS = int(os.environ.get("SESSION_ROLLING_REFRESH_SECONDS", str(24 * 3600)))
 
 # Django за nginx: сообщаем, что оригинальный запрос — HTTPS (X-Forwarded-Proto пробрасывает nginx)
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

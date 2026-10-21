@@ -6,6 +6,7 @@ import { importWithRetry } from "../../utils/importWithRetry";
 import { resolvePersistentMeetingView, useActiveLiveMeeting } from "../liveMeetingSession";
 import { useFloatingDrag } from "../useFloatingDrag";
 import "../styles/meeting-persist.css";
+import MeetingEntryGate from "../../r91/MeetingEntryGate";
 
 const VideoMeetingPage = lazy(() => importWithRetry(() => import("../pages/VideoMeetingPage")));
 
@@ -66,7 +67,9 @@ export default function PersistentMeetingHost() {
         <div className="meeting-persist__stage" aria-hidden={mini ? "true" : undefined}>
           <ErrorBoundary kind="room" homeHref="/cabinet">
             <Suspense fallback={null}>
-              <VideoMeetingPage key={view.uuid} meetingUuid={view.uuid} presentation={view.mode} />
+              <MeetingEntryGate key={view.uuid} meetingUuid={view.uuid} bypass={mini}>
+                <VideoMeetingPage key={view.uuid} meetingUuid={view.uuid} presentation={view.mode} />
+              </MeetingEntryGate>
             </Suspense>
           </ErrorBoundary>
         </div>

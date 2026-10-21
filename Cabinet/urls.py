@@ -1,4 +1,5 @@
 from . import social_auth  # r36
+from . import r91_oauth  # r91
 from django.urls import path, include
 
 from . import avatar_api, views
@@ -6,6 +7,10 @@ from . import avatar_api, views
 urlpatterns = [
     # r36: Яндекс ID / VK ID
     path("oauth/providers/", social_auth.oauth_providers, name="oauth_providers"),
+    path("oauth/pending/", r91_oauth.oauth_pending, name="oauth_pending"),  # r91
+    path("oauth/complete/", r91_oauth.oauth_complete, name="oauth_complete"),
+    path("oauth/cancel/", r91_oauth.oauth_cancel, name="oauth_cancel"),
+    path("meeting-entry/<uuid:meeting_uuid>/", r91_oauth.meeting_entry, name="meeting_entry"),
     path("oauth/<str:provider>/start/", social_auth.oauth_start, name="oauth_start"),
     path("oauth/<str:provider>/callback/", social_auth.oauth_callback, name="oauth_callback"),
     path("me/", views.api_me, name="cabinet_api_me"),
