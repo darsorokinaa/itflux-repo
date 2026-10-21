@@ -5,7 +5,7 @@
 
 import { parseTaskHtmlFragment } from "./parseTaskHtmlFragment";
 
-const SECTION_HEADERS = /^(КОЭФФИЦИЕНТЫ|ГРАФИКИ|ФУНКЦИИ)$/i;
+const SECTION_HEADERS = /^(КОЭФФИЦИЕНТЫ|ГРАФИКИ|ФУНКЦИИ|ФОРМУЛЫ)$/i;
 const LETTER_LABEL_RE = /^([А-ЯA-Z])\)$/i;
 const NUM_LABEL_RE = /^(\d+)\)$/;
 
@@ -134,9 +134,16 @@ function sortMatchingItems(items) {
 }
 
 function formulaRowTitle(introHtml, items) {
-  const blob = `${introHtml} ${items.map((it) => it.section || "").join(" ")}`;
-  if (/ФУНКЦ/i.test(blob)) return "Функции";
-  return "Коэффициенты";
+  // Заголовок берём только из заголовков секций (не из вводного текста:
+  // «графики функций вида y=kx+b» не означает строку «Функции»).
+  const sections = items
+    .filter((it) => !itemIsGraph(it.bodyHtml))
+    .map((it) => it.section || "")
+    .join(" ");
+  if (/ФОРМУЛ/i.test(sections)) return "Формулы";
+  if (/ФУНКЦ/i.test(sections)) return "Функции";
+  if (/КОЭФФИЦИЕНТ/i.test(sections)) return "Коэффициенты";
+  return /знак\S*\s+коэффициент/i.test(introHtml || "") ? "Коэффициенты" : "Формулы";
 }
 
 function appendMatchingRow(wrap, rowClass, titleText, rowItems, itemClass) {
@@ -216,7 +223,7 @@ function appendAnswerGrid(wrap, formulaItems) {
 function mightBeMatchingTaskHtml(html) {
   if (!html || typeof html !== "string") return false;
   const s = html;
-  if (!/КОЭФФИЦИЕНТ|ГРАФИК/i.test(s) && !/ФУНКЦИ/i.test(s)) return false;
+  if (!/КОЭФФИЦИЕНТ|ГРАФИК|ФОРМУЛ/i.test(s) && !/ФУНКЦИ/i.test(s)) return false;
   if (!LETTER_LABEL_RE.test(s.replace(/<[^>]+>/g, " ")) && !/[А-Я]\)/.test(s)) return false;
   const hasLetter = /<(?:b|strong)[^>]*>\s*[А-ЯA-Z]\)/i.test(s);
   const hasNum = /<(?:b|strong)[^>]*>\s*\d+\)/i.test(s);
@@ -260,7 +267,8 @@ function buildMatchingMarkup(introHtml, items, footerHtml) {
     wrap.appendChild(foot);
   }
 
-  appendAnswerGrid(wrap, formulaItems);
+  // Буквы А) Б) В) могут стоять и у графиков (ГРАФИКИ А–В / ФОРМУЛЫ 1–3).
+  appendAnswerGrid(wrap, items);
 
   return wrap.outerHTML;
 }
