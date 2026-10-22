@@ -86,6 +86,24 @@ def log_switch(request, user, reason: str) -> None:
         log.warning("cdn-users log write failed: %s", exc)
 
 
+SWITCH_REASONS = {"call_drops", "join_timeout"}
+
+
+def record_switch(request, user, reason: str, via: str, token: str = ""):
+    """r95: серверная запись автоперехода (не для pinned). Ошибка записи не ломает перенос."""
+    if reason not in SWITCH_REASONS:
+        return None
+    from Cabinet.cdn_handoff_models import CdnSwitchEvent
+    try:
+        return CdnSwitchEvent.objects.create(
+            user=user, reason=reason, via=via, route_from="direct", route_to="cdn",
+            ua_family=cdn_users.short_ua(request.META.get("HTTP_USER_AGENT", ""))[:40],
+            token_hash=_key(token) if token else "")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("cdn switch event write failed: %s", exc)
+        return None
+
+
 def issue_token(request, user, next_path: str, reason: str) -> str:
     from Cabinet.cdn_handoff_models import CdnHandoffToken
     token = secrets.token_urlsafe(32)
@@ -109,6 +127,11 @@ def consume_token(token: str):
     if won != 1:
         return None
     t = CdnHandoffToken.objects.get(token_hash=_key(token))
+    try:
+        from Cabinet.cdn_handoff_models import CdnSwitchEvent
+        CdnSwitchEvent.objects.filter(token_hash=t.token_hash, redeemed_at__isnull=True).update(redeemed_at=now)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("cdn switch redeem mark failed: %s", exc)
     return {"uid": t.user_id, "next": t.next_path, "reason": t.reason, "ua": t.ua_hash}
 
 
@@ -139,6 +162,7 @@ def api_issue(request):
     if reason != "pinned":
         set_pref(user, reason)
     log_switch(request, user, reason)
+    record_switch(request, user, reason, "token", token)
     url = f"{CDN_ORIGIN}/api/cdn-handoff/redeem/?" + urlencode({"t": token})
     return JsonResponse({"url": url, "ttl": ttl()})
 
@@ -184,3 +208,27 @@ def api_pref(request):
         from Cabinet.cdn_handoff_models import CdnPreference
         reason = CdnPreference.objects.filter(user=request.user).values_list("reason", flat=True).first() or ""
     return JsonResponse({"prefer_cdn": pref, "reason": reason})
+
+
+@never_cache
+@require_POST
+def api_event(request):
+    """r95: переход без токена (основной хост не ответил) — клиент сообщает с cdn после входа."""
+    user = request.user
+    if not user.is_authenticated:
+        return JsonResponse({"error": "auth"}, status=401)
+    if not cdn_users.is_cdn(request):
+        return JsonResponse({"error": "cdn_only"}, status=400)
+    try:
+        body = json.loads(request.body or b"{}")
+    except ValueError:
+        body = {}
+    reason = body.get("reason") if isinstance(body, dict) else None
+    if reason not in SWITCH_REASONS:
+        return JsonResponse({"error": "reason"}, status=400)
+    rk = f"r95:cdnsw:rate:{user.pk}"
+    if not cache.add(rk, 1, 60):  # не больше 1 в минуту
+        return JsonResponse({"ok": True, "dedup": True})
+    log_switch(request, user, reason + "_fb")
+    ev = record_switch(request, user, reason, "fallback")
+    return JsonResponse({"ok": bool(ev)})

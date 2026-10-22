@@ -430,6 +430,17 @@ class VideoMeetingAttendanceListView(APIView):
         return Response({"results": rows})
 
 
+def _route_meta(request) -> dict:
+    """r95: cdn/direct по Host (cdn.itflux-academy.ru = релей с proxy_protocol), браузер/ОС без версии ОС."""
+    from Generator import cdn_users
+    try:
+        route = "cdn" if cdn_users.is_cdn(request) else "direct"
+        ua = cdn_users.short_ua(request.META.get("HTTP_USER_AGENT", ""))[:40]
+    except Exception:  # noqa: BLE001
+        return {}
+    return {"route": route, "uaFamily": ua}
+
+
 class VideoMeetingTechnicalEventView(APIView):
     """Санитизированная телеметрия Jitsi. Не доказывает media connection."""
 
@@ -447,6 +458,7 @@ class VideoMeetingTechnicalEventView(APIView):
             data = request.data if isinstance(request.data, dict) else {}
             event_type = str(data.get("eventType") or data.get("event_type") or "")[:40]
             metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+            metadata = {**metadata, **_route_meta(request)}  # r95: маршрут и семейство браузера — с сервера
             event = record_technical_event(
                 meeting=meeting,
                 user=request.user,

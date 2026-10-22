@@ -19,3 +19,16 @@ class CdnPreference(models.Model):
     reason = models.CharField(max_length=20, default="call_drops")
     until = models.DateTimeField()
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class CdnSwitchEvent(models.Model):
+    """r95: журнал автопереходов звонка main -> cdn (одна строка на переход, без PII кроме uid)."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="+")
+    reason = models.CharField(max_length=20)  # call_drops | join_timeout
+    via = models.CharField(max_length=10, default="token")  # token | fallback (основной хост недоступен)
+    route_from = models.CharField(max_length=10, default="direct")
+    route_to = models.CharField(max_length=10, default="cdn")
+    ua_family = models.CharField(max_length=40, blank=True, default="")
+    token_hash = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    redeemed_at = models.DateTimeField(null=True, blank=True)

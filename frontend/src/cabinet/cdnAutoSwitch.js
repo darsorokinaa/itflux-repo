@@ -21,6 +21,7 @@ export function stripVersionParam(search) {
   params.delete("_itflux_v");
   params.delete("itflux_nocdn");
   params.delete("itflux_cdn");
+  params.delete("itflux_cdn_fb");
   const s = params.toString();
   return s ? `?${s}` : "";
 }
@@ -88,6 +89,14 @@ export function showSwitchNotice(doc = typeof document !== "undefined" ? documen
   box.textContent = NOTICE_TEXT;
 }
 
+/** Добавляет параметр в относительный путь до #hash. */
+export function withParam(path, key, value) {
+  const [base, ...rest] = String(path || "/").split("#");
+  const hash = rest.length ? `#${rest.join("#")}` : "";
+  const sep = base.includes("?") ? "&" : "?";
+  return `${base}${sep}${encodeURIComponent(key)}=${encodeURIComponent(value)}${hash}`;
+}
+
 let switching = false;
 
 /** Переводит эту же вкладку на ту же встречу на cdn. Возвращает Promise<boolean>. */
@@ -111,7 +120,8 @@ export async function switchToCdn(reason = "call_drops", {
     /* ignore */
   }
   if (reason !== "pinned") showSwitchNotice(win.document);
-  let target = `https://${CDN_HOST}${next}`;
+  // r95: без токена (основной хост не ответил) — помечаем, чтобы cdn сообщил о переходе серверу
+  let target = `https://${CDN_HOST}${reason === "pinned" ? next : withParam(next, "itflux_cdn_fb", reason)}`;
   for (let attempt = 0; attempt < 2 && fetchImpl; attempt += 1) {
     try {
       const res = await fetchImpl("/api/cdn-handoff/issue/", {
@@ -190,6 +200,36 @@ export async function redirectIfServerPrefersCdn({
     const data = await res.json();
     if (!data?.prefer_cdn) return false;
     return switchToCdn(data.reason === "pinned" ? "pinned" : "call_drops", { win, fetchImpl, delayMs: 0 });
+  } catch {
+    return false;
+  }
+}
+
+/** r95: на cdn после перехода без токена — одна запись о переходе на сервере, параметр убирается из URL. */
+export async function reportFallbackArrival({
+  win = typeof window !== "undefined" ? window : null,
+  fetchImpl = typeof fetch !== "undefined" ? fetch : null,
+} = {}) {
+  if (!win?.location || String(win.location.hostname || "").toLowerCase() !== CDN_HOST) return false;
+  const params = new URLSearchParams(win.location.search || "");
+  const reason = params.get("itflux_cdn_fb");
+  if (!reason) return false;
+  params.delete("itflux_cdn_fb");
+  try {
+    const q = params.toString();
+    win.history?.replaceState?.(win.history.state, "", `${win.location.pathname}${q ? `?${q}` : ""}${win.location.hash || ""}`);
+  } catch {
+    /* ignore */
+  }
+  if (!fetchImpl || !["call_drops", "join_timeout"].includes(reason)) return false;
+  try {
+    const res = await fetchImpl("/api/cdn-handoff/event/", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": readCsrf(win.document) },
+      body: JSON.stringify({ reason }),
+    });
+    return Boolean(res?.ok);
   } catch {
     return false;
   }

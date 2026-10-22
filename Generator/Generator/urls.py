@@ -69,6 +69,7 @@ urlpatterns = [
     path("api/cdn-handoff/issue/", cdn_handoff.api_issue, name="cdn_handoff_issue"),  # r93
     path("api/cdn-handoff/redeem/", cdn_handoff.api_redeem, name="cdn_handoff_redeem"),
     path("api/cdn-handoff/pref/", cdn_handoff.api_pref, name="cdn_handoff_pref"),
+    path("api/cdn-handoff/event/", cdn_handoff.api_event, name="cdn_handoff_event"),  # r95
     path("api/cabinet/", include("Cabinet.urls")),
     path(
         "payments/webhook/<str:provider>/",
