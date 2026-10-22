@@ -151,21 +151,26 @@ def _student_interactive_assignment(students, assignment_id):
 
 def _schedule_qs(students):
     student_ids, groups = _student_ids_and_groups(students)
-    return ScheduleEvent.objects.filter(
+    # r99: фильтр (OR + join участников) — в подзапросе по id, без DISTINCT на
+    # 14-табличном select_related: иначе Postgres тратит ~200 мс только на планирование.
+    matching_ids = ScheduleEvent.objects.filter(
         Q(student_id__in=student_ids)
         | Q(group__in=groups)
         | Q(
             participants__student_id__in=student_ids,
             participants__status__in=["invited", "accepted"],
         )
-    ).exclude(status=ScheduleEvent.Status.CANCELLED).exclude(
+    ).values("id")
+    return ScheduleEvent.objects.filter(id__in=matching_ids).exclude(
+        status=ScheduleEvent.Status.CANCELLED
+    ).exclude(
         event_type__in=("personal", "blocked"),
     ).select_related(
         "owner", "owner__profile", "lesson", "student", "student_subject", "group",
         "lesson_plan_item", "lesson_plan_item__plan",
         "series", "series__lesson_plan_item", "series__lesson_plan_item__plan",
         "journal",
-    ).prefetch_related("plan_items", "plan_items__plan").distinct()
+    ).prefetch_related("plan_items", "plan_items__plan")
 
 
 def _pick_student(students, teacher=None):
@@ -568,20 +573,38 @@ def _serialize_library_material(
     }
 
 
+def _published_materials_for_lessons(lessons):
+    """Батч-версия: {lesson_id: [материалы]} за 2-3 запроса вместо 2×N (r99)."""
+    lesson_ids = {l.id for l in lessons if l is not None}
+    if not lesson_ids:
+        return {}
+    by_lesson = {lid: {} for lid in lesson_ids}
+    links = list(
+        Lesson.materials.through.objects.filter(
+            lesson_id__in=lesson_ids,
+            material__status=MaterialStatus.PUBLISHED,
+        ).values_list("lesson_id", "material_id")
+    )
+    links += list(
+        LessonPlanItem.materials.through.objects.filter(
+            lessonplanitem__linked_lesson_id__in=lesson_ids,
+            material__status=MaterialStatus.PUBLISHED,
+        ).values_list("lessonplanitem__linked_lesson_id", "material_id")
+    )
+    if links:
+        mats = Material.objects.select_related("cabinet_file").in_bulk({mid for _, mid in links})
+        for lid, mid in links:
+            if mid in mats:
+                by_lesson[lid][mid] = mats[mid]
+    return {
+        lid: sorted(d.values(), key=lambda m: (m.updated_at or m.created_at, m.id), reverse=True)
+        for lid, d in by_lesson.items()
+    }
+
+
 def _published_materials_for_lesson(lesson):
     """Материалы урока + актуальные вложения из связанных пунктов плана."""
-    by_id = {}
-    for material in lesson.materials.filter(status=MaterialStatus.PUBLISHED).select_related("cabinet_file"):
-        by_id[material.id] = material
-    plan_items = LessonPlanItem.objects.filter(linked_lesson=lesson).prefetch_related("materials__cabinet_file")
-    for plan_item in plan_items:
-        for material in plan_item.materials.filter(status=MaterialStatus.PUBLISHED):
-            by_id[material.id] = material
-    return sorted(
-        by_id.values(),
-        key=lambda m: (m.updated_at or m.created_at, m.id),
-        reverse=True,
-    )
+    return _published_materials_for_lessons([lesson]).get(lesson.id, [])
 
 
 def _collect_student_materials(students, limit=None, lesson_subjects=None):
@@ -591,14 +614,15 @@ def _collect_student_materials(students, limit=None, lesson_subjects=None):
     assignments = (
         _lesson_assignments_qs(students)
         .select_related("lesson", "teacher", "teacher__profile")
-        .prefetch_related("lesson__materials__cabinet_file")
         .order_by("-assigned_at", "-id")
     )
+    assignments = list(assignments)
+    materials_by_lesson = _published_materials_for_lessons([a.lesson for a in assignments])
     for assignment in assignments:
         lesson = assignment.lesson
         lesson_topic = lesson.topic or lesson.title
         subject_id, subject_label = lesson_subjects.get(lesson.id, (None, ""))
-        for material in _published_materials_for_lesson(lesson):
+        for material in materials_by_lesson.get(lesson.id, []):
             if material.id in seen:
                 continue
             seen.add(material.id)
@@ -1394,6 +1418,23 @@ class StudentDashboardView(StudentScopedView):
 
         recent_materials = _recent_materials(students, limit=3, user=request.user)
 
+        # r99: батч вместо запроса на каждый интерактив / каждое ДЗ.
+        attempted_pairs = set(
+            InteractiveAttempt.objects.filter(assignment__in=[a.id for a in interactives])
+            .values_list("assignment_id", "student_id")
+            .distinct()
+        ) if interactives else set()
+        checked_subs = {}
+        if all_homeworks:
+            sub_qs = HomeworkSubmission.objects.filter(
+                homework_id__in=[hw.id for hw in all_homeworks],
+                status=SubmissionStatus.CHECKED,
+            )
+            if not sub_qs.ordered:
+                sub_qs = sub_qs.order_by("pk")
+            for sub in sub_qs:
+                checked_subs.setdefault((sub.homework_id, sub.student_id), sub)
+
         return Response({
             "greeting_name": profile.get_display_name().split()[0] if profile.get_display_name() else "Ученик",
             "summary": {
@@ -1402,10 +1443,7 @@ class StudentDashboardView(StudentScopedView):
                 "interactives_new": sum(
                     1
                     for a in interactives
-                    if not InteractiveAttempt.objects.filter(
-                        assignment=a,
-                        student=_pick_student(students, a.teacher),
-                    ).exists()
+                    if (a.id, getattr(_pick_student(students, a.teacher), "id", None)) not in attempted_pairs
                 ),
             },
             "metrics": {
@@ -1431,11 +1469,9 @@ class StudentDashboardView(StudentScopedView):
                 }
                 for hw in all_homeworks
                 for sub in [
-                    HomeworkSubmission.objects.filter(
-                        homework=hw,
-                        student=_pick_student(students, hw.teacher),
-                        status=SubmissionStatus.CHECKED,
-                    ).first()
+                    checked_subs.get(
+                        (hw.id, getattr(_pick_student(students, hw.teacher), "id", None))
+                    )
                 ]
                 if sub
             ][:5],
