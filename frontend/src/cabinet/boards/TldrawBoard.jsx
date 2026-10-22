@@ -41,6 +41,7 @@ import {
   nextCanvasGeometry,
 } from "./boardDocumentTelemetry";
 import { createLessonBoardAssetStore } from "./lessonBoardAssetStore";
+import { bindBoardLoadFailures } from "./boardLoadFailures";
 import { revealBoardContent } from "./boardOpenFrame";
 import BoardV2ErrorBoundary from "./BoardV2ErrorBoundary";
 import LessonBoardMessage from "./LessonBoardMessage";
@@ -180,6 +181,7 @@ function TldrawBoardSynced({
   avatarUrl,
   canEdit,
   onRetry,
+  onReady,
   attempt = 0,
 }) {
   const users = useMemo(
@@ -214,6 +216,7 @@ function TldrawBoardSynced({
     }
     if (sync.status && sync.status !== "loading" && sync.status !== "error") {
       markPerf("board_synced");
+      onReady?.(true);
     }
     const wasShowingCanvas = previous === "synced-remote" || previous === "synced-local";
     if (!wasShowingCanvas) return;
@@ -226,7 +229,7 @@ function TldrawBoardSynced({
 
   useEffect(() => {
     if (sync.status !== "error" || attempt >= BOARD_SYNC_AUTO_RETRIES) return undefined;
-    const timer = window.setTimeout(() => onRetryRef.current?.(), BOARD_SYNC_AUTO_RETRY_MS);
+    const timer = window.setTimeout(() => onRetryRef.current?.("auto"), BOARD_SYNC_AUTO_RETRY_MS);
     return () => window.clearTimeout(timer);
   }, [attempt, sync.status]);
 
@@ -237,8 +240,9 @@ function TldrawBoardSynced({
     return (
       <LessonBoardMessage
         title="Не удалось подключить доску"
-        text="Соединение с доской прервалось. Можно повторить, не выходя из урока."
+        text="Соединение с доской прервалось. Можно обновить доску, не выходя из урока и не прерывая звонок."
         onRetry={onRetry}
+        retryLabel="Обновить доску"
       />
     );
   }
@@ -296,7 +300,7 @@ function TldrawBoardSynced({
   );
 }
 
-function TldrawBoardSession({ boardId, userId, displayName, role, avatarUrl, canEdit, onRetry, attempt = 0 }) {
+function TldrawBoardSession({ boardId, userId, displayName, role, avatarUrl, canEdit, onRetry, onReady, attempt = 0 }) {
   const roomId = lessonBoardRoomId(boardId);
   const name = lessonBoardDisplayName(displayName, role);
   const color = lessonBoardPresenceColor(role, userId);
@@ -320,6 +324,7 @@ function TldrawBoardSession({ boardId, userId, displayName, role, avatarUrl, can
       avatarUrl={avatarUrl || ""}
       canEdit={canEdit}
       onRetry={onRetry}
+      onReady={onReady}
       attempt={attempt}
     />
   );
@@ -337,14 +342,38 @@ export default function TldrawBoard(props) {
       markBoard("tldrawUnmountAt", new Date().toISOString());
     };
   }, []);
-  const retry = () => setAttempt((value) => value + 1);
+  const [failed, setFailed] = useState(false);
+  const readyRef = useRef(false);
+  const onReady = useCallback(() => { readyRef.current = true; }, []);
+  // r98: remount only the board subtree; the lesson page / call keep running.
+  const retry = useCallback((source) => {
+    readyRef.current = false;
+    setFailed(false);
+    setAttempt((value) => value + 1);
+    if (source !== "auto") {
+      reportClientEvent("board_retry_click", { board_id: String(props.boardId || "").slice(0, 64) });
+    }
+  }, [props.boardId]);
+  useEffect(() => bindBoardLoadFailures(props.boardId, {
+    isReady: () => readyRef.current,
+    onFatal: () => setFailed(true),
+  }), [props.boardId]);
   const roomId = lessonBoardRoomId(props.boardId);
 
   return (
     <LessonBoardFrame roomId={roomId} boardId={props.boardId}>
-      <BoardV2ErrorBoundary onRetry={retry}>
-        <TldrawBoardSession key={attempt} {...props} onRetry={retry} attempt={attempt} />
+      <BoardV2ErrorBoundary key={`b${attempt}`} onRetry={retry}>
+        <TldrawBoardSession key={attempt} {...props} onRetry={retry} onReady={onReady} attempt={attempt} />
       </BoardV2ErrorBoundary>
+      {failed ? (
+        <LessonBoardMessage
+          testId="board-retry-overlay"
+          title="Доска не загрузилась"
+          text="Звонок продолжается. Обновим только доску."
+          onRetry={retry}
+          retryLabel="Обновить доску"
+        />
+      ) : null}
     </LessonBoardFrame>
   );
 }

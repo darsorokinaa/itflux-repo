@@ -33,6 +33,7 @@ export default class BoardV2ErrorBoundary extends Component {
         title="Не удалось подключить доску"
         text={`Доска остановилась с ошибкой${detail ? `: ${detail}` : ""}. Видеозвонок, задания и чат при этом продолжают работать.`}
         onRetry={this.retry}
+        retryLabel="Обновить доску"
       />
     );
   }

@@ -198,7 +198,7 @@ describe("TldrawBoard", () => {
     expect(screen.getByText("Не удалось подключить доску")).toBeTruthy();
     expect(screen.getByText("Видеозвонок")).toBeTruthy();
     const before = syncCalls.length;
-    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Обновить доску" }));
     expect(syncCalls.length).toBeGreaterThan(before);
     expect(syncCalls.every((call) => call.roomId === BOARD)).toBe(true);
   });
@@ -276,7 +276,35 @@ describe("TldrawBoard", () => {
     expect(screen.getByText("Видеозвонок")).toBeTruthy();
     expect(screen.queryByTestId("tldraw-canvas")).toBeNull();
     explode = false;
-    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Обновить доску" }));
+    expect(screen.getByTestId("tldraw-canvas")).toBeTruthy();
+  });
+  it("shows the refresh overlay on an unhandled rejection before sync and remounts only the board", async () => {
+    reportClientEvent.mockClear();
+    syncResult = { status: "loading" };
+    render(boardTree());
+    const ev = new Event("unhandledrejection");
+    ev.reason = new Error("asset fetch failed");
+    await act(async () => { window.dispatchEvent(ev); });
+    expect(screen.getByTestId("board-retry-overlay")).toBeTruthy();
+    expect(screen.getByText("Видеозвонок")).toBeTruthy();
+    expect(reportClientEvent).toHaveBeenCalledWith("board_unhandled_rejection", expect.objectContaining({ board_id: BOARD, ready: false }));
+    const before = syncCalls.length;
+    syncResult = { status: "synced-remote", store: { ok: true } };
+    fireEvent.click(screen.getByRole("button", { name: "Обновить доску" }));
+    expect(screen.queryByTestId("board-retry-overlay")).toBeNull();
+    expect(syncCalls.length).toBeGreaterThan(before);
+    expect(screen.getByTestId("tldraw-canvas")).toBeTruthy();
+    expect(reportClientEvent).toHaveBeenCalledWith("board_retry_click", { board_id: BOARD });
+  });
+
+  it("does not overlay a synced board on a late rejection", async () => {
+    syncResult = { status: "synced-remote", store: { ok: true } };
+    render(boardTree());
+    const ev = new Event("unhandledrejection");
+    ev.reason = new Error("late");
+    await act(async () => { window.dispatchEvent(ev); });
+    expect(screen.queryByTestId("board-retry-overlay")).toBeNull();
     expect(screen.getByTestId("tldraw-canvas")).toBeTruthy();
   });
 });

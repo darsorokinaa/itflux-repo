@@ -1,4 +1,5 @@
 import { reportClientEvent } from "../../utils/clientTelemetry";
+import { navigationInfo } from "./boardLoadFailures";
 
 export function boardDocumentSnapshot(boardId, {
   doc = typeof document !== "undefined" ? document : null,
@@ -18,18 +19,19 @@ export function bindBoardDocumentTelemetry(boardId, {
   report = reportClientEvent,
 } = {}) {
   if (!doc || !win || typeof win.addEventListener !== "function") return () => {};
-  const send = (event) => {
+  const send = (event, extra = {}) => {
     try {
-      report(event, boardDocumentSnapshot(boardId, { doc, win }));
+      report(event, { ...boardDocumentSnapshot(boardId, { doc, win }), ...extra });
     } catch {
       /* ignore */
     }
   };
   const onHide = () => send("board_document_pagehide");
   const onUnload = () => send("board_document_unload");
-  const onShow = () => send("board_document_pageshow");
+  // r98: persisted=true → bfcache restore; nav_type=reload after a killed tab.
+  const onShow = (event) => send("board_document_pageshow", { persisted: Boolean(event?.persisted), ...navigationInfo(win) });
   const onVis = () => send("board_document_visibility");
-  send("board_document_mount");
+  send("board_document_mount", navigationInfo(win));
   win.addEventListener("pagehide", onHide);
   win.addEventListener("beforeunload", onUnload);
   win.addEventListener("pageshow", onShow);

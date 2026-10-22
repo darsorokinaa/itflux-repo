@@ -171,3 +171,23 @@ class ClientTelemetryApiTests(TestCase):
         names = re.findall(r'"([A-Za-z0-9_]+)"', block)
         missing = [name for name in names if name not in ALLOWED_EVENTS]
         self.assertEqual(missing, [])
+
+    def test_r98_board_failure_events_allowed(self):
+        for event in ("board_unhandled_rejection", "board_asset_load_failed", "board_retry_click"):
+            res = self.client.post(
+                "/api/cabinet/client-telemetry/",
+                data={
+                    "event": event,
+                    "extra": {"board_id": "b", "url": "/api/cabinet/interactive-boards/b/assets/a/", "status": 404},
+                },
+                content_type="application/json",
+            )
+            self.assertEqual(res.status_code, 200, event)
+
+    def test_r98_client_and_server_event_lists_match(self):
+        from Cabinet.client_telemetry import ALLOWED_EVENTS
+
+        source = (Path(__file__).resolve().parents[1] / "frontend/src/utils/clientTelemetry.js").read_text(encoding="utf-8")
+        for event in ("board_unhandled_rejection", "board_asset_load_failed", "board_retry_click"):
+            self.assertIn(event, ALLOWED_EVENTS)
+            self.assertIn(chr(34) + event + chr(34), source)
