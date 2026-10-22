@@ -225,7 +225,7 @@ function TldrawBoardSynced({
       phase: String(sync.status || "").slice(0, 32),
       previous: String(previous || "").slice(0, 32),
     });
-  }, [boardId, sync.status]);
+  }, [boardId, onReady, sync.status]);
 
   useEffect(() => {
     if (sync.status !== "error" || attempt >= BOARD_SYNC_AUTO_RETRIES) return undefined;
