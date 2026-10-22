@@ -12,6 +12,7 @@ import {
   syncJitsiAudioDevices,
   audioDeviceStillPresent,
   pickReplacementDevice,
+  LEFT_HANGUP_WAIT_MS,
 } from "./jitsiMediaWatchdog";
 
 function createApi(overrides = {}) {
@@ -354,6 +355,8 @@ describe("attachMediaWatchdog", () => {
     const handle = attachMediaWatchdog(api, { onReconnectRequired, onConnectionState });
     api.emit("videoConferenceJoined", { id: "local" });
     api.emit("videoConferenceLeft");
+    expect(onConnectionState).not.toHaveBeenCalledWith("reconnecting", "videoConferenceLeft");
+    vi.advanceTimersByTime(LEFT_HANGUP_WAIT_MS);
     expect(api.dispose).not.toHaveBeenCalled();
     expect(onReconnectRequired).not.toHaveBeenCalled();
     expect(onConnectionState).toHaveBeenCalledWith("reconnecting", "videoConferenceLeft");
@@ -591,5 +594,98 @@ describe("hidden tab hard reconnect deferral (r92)", () => {
     document.dispatchEvent(new Event("visibilitychange"));
     expect(onReconnectRequired).not.toHaveBeenCalled();
     handle.dispose();
+  });
+});
+
+
+describe("r97 hangup vs network loss", () => {
+  it("normal hangup (left then readyToClose) starts no recovery and no telemetry", () => {
+    vi.useFakeTimers();
+    const api = createApi();
+    const onTelemetry = vi.fn();
+    const onReconnectRequired = vi.fn();
+    const onNetworkHardReconnect = vi.fn();
+    const onConnectionState = vi.fn();
+    const handle = attachMediaWatchdog(api, { onTelemetry, onReconnectRequired, onNetworkHardReconnect, onConnectionState });
+    api.emit("videoConferenceJoined", { id: "local" });
+    api.emit("videoConferenceLeft");
+    vi.advanceTimersByTime(200);
+    api.emit("readyToClose");
+    vi.advanceTimersByTime(LEFT_HANGUP_WAIT_MS + NETWORK_RECOVERY_GRACE_MS + 100);
+    expect(onTelemetry).not.toHaveBeenCalled();
+    expect(onReconnectRequired).not.toHaveBeenCalled();
+    expect(onNetworkHardReconnect).not.toHaveBeenCalled();
+    expect(onConnectionState).not.toHaveBeenCalledWith("reconnecting", "videoConferenceLeft");
+    handle.dispose();
+    vi.useRealTimers();
+  });
+
+  it("unexpected left without readyToClose is a real loss: tagged reason + hard reconnect signal", () => {
+    vi.useFakeTimers();
+    const api = createApi();
+    const onTelemetry = vi.fn();
+    const onReconnectRequired = vi.fn();
+    const onNetworkHardReconnect = vi.fn();
+    const handle = attachMediaWatchdog(api, { onTelemetry, onReconnectRequired, onNetworkHardReconnect });
+    api.emit("videoConferenceJoined", { id: "local" });
+    api.emit("videoConferenceLeft");
+    vi.advanceTimersByTime(LEFT_HANGUP_WAIT_MS);
+    expect(onTelemetry).toHaveBeenCalledWith("media_recovery_started", expect.objectContaining({ reason: "conference_left_unexpected" }));
+    vi.advanceTimersByTime(NETWORK_RECOVERY_GRACE_MS + 10);
+    expect(onReconnectRequired).toHaveBeenCalledTimes(1);
+    expect(onNetworkHardReconnect).toHaveBeenCalledTimes(1);
+    expect(onNetworkHardReconnect).toHaveBeenCalledWith({ reason: "conference_left_unexpected" });
+    handle.dispose();
+    vi.useRealTimers();
+  });
+
+  it("rejoin during the hangup wait cancels recovery", () => {
+    vi.useFakeTimers();
+    const api = createApi();
+    const onTelemetry = vi.fn();
+    const handle = attachMediaWatchdog(api, { onTelemetry });
+    api.emit("videoConferenceJoined", { id: "local" });
+    api.emit("videoConferenceLeft");
+    api.emit("videoConferenceJoined", { id: "local" });
+    vi.advanceTimersByTime(LEFT_HANGUP_WAIT_MS + NETWORK_RECOVERY_GRACE_MS + 10);
+    expect(onTelemetry).not.toHaveBeenCalled();
+    handle.dispose();
+    vi.useRealTimers();
+  });
+
+  it("connectionFailed still triggers recovery and the hard reconnect signal", () => {
+    vi.useFakeTimers();
+    const api = createApi();
+    const onNetworkHardReconnect = vi.fn();
+    const handle = attachMediaWatchdog(api, { onNetworkHardReconnect });
+    api.emit("videoConferenceJoined", { id: "local" });
+    api.emit("connectionFailed", { error: "connection.droppedError" });
+    vi.advanceTimersByTime(NETWORK_RECOVERY_GRACE_MS + 10);
+    expect(onNetworkHardReconnect).toHaveBeenCalledWith({ reason: "connectionFailed" });
+    handle.dispose();
+    vi.useRealTimers();
+  });
+
+  it("left while hidden (iOS background) defers until visible", () => {
+    vi.useFakeTimers();
+    let vis = "hidden";
+    const spy = vi.spyOn(document, "visibilityState", "get").mockImplementation(() => vis);
+    const api = createApi();
+    const onTelemetry = vi.fn();
+    const onReconnectRequired = vi.fn();
+    const onNetworkHardReconnect = vi.fn();
+    const handle = attachMediaWatchdog(api, { onTelemetry, onReconnectRequired, onNetworkHardReconnect });
+    api.emit("videoConferenceJoined", { id: "local" });
+    api.emit("videoConferenceLeft");
+    vi.advanceTimersByTime(LEFT_HANGUP_WAIT_MS + 10);
+    expect(onTelemetry).not.toHaveBeenCalled();
+    vis = "visible";
+    handle.handleLifecycleEvent("visibilitychange");
+    expect(onTelemetry).toHaveBeenCalledWith("media_recovery_started", expect.objectContaining({ reason: "backgrounded" }));
+    expect(onReconnectRequired).toHaveBeenCalledTimes(1);
+    expect(onNetworkHardReconnect).not.toHaveBeenCalled();
+    handle.dispose();
+    spy.mockRestore();
+    vi.useRealTimers();
   });
 });

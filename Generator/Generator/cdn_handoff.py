@@ -22,6 +22,7 @@ from django.core.cache import cache
 from django.utils import timezone as dj_tz
 from django.http import HttpResponseRedirect, JsonResponse
 from django.views.decorators.cache import never_cache
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from Generator import cdn_users
@@ -210,15 +211,26 @@ def api_pref(request):
     return JsonResponse({"prefer_cdn": pref, "reason": reason})
 
 
+@csrf_exempt
 @never_cache
 @require_POST
 def api_event(request):
-    """r95: переход без токена (основной хост не ответил) — клиент сообщает с cdn после входа."""
+    """r95: переход без токена (основной хост не ответил) — клиент сообщает с cdn после входа.
+
+    r97: csrf_exempt — на cdn страница с no-referrer, Django отклонял POST «no Referer».
+    Безопасно: эндпоинт только пишет одну строку журнала (whitelist reason, 1/мин на юзера),
+    требует сессию, только хост cdn, только JSON (не simple-request формы), чужой Origin → 403.
+    """
     user = request.user
     if not user.is_authenticated:
         return JsonResponse({"error": "auth"}, status=401)
     if not cdn_users.is_cdn(request):
         return JsonResponse({"error": "cdn_only"}, status=400)
+    origin = request.headers.get("Origin")
+    if origin and origin.rstrip("/") != f"https://{request.get_host()}":
+        return JsonResponse({"error": "origin"}, status=403)
+    if not (request.content_type or "").startswith("application/json"):
+        return JsonResponse({"error": "content_type"}, status=415)
     try:
         body = json.loads(request.body or b"{}")
     except ValueError:

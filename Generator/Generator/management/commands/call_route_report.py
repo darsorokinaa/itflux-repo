@@ -12,6 +12,13 @@ from django.utils import timezone
 
 DROP_TYPES = ("connection_reconnecting", "connection_failed")
 JOIN_TIMEOUT_REASON = "jitsi_join_fatal_timeout"
+# r97: не обрывы — обычный hangup / уход в фон. "videoConferenceLeft" = легаси (до r97 watchdog
+# слал её на каждый выход, включая hangup); настоящая потеря теперь "conference_left_unexpected".
+NON_DROP_REASONS = ("videoConferenceLeft", "hangup", "backgrounded")
+
+
+def is_drop(event_type, reason):
+    return event_type in DROP_TYPES and (reason or "") not in NON_DROP_REASONS
 
 
 def session_stats(since, until=None):
@@ -19,7 +26,7 @@ def session_stats(since, until=None):
     qs = E.objects.filter(occurred_at__gte=since).exclude(call_session_id="")
     if until:
         qs = qs.filter(occurred_at__lt=until)
-    s = defaultdict(lambda: {"routes": Counter(), "ua": Counter(), "types": Counter(), "jt": 0,
+    s = defaultdict(lambda: {"routes": Counter(), "ua": Counter(), "types": Counter(), "jt": 0, "nondrop": Counter(),
                              "first": None, "last": None, "joined_at": None, "users": set()})
     for row in qs.values("call_session_id").annotate(a=Min("occurred_at"), b=Max("occurred_at")):
         s[row["call_session_id"]]["first"], s[row["call_session_id"]]["last"] = row["a"], row["b"]
@@ -33,6 +40,8 @@ def session_stats(since, until=None):
                 .annotate(c=Count("id"), a=Min("occurred_at"))):
         x = s[row["call_session_id"]]
         x["types"][row["event_type"]] += row["c"]
+        if row["event_type"] in DROP_TYPES and not is_drop(row["event_type"], row["reason"]):
+            x["nondrop"][row["event_type"]] += row["c"]
         if row["user_id"]:
             x["users"].add(row["user_id"])
         if row["event_type"] == "conference_failed" and row["reason"] == JOIN_TIMEOUT_REASON:
@@ -47,8 +56,8 @@ def session_stats(since, until=None):
         dur = (x["last"] - x["joined_at"]).total_seconds() if x["joined_at"] and x["last"] else 0.0
         out[sid] = {"route": route, "ua": x["ua"].most_common(1)[0][0] if x["ua"] else "-",
                     "joined": x["types"]["conference_joined"] > 0, "join_timeout": x["jt"] > 0,
-                    "drops": sum(x["types"][t] for t in DROP_TYPES),
-                    "reconnects": x["types"]["connection_reconnecting"],
+                    "drops": sum(x["types"][t] - x["nondrop"][t] for t in DROP_TYPES),
+                    "reconnects": x["types"]["connection_reconnecting"] - x["nondrop"]["connection_reconnecting"],
                     "restored": x["types"]["connection_restored"],
                     "peer_fail": x["types"]["peer_connection_failure"],
                     "seconds": max(dur, 0.0), "users": x["users"]}

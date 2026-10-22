@@ -43,6 +43,32 @@ export function createDropDetector({ threshold = DROP_THRESHOLD, windowMs = DROP
   };
 }
 
+/**
+ * r97: детектор живёт per-meeting в пределах вкладки — пересоздание Jitsi API
+ * (hard reconnect) не обнуляет счёт обрывов.
+ */
+const detectors = new Map();
+export function getMeetingDropDetector(meetingKey, opts) {
+  const key = String(meetingKey || "_default");
+  let d = detectors.get(key);
+  if (!d) {
+    d = createDropDetector(opts);
+    detectors.set(key, d);
+  }
+  return d;
+}
+export function resetMeetingDropDetectors() {
+  detectors.clear();
+}
+
+/** r97: watchdog запросил пересоздание из-за потери сети — это обрыв для детектора. */
+export function recordHardReconnect(meetingKey, { onSwitch = switchToCdn, win } = {}) {
+  if (!cdnSwitchAllowed(win || (typeof window !== "undefined" ? window : null))) return false;
+  const fired = getMeetingDropDetector(meetingKey).record("hard_reconnect");
+  if (fired) void onSwitch("call_drops");
+  return fired;
+}
+
 /** Классификация событий Jitsi External API: что считаем обрывом сигнализации. */
 export function isSignalingDropEvent(name, event) {
   if (name === "connectionFailed") return true;
@@ -151,7 +177,7 @@ export async function switchToCdn(reason = "call_drops", {
 }
 
 /** Подписывает детектор на события одного Jitsi External API. */
-export function attachCdnAutoSwitch(api, { detector = createDropDetector(), onSwitch = switchToCdn, win } = {}) {
+export function attachCdnAutoSwitch(api, { meetingKey, detector = getMeetingDropDetector(meetingKey), onSwitch = switchToCdn, win } = {}) {
   if (!api?.addListener) return () => {};
   if (!cdnSwitchAllowed(win || (typeof window !== "undefined" ? window : null))) return () => {};
   let joins = 0;
@@ -225,7 +251,10 @@ export async function reportFallbackArrival({
   try {
     const res = await fetchImpl("/api/cdn-handoff/event/", {
       method: "POST",
-      credentials: "same-origin",
+      credentials: "include",
+      // r97: cdn отдаёт no-referrer → Django CSRF падал «no Referer». Явно шлём same-origin referrer.
+      referrer: win.location.href,
+      referrerPolicy: "same-origin",
       headers: { "Content-Type": "application/json", "X-CSRFToken": readCsrf(win.document) },
       body: JSON.stringify({ reason }),
     });

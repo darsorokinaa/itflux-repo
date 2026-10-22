@@ -8,7 +8,7 @@
  * в разные MUC (token vs guest) и не видят друг друга.
  */
 
-import { attachCdnAutoSwitch, switchToCdn } from "./cdnAutoSwitch"; // r93
+import { attachCdnAutoSwitch, recordHardReconnect, switchToCdn } from "./cdnAutoSwitch"; // r93
 import {
   attachConferencePresence,
   createBrowserTabSessionId,
@@ -865,7 +865,7 @@ export function buildJitsiExternalApiOptions({
 
 export function registerJoinDiagnostics(api, { onMediaWarning, diagnostics } = {}) {
   try {
-    attachCdnAutoSwitch(api); // r93: повторные обрывы на основном хосте → cdn
+    attachCdnAutoSwitch(api, { meetingKey: diagnostics?.meetingUuid }); // r93/r97: детектор per-meeting: повторные обрывы на основном хосте → cdn
   } catch {
     /* ignore */
   }
@@ -1167,6 +1167,13 @@ function wireParticipantListeners(api, hooks) {
     onReconnectRequired: hooks.onReconnectRequired,
     onRecoveryStarted: hooks.onRecoveryStarted,
     shouldReconnect: hooks.shouldReconnect,
+    onNetworkHardReconnect: () => {
+      try {
+        recordHardReconnect(hooks.diagnostics?.meetingUuid); // r97
+      } catch {
+        /* ignore */
+      }
+    },
     onTelemetry: (eventType, extra = {}) => {
       const meetingUuid = hooks.diagnostics?.meetingUuid;
       if (!meetingUuid) return;

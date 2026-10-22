@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   createDropDetector, isSignalingDropEvent, attachCdnAutoSwitch, switchToCdn,
   cdnSwitchAllowed, stripVersionParam, NOTICE_TEXT,
+  getMeetingDropDetector, recordHardReconnect, resetMeetingDropDetectors,
 } from "./cdnAutoSwitch";
 
 function fakeWin({ host = "itflux-academy.ru", search = "", path = "/cabinet/meetings/abc/" } = {}) {
@@ -96,5 +97,48 @@ describe("r93b pinned redirect", () => {
     const fetchImpl = vi.fn();
     expect(await redirectIfServerPrefersCdn({ win: fakeWin({ host: "cdn.itflux-academy.ru" }), fetchImpl })).toBe(false);
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("r97 per-meeting detector", () => {
+  it("survives a new Jitsi API instance for the same meeting", () => {
+    resetMeetingDropDetectors();
+    const w = fakeWin();
+    const onSwitch = vi.fn();
+    const a1 = fakeApi();
+    attachCdnAutoSwitch(a1, { meetingKey: "m1", onSwitch, win: w });
+    a1.fire("connectionFailed", {});
+    const a2 = fakeApi(); // hard reconnect → новый API
+    attachCdnAutoSwitch(a2, { meetingKey: "m1", onSwitch, win: w });
+    a2.fire("connectionFailed", {});
+    expect(onSwitch).toHaveBeenCalledWith("call_drops");
+  });
+
+  it("keeps meetings separate", () => {
+    resetMeetingDropDetectors();
+    getMeetingDropDetector("a").record();
+    expect(getMeetingDropDetector("b").count()).toBe(0);
+    expect(getMeetingDropDetector("a").count()).toBe(1);
+  });
+
+  it("recordHardReconnect counts toward the threshold; respects nocdn and guard", () => {
+    resetMeetingDropDetectors();
+    const onSwitch = vi.fn();
+    const w = fakeWin();
+    expect(recordHardReconnect("m2", { onSwitch, win: w })).toBe(false);
+    expect(recordHardReconnect("m2", { onSwitch, win: w })).toBe(true);
+    expect(onSwitch).toHaveBeenCalledTimes(1);
+    resetMeetingDropDetectors();
+    const off = vi.fn();
+    const wn = fakeWin({ search: "?itflux_nocdn=1" });
+    recordHardReconnect("m3", { onSwitch: off, win: wn });
+    recordHardReconnect("m3", { onSwitch: off, win: wn });
+    expect(off).not.toHaveBeenCalled();
+    const wg = fakeWin();
+    wg.sessionStorage.setItem("itfluxCdnSwitchAt", String(Date.now()));
+    recordHardReconnect("m4", { onSwitch: off, win: wg });
+    recordHardReconnect("m4", { onSwitch: off, win: wg });
+    expect(off).not.toHaveBeenCalled();
   });
 });

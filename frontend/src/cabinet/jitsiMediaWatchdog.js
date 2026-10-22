@@ -23,6 +23,22 @@ export const WATCHDOG_STATES = Object.freeze({
   exhausted: "exhausted",
 });
 
+/**
+ * r97: videoConferenceLeft приходит и при обычном hangup (readyToClose чуть позже),
+ * и при уходе iOS в фон. Ждём readyToClose это время, прежде чем считать выход обрывом.
+ */
+export const LEFT_HANGUP_WAIT_MS = 1500;
+/** r97: причина телеметрии для настоящей потери конференции (не hangup). */
+export const UNEXPECTED_LEFT_REASON = "conference_left_unexpected";
+
+/** r97: выход из конференции, пока вкладка была в фоне (iOS) — не обрыв сети. */
+export const BACKGROUNDED_REASON = "backgrounded";
+
+export function telemetryReasonOf(reason, { backgrounded = false } = {}) {
+  if (reason !== "videoConferenceLeft") return reason;
+  return backgrounded ? BACKGROUNDED_REASON : UNEXPECTED_LEFT_REASON;
+}
+
 export function shouldRecoverFromJitsiEvent(eventName) {
   if (eventName === "participantLeft") return false;
   if (eventName === "readyToClose") return false;
@@ -405,7 +421,9 @@ export function attachMediaWatchdog(api, {
   onReconnectRequired,
   onRecoveryStarted,
   onTelemetry,
+  onNetworkHardReconnect,
   shouldReconnect = () => true,
+  leftHangupWaitMs = LEFT_HANGUP_WAIT_MS,
 } = {}) {
   const listeners = [];
   const domListeners = [];
@@ -433,6 +451,9 @@ export function attachMediaWatchdog(api, {
   let lastNetworkReason = "";
   let quietCycle = false;
   let recoveryTelemetrySent = false;
+  let leftTimer = null;
+  let leftWhileHidden = false;
+  let backgroundedCycle = false;
 
   const log = (tag, extra = {}) => {
     try {
@@ -450,7 +471,7 @@ export function attachMediaWatchdog(api, {
     try {
       const intended = getIntended() || {};
       onTelemetry?.(eventType, {
-        reason: extra.reason || lastNetworkReason || "",
+        reason: telemetryReasonOf(extra.reason || lastNetworkReason || "", { backgrounded: backgroundedCycle }),
         attempt: extra.attempt,
         callSessionId: diagnostics.callSessionId || "",
         intendedMicOn: Boolean(intended.micOn),
@@ -478,6 +499,14 @@ export function attachMediaWatchdog(api, {
     }
   };
 
+  const clearLeftTimer = () => {
+    if (leftTimer != null) {
+      clearTimeout(leftTimer);
+      leftTimer = null;
+    }
+    leftWhileHidden = false;
+  };
+
   const clearDeviceTimer = () => {
     if (deviceTimer != null) {
       clearTimeout(deviceTimer);
@@ -500,6 +529,7 @@ export function attachMediaWatchdog(api, {
     if (disposed) return;
     deferredHardReason = "";
     const hadCycle = cycleOpen;
+    const wasBackgrounded = backgroundedCycle;
     clearGrace();
     cycleOpen = false;
     hardRequestedThisCycle = false;
@@ -509,8 +539,9 @@ export function attachMediaWatchdog(api, {
     peerGlitchesWithoutRecovery = 0;
     state = WATCHDOG_STATES.healthy;
     if (hadCycle && recoveryTelemetrySent) {
-      telemetry("media_recovery_succeeded", { reason: why, jitsiParticipantId: localParticipantId });
+      telemetry("media_recovery_succeeded", { reason: wasBackgrounded ? BACKGROUNDED_REASON : why, jitsiParticipantId: localParticipantId });
     }
+    backgroundedCycle = false;
     recoveryTelemetrySent = false;
     onConnectionState?.("joined", why);
   };
@@ -532,6 +563,12 @@ export function attachMediaWatchdog(api, {
       reason,
       preserveMediaState: true,
     });
+    // r97: настоящее пересоздание после потери сети — сигнал детектору cdn (не hangup).
+    try {
+      if (!backgroundedCycle) onNetworkHardReconnect?.({ reason: telemetryReasonOf(reason) });
+    } catch {
+      /* ignore */
+    }
   };
 
   const finishGrace = () => {
@@ -734,6 +771,17 @@ export function attachMediaWatchdog(api, {
   const handleLifecycleEvent = (reason = "visibilitychange") => {
     if (disposed || intentionalClose) return;
     if (reason === "visibilitychange" && readVisibility() !== "visible") return;
+    if (leftWhileHidden && readVisibility() === "visible") {
+      // r97: вкладка вернулась, а конференция так и не вернулась — это потеря, восстанавливаем.
+      // Как и до r97 (r92), пересоздаём сразу, но причина "backgrounded" — отчёт не считает это обрывом.
+      leftWhileHidden = false;
+      if (!cycleOpen) {
+        backgroundedCycle = true;
+        startNetworkRecovery("videoConferenceLeft");
+      }
+      requestHardReconnect("videoConferenceLeft");
+      return;
+    }
     if (deferredHardReason && readVisibility() === "visible") {
       const deferred = deferredHardReason;
       deferredHardReason = "";
@@ -824,6 +872,7 @@ export function attachMediaWatchdog(api, {
   listen(api, "videoConferenceJoined", (event) => {
     if (disposed) return;
     joinedOnce = true;
+    clearLeftTimer();
     localParticipantId = String(event?.id || "").trim();
     markRecovered("videoConferenceJoined");
   }, listeners);
@@ -836,12 +885,24 @@ export function attachMediaWatchdog(api, {
   }, listeners);
 
   listen(api, "videoConferenceLeft", () => {
-    if (disposed || intentionalClose) return;
-    startNetworkRecovery("videoConferenceLeft");
+    if (disposed || intentionalClose || !joinedOnce) return;
+    // r97: не начинаем восстановление сразу — hangup шлёт readyToClose следом.
+    if (readVisibility() === "hidden") {
+      // iOS/фон: решаем при возврате вкладки (handleLifecycleEvent), без ложного обрыва.
+      leftWhileHidden = true;
+      return;
+    }
+    if (leftTimer != null) return;
+    leftTimer = setTimeout(() => {
+      leftTimer = null;
+      if (disposed || intentionalClose) return;
+      startNetworkRecovery("videoConferenceLeft");
+    }, Math.max(0, Number(leftHangupWaitMs) || 0));
   }, listeners);
 
   listen(api, "readyToClose", () => {
     intentionalClose = true;
+    clearLeftTimer();
     clearGrace();
     cycleOpen = false;
     hardRequestedThisCycle = false;
@@ -882,6 +943,7 @@ export function attachMediaWatchdog(api, {
       }
       clearGrace();
       clearDeviceTimer();
+      clearLeftTimer();
       for (const [eventName, handler] of listeners) {
         try {
           api.removeListener?.(eventName, handler);

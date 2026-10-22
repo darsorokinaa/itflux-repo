@@ -113,3 +113,91 @@ class CallRouteReportR95Tests(TestCase):
     def test_session_stats_empty(self):
         from Generator.management.commands import call_route_report as rep
         self.assertEqual(rep.session_stats(timezone.now() - timedelta(days=1)), {})
+
+
+@override_settings(ALLOWED_HOSTS=HOSTS)
+class R97FixesTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        fd, self.log = tempfile.mkstemp(suffix=".log")
+        os.close(fd)
+        self.ov = override_settings(CDN_USERS_LOG=self.log)
+        self.ov.enable()
+        self.u = get_user_model().objects.create_user("r97a", password="pw-a")
+
+    def tearDown(self):
+        self.ov.disable()
+        os.unlink(self.log)
+
+    def test_event_stored_with_csrf_checks_and_no_referer(self):
+        c = Client(HTTP_USER_AGENT=UA, enforce_csrf_checks=True)
+        c.force_login(self.u)
+        r = c.post("/api/cdn-handoff/event/", data=json.dumps({"reason": "call_drops"}), content_type="application/json",
+                   HTTP_HOST="cdn.itflux-academy.ru", secure=True, HTTP_ORIGIN="https://cdn.itflux-academy.ru")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(CdnSwitchEvent.objects.filter(via="fallback").count(), 1)
+
+    def test_event_rejects_foreign_origin_and_form(self):
+        c = Client(HTTP_USER_AGENT=UA, enforce_csrf_checks=True)
+        c.force_login(self.u)
+        r = c.post("/api/cdn-handoff/event/", data=json.dumps({"reason": "call_drops"}), content_type="application/json",
+                   HTTP_HOST="cdn.itflux-academy.ru", secure=True, HTTP_ORIGIN="https://evil.example")
+        self.assertEqual(r.status_code, 403)
+        r = c.post("/api/cdn-handoff/event/", data={"reason": "call_drops"}, HTTP_HOST="cdn.itflux-academy.ru", secure=True)
+        self.assertEqual(r.status_code, 415)
+        self.assertEqual(CdnSwitchEvent.objects.count(), 0)
+
+    def test_event_still_requires_auth_and_cdn(self):
+        r = Client(enforce_csrf_checks=True).post("/api/cdn-handoff/event/", data="{}", content_type="application/json",
+                                                  HTTP_HOST="cdn.itflux-academy.ru")
+        self.assertEqual(r.status_code, 401)
+        c = Client(HTTP_USER_AGENT=UA, enforce_csrf_checks=True)
+        c.force_login(self.u)
+        r = c.post("/api/cdn-handoff/event/", data=json.dumps({"reason": "call_drops"}), content_type="application/json",
+                   HTTP_HOST="itflux-academy.ru")
+        self.assertEqual(r.status_code, 400)
+
+    def test_cdn_origin_trusted(self):
+        from django.conf import settings
+        self.assertIn("https://cdn.itflux-academy.ru", settings.CSRF_TRUSTED_ORIGINS)
+
+    def test_hangup_and_legacy_left_not_drops(self):
+        from Generator.management.commands import call_route_report as rep
+        self.assertFalse(rep.is_drop("connection_reconnecting", "videoConferenceLeft"))
+        self.assertFalse(rep.is_drop("connection_reconnecting", "hangup"))
+        self.assertFalse(rep.is_drop("connection_failed", "backgrounded"))
+        self.assertTrue(rep.is_drop("connection_reconnecting", "conference_left_unexpected"))
+        self.assertTrue(rep.is_drop("connection_reconnecting", "connectionFailed"))
+        self.assertTrue(rep.is_drop("connection_failed", ""))
+        self.assertFalse(rep.is_drop("conference_left", ""))
+
+    def test_session_stats_excludes_legacy_left(self):
+        from Generator.management.commands import call_route_report as rep
+        rows = [
+            {"call_session_id": "s", "event_type": "connection_reconnecting", "reason": "videoConferenceLeft", "user_id": None, "c": 3, "a": timezone.now()},
+            {"call_session_id": "s", "event_type": "connection_reconnecting", "reason": "connectionFailed", "user_id": None, "c": 1, "a": timezone.now()},
+        ]
+
+        class QS(list):
+            def __getattr__(self, n):
+                return lambda *a, **k: self
+
+        empty, typed = QS(), QS(rows)
+
+        class Root:
+            calls = 0
+
+            def filter(self, **k):
+                return self
+
+            def exclude(self, **k):
+                return self
+
+            def values(self, *a):
+                Root.calls += 1
+                return {1: empty, 2: empty, 3: typed}[Root.calls]
+
+        with mock.patch("Cabinet.models.MeetingTechnicalEvent.objects", Root()):
+            out = rep.session_stats(timezone.now() - timedelta(days=1))
+        self.assertEqual(out["s"]["drops"], 1)
+        self.assertEqual(out["s"]["reconnects"], 1)

@@ -41,3 +41,19 @@ describe("r95 cdn switch recording", () => {
     expect(f).not.toHaveBeenCalled();
   });
 });
+
+
+describe("r97 fallback arrival request", () => {
+  it("sends credentials, csrf and a same-origin referrer", async () => {
+    const w = win({ host: "cdn.itflux-academy.ru", search: "?itflux_cdn_fb=call_drops" });
+    w.location.href = "https://cdn.itflux-academy.ru/cabinet/meetings/abc/";
+    const fetchImpl = vi.fn(async () => ({ ok: true }));
+    expect(await reportFallbackArrival({ win: w, fetchImpl })).toBe(true);
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe("/api/cdn-handoff/event/");
+    expect(init.credentials).toBe("include");
+    expect(init.referrer).toBe("https://cdn.itflux-academy.ru/cabinet/meetings/abc/");
+    expect(init.referrerPolicy).toBe("same-origin");
+    expect(init.headers["X-CSRFToken"]).toBe("x");
+  });
+});
