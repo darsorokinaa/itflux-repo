@@ -131,7 +131,19 @@ class MirrorNoindexMiddleware:
         resp = self.get_response(request)
         if _is_mirror(request):
             resp["X-Robots-Tag"] = "noindex, nofollow"
+        elif _is_service_path(request):
+            # r100: служебные адреса (кабинет, API, превью) — вне индекса даже при прямой ссылке
+            resp["X-Robots-Tag"] = "noindex, nofollow"
         return resp
+
+
+SERVICE_PATH_RE = re.compile(r"^/(cabinet|api|admin|teacher|parent|book|invite|dev|jitsi|ws)(/|$)")
+
+
+def _is_service_path(request):
+    """r100: /cabinet (включая /cabinet/login), /api/…, ?preview=… — X-Robots-Tag: noindex."""
+    path = request.path or "/"
+    return bool(SERVICE_PATH_RE.match(path)) or "preview" in request.GET
 
 
 def _stem(w):
@@ -415,7 +427,7 @@ def robots_txt_body(mirror=False):
         return "User-agent: *\nDisallow: /\n"
     return (
         "User-agent: *\n"
-        "Disallow: /cabinet/\n"
+        "Disallow: /cabinet\n"
         "Disallow: /api/\n"
         "Disallow: /admin/\n"
         "Disallow: /teacher/\n"
@@ -433,7 +445,7 @@ def robots_txt_body(mirror=False):
         "Allow: /\n"
         "\n"
         "User-agent: Yandex\n"
-        "Disallow: /cabinet/\n"
+        "Disallow: /cabinet\n"
         "Disallow: /api/\n"
         "Disallow: /admin/\n"
         "Disallow: /teacher/\n"

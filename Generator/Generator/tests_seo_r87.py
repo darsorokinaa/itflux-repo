@@ -4,7 +4,7 @@ import re
 import tempfile
 from pathlib import Path
 
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 
 from Generator import seo
 from Generator.models import Level, Subject, Task, TaskList
@@ -140,3 +140,21 @@ class SeoR87Tests(TestCase):
         self.assertTrue(t.endswith("| Цифровой поток"))
         self.assertEqual(seo.short_title("Пляж корней", "урок", "ОГЭ", "математика"),
                          "Пляж корней — урок ОГЭ математика | Цифровой поток")
+
+
+class R100ServiceNoindexTests(SimpleTestCase):
+    def test_robots_blocks_cabinet_without_slash(self):
+        from .seo import robots_txt_body
+        body = robots_txt_body()
+        self.assertIn("Disallow: /cabinet\n", body)
+        self.assertNotIn("Disallow: /cabinet/\n", body)
+
+    def test_service_paths(self):
+        from django.test import RequestFactory
+        from .seo import _is_service_path
+        rf = RequestFactory()
+        for p in ("/cabinet", "/cabinet/login", "/api/interesting/", "/teacher/x"):
+            self.assertTrue(_is_service_path(rf.get(p)), p)
+        self.assertTrue(_is_service_path(rf.get("/lessons", {"preview": "1"})))
+        for p in ("/", "/lessons", "/interesting", "/zadaniya/oge", "/cabinetry"):
+            self.assertFalse(_is_service_path(rf.get(p)), p)
