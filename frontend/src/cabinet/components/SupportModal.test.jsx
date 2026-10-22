@@ -78,6 +78,7 @@ describe("supportContacts helpers", () => {
       "telegram",
       "email",
       "vk",
+      "max",
       "social",
     ]);
   });

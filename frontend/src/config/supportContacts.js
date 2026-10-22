@@ -6,6 +6,7 @@
  *   VITE_SUPPORT_TELEGRAM          — username без @ или полный https://t.me/…
  *   VITE_SUPPORT_EMAIL             — публичный email поддержки
  *   VITE_SUPPORT_VK                — URL VK
+ *   VITE_SUPPORT_MAX               — URL канала в MAX
  *   VITE_SUPPORT_TELEGRAM_CHAT     — Telegram в блоке «Социальные сети»
  *   VITE_SUPPORT_TELEGRAM_CHANNEL  — канал (опционально) в блоке «Социальные сети»
  */
@@ -13,6 +14,8 @@
 import {
   TEACHERS_TELEGRAM_CHAT_URL,
   TEACHERS_VK_URL,
+  MAX_CHANNEL_URL,
+  MAX_CHANNEL_NAME,
 } from "./teacherLinks";
 
 /** Личный Telegram для связи по поддержке. */
@@ -57,6 +60,7 @@ export function telegramHttpsUrl(usernameOrUrl) {
  *   telegram: null | { username: string, display: string, url: string },
  *   email: null | string,
  *   vk: null | { url: string },
+ *   max: null | { url: string, name: string },
  *   social: Array<{ id: string, label: string, url: string }>,
  * }}
  */
@@ -68,6 +72,7 @@ export function getSupportContacts() {
 
   const email = readEnv("VITE_SUPPORT_EMAIL") || SUPPORT_EMAIL_DEFAULT;
   const vkUrl = readEnv("VITE_SUPPORT_VK") || TEACHERS_VK_URL;
+  const maxUrl = readEnv("VITE_SUPPORT_MAX") || MAX_CHANNEL_URL;
 
   const social = [];
   const seen = new Set();
@@ -100,11 +105,12 @@ export function getSupportContacts() {
         : null,
     email: email || null,
     vk: vkUrl ? { url: vkUrl } : null,
+    max: maxUrl ? { url: maxUrl, name: MAX_CHANNEL_NAME } : null,
     social,
   };
 }
 
 /** Публичные поля, которые можно безопасно отдавать в UI (без секретов). */
 export function getPublicSupportContactKeys() {
-  return ["telegram", "email", "vk", "social"];
+  return ["telegram", "email", "vk", "max", "social"];
 }

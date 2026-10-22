@@ -206,7 +206,8 @@ def organization_ld():
         "alternateName": "ITFlux Academy",
         "url": SITE_ORIGIN + "/",
         "logo": SITE_ORIGIN + "/favicon.png",
-        "sameAs": ["https://t.me/itfluxacademy", "https://vk.com/itfluxacademy"],
+        "sameAs": ["https://t.me/itfluxacademy", "https://vk.com/itfluxacademy",
+                   "https://max.ru/channel_itfluxacademy"],
     }
 
 

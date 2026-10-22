@@ -653,3 +653,14 @@
     --t-gutter: 16px;
   }
 }
+
+/* r96: ссылка на канал в MAX под кнопкой Telegram */
+.tc-tg-card__max {
+  margin: 10px 0 0 8px;
+}
+
+@media (max-width: 720px) {
+  .tc-tg-card__max {
+    margin-left: 0;
+  }
+}

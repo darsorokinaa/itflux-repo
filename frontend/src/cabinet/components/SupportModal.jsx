@@ -7,13 +7,14 @@ import "../../components/SupportFab.css";
 const FOCUSABLE =
   'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';
 
-function ContactRow({ label, value, actionLabel, href, external, icon }) {
+function ContactRow({ label, value, actionLabel, href, external, icon, ariaLabel }) {
   if (!href && !value) return null;
 
   const action = href ? (
     <a
       href={href}
       className="cb-support-row__action"
+      {...(ariaLabel ? { "aria-label": ariaLabel } : {})}
       {...(external
         ? { target: "_blank", rel: "noopener noreferrer" }
         : {})}
@@ -26,7 +27,11 @@ function ContactRow({ label, value, actionLabel, href, external, icon }) {
     <div className="cb-support-row">
       <div className="cb-support-row__main">
         <span className="cb-support-row__icon" aria-hidden="true">
-          <CabinetIcon name={icon} />
+          {icon === "max-badge" ? (
+            <span className="cb-support-row__badge">MAX</span>
+          ) : (
+            <CabinetIcon name={icon} />
+          )}
         </span>
         <div className="cb-support-row__text">
           <span className="cb-support-row__label">{label}</span>
@@ -122,7 +127,7 @@ export default function SupportModal({ open, onClose }) {
 
   const contacts = getSupportContacts();
   const hasContacts =
-    contacts.telegram || contacts.email || contacts.vk || contacts.social.length > 0;
+    contacts.telegram || contacts.email || contacts.vk || contacts.max || contacts.social.length > 0;
 
   return createPortal(
     <div
@@ -188,6 +193,18 @@ export default function SupportModal({ open, onClose }) {
                   href={contacts.vk.url}
                   external
                   icon="users"
+                />
+              ) : null}
+
+              {contacts.max ? (
+                <ContactRow
+                  label="MAX"
+                  value="Цифровой поток"
+                  actionLabel="Открыть"
+                  href={contacts.max.url}
+                  external
+                  icon="max-badge"
+                  ariaLabel={`Канал «${contacts.max.name}» в MAX`}
                 />
               ) : null}
 

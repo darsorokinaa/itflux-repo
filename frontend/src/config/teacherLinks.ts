@@ -11,6 +11,10 @@ export const TEACHERS_TELEGRAM_CHAT_URL = "https://t.me/c/itfluxchat/262";
 /** @deprecated используйте TEACHERS_TELEGRAM_CHANNEL_URL */
 export const TEACHERS_TELEGRAM_URL = TEACHERS_TELEGRAM_CHANNEL_URL;
 
+/** Канал «Цифровой поток - онлайн-академия IT-технологий» в MAX. */
+export const MAX_CHANNEL_URL = "https://max.ru/channel_itfluxacademy";
+export const MAX_CHANNEL_NAME = "Цифровой поток - онлайн-академия IT-технологий";
+
 /** Сообщество учителей во ВКонтакте. */
 export const TEACHERS_VK_URL = "https://vk.com/itfluxacademy";
 

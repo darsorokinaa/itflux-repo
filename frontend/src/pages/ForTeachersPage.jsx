@@ -19,6 +19,8 @@ import {
   TEACHER_COMMUNITY_FEEDBACK_ENDPOINT,
   TEACHER_FEEDBACK_DRAFT_KEY,
   TEACHERS_TELEGRAM_CHANNEL_URL,
+  MAX_CHANNEL_URL,
+  MAX_CHANNEL_NAME,
   TEACHERS_TELEGRAM_CHAT_URL,
 } from "../config/teacherLinks";
 
@@ -689,6 +691,16 @@ export default function ForTeachersPage() {
                 onClick={() => trackTeachersEvent("teachers_main_channel_click")}
               >
                 Открыть канал
+              </a>
+              <a
+                className="tc-btn tc-btn--secondary tc-tg-card__max"
+                href={MAX_CHANNEL_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={`Канал «${MAX_CHANNEL_NAME}» в MAX`}
+                onClick={() => trackTeachersEvent("teachers_max_channel_click")}
+              >
+                Канал в MAX
               </a>
             </article>
             <article className="tc-tg-card tc-tg-card--warm">
