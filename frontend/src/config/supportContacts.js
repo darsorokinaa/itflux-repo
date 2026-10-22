@@ -22,7 +22,7 @@ import {
 export const SUPPORT_TELEGRAM_DEFAULT = "dariyasorokinaa";
 
 /** Публичный email поддержки. */
-export const SUPPORT_EMAIL_DEFAULT = "itflux.academy@yandex.ru";
+export const SUPPORT_EMAIL_DEFAULT = "itflux.academy@yandex.com";
 
 function readEnv(name) {
   try {
