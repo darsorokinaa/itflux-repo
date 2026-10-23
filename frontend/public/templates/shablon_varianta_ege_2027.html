@@ -126,6 +126,10 @@ input[type=number]{background:white;color:#3e4554;padding:6px 9px;border:1px sol
 .task th,.task td{border:.15mm solid #111;padding:1mm .7mm;font-weight:400;text-align:center;overflow-wrap:anywhere;min-width:0}
 .task table img{display:block;width:auto !important;max-width:100% !important;height:auto !important;max-height:140mm !important;margin:0 auto;object-fit:contain}
 .task th:first-child,.task td:first-child{text-align:left}
+.task table.match-options{margin:1.5mm 0 2.5mm}
+.task table.match-options td{border:0;padding:.5mm 1.5mm;vertical-align:top;text-align:left}
+.task table.match-options td p{margin:0}
+.task table.match-options img{display:block;margin:.5mm 0 0;max-height:50mm !important}
 .task table th:first-child{width:40%}
 .task ol,.task ul{margin:1mm 0;padding-left:4.5mm}
 .task ol .katex-display{display:inline;margin:0}
@@ -1590,7 +1594,7 @@ function safeHtml(html){
    const name=attr.name.toLowerCase(),v=attr.value;
    if(!allowedAttrs.has(name)||/^on/i.test(name)||/url\s*\(|javascript:|expression\s*\(/i.test(v)){el.removeAttribute(attr.name);continue;}
    if(name==='src'&&!/^(data:image\/(png|jpeg|jpg|gif|webp|svg\+xml);|https?:\/\/|\/[^/]|\.\.?\/)/i.test(v))el.removeAttribute(attr.name);
-   if(name==='class')el.className=v.split(/\s+/).filter(c=>/^(math|formula|align-center|align-right|frac|numerator|denominator|no-wrap|illustration)$/.test(c)).join(' ');
+   if(name==='class')el.className=v.split(/\s+/).filter(c=>/^(math|formula|align-center|align-right|frac|numerator|denominator|no-wrap|illustration|match-options)$/.test(c)).join(' ');
   }
  }
  return template.content;

@@ -567,6 +567,103 @@ function isInformaticsTaskOne(subject: string | undefined, taskNumber: number | 
   return (code === "inf" || code === "informatics") && Number(taskNumber) === 1;
 }
 
+function imageKey(src: string): string {
+  const clean = String(src || "").split(/[?#]/)[0];
+  return (clean.split("/").pop() || clean).toLowerCase();
+}
+
+// Повтор той же картинки (тот же файл) печатаем один раз — как removeDuplicateImages в MathContent.jsx.
+function removeDuplicateImages(root: HTMLElement): void {
+  const seen = new Set<string>();
+  for (const img of [...root.querySelectorAll("img")]) {
+    const src = img.getAttribute("src") || "";
+    if (!src || src.includes("math") || src.includes("mjx")) continue;
+    const key = imageKey(src);
+    if (!seen.has(key)) {
+      seen.add(key);
+      continue;
+    }
+    const host = img.closest("p, figure, div.task-html-block");
+    if (host && host !== root && host.querySelectorAll("img").length <= 1) host.remove();
+    else img.remove();
+  }
+}
+
+const MATCH_LABEL_RE = /^\s*(?:[А-ЯA-Z]|\d{1,2})\)\s*$/;
+
+// ОГЭ (мат. №11 и др.): пары «А)» + картинка/формула идут div-ами подряд и печатаются столбиком
+// на всю ширину. Перекладываем их в одну строку таблицы .match-options (картинки ~5 см).
+function layoutMatchingOptions(root: HTMLElement): void {
+  // Уже размеченные formatOgeMathMatchingTaskHtml полосы (.oge-math-matching-strip > .oge-math-matching-item):
+  // без этого первая картинка уезжала в «figure» над условием, остальные печатались на всю ширину.
+  for (const strip of [...root.querySelectorAll(".oge-math-matching-strip")]) {
+    const items = [...strip.querySelectorAll(":scope > .oge-math-matching-item")];
+    if (items.length < 2) continue;
+    const table = document.createElement("table");
+    table.className = "match-options";
+    const tbody = document.createElement("tbody");
+    const tr = document.createElement("tr");
+    for (const item of items) {
+      const td = document.createElement("td");
+      const labelText = (item.querySelector(".oge-math-matching-item__label")?.textContent || "").trim();
+      if (labelText) {
+        const b = document.createElement("b");
+        b.textContent = (/\)$/.test(labelText) ? labelText : `${labelText})`) + " ";
+        td.append(b);
+      }
+      const body = item.querySelector(".oge-math-matching-item__body");
+      if (body) td.append(...body.childNodes);
+      tr.append(td);
+    }
+    tbody.append(tr);
+    table.append(tbody);
+    strip.replaceWith(table);
+  }
+  for (const title of [...root.querySelectorAll(".oge-math-matching-row__title")]) {
+    const b = document.createElement("b");
+    b.textContent = (title.textContent || "").trim().toUpperCase();
+    title.replaceChildren(b);
+  }
+  for (const box of [...root.querySelectorAll("div")]) {
+    if (!box.isConnected) continue;
+    const kids = [...box.childNodes].filter(
+      (n) => n.nodeType === 1 || (n.nodeType === 3 && (n.textContent || "").trim())
+    );
+    if (kids.length < 4 || kids.length % 2 || kids.some((n) => n.nodeType !== 1)) continue;
+    const els = kids as HTMLElement[];
+    const pairs: [HTMLElement, HTMLElement][] = [];
+    let ok = true;
+    for (let i = 0; i < els.length; i += 2) {
+      const lab = els[i];
+      const body = els[i + 1];
+      if (lab.localName !== "div" || !MATCH_LABEL_RE.test(lab.textContent || "") || lab.querySelector("img")) {
+        ok = false;
+        break;
+      }
+      if (MATCH_LABEL_RE.test(body.textContent || "") && !body.querySelector("img, svg")) {
+        ok = false;
+        break;
+      }
+      pairs.push([lab, body]);
+    }
+    if (!ok || pairs.length < 2) continue;
+    const table = document.createElement("table");
+    table.className = "match-options";
+    const tbody = document.createElement("tbody");
+    const tr = document.createElement("tr");
+    for (const [lab, body] of pairs) {
+      const td = document.createElement("td");
+      const b = document.createElement("b");
+      b.textContent = (lab.textContent || "").trim() + " ";
+      td.append(b, ...body.childNodes);
+      tr.append(td);
+    }
+    tbody.append(tr);
+    table.append(tbody);
+    box.replaceChildren(table);
+  }
+}
+
 function sanitizeTaskHtml(
   raw: string,
   subject?: string,
@@ -581,6 +678,8 @@ function sanitizeTaskHtml(
   root.innerHTML = prepared;
 
   for (const el of [...root.querySelectorAll("pre")]) replacePre(el);
+  removeDuplicateImages(root);
+  layoutMatchingOptions(root);
 
   let guard = 0;
   while (guard < 40) {
