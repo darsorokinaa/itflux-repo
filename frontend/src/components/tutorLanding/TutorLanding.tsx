@@ -17,6 +17,15 @@ import {
 } from "lucide-react";
 import { fmtRub, useTariffPlans, yearDiscountPercent, type PublicPlan } from "./useTariffPlans";
 import "./tutor-landing.css";
+import imgBank from "./img/bank.webp";
+import imgTextbook from "./img/textbook.webp";
+import imgAuthor from "./img/author.webp";
+import imgLessons from "./img/lessons.webp";
+import imgInteractive from "./img/interactive.webp";
+import imgGenerator from "./img/generator.webp";
+import imgHomework from "./img/homework_autocheck.webp";
+import imgReview from "./img/review.webp";
+import imgJournal from "./img/journal.webp";
 
 export const CONTACT_EMAIL = "itflux.academy@yandex.com";
 const REGISTER_URL = `/cabinet/login?mode=register&next=${encodeURIComponent("/cabinet")}`;
@@ -37,6 +46,8 @@ export default function TutorLanding({ isTeacher = false }: Props) {
     <div className="tl">
       <TutorHero ctaTo={startCta} studentsTo={isTeacher ? "/cabinet/students" : `/cabinet/login?mode=register&next=${encodeURIComponent("/cabinet/students")}`} />
       <TutorFeatures />
+      <TutorMaterials />
+      <TutorAutocheck ctaTo={startCta} />
       {landingPlans.length === 3 ? (
         <TutorPricing plans={landingPlans} ctaTo={startCta} discount={discount} />
       ) : failed ? (
@@ -114,7 +125,7 @@ function HeroIllustration() {
 const FEATURES = [
   { t: "Банк задач ФИПИ", d: "Задачи из открытого банка ФИПИ по номерам КИМ ОГЭ и ЕГЭ.", I: BookOpen },
   { t: "Авторские задачи", d: "Добавляйте свои задачи и собирайте из них подборки.", I: PenLine },
-  { t: "Автопроверка ДЗ", d: "Ответы учеников проверяются автоматически — вы видите только итог.", I: CheckCheck },
+  { t: "Автопроверка ДЗ", d: "Краткие ответы проверяются сразу после отправки, развёрнутые приходят вам на проверку.", I: CheckCheck },
   { t: "Генератор вариантов", d: "Варианты в формате КИМ за пару кликов, с ответами.", I: FileStack },
   { t: "Готовые планы ОГЭ и ЕГЭ", d: "Программа подготовки по неделям уже внутри платформы.", I: Map },
   { t: "Календарь и расписание", d: "Все уроки на одной неделе, ссылки на занятия рядом.", I: CalendarDays },
@@ -136,6 +147,83 @@ function TutorFeatures() {
           </article>
         ))}
       </div>
+    </section>
+  );
+}
+
+function Shot({ src, cap, w, h }: { src: string; cap: string; w: number; h: number }) {
+  return (
+    <figure className="tl-shot">
+      <div className="tl-shot__bar" aria-hidden><i /><i /><i /></div>
+      <img src={src} alt={cap} width={w} height={h} loading="lazy" decoding="async" />
+      <figcaption>{cap}</figcaption>
+    </figure>
+  );
+}
+
+/* Цифры — из БД на 23.10.2026 (global, is_active), округлены вниз. */
+const MATERIALS = [
+  { n: "более 12 500", h: "заданий ФИПИ", p: "Открытый банк по математике и информатике, всегда бесплатно.", img: imgBank, cap: "Банк заданий", w: 1200, h2: 562 },
+  { n: "более 1 650", h: "задач из учебников", p: "Тоже бесплатно, для отработки тем.", img: imgTextbook, cap: "Задачи из учебников", w: 1200, h2: 614 },
+  { n: "более 2 500", h: "авторских задач «Цифрового потока»", p: "Свои задачи, которых нет в открытом банке.", img: imgAuthor, cap: "Авторские задачи", w: 1200, h2: 618 },
+  { n: "57", h: "готовых уроков", p: "Можно взять урок целиком и провести его с учеником.", img: imgLessons, cap: "Каталог уроков", w: 1200, h2: 480 },
+  { n: "26", h: "интерактивов", p: "Задания, которые ученик выполняет прямо на платформе.", img: imgInteractive, cap: "Интерактив", w: 1200, h2: 613 },
+  { n: "", h: "Генератор вариантов", p: "Соберите вариант в формате экзамена за пару кликов.", img: imgGenerator, cap: "Генератор вариантов", w: 1200, h2: 619 },
+];
+
+function TutorMaterials() {
+  return (
+    <section className="tl-section" id="materialy" aria-labelledby="tl-materials-title">
+      <h2 id="tl-materials-title" className="tl-h2">Всё для подготовки к ОГЭ и ЕГЭ уже внутри</h2>
+      <p className="tl-lead">Не нужно собирать задачи по разным сайтам: банк, уроки и варианты в одном кабинете.</p>
+      <div className="tl-grid3">
+        {MATERIALS.map((m) => (
+          <article key={m.h} className="tl-card tl-mat">
+            <Shot src={m.img} cap={m.cap} w={m.w} h={m.h2} />
+            <div className="tl-mat__body">
+              {m.n ? <b className="tl-num">{m.n}</b> : null}
+              <h3>{m.h}</h3>
+              <p>{m.p}</p>
+            </div>
+          </article>
+        ))}
+      </div>
+      <div className="tl-center"><a className="tl-btn" href="/zadaniya">Посмотреть задания</a></div>
+    </section>
+  );
+}
+
+function TutorAutocheck({ ctaTo }: { ctaTo: string }) {
+  return (
+    <section className="tl-section" id="avtoproverka" aria-labelledby="tl-autocheck-title">
+      <h2 id="tl-autocheck-title" className="tl-h2">Домашку проверяет платформа, а не Вы</h2>
+      <p className="tl-lead">Выдайте задания ученику, и ответы проверятся автоматически.</p>
+      <div className="tl-grid3">
+        <article className="tl-card tl-step">
+          <span className="tl-step__n">1</span>
+          <p>Задания с кратким ответом проверяются сразу после отправки домашки. Если нужен развёрнутый ответ, платформа отдельно подскажет, что его надо проверить Вам.</p>
+          <div className="tl-step__v"><Shot src={imgHomework} cap="Домашнее задание · демо-данные" w={1200} h={615} /></div>
+        </article>
+        <article className="tl-card tl-step">
+          <span className="tl-step__n">2</span>
+          <p>Ответ засчитывается и с точкой, и с запятой: 0.5 и 0,5 — одно и то же.</p>
+          <div className="tl-step__v">
+            <figure className="tl-shot tl-eq" aria-label="0.5 и 0,5 засчитываются одинаково">
+              <div className="tl-eq__b"><span><em>0.5</em><i>✓</i></span><b>=</b><span><em>0,5</em><i>✓</i></span></div>
+              <figcaption>иллюстрация</figcaption>
+            </figure>
+          </div>
+        </article>
+        <article className="tl-card tl-step">
+          <span className="tl-step__n">3</span>
+          <p>Все сданные работы собраны в разделе «Проверка». Результаты по ученикам, группам и темам видны в журнале и отчётах (на платных тарифах). Ученик видит свои результаты в кабинете.</p>
+          <div className="tl-step__v">
+            <Shot src={imgReview} cap="Раздел «Проверка»" w={1200} h={480} />
+            <Shot src={imgJournal} cap="Журнал · на платных тарифах" w={1200} h={531} />
+          </div>
+        </article>
+      </div>
+      <div className="tl-center"><Link className="tl-btn" to={ctaTo}>Попробовать бесплатно</Link></div>
     </section>
   );
 }
