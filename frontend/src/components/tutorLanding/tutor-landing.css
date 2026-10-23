@@ -129,14 +129,15 @@
 .tl-final__mail a { color: #fff; text-decoration: underline; }
 
 @media (max-width: 1024px) {
-  .tl-grid4 { grid-template-columns: repeat(2, 1fr); }
+  .tl-grid4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 760px) {
   .tl { padding: 0 20px; }
   .tl-hero { padding: 16px 0 64px; }
   .tl-hero__grid, .tl-plans { grid-template-columns: 1fr; gap: 40px; }
   .tl-plans { gap: 26px; }
-  .tl-grid4 { grid-template-columns: 1fr 1fr; gap: 12px; }
+  .tl-grid4 { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .tl-feature h3 { overflow-wrap: anywhere; }
   .tl-card { padding: 18px; }
   .tl-plan { padding: 30px 22px; }
   .tl-h1 { font-size: 32px; }
@@ -179,3 +180,6 @@
 .tl-eq__b i { font-style: normal; color: #fff; background: #2BB673; border-radius: 50%; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; font-weight: 700; }
 @media (max-width: 1024px) { .tl-grid3 { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 760px) { .tl-grid3 { grid-template-columns: 1fr; } .tl-num { font-size: 32px; } .tl-step p { min-height: 0; } }
+@media (max-width: 419px) {
+  .tl-grid4 { grid-template-columns: minmax(0, 1fr); }
+}
