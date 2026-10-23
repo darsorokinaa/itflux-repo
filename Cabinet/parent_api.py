@@ -470,7 +470,7 @@ class ParentDashboardView(APIView):
                 feed = build_journal_entries_feed(
                     student.teacher,
                     student_id=student.id,
-                    limit=12,
+                    limit=200,
                 )
                 recent_results = _filter_parent_journal_entries(
                     feed.get("entries") or [],
@@ -486,6 +486,7 @@ class ParentDashboardView(APIView):
             records = StudentLessonRecord.objects.filter(
                 student=student,
                 journal__teacher=student.teacher_id,
+                visible_to_parent=True,
                 publish_status__in=[
                     RecordPublishStatus.PUBLISHED,
                     RecordPublishStatus.EDITED_AFTER_PUBLISH,
@@ -515,9 +516,11 @@ class ParentDashboardView(APIView):
             }
 
         billing = None
-        if rel.has_permission("view_billing"):
+        if rel.status == ParentRelationshipStatus.ACTIVE:
             try:
                 billing = _parent_billing_payload(student, rel)
+                if billing and not billing.get("allowed"):
+                    billing = None
             except Exception:
                 logger.exception("parent dashboard billing failed student=%s", student.id)
                 billing = {"allowed": False, "reason": "unavailable"}
@@ -643,6 +646,10 @@ class ParentJournalView(APIView):
                 require_permission(rel, "view_journal")
         except (KeyError, ValueError, ParentAccessError) as exc:
             return _error(exc if isinstance(exc, (ParentAccessError,)) else ParentAccessError("Укажите student_id"))
+        try:
+            limit = max(1, min(int(request.query_params.get("limit") or 100), 500))
+        except (TypeError, ValueError):
+            limit = 100
         feed = build_journal_entries_feed(
             rel.student.teacher,
             student_id=rel.student.id,
@@ -650,13 +657,15 @@ class ParentJournalView(APIView):
             date_to=request.query_params.get("date_to"),
             entry_type=request.query_params.get("entry_type"),
             homework_only=request.query_params.get("homework_only") in {"1", "true"},
-            limit=int(request.query_params.get("limit") or 100),
+            # r109: лимит в ленте применяется до фильтра «опубликовано + видно родителю»,
+            # поэтому берём с запасом и обрезаем уже после фильтрации.
+            limit=max(limit, 500),
         )
         feed["entries"] = _filter_parent_journal_entries(
             feed.get("entries") or [],
             rel=rel,
             include_comments=rel.has_permission("view_comments"),
-        )
+        )[:limit]
         return Response(feed)
 
 
@@ -704,9 +713,11 @@ class ParentBillingView(APIView):
     def get(self, request):
         try:
             rel = get_active_relationship(request.user, int(request.query_params["student_id"]))
-            require_permission(rel, "view_billing")
         except (KeyError, ValueError, ParentAccessError) as exc:
             return _error(exc if isinstance(exc, ParentAccessError) else ParentAccessError("Укажите student_id"))
+        # r109: доступ = право в приглашении ИЛИ глобальная настройка преподавателя
+        # (show_billing_to_parent); без доступа — 200 allowed:false, чтобы фронт
+        # показал понятное сообщение вместо ошибки 403.
         payload = _parent_billing_payload(rel.student, rel)
         if not payload or not payload.get("allowed"):
             return Response({"allowed": False, "reason": "disabled_by_teacher"})
