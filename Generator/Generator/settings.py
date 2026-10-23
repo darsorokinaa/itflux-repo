@@ -314,6 +314,9 @@ MIDDLEWARE = [
 
 # r90: лог пользователей cdn.itflux-academy.ru (1 строка/польз./10 мин), см. Generator/cdn_users.py
 CDN_USERS_LOG = os.environ.get("CDN_USERS_LOG", "/var/log/itflux/cdn-users.log")
+# r105: анонимные замеры загрузки (cdn vs direct), см. Generator/load_timing.py
+LOAD_TIMING_LOG = os.environ.get("LOAD_TIMING_LOG", "/var/log/itflux/load-timing.log")
+LOAD_TIMING_RATE = int(os.environ.get("LOAD_TIMING_RATE", "20"))  # строк/мин на сессию или IP
 CDN_USERS_THROTTLE_SECONDS = int(os.environ.get("CDN_USERS_THROTTLE_SECONDS", "600"))
 
 # Django admin TOTP (python manage.py setup_admin_totp <user>)

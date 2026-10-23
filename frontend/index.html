@@ -61,7 +61,7 @@
           if (window.__ITFLUX_BOOTED) return;
           if (onMain) {
             if (!dismissed()) banner("Откройте через запасной адрес", cdnUrl);
-            if (!window.__ITFLUX_NO_CDN && set(Date.now())) go(cdnUrl);
+            if (!window.__ITFLUX_NO_CDN && set(Date.now())) { try { if (window.__itfluxLoadTiming) window.__itfluxLoadTiming("auto_switch"); } catch (e) { /* ignore */ } go(cdnUrl); }
           } else if (!dismissed()) {
             var sep = location.search ? "&" : "?";
             banner("Попробуйте основной адрес", "https://" + MAIN + location.pathname + location.search + sep + "itflux_nocdn=1" + location.hash);
@@ -127,6 +127,47 @@
     #itflux-cdn-hint a{color:#93c5fd;font-weight:600;text-decoration:underline}
     #itflux-cdn-hint button{margin-left:auto;flex:none;border:0;background:transparent;color:#cbd5e1;font-size:20px;line-height:1;cursor:pointer;padding:2px 6px}
   </style>
+  <script id="itflux-load-timing-script">
+    /* r105: анонимный замер загрузки (cdn vs direct). Один sendBeacon на загрузку страницы → /api/load-timing/.
+       Только тайминги навигации, момент готовности приложения и тип события; хост/UA сервер берёт из запроса. */
+    (function () {
+      try {
+        var host = String(location.hostname || "").toLowerCase();
+        if (!/(^|\.)itflux-academy\.ru$/.test(host) || window.__ITFLUX_CDN_REDIRECTING) return;
+        if (!navigator.sendBeacon || !window.performance) return;
+        var sent = false, readyAt = null, FAIL_MS = Number(window.__ITFLUX_LT_FAIL_MS) || 30000, started = Date.now();
+        function nav() {
+          try { var e = performance.getEntriesByType("navigation")[0]; if (e) return e; } catch (err) { /* ignore */ }
+          return null;
+        }
+        function ms(v) { return typeof v === "number" && v > 0 ? Math.round(v) : null; }
+        function send(ev) {
+          if (sent) return;
+          sent = true;
+          var e = nav(), t = performance.timing || {};
+          var base = t.navigationStart || 0;
+          var p = {
+            ev: ev,
+            ttfb: e ? ms(e.responseStart) : ms(t.responseStart - base),
+            dcl: e ? ms(e.domContentLoadedEventEnd) : ms(t.domContentLoadedEventEnd - base),
+            load: e ? ms(e.loadEventEnd) : ms(t.loadEventEnd - base),
+            ready: readyAt,
+            nav: e && e.type ? String(e.type) : "",
+            sw: navigator.serviceWorker && navigator.serviceWorker.controller ? 1 : 0
+          };
+          try { navigator.sendBeacon("/api/load-timing/", new Blob([JSON.stringify(p)], { type: "text/plain" })); } catch (err) { /* ignore */ }
+        }
+        window.__itfluxLoadTiming = send;
+        var iv = setInterval(function () {
+          if (sent) { clearInterval(iv); return; }
+          if (readyAt === null && window.__ITFLUX_BOOTED) readyAt = Math.round(performance.now());
+          if (readyAt !== null && document.readyState === "complete") { clearInterval(iv); setTimeout(function () { send("ok"); }, 0); return; }
+          if (Date.now() - started > FAIL_MS) { clearInterval(iv); send(readyAt !== null ? "ok" : "boot_fail"); }
+        }, 500);
+        window.addEventListener("pagehide", function () { if (!sent) send(readyAt !== null ? "ok" : "hidden"); });
+      } catch (err) { /* замер не блокирует запуск */ }
+    })();
+  </script>
   <script src="/boot-watchdog.js"></script>
 
   <!-- Яндекс.Метрика подключается только после согласия на cookie (см. utils/analytics.js). -->

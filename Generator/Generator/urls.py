@@ -7,6 +7,7 @@ from django.views.static import serve
 
 from . import views
 from . import cdn_handoff  # r93
+from . import load_timing  # r105
 from . import seo_tasks  # r36
 from . import seasonal_theme_api
 from . import variant_theme_api
@@ -69,6 +70,7 @@ urlpatterns = [
     path("api/cdn-handoff/issue/", cdn_handoff.api_issue, name="cdn_handoff_issue"),  # r93
     path("api/cdn-handoff/redeem/", cdn_handoff.api_redeem, name="cdn_handoff_redeem"),
     path("api/cdn-handoff/pref/", cdn_handoff.api_pref, name="cdn_handoff_pref"),
+    path("api/load-timing/", load_timing.api_load_timing, name="load_timing"),  # r105
     path("api/cdn-handoff/event/", cdn_handoff.api_event, name="cdn_handoff_event"),  # r95
     path("api/cabinet/", include("Cabinet.urls")),
     path(
