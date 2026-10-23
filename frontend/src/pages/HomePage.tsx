@@ -8,6 +8,7 @@ import {
   Users,
 } from "lucide-react";
 import HeroSection from "../components/HeroSection";
+import TutorLanding from "../components/tutorLanding/TutorLanding";
 import TeacherQuotesBlock from "../components/TeacherQuotesBlock";
 import { type LevelId } from "../data/levels";
 import { formatTasksCount } from "../utils/formatTasksCount";
@@ -126,12 +127,16 @@ export default function HomePage() {
 
       <div className="digital-flow-page__wrap">
         <main className="home-page__main">
+          {/* r103: новый hero/лендинг для репетиторов; прежние блоки (банк задач, генератор) — ниже. */}
+          <TutorLanding />
+          <div className="home-section-divider" role="separator" aria-hidden />
           <HomeValuePathsBlock />
           <div className="home-section-divider" role="separator" aria-hidden />
           <HeroSection
             tasksCountLabel={heroTasksCountLabel}
             subjectsCountLabel={heroSubjectsCountLabel}
             generatedVariantsCountLabel={heroGeneratedVariantsCountLabel}
+            headingLevel={2}
           />
 
           <section id="home-levels" className="home-levels">

@@ -7,22 +7,26 @@ type HeroSectionProps = {
   tasksCountLabel: string;
   subjectsCountLabel: string;
   generatedVariantsCountLabel: string;
+  /** r103: на главной над блоком стоит новый hero с h1, поэтому здесь h2. */
+  headingLevel?: 1 | 2;
 };
 
 export default function HeroSection({
   tasksCountLabel,
   subjectsCountLabel,
   generatedVariantsCountLabel,
+  headingLevel = 1,
 }: HeroSectionProps) {
+  const Heading = headingLevel === 2 ? "h2" : "h1";
   return (
     <section className="home-hero" aria-labelledby="home-hero-heading">
       <div className="home-hero__inner">
         <div className="home-hero__content">
           <span className="home-hero__badge">ПРОСТРАНСТВО ДЛЯ УЧИТЕЛЕЙ</span>
 
-          <h1 id="home-hero-heading" className="home-hero__title">
+          <Heading id="home-hero-heading" className="home-hero__title">
             Цифровой поток — всё для уроков, заданий и проверки в одном месте
-          </h1>
+          </Heading>
 
           <p className="home-hero__description">
             Собирайте варианты, используйте готовые уроки, выдавайте домашние
