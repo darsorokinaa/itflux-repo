@@ -4731,6 +4731,16 @@ body.vl-room-fullscreen .student-cabinet-nav {
   background: #020617;
 }
 
+/* Экран всегда целиком (letterbox), а не обрезка cover: портрет планшета не режется. */
+.lk-fallback-tile--screen video {
+  object-fit: contain;
+  background: #000;
+}
+
+.lk-fallback-tile--screen[data-orientation="portrait"] {
+  min-height: min(70vh, 560px);
+}
+
 .lk-fallback-tile figcaption {
   position: absolute;
   left: 8px;

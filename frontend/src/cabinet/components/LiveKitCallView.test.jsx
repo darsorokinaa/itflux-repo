@@ -193,3 +193,15 @@ describe("LiveKitCallView", () => {
     expect(room.disconnect).toHaveBeenCalledWith(true);
   });
 });
+
+import { orientationFromSize, SCREEN_SHARE_CAPTURE } from "./LiveKitCallView";
+describe("r107 screen orientation", () => {
+  it("classifies orientation", () => {
+    expect(orientationFromSize(1080, 1920)).toBe("portrait");
+    expect(orientationFromSize(1920, 1080)).toBe("landscape");
+    expect(orientationFromSize(0, 0)).toBe("");
+  });
+  it("does not force landscape capture", () => {
+    expect(SCREEN_SHARE_CAPTURE.resolution.width).toBe(SCREEN_SHARE_CAPTURE.resolution.height);
+  });
+});

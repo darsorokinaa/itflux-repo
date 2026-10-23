@@ -36,8 +36,39 @@ function useAttachedTrack(track) {
   return ref;
 }
 
-function MediaTile({ track, muted = false, label, audio = false, avatar = false, pipRole = "" }) {
+/**
+ * Ориентация экрана планшета меняется на лету (portrait <-> landscape): videoWidth/Height
+ * приходят через событие "resize" у <video>. Отдаём класс ориентации, чтобы плитка пересчиталась.
+ */
+export function orientationFromSize(width, height) {
+  const w = Number(width) || 0;
+  const h = Number(height) || 0;
+  if (!(w > 0 && h > 0)) return "";
+  if (h > w * 1.05) return "portrait";
+  if (w > h * 1.05) return "landscape";
+  return "square";
+}
+
+function useVideoOrientation(ref, enabled) {
+  const [orientation, setOrientation] = useState("");
+  useEffect(() => {
+    const element = ref.current;
+    if (!enabled || !element) return undefined;
+    const update = () => setOrientation(orientationFromSize(element.videoWidth, element.videoHeight));
+    update();
+    element.addEventListener("resize", update);
+    element.addEventListener("loadedmetadata", update);
+    return () => {
+      element.removeEventListener("resize", update);
+      element.removeEventListener("loadedmetadata", update);
+    };
+  }, [ref, enabled]);
+  return orientation;
+}
+
+function MediaTile({ track, muted = false, label, audio = false, avatar = false, pipRole = "", screen = false }) {
   const ref = useAttachedTrack(avatar ? null : track);
+  const orientation = useVideoOrientation(ref, screen && !avatar && !audio);
   if (audio) {
     return <audio ref={ref} autoPlay playsInline />;
   }
@@ -50,12 +81,22 @@ function MediaTile({ track, muted = false, label, audio = false, avatar = false,
     );
   }
   return (
-    <figure className="lk-fallback-tile">
+    <figure
+      className={screen ? "lk-fallback-tile lk-fallback-tile--screen" : "lk-fallback-tile"}
+      data-orientation={screen ? orientation || undefined : undefined}
+    >
       <video ref={ref} autoPlay playsInline muted={muted} data-call-pip-video={pipRole || undefined} />
       <figcaption>{label}</figcaption>
     </figure>
   );
 }
+
+// Без фиксированного 1920x1080: квадратная рамка-ограничение подходит и для портрета, и для ландшафта
+// (по умолчанию LiveKit просит 1920x1080 и при повороте планшета кадр масштабируется под старый формат).
+export const SCREEN_SHARE_CAPTURE = Object.freeze({
+  resolution: { width: 1920, height: 1920, frameRate: 15 },
+  contentHint: "detail",
+});
 
 const AUDIO_CONFIRM_MS = 8000;
 
@@ -77,7 +118,7 @@ export function collectTiles(room, { audioOnly }) {
     const label = local.name || "Вы";
     if (camera && !audioOnly) tiles.push({ key: "local-camera", track: camera, label, muted: true });
     else tiles.push({ key: "local-avatar", avatar: true, label });
-    if (screen && !audioOnly) tiles.push({ key: "local-screen", track: screen, label: "Ваш экран", muted: true });
+    if (screen && !audioOnly) tiles.push({ key: "local-screen", track: screen, label: "Ваш экран", muted: true, screen: true });
     // Свой микрофон в <audio> не вставляем: браузер проигрывает его обратно.
   }
   room?.remoteParticipants?.forEach?.((participant) => {
@@ -87,7 +128,7 @@ export function collectTiles(room, { audioOnly }) {
     const label = participant.name || "Участник";
     if (camera && !audioOnly) tiles.push({ key: `${participant.identity}-camera`, track: camera, label, muted: false, pipRole: "remote" });
     else tiles.push({ key: `${participant.identity}-avatar`, avatar: true, label });
-    if (screen && !audioOnly) tiles.push({ key: `${participant.identity}-screen`, track: screen, label: `${label}: экран`, muted: false });
+    if (screen && !audioOnly) tiles.push({ key: `${participant.identity}-screen`, track: screen, label: `${label}: экран`, muted: false, screen: true });
     if (mic) audios.push({ key: `${participant.identity}-mic`, track: mic });
   });
   return { tiles, audios };
@@ -546,7 +587,7 @@ const LiveKitCallView = forwardRef(function LiveKitCallView({
     const next = !sharing;
     setBusy("share");
     try {
-      await roomRef.current?.localParticipant.setScreenShareEnabled(next);
+      await roomRef.current?.localParticipant.setScreenShareEnabled(next, next ? SCREEN_SHARE_CAPTURE : undefined);
       setSharing(next);
       if (!next) setNotice(MEDIA_SCREEN_NOTE);
       refreshTiles();
@@ -780,7 +821,7 @@ const LiveKitCallView = forwardRef(function LiveKitCallView({
       <section className="lk-fallback" aria-label="Видеосвязь">
         <div className={`lk-fallback-stage${tileWide ? " lk-fallback-stage--tiles" : ""}`}>
           {tiles.length ? tiles.map((tile) => (
-            <MediaTile key={tile.key} track={tile.track} label={tile.label} muted={tile.muted} avatar={tile.avatar} pipRole={tile.pipRole} />
+            <MediaTile key={tile.key} track={tile.track} label={tile.label} muted={tile.muted} avatar={tile.avatar} pipRole={tile.pipRole} screen={tile.screen} />
           )) : conferenceStatus.ready ? (
             <p className="lk-fallback-wait">Камера выключена. Голос можно оставить включённым.</p>
           ) : null}
