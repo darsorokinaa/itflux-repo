@@ -56,6 +56,17 @@ B_EMAIL_PROMO = (
     "действует до 30 ноября."
 )
 
+# r101: напоминание «Вернуться к оплате» через 15–30 мин после брошенной формы (только кабинет, без писем).
+CHECKOUT_KEY_PREFIX = "checkout_return:"
+CHECKOUT_TITLE = "Оплата не завершена"
+CHECKOUT_TEXT = (
+    "Вы начали оформлять тариф «{plan}», но оплата не завершилась. "
+    "Можно вернуться к оплате — выбранный тариф сохранён."
+)
+CHECKOUT_BUTTON = "Вернуться к оплате"
+CHECKOUT_DELAY_MIN = 15
+CHECKOUT_DELAY_MAX_HOURS = 24
+
 C_TITLE = "Спасибо, что работаете с «Цифровым потоком»"
 C_TEXT = (
     "Здравствуйте! {when} Ваша подписка «Профи». Спасибо, что были с платформой с самого начала! "
@@ -131,6 +142,8 @@ def render(kind: str, context: dict, now=None) -> dict | None:
             return None
         return {"title": A_TITLE.format(when=when), "message": A_TEXT.format(when=when)}
     if kind == "payment_unfinished":
+        if context.get("checkout_payment_id"):
+            return {"title": CHECKOUT_TITLE, "message": CHECKOUT_TEXT.format(plan=context.get("plan_name") or "")}
         return {"title": B_TITLE, "message": B_TEXT}
     if kind == "pro_thanks":
         end = date.fromisoformat(context["period_end"])
@@ -153,6 +166,13 @@ def still_relevant(popup, now=None) -> bool:
             sub and sub.plan.slug == "premium" and sub.expires_at and sub.expires_at > now
             and sub.expires_at.isoformat() == ctx.get("expires_at")
         )
+    if popup.kind == "payment_unfinished" and ctx.get("checkout_payment_id"):
+        p = Payment.objects.filter(pk=ctx["checkout_payment_id"]).first()
+        if not p or p.status != Payment.Status.PENDING:
+            return False
+        return not Payment.objects.filter(
+            teacher_id=popup.user_id, status=Payment.Status.PAID, created_at__gt=p.created_at
+        ).exists()
     if popup.kind == "payment_unfinished":
         since = ctx.get("last_pending_at")
         qs = Payment.objects.filter(teacher_id=popup.user_id, status=Payment.Status.PAID)
@@ -167,13 +187,32 @@ def still_relevant(popup, now=None) -> bool:
     return True
 
 
+def checkout_button_url(ctx: dict, now=None) -> str:
+    """Живая форма банка → её PaymentURL, иначе — новый checkout того же тарифа."""
+    from .models import Payment
+    from .tbank_payment import form_lifetime
+
+    now = now or timezone.now()
+    p = Payment.objects.filter(pk=ctx.get("checkout_payment_id")).first()
+    fallback = f"{PRICING_PATH}?plan={ctx.get('plan_slug') or ''}&period={ctx.get('billing_period') or 'month'}"
+    if not p:
+        return fallback
+    url = str((p.metadata or {}).get("payment_url") or "")
+    if url.startswith("https://") and p.created_at > now - form_lifetime() + timedelta(minutes=10):
+        return url
+    return fallback
+
+
 def payload(popup, now=None) -> dict | None:
     r = render(popup.kind, popup.context or {}, now)
     if r is None:
         return None
+    button_url = popup.button_url
+    if (popup.context or {}).get("checkout_payment_id"):
+        button_url = checkout_button_url(popup.context, now)
     return {
         "id": popup.pk, "kind": popup.kind, "title": r["title"], "message": r["message"],
-        "signature": SIGNATURE, "button_label": popup.button_label, "button_url": popup.button_url,
+        "signature": SIGNATURE, "button_label": popup.button_label, "button_url": button_url,
         "close_label": "Закрыть",
     }
 
@@ -187,6 +226,10 @@ def next_popup(user, now=None):
     now = now or timezone.now()
     if not is_teacher(user):
         return None
+    try:
+        ensure_checkout_reminder(user, now)
+    except Exception:
+        logger.exception("checkout reminder failed user=%s", user.pk)
     for p in OneShotPopup.objects.filter(user=user, status=OneShotPopup.Status.PENDING).order_by("-priority", "pk"):
         data = payload(p, now) if still_relevant(p, now) else None
         if data is None:
@@ -286,6 +329,44 @@ def place(user, kind: str, key: str, context: dict, *, button_label: str, button
         except IntegrityError:
             return "exists"
     return "superseded+popup" if lower_pending else "popup"
+
+
+def ensure_checkout_reminder(user, now=None) -> str | None:
+    """r101: окно «Вернуться к оплате» для последнего брошенного checkout (15 мин – 24 ч назад).
+
+    Одно окно на платёж (key=checkout_return:<id>, уникален) — после закрытия не повторяется.
+    Не ставим, если после этого платежа уже была успешная оплата или платёж заменён (superseded_by).
+    """
+    from .models import Payment
+
+    now = now or timezone.now()
+    p = (
+        Payment.objects.select_related("plan")
+        .filter(
+            teacher=user, status=Payment.Status.PENDING, is_recurrent=False,
+            purpose=Payment.Purpose.SUBSCRIPTION,
+            created_at__lte=now - timedelta(minutes=CHECKOUT_DELAY_MIN),
+            created_at__gte=now - timedelta(hours=CHECKOUT_DELAY_MAX_HOURS),
+        )
+        .exclude(provider_payment_id="")
+        .order_by("-created_at")
+        .first()
+    )
+    if not p or (p.metadata or {}).get("superseded_by"):
+        return None
+    if Payment.objects.filter(teacher=user, status=Payment.Status.PAID, created_at__gt=p.created_at).exists():
+        return None
+    ctx = {
+        "checkout_payment_id": p.pk,
+        "plan_slug": getattr(p.plan, "slug", "") or "",
+        "plan_name": getattr(p.plan, "name", "") or "",
+        "billing_period": p.billing_period,
+    }
+    return place(
+        user, "payment_unfinished", f"{CHECKOUT_KEY_PREFIX}{p.pk}", ctx,
+        button_label=CHECKOUT_BUTTON, button_url=PRICING_PATH,
+        show_until=p.created_at + timedelta(hours=CHECKOUT_DELAY_MAX_HOURS), now=now,
+    )
 
 
 # ── группа А (из r62 N1) ───────────────────────────────────────────────────

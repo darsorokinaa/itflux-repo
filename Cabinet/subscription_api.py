@@ -1349,10 +1349,20 @@ class PaymentWebhookView(APIView):
 
         from .payment_service import PaymentProviderService
 
-        result = PaymentProviderService.handle_webhook(
-            request.data if hasattr(request, "data") else {},
-            provider_name=provider,
-        )
+        from .payment_alerts import record_alert
+
+        try:
+            result = PaymentProviderService.handle_webhook(
+                request.data if hasattr(request, "data") else {},
+                provider_name=provider,
+            )
+        except Exception as exc:
+            # r101: 5xx на webhook — банк будет повторять, а мы об этом должны узнать
+            record_alert("webhook_error", provider=provider, error=type(exc).__name__)
+            raise
+        if not result.get("ok"):
+            # r101: любой не-200 ответ банку — ERROR + счётчик (+ Telegram при PAYMENT_ALERTS_TELEGRAM=1)
+            record_alert("webhook_rejected", provider=provider, error=result.get("error") or "unknown")
         # Т-Банк ожидает тело ответа ровно "OK"
         if (provider or "").strip().lower() in ("tbank", "tinkoff"):
             if result.get("ok"):

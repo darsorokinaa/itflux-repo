@@ -206,6 +206,27 @@ class PaymentProviderService:
                 "pricing": meta.get("pricing") if isinstance(meta, dict) else None,
             }
 
+        # r101: dedupe — живая форма на тот же тариф/период/сумму → та же PaymentURL, без нового Init.
+        if provider_name in ("tbank", "tinkoff"):
+            reuse = cls._reusable_pending_checkout(teacher, plan, billing_period, final_amount)
+            if reuse is not None:
+                rmeta = reuse.metadata if isinstance(reuse.metadata, dict) else {}
+                logger.info("payment_checkout_reused payment_id=%s teacher=%s", reuse.pk, teacher.pk)
+                return {
+                    "payment_id": reuse.pk,
+                    "provider_payment_id": reuse.provider_payment_id,
+                    "provider": reuse.provider,
+                    "status": reuse.status,
+                    "payment_url": str(rmeta.get("payment_url") or ""),
+                    "amount": str(reuse.final_amount or reuse.amount),
+                    "currency": reuse.currency,
+                    "billing_period": reuse.billing_period,
+                    "plan_slug": plan.slug,
+                    "idempotent": True,
+                    "reused_checkout": True,
+                    "pricing": rmeta.get("pricing"),
+                }
+
         promo_obj = None
         if calc.get("promo_code") and (
             calc["applied_discount_source"] == "promo" or calc.get("stacked_promo")
@@ -337,6 +358,12 @@ class PaymentProviderService:
             _release_promo(payment)
             raise
 
+        if provider_name in ("tbank", "tinkoff"):
+            try:
+                cls._supersede_other_pending(payment)
+            except Exception:
+                logger.exception("payment_supersede_failed payment_id=%s", payment.pk)
+
         payment.refresh_from_db()
         if payment_url:
             meta = dict(payment.metadata or {})
@@ -364,6 +391,73 @@ class PaymentProviderService:
             },
         }
         return result
+
+    # ── r101: dedupe/supersede незавершённых checkout ──────────────────────────
+    REUSE_SAFETY_MARGIN = timedelta(minutes=30)
+
+    @classmethod
+    def _reusable_pending_checkout(cls, teacher, plan, billing_period, final_amount):
+        from .models import Payment
+        from .tbank_payment import form_lifetime
+
+        cutoff = timezone.now() - (form_lifetime() - cls.REUSE_SAFETY_MARGIN)
+        candidates = Payment.objects.filter(
+            teacher=teacher, plan=plan, billing_period=billing_period,
+            status=Payment.Status.PENDING, purpose=Payment.Purpose.SUBSCRIPTION,
+            is_recurrent=False, created_at__gte=cutoff,
+        ).exclude(provider_payment_id="").order_by("-created_at")
+        for p in candidates[:5]:
+            meta = p.metadata if isinstance(p.metadata, dict) else {}
+            if meta.get("superseded_by") or not meta.get("payment_url"):
+                continue
+            if (p.final_amount if p.final_amount is not None else p.amount) != final_amount:
+                continue  # цена изменилась (акция/промокод) — нужна новая форма
+            return p
+        return None
+
+    @classmethod
+    def _supersede_other_pending(cls, new_payment):
+        """Старые pending другого тарифа/периода → metadata.superseded_by.
+
+        Статус не меняем: если человек всё-таки оплатит старую форму, webhook/reconcile её активирует.
+        Cancel у банка — только при TBANK_CANCEL_SUPERSEDED=1 и статусе NEW/FORM_SHOWED (деньги не списаны).
+        """
+        from django.conf import settings as dj
+
+        from .models import Payment
+        from .tbank_payment import cancel_payment, form_lifetime, get_state_raw
+
+        olds = Payment.objects.filter(
+            teacher_id=new_payment.teacher_id, status=Payment.Status.PENDING,
+            purpose=Payment.Purpose.SUBSCRIPTION, is_recurrent=False,
+            created_at__gte=timezone.now() - form_lifetime(),
+        ).exclude(pk=new_payment.pk)
+        do_cancel = str(getattr(dj, "TBANK_CANCEL_SUPERSEDED", "") or "").lower() in ("1", "true", "yes", "on")
+        for old in olds:
+            if old.plan_id == new_payment.plan_id and old.billing_period == new_payment.billing_period:
+                continue
+            meta = dict(old.metadata or {})
+            if meta.get("superseded_by"):
+                continue
+            meta["superseded_by"] = new_payment.pk
+            meta["superseded_at"] = timezone.now().isoformat()
+            old.metadata = meta
+            old.save(update_fields=["metadata", "updated_at"])
+            logger.info("payment_superseded payment_id=%s by=%s", old.pk, new_payment.pk)
+            if do_cancel and old.provider_payment_id:
+                try:
+                    st = get_state_raw(old.provider_payment_id)
+                    if st.get("Status") in ("NEW", "FORM_SHOWED") and cancel_payment(old.provider_payment_id):
+                        cls.handle_webhook(
+                            {"payment_id": old.pk, "status": "cancelled",
+                             "event_id": f"reconcile_{old.pk}_superseded",
+                             "provider_payment_id": old.provider_payment_id,
+                             "error_code": "superseded",
+                             "error_message": f"Заменён платежом #{new_payment.pk}"},
+                            provider_name="tbank", skip_provider_parse=True,
+                        )
+                except Exception:
+                    logger.exception("payment_supersede_cancel_failed payment_id=%s", old.pk)
 
     @classmethod
     def _grant_zero_price_promotion(

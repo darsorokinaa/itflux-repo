@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import timedelta
 import logging
 import os
 import re
@@ -22,6 +23,7 @@ from urllib.parse import urlparse
 
 import requests
 from django.conf import settings
+from django.utils import timezone
 
 from .payment_service import PaymentProviderInterface
 
@@ -380,6 +382,28 @@ def map_tbank_status(status: str) -> str:
     return "pending"
 
 
+def form_lifetime() -> timedelta:
+    """r101: срок жизни платёжной формы (RedirectDueDate). TBANK_FORM_LIFETIME_MINUTES, по умолчанию 24 ч."""
+    try:
+        minutes = int(getattr(settings, "TBANK_FORM_LIFETIME_MINUTES", 0) or 24 * 60)
+    except (TypeError, ValueError):
+        minutes = 24 * 60
+    return timedelta(minutes=max(minutes, 15))
+
+
+def _save_init_error(payment, code: str, message: str) -> None:
+    """r101: ErrorCode/Message/Details или исключение HTTP — в error_code/error_message + алерт."""
+    payment.error_code = str(code or "")[:64]
+    payment.error_message = str(message or "")[:512]
+    try:
+        payment.save(update_fields=["error_code", "error_message", "updated_at"])
+    except Exception:
+        logger.exception("payment_init_error_save_failed payment_id=%s", payment.pk)
+    from .payment_alerts import record_alert
+
+    record_alert("init_failed", payment_id=payment.pk, code=payment.error_code)
+
+
 class TBankPaymentProvider(PaymentProviderInterface):
     """Готовая платёжная форма Т-Банка (non-PCI redirect) + COF Charge."""
 
@@ -427,6 +451,13 @@ class TBankPaymentProvider(PaymentProviderInterface):
         email = _receipt_email(payment)
         if email:
             body["DATA"] = {"Email": email}
+        # r101: явный срок жизни формы — тот же, что используется для повторной выдачи ссылки (dedupe).
+        if include_return_urls:
+            body["RedirectDueDate"] = (
+                timezone.localtime(timezone.now() + form_lifetime())
+                .replace(microsecond=0)
+                .isoformat()
+            )
 
         # Официально: Recurrent=Y + CustomerKey → RebillId после AUTHORIZED/CONFIRMED.
         # Документация: https://developer.tbank.ru/eacq/api/init
@@ -465,11 +496,19 @@ class TBankPaymentProvider(PaymentProviderInterface):
                     "На сервере установите сертификаты «Российский доверенный УЦ» "
                     "в /usr/local/share/ca-certificates и выполните update-ca-certificates."
                 )
+            _save_init_error(payment, "ssl_error", f"{type(exc).__name__}: {exc}")
             raise ValueError(
                 f"Ошибка SSL при обращении к Т-Банку. {hint} Детали: {exc}"
             ) from exc
         except Exception as exc:
             logger.exception("payment_init_failed payment_id=%s", payment.pk)
+            code = "http_timeout" if isinstance(exc, requests.exceptions.Timeout) else (
+                "bad_json" if isinstance(exc, ValueError) else "http_error"
+            )
+            http_status = getattr(locals().get("response"), "status_code", None)
+            _save_init_error(
+                payment, code, f"{type(exc).__name__}: {exc}" + (f" (HTTP {http_status})" if http_status else "")
+            )
             raise ValueError(f"Не удалось связаться с Т-Банком: {exc}") from exc
 
         if not data.get("Success"):
@@ -477,9 +516,9 @@ class TBankPaymentProvider(PaymentProviderInterface):
             message = (data.get("Message") or "Init rejected").strip()
             error_code = data.get("ErrorCode")
             logger.error("payment_init_failed payment_id=%s data=%s", payment.pk, data)
-            payment.error_code = str(error_code or "")
-            payment.error_message = (details or message)[:512]
-            payment.save(update_fields=["error_code", "error_message", "updated_at"])
+            # r101: сохраняем и Message, и Details (раньше — только одно из них)
+            full = message if not details or details == message else f"{message}: {details}"
+            _save_init_error(payment, str(error_code or "init_rejected"), full)
             if str(error_code) in ("204", "205") or "токен" in details.lower():
                 raise ValueError(
                     "Т-Банк отклонил платёж: неверный TerminalKey или Password. "
@@ -705,6 +744,25 @@ class TBankPaymentProvider(PaymentProviderInterface):
             "error_code": str(payload.get("ErrorCode") or ""),
             "error_message": str(payload.get("Message") or payload.get("Details") or "")[:512],
         }
+
+
+def get_state_raw(provider_payment_id) -> dict[str, Any]:
+    """r101: read-only GetState. Возвращает только Status/Success/ErrorCode/Message (без токена и ПДн)."""
+    data = _signed_call("GetState", {"PaymentId": str(provider_payment_id)})
+    if not isinstance(data, dict):
+        return {"Success": False, "Status": "", "ErrorCode": "bad_response", "Message": ""}
+    return {
+        "Success": bool(data.get("Success")),
+        "Status": str(data.get("Status") or "").upper(),
+        "ErrorCode": str(data.get("ErrorCode") or ""),
+        "Message": str(data.get("Message") or data.get("Details") or "")[:512],
+    }
+
+
+def cancel_payment(provider_payment_id) -> bool:
+    """r101: /v2/Cancel для неоплаченной формы (NEW/FORM_SHOWED) — деньги не списывались."""
+    data = _signed_call("Cancel", {"PaymentId": str(provider_payment_id)})
+    return bool(isinstance(data, dict) and data.get("Success"))
 
 
 # ── r61: привязанные карты (для отвязки из кабинета) ─────────────────────────
