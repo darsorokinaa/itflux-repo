@@ -97,7 +97,7 @@ NOINDEX_RE = re.compile(
 REDIRECTS = {"/gotovye-uroki": "/lessons"}
 NOINDEX_PARAMS = ("preview",)
 CLEAN_PARAMS = ("preview", "_itflux_v")
-MIRROR_HOSTS = ("cdn.itflux-academy.ru",)  # r87: зеркало-ретранслятор: canonical на основной домен + noindex
+MIRROR_HOSTS = ("cdn.itflux-academy.ru", "app.itflux-academy.ru")  # r87: зеркало-ретранслятор: canonical на основной домен + noindex
 TITLE_MAX = 70
 # r87: продвигаем пока только математику и информатику (sitemap, хабы /zadaniya, меню SEO-страниц)
 FOCUS_SUBJECTS = ("math", "math_base", "inf")

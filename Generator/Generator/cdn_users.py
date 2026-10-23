@@ -16,7 +16,7 @@ from django.core.cache import cache
 
 log = logging.getLogger(__name__)
 
-CDN_HOSTS = {"cdn.itflux-academy.ru", "www.cdn.itflux-academy.ru"}
+CDN_HOSTS = {"cdn.itflux-academy.ru", "www.cdn.itflux-academy.ru", "app.itflux-academy.ru"}  # r110 app
 DEFAULT_LOG = "/var/log/itflux/cdn-users.log"
 _lock = threading.Lock()
 

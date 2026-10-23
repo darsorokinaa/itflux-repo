@@ -400,7 +400,7 @@ CSRF_TRUSTED_ORIGINS = [
     "https://*.repl.co",
 ] + _extra_origins
 # r97: запасной канал звонков (cdn handoff) — POST с cdn должны проходить CSRF Origin-проверку.
-for _cdn_origin in ("https://cdn.itflux-academy.ru",):
+for _cdn_origin in ("https://cdn.itflux-academy.ru", "https://app.itflux-academy.ru"):  # r110 app
     if _cdn_origin not in CSRF_TRUSTED_ORIGINS:
         CSRF_TRUSTED_ORIGINS.append(_cdn_origin)
 for _canonical_host in _CANONICAL_PUBLIC_HOSTS:

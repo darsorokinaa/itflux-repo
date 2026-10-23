@@ -4,7 +4,11 @@
  * Сессия переносится одноразовым серверным токеном (/api/cdn-handoff/issue/ → redeem на cdn).
  * ?itflux_nocdn=1 отключает (window.__ITFLUX_NO_CDN из r86).
  */
-export const CDN_HOST = "cdn.itflux-academy.ru";
+export const CDN_HOST = "app.itflux-academy.ru"; // r110: новые переключения на app
+export const CDN_HOSTS = ["app.itflux-academy.ru", "cdn.itflux-academy.ru"]; // r110: cdn остаётся рабочим
+export function isCdnHost(hostname) {
+  return CDN_HOSTS.includes(String(hostname || "").toLowerCase());
+}
 export const MAIN_HOSTS = ["itflux-academy.ru", "www.itflux-academy.ru"];
 export const PREFER_KEY = "itfluxPreferCdn"; // флаг r86 (7 дней)
 export const DROP_THRESHOLD = 2;
@@ -158,7 +162,7 @@ export async function switchToCdn(reason = "call_drops", {
       });
       if (res?.ok) {
         const data = await res.json();
-        if (typeof data?.url === "string" && data.url.startsWith(`https://${CDN_HOST}/`)) {
+        if (typeof data?.url === "string" && CDN_HOSTS.some((h) => data.url.startsWith(`https://${h}/`))) {
           target = data.url;
           break;
         }
@@ -236,7 +240,7 @@ export async function reportFallbackArrival({
   win = typeof window !== "undefined" ? window : null,
   fetchImpl = typeof fetch !== "undefined" ? fetch : null,
 } = {}) {
-  if (!win?.location || String(win.location.hostname || "").toLowerCase() !== CDN_HOST) return false;
+  if (!win?.location || !isCdnHost(win.location.hostname)) return false;
   const params = new URLSearchParams(win.location.search || "");
   const reason = params.get("itflux_cdn_fb");
   if (!reason) return false;

@@ -142,3 +142,13 @@ describe("r97 per-meeting detector", () => {
     expect(off).not.toHaveBeenCalled();
   });
 });
+
+describe("r110 app host", () => {
+  it("app и cdn считаются запасными хостами, новые переключения — на app", async () => {
+    const m = await import("./cdnAutoSwitch.js");
+    expect(m.CDN_HOST).toBe("app.itflux-academy.ru");
+    expect(m.isCdnHost("cdn.itflux-academy.ru")).toBe(true);
+    expect(m.isCdnHost("APP.itflux-academy.ru")).toBe(true);
+    expect(m.isCdnHost("itflux-academy.ru")).toBe(false);
+  });
+});

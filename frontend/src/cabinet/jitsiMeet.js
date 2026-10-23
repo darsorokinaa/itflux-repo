@@ -335,7 +335,7 @@ export function setMeetingMicEnabled(meetingUuid, enabled) {
 }
 
 const JITSI_SAME_ORIGIN_SOURCE_HOST = "lesson.itflux-academy.ru";
-const JITSI_RELAY_PAGE_HOST = "cdn.itflux-academy.ru";
+const JITSI_RELAY_PAGE_HOSTS = ["cdn.itflux-academy.ru", "app.itflux-academy.ru"]; // r110 app
 const JITSI_SAME_ORIGIN_PAGE_HOSTS = ["itflux-academy.ru", "www.itflux-academy.ru", "itflux.ru", "www.itflux.ru"];
 
 export function isAppleTouchDevice() {
@@ -355,7 +355,7 @@ export function resolveJitsiFrameDomain(domain) {
   if (typeof window === "undefined") return clean;
   const pageHost = String(window.location?.host || "").toLowerCase();
   // r92: cdn.* идёт через relay (провайдеры, режущие TLS к основному VPS) — Jitsi всегда same-origin.
-  if (pageHost === JITSI_RELAY_PAGE_HOST) return pageHost + "/jitsi";
+  if (JITSI_RELAY_PAGE_HOSTS.includes(pageHost)) return pageHost + "/jitsi";
   if (!isAppleTouchDevice()) return clean;
   if (!JITSI_SAME_ORIGIN_PAGE_HOSTS.includes(pageHost)) return clean;
   return `${pageHost}/jitsi`;

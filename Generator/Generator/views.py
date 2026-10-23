@@ -1091,7 +1091,7 @@ def page_not_found(request, exception=None):
         host = request.get_host().split(":")[0].lower()
     except Exception:
         host = ""
-    if (host not in ("itflux-academy.ru", "www.itflux-academy.ru", "cdn.itflux-academy.ru")
+    if (host not in ("itflux-academy.ru", "www.itflux-academy.ru", "cdn.itflux-academy.ru", "app.itflux-academy.ru")
             or re.match(r"^/(api|admin|media|static|ws|assets|vendor|fonts)(/|$)", request.path or "/")):
         return _defaults.page_not_found(request, exception)
     frontend_dir = getattr(django_settings, 'FRONTEND_DIR', django_settings.BASE_DIR.parent / 'frontend' / 'dist')

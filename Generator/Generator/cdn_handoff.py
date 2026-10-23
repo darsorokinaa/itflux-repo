@@ -29,7 +29,7 @@ from Generator import cdn_users
 
 log = logging.getLogger(__name__)
 
-CDN_ORIGIN = "https://cdn.itflux-academy.ru"
+CDN_ORIGIN = "https://app.itflux-academy.ru"  # r110: новые переносы на app; cdn продолжает работать
 PREF_TTL = 7 * 24 * 3600
 ALLOWED_REASONS = {"call_drops", "join_timeout", "pinned"}
 _VERSION_PARAM = re.compile(r"(^|&)_itflux_v=[^&]*")

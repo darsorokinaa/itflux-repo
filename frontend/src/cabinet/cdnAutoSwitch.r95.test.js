@@ -24,7 +24,7 @@ describe("r95 cdn switch recording", () => {
     const f = vi.fn().mockRejectedValue(new Error("down"));
     await switchToCdn("join_timeout", { win: w, fetchImpl: f, delayMs: 0 });
     expect(w.__ITFLUX_NAVIGATE).toHaveBeenCalledWith(
-      "https://cdn.itflux-academy.ru/cabinet/meetings/abc/?itflux_cdn_fb=join_timeout");
+      "https://app.itflux-academy.ru/cabinet/meetings/abc/?itflux_cdn_fb=join_timeout");
   });
   it("reports arrival on cdn once and cleans url", async () => {
     const w = win({ host: "cdn.itflux-academy.ru", search: "?itflux_cdn_fb=call_drops&x=1" });
