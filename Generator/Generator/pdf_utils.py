@@ -357,6 +357,40 @@ def layout_matching_options(html: str) -> str:
     return str(soup) if changed else html
 
 
+def remove_duplicate_images(html: str) -> str:
+    """Повтор одной и той же картинки (тот же src) убираем — как
+    removeDuplicateImages в frontend MathContent.jsx. В ~2100 заданиях
+    после условия продублированы <p><img></p> — на сайте их скрывает фронт,
+    а в PDF графики печатались дважды."""
+    if html.count("<img") < 2:
+        return html
+    try:
+        from bs4 import BeautifulSoup
+    except Exception:
+        return html
+    soup = BeautifulSoup(html, "html.parser")
+    seen = set()
+    changed = False
+    for img in soup.find_all("img"):
+        src = img.get("src") or ""
+        if not src or "math" in src or "mjx" in src:
+            continue
+        if src in seen:
+            host = None
+            for par in img.parents:
+                if par.name in ("p", "figure") or (par.name == "div" and "task-html-block" in (par.get("class") or [])):
+                    host = par
+                    break
+            if host is not None and len(host.find_all("img")) <= 1:
+                host.decompose()
+            else:
+                img.decompose()
+            changed = True
+        else:
+            seen.add(src)
+    return str(soup) if changed else html
+
+
 def rewrite_content_image_urls(html: str, request=None) -> str:
     """Заменяет относительные URL изображений на file:// для PDF."""
     def replacer(m):
@@ -434,6 +468,7 @@ def build_pdf_context(request, variant, subject, author_filter=None):
             html = process_latex(raw_text, for_pdf=True)
             html = fix_pdf_html(html)
             html = strip_table_inline_colors(html)
+            html = remove_duplicate_images(html)
             html = rewrite_content_image_urls(html, request)
             html = layout_matching_options(html)
             rendered_text = mark_safe(html)
