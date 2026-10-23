@@ -153,6 +153,12 @@ MATH_CSS = mark_safe("""<style>
 sup { font-size: .75em; vertical-align: super; }
 sub { font-size: .75em; vertical-align: sub; }
 /* verbatim (код) — MathJax не поддерживает */
+/* Варианты ответа «А) Б) В)» / «1) 2) 3)» в одну строку (ОГЭ мат. №11) */
+table.pdf-match-opts { width: 100%; border-collapse: collapse; table-layout: fixed; margin: .3em 0 .6em; border: none !important; page-break-inside: avoid; }
+table.pdf-match-opts td { vertical-align: top; text-align: left; padding: .2em .4em; border: none !important; background: none !important; }
+table.pdf-match-opts td > div, table.pdf-match-opts td p { display: inline-block; margin: 0; vertical-align: top; }
+table.pdf-match-opts .pdf-match-label { display: inline-block; font-weight: bold; margin-right: .35em; vertical-align: top; }
+table.pdf-match-opts img { max-width: 100%; max-height: 5.2cm; height: auto; }
 .latex-verbatim { display: block; margin: .5em 0; font-family: "DejaVu Sans Mono", "DejaVuSansMono", monospace; font-size: 0.9em; background: #f5f5f5; padding: .5em; border-radius: 4px; }
 </style>""")
 
@@ -303,6 +309,54 @@ def _resolve_image_url(url: str, request=None) -> str:
     return url
 
 
+_RE_OPT_LABEL = re.compile(r"^\s*(?:[А-ЯA-Z]|\d{1,2})\)\s*$")
+
+
+def layout_matching_options(html: str) -> str:
+    """ОГЭ (напр. математика №11): блоки вида «А) <img>», «Б) <img>» … идут
+    подряд div-ами и в PDF выстраиваются в столбик на всю страницу.
+    Перекладываем пары (метка, содержимое) в однострочную таблицу."""
+    if "task-html-block" not in html or ")</b>" not in html:
+        return html
+    try:
+        from bs4 import BeautifulSoup, Tag
+    except Exception:
+        return html
+    soup = BeautifulSoup(html, "html.parser")
+    changed = False
+    for box in soup.find_all("div"):
+        kids = [k for k in box.children if isinstance(k, Tag) or str(k).strip()]
+        if len(kids) < 4 or len(kids) % 2 or not all(isinstance(k, Tag) for k in kids):
+            continue
+        pairs = []
+        for lab, body in zip(kids[0::2], kids[1::2]):
+            if lab.name != "div" or not _RE_OPT_LABEL.match(lab.get_text() or "") or lab.find("img"):
+                pairs = []
+                break
+            if _RE_OPT_LABEL.match(body.get_text() or "") and not body.find(["img", "svg"]):
+                pairs = []
+                break
+            pairs.append((lab, body))
+        if len(pairs) < 2:
+            continue
+        table = soup.new_tag("table", attrs={"class": "pdf-match-opts"})
+        tr = soup.new_tag("tr")
+        table.append(tr)
+        width = f"{100 / len(pairs):.2f}%"
+        for lab, body in pairs:
+            td = soup.new_tag("td", attrs={"style": f"width:{width}"})
+            lab.extract(); body.extract()
+            lab.name = "span"
+            lab["class"] = "pdf-match-label"
+            td.append(lab)
+            td.append(body)
+            tr.append(td)
+        box.clear()
+        box.append(table)
+        changed = True
+    return str(soup) if changed else html
+
+
 def rewrite_content_image_urls(html: str, request=None) -> str:
     """Заменяет относительные URL изображений на file:// для PDF."""
     def replacer(m):
@@ -381,6 +435,7 @@ def build_pdf_context(request, variant, subject, author_filter=None):
             html = fix_pdf_html(html)
             html = strip_table_inline_colors(html)
             html = rewrite_content_image_urls(html, request)
+            html = layout_matching_options(html)
             rendered_text = mark_safe(html)
         part_obj = item.task.task.part
         part = part_obj.part_title if part_obj else None
