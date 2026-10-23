@@ -149,7 +149,7 @@ import {
 } from "../screenshare/annotationModel";
 import { LASER_TTL_MS, canDrawScreenShareAnnotations } from "../screenshare/constants";
 import { AnnotationProvider } from "../annotations/AnnotationContext";
-import { CALL_FRAME_ASPECT, FLOATING_CALL_CHROME, presetCallFrame, useFloatingDrag } from "../useFloatingDrag";
+import { CALL_FRAME_ASPECT, FLOATING_CALL_CHROME, callFrameAspectFor, presetCallFrame, useFloatingDrag } from "../useFloatingDrag";
 import FloatingResizeHandles from "../FloatingResizeHandles";
 import MiniCallBar, { FloatingCallTools } from "../components/MiniCallBar";
 import {
@@ -4094,6 +4094,13 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
     !workspaceOpen || liveVariantAnswers || canManage
   );
 
+  // r107: чужая демонстрация (планшет) — окно звонка под пропорцию кадра, пересчёт при повороте.
+  const remoteShareAspect = (!screenshareLayout.localSharing && screenshareLayout.presenterJitsiId)
+    ? callFrameAspectFor(screenshareLayout.contentWidth, screenshareLayout.contentHeight)
+    : CALL_FRAME_ASPECT;
+  const callFrameAspect = callView === "minimized" ? 0 : remoteShareAspect;
+  const callFrameOrientation = remoteShareAspect < 1 ? "portrait" : (remoteShareAspect < CALL_FRAME_ASPECT ? "mid" : "land");
+
   const {
     nodeRef: compactCallRef,
     style: compactCallStyle,
@@ -4107,14 +4114,14 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
     minWidth: callView === "minimized" ? 160 : 320,
     minHeight: callView === "minimized"
       ? 40
-      : Math.round(320 / CALL_FRAME_ASPECT) + FLOATING_CALL_CHROME,
-    aspectRatio: callView === "minimized" ? 0 : CALL_FRAME_ASPECT,
+      : Math.round(320 / Math.max(1, remoteShareAspect)) + FLOATING_CALL_CHROME,
+    aspectRatio: callFrameAspect,
     chromeHeight: callView === "minimized" ? 0 : FLOATING_CALL_CHROME,
     marginTop: boardChromeOpen ? 72 : 74,
-    sizeToken: compactCall ? callView : "",
+    sizeToken: compactCall ? `${callView}:${callFrameOrientation}` : "",
     frameSize: callView === "minimized"
       ? null
-      : presetCallFrame(callView, undefined, { marginTop: boardChromeOpen ? 72 : 74 }),
+      : presetCallFrame(callView, undefined, { marginTop: boardChromeOpen ? 72 : 74, aspectRatio: remoteShareAspect }),
     storageKey: meetingUuid
       ? (shareMiniCall ? `vl-share-pip-v6:${meetingUuid}` : `vl-compact-call-v6:${meetingUuid}`)
       : null,

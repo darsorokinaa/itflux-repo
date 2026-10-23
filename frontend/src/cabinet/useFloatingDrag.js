@@ -60,6 +60,19 @@ export function clampFloatingBox(box, viewport, minWidth, minHeight, margins) {
 
 export const CALL_FRAME_ASPECT = 16 / 9;
 
+/**
+ * r107: пропорция плавающего окна звонка под демонстрацию экрана собеседника.
+ * Планшет в портрете (например 1600x2560) раньше показывался в окне 16:9 мелкой полоской.
+ * Ограничиваем 9:16..16:9; без размеров кадра — обычные 16:9.
+ */
+export function callFrameAspectFor(contentWidth, contentHeight) {
+  const w = Number(contentWidth) || 0;
+  const h = Number(contentHeight) || 0;
+  if (!(w > 0 && h > 0)) return CALL_FRAME_ASPECT;
+  const ratio = w / h;
+  return Math.min(CALL_FRAME_ASPECT, Math.max(9 / 16, Math.round(ratio * 100) / 100));
+}
+
 /** Полоска заголовка и кнопки под видео в плавающем окне. В пропорцию кадра не входит. */
 export const FLOATING_CALL_CHROME = 64;
 

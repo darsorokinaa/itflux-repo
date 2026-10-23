@@ -162,3 +162,14 @@ describe("useFloatingDrag layout", () => {
     });
   });
 });
+
+import { callFrameAspectFor } from "./useFloatingDrag";
+describe("r107 callFrameAspectFor", () => {
+  it("follows share orientation within 9:16..16:9", () => {
+    expect(callFrameAspectFor(0, 0)).toBeCloseTo(16 / 9);
+    expect(callFrameAspectFor(2560, 1600)).toBeCloseTo(1.6);
+    expect(callFrameAspectFor(1600, 2560)).toBeCloseTo(0.63, 2);
+    expect(callFrameAspectFor(500, 3000)).toBeCloseTo(9 / 16);
+    expect(callFrameAspectFor(3840, 1080)).toBeCloseTo(16 / 9);
+  });
+});

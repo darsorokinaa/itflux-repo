@@ -579,12 +579,21 @@ export function buildJitsiConfigOverwrite({
     replaceParticipant: true,
     channelLastN: 8,
     resolution: JITSI_CAMERA_MAX_HEIGHT,
-    startBitrate: 2500,
+    // r107: 2500 кбит/с на старте забивали канал слабых учеников (BWE ~300 кбит/с) → потери, «шипение» звука.
+    startBitrate: 1000,
     disableSimulcast: false,
     enableNoAudioDetection: true,
     enableNoisyMicDetection: true,
     enableIceRestart: true,
     stereo: false,
+    // r107: обработка звука браузера явно включена (AEC/NS/AGC/HPF), моно; RED — избыточность Opus при потерях.
+    disableAP: false,
+    disableAEC: false,
+    disableNS: false,
+    disableAGC: false,
+    disableHPF: false,
+    enableOpusRed: true,
+    audioQuality: { stereo: false, enableOpusDtx: false },
     constraints: jitsiCameraConstraints(),
     // Демонстрация экрана: 5–15 fps, VP9 SVC, высокий битрейт для чёткого текста.
     desktopSharingFrameRate: { min: 5, max: 15 },
