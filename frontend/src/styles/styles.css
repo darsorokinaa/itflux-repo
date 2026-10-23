@@ -8453,9 +8453,10 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 
     .exam-page .task-text pre,
     .exam-page .task-text code {
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-        word-break: break-word;
+        white-space: pre;
+        overflow-x: auto;
+        overflow-wrap: normal;
+        word-break: normal;
     }
 
     .exam-page .task-text mjx-container {
@@ -9164,6 +9165,31 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
     white-space: normal !important;
     overflow-wrap: anywhere !important;
     word-break: break-word !important;
+}
+/* Код программ (ЕГЭ инф. №16 и др.): правило выше схлопывало отступы и переносы строк в <pre>.
+   Специфичность (0,2,1) выше, чем у «.exam-page .task-text *» (0,2,0), поэтому !important здесь перекрывает его. */
+.exam-page .task-text pre,
+.exam-page .task-text pre *,
+.exam-page .task-text code,
+.exam-page .task-text .task-code-block,
+.exam-page .task-text .task-code-block * {
+    white-space: pre !important;
+    overflow-wrap: normal !important;
+    word-break: normal !important;
+}
+.exam-page .task-text pre {
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+    overflow-x: auto;
+    text-align: left;
+    font-family: var(--font-mono, "JetBrains Mono", ui-monospace, monospace);
+    tab-size: 4;
+    -moz-tab-size: 4;
+}
+.exam-page .task-text :is(td, th):has(> pre) {
+    text-align: left !important;
+    vertical-align: top !important;
 }
 /* MathJax: глобальные word-break/white-space выше ломают внутреннюю вёрстку → цифры/буквы наезжают */
 .exam-page .task-text mjx-container,

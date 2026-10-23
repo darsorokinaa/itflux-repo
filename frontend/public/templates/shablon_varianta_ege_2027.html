@@ -132,6 +132,11 @@ input[type=number]{background:white;color:#3e4554;padding:6px 9px;border:1px sol
 .task table.match-options img{display:block;margin:.5mm 0 0;max-height:50mm !important}
 .task table th:first-child{width:40%}
 .task ol,.task ul{margin:1mm 0;padding-left:4.5mm}
+/* Код программ (ЕГЭ инф. №16 и др.): моноширинный шрифт, отступы и переносы строк как в исходнике */
+.task pre{display:block;margin:1.2mm 0;padding:1.2mm 1.6mm;background:#f6f7f9;border:.15mm solid #c9ced6;border-radius:1mm;font-family:"DejaVu Sans Mono","JetBrains Mono",Consolas,"Courier New",monospace;font-size:.7em;line-height:1.32;text-align:left;white-space:pre-wrap;overflow-wrap:break-word;word-break:normal;tab-size:4;-moz-tab-size:4;break-inside:avoid;color:#111}
+.task table:has(pre){table-layout:auto}
+.task td:has(>pre),.task th:has(>pre){text-align:left;vertical-align:top}
+.task td>pre{margin:0;border:0;background:transparent;padding:.4mm .6mm}
 .task ol .katex-display{display:inline;margin:0}
 .task ol .katex-display>.katex{display:inline-block;white-space:nowrap}
 .solution-title{font-style:italic;margin-top:4mm;margin-bottom:1.5mm}
@@ -1584,7 +1589,7 @@ function normalize(data){
  const seen=new Set();for(const t of result.tasks){if(seen.has(t.number))throw Error(`Повторяется номер задания ${t.number}.`);seen.add(t.number);}
  return result;
 }
-const allowedTags=new Set(('p div span br b strong i em u s sub sup ul ol li table thead tbody tfoot tr th td colgroup col caption figure figcaption img math semantics mrow mi mn mo mtext mfrac msqrt mroot msup msub msubsup mfenced mtable mtr mtd mover munder munderover mspace menclose mpadded mstyle svg g path rect line circle ellipse polyline polygon text tspan defs marker title desc').split(' '));
+const allowedTags=new Set(('p div pre span br b strong i em u s sub sup ul ol li table thead tbody tfoot tr th td colgroup col caption figure figcaption img math semantics mrow mi mn mo mtext mfrac msqrt mroot msup msub msubsup mfenced mtable mtr mtd mover munder munderover mspace menclose mpadded mstyle svg g path rect line circle ellipse polyline polygon text tspan defs marker title desc').split(' '));
 const allowedAttrs=new Set(('class colspan rowspan scope width height src alt viewbox d x y x1 x2 y1 y2 cx cy r rx ry points fill stroke stroke-width stroke-dasharray stroke-linecap stroke-linejoin transform text-anchor dominant-baseline font-size font-style font-weight opacity xmlns display mathvariant mathsize linethickness columnalign rowspacing columnspacing start type aria-label role').split(' '));
 function safeHtml(html){
  const template=document.createElement('template');template.innerHTML=String(html??'');
@@ -1594,7 +1599,7 @@ function safeHtml(html){
    const name=attr.name.toLowerCase(),v=attr.value;
    if(!allowedAttrs.has(name)||/^on/i.test(name)||/url\s*\(|javascript:|expression\s*\(/i.test(v)){el.removeAttribute(attr.name);continue;}
    if(name==='src'&&!/^(data:image\/(png|jpeg|jpg|gif|webp|svg\+xml);|https?:\/\/|\/[^/]|\.\.?\/)/i.test(v))el.removeAttribute(attr.name);
-   if(name==='class')el.className=v.split(/\s+/).filter(c=>/^(math|formula|align-center|align-right|frac|numerator|denominator|no-wrap|illustration|match-options)$/.test(c)).join(' ');
+   if(name==='class')el.className=v.split(/\s+/).filter(c=>/^(math|formula|align-center|align-right|frac|numerator|denominator|no-wrap|illustration|match-options|code-block)$/.test(c)).join(' ');
   }
  }
  return template.content;

@@ -22,7 +22,7 @@ const TEMPLATE_YEAR = "2027";
 const TEMPLATE_WATERMARK = "ПРОЕКТ ЕГЭ 2027";
 
 const ALLOWED_TAGS = new Set(
-  "p div span br b strong i em u s sub sup ul ol li table thead tbody tfoot tr th td colgroup col caption figure figcaption img math semantics mrow mi mn mo mtext mfrac msqrt mroot msup msub msubsup mfenced mtable mtr mtd mover munder munderover mspace menclose mpadded mstyle svg g path rect line circle ellipse polyline polygon text tspan defs marker title desc".split(
+  "p div pre span br b strong i em u s sub sup ul ol li table thead tbody tfoot tr th td colgroup col caption figure figcaption img math semantics mrow mi mn mo mtext mfrac msqrt mroot msup msub msubsup mfenced mtable mtr mtd mover munder munderover mspace menclose mpadded mstyle svg g path rect line circle ellipse polyline polygon text tspan defs marker title desc".split(
     " "
   )
 );
@@ -513,17 +513,22 @@ function convertDollarMathIn(root: ParentNode): void {
     nodes.push(current as Text);
     current = walker.nextNode();
   }
-  for (const node of nodes) node.data = dollarToKatex(node.data);
+  for (const node of nodes) {
+    if (node.parentElement?.closest("pre")) continue;
+    node.data = dollarToKatex(node.data);
+  }
 }
 
+/**
+ * Код программ (ЕГЭ инф. №16 и др.): оставляем моноширинный блок <pre class="code-block">
+ * только с текстом — отступы и переносы строк сохраняются, вложенная разметка (<code>, <span>) снимается.
+ */
 function replacePre(el: Element): void {
-  const text = el.textContent || "";
-  const paragraph = document.createElement("p");
-  text.split("\n").forEach((line, index) => {
-    if (index) paragraph.appendChild(document.createElement("br"));
-    paragraph.appendChild(document.createTextNode(line));
-  });
-  el.replaceWith(paragraph);
+  const text = (el.textContent || "").replace(/\r\n?/g, "\n").replace(/\t/g, "    ").replace(/^\n+|\s+$/g, "");
+  const pre = document.createElement("pre");
+  pre.className = "code-block";
+  pre.textContent = text;
+  el.replaceWith(pre);
 }
 
 const INLINE_IMG_BLOCKS = "p, li, td, th, div, figure, h1, h2, h3, h4, h5, h6, caption";

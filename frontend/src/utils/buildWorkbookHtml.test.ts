@@ -476,3 +476,29 @@ describe("injectExamTemplateData", () => {
     expect(html).not.toContain("variant-download-style");
   });
 });
+
+describe("ЕГЭ инф. №16: код программ в печати", () => {
+  const code16 =
+    '<div class="task-html-block"><p>Процедура F(n):</p><table border="1"><tr><td><b>Паскаль</b></td><td><b>Python</b></td></tr>' +
+    "<tr><td><pre>procedure F(n: integer);\nbegin\n  writeln(n);\n  if n &lt; 6 then\n  begin\n    F(n+2);\n    F(n*3)\n  end\nend;</pre></td>" +
+    '<td><pre>def F(n):\n    print(n)\n    if n &lt; 6:\n        F(n+2)\n        F(n*3)\n# цена $5 и $6</pre></td></tr></table></div>';
+
+  it("keeps <pre> with indentation and line breaks, no KaTeX inside code", () => {
+    const doc = buildExamTemplateDocument([{ id: 20376, task_number: 16, text: code16, subject: "inf", level: "ege" } as never], {
+      title: "Вариант",
+      mode: "variant",
+    });
+    const html = doc.tasks[0]?.html || "";
+    expect(html).toContain('<pre class="code-block">procedure F(n: integer);\nbegin\n  writeln(n);');
+    expect(html).toContain("\n        F(n+2)\n");
+    expect(html).toContain("# цена $5 и $6");
+    expect(html).not.toContain("\\(5");
+  });
+
+  it("template whitelists pre and code-block class", () => {
+    const template = readFileSync(templatePath, "utf8");
+    expect(template).toMatch(/allowedTags=new Set\(\('p div pre /);
+    expect(template).toContain("|code-block)$/");
+    expect(template).toMatch(/\.task pre\{[^}]*white-space:pre-wrap;/);
+  });
+});
