@@ -276,7 +276,7 @@ TARIFFS = [
 ]
 
 
-REQUIRED_PUBLIC_SLUGS = ("start", "teacher", "pro", "premium")
+REQUIRED_PUBLIC_SLUGS = ("start", "teacher", "pro")
 
 
 def apply_tariff_catalog(*, overwrite: bool = False) -> list[tuple[str, bool]]:

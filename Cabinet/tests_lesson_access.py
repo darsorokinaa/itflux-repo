@@ -282,7 +282,7 @@ class LessonAccessPolicyTests(LessonAccessBase):
     def test_upgrade_cta(self):
         access = LessonAccessService.get_access(self.user, self.paid)
         upgrade = next(c for c in access.cta if c["type"] == "upgrade")
-        self.assertIn("Премиум", upgrade["label"])
+        self.assertIn("Профи", upgrade["label"])
 
 
 class LessonPurchaseTests(LessonAccessBase):

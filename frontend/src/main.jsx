@@ -47,23 +47,24 @@ try {
       </ErrorBoundary>
     </StrictMode>,
   )
+  // r111: готовность не зависит только от rAF (в фоновой вкладке rAF не срабатывает).
+  let obs = null
+  if (rootEl && typeof MutationObserver === 'function') {
+    obs = new MutationObserver(() => {
+      if (markAppReady()) { obs.disconnect(); obs = null }
+    })
+    obs.observe(rootEl, { childList: true, subtree: true })
+  }
   const paint = () => {
-    if (markAppReady()) return
+    if (markAppReady()) { if (obs) { obs.disconnect(); obs = null } return }
     window.setTimeout(() => {
-      if (markAppReady()) return
+      if (markAppReady()) { if (obs) { obs.disconnect(); obs = null } return }
       markBootStage(BOOT_STAGES.BOOTSTRAP_FAILED)
-      const lateRoot = document.getElementById('root')
-      if (!lateRoot || typeof MutationObserver !== 'function') return
-      const obs = new MutationObserver(() => {
-        if (markAppReady()) obs.disconnect()
-      })
-      obs.observe(lateRoot, { childList: true, subtree: true })
     }, 50)
   }
+  window.setTimeout(paint, 0)
   if (typeof requestAnimationFrame === "function") {
     requestAnimationFrame(() => requestAnimationFrame(paint))
-  } else {
-    window.setTimeout(paint, 0)
   }
 } catch (err) {
   markBootStage(BOOT_STAGES.BOOTSTRAP_FAILED, { message: String(err?.message || err) })

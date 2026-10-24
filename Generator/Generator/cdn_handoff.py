@@ -31,7 +31,7 @@ log = logging.getLogger(__name__)
 
 CDN_ORIGIN = "https://app.itflux-academy.ru"  # r110: новые переносы на app; cdn продолжает работать
 PREF_TTL = 7 * 24 * 3600
-ALLOWED_REASONS = {"call_drops", "join_timeout", "pinned"}
+ALLOWED_REASONS = {"call_drops", "join_timeout", "pinned", "slow_load"}  # r111 slow_load: index.html
 _VERSION_PARAM = re.compile(r"(^|&)_itflux_v=[^&]*")
 
 
@@ -160,7 +160,7 @@ def api_issue(request):
     if reason == "pinned" and not prefers_cdn(user):
         return JsonResponse({"error": "not_pinned"}, status=403)
     token = issue_token(request, user, body.get("next") or "/cabinet/", reason)
-    if reason != "pinned":
+    if reason not in ("pinned", "slow_load"):
         set_pref(user, reason)
     log_switch(request, user, reason)
     record_switch(request, user, reason, "token", token)

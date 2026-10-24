@@ -57,7 +57,7 @@ export const PLAN_DISPLAY_NAMES: Record<string, string> = {
   repetitor: "Репетитор",
   pro: "Профи",
   profi: "Профи",
-  premium: "Премиум",
+  premium: "Профи",
   school: "Школа",
 };
 

@@ -103,6 +103,8 @@ def build_line(request, data: dict) -> str:
     parts.append(f"uidh={uid_hash(getattr(request, 'user', None))}")
     ua = cdn_users.short_ua(request.META.get("HTTP_USER_AGENT", "")).replace('"', "")
     parts.append(f'ua="{ua}"')
+    vis = _token(data.get("vis"), 10)
+    parts.append(f"vis={vis if vis in ('visible', 'hidden', 'prerender') else '-'}")
     return " ".join(parts) + "\n"
 
 

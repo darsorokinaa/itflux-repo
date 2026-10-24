@@ -12,7 +12,7 @@ const PLAN_NAMES = {
   repetitor: "Репетитор",
   pro: "Профи",
   profi: "Профи",
-  premium: "Премиум",
+  premium: "Профи",
   school: "Школа",
 };
 

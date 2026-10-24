@@ -269,7 +269,6 @@ function ctaLabel(plan, isCurrent, { expiresAt, currentSlug, currentPlan, period
   if (plan.slug === "pro") return "Перейти на Профи";
   if (plan.slug === "start") return "Выбрать Старт";
   if (plan.slug === "teacher") return `Выбрать ${plan.name || "Репетитор"}`;
-  if (plan.slug === "premium") return "Выбрать Премиум";
   return `Выбрать ${plan.name}`;
 }
 
@@ -394,7 +393,7 @@ function SubscriptionStatusCard({
       <section className="upg-status upg-status--promo" aria-labelledby="upg-status-title">
         <div className="upg-status__body">
           <h2 id="upg-status-title" className="upg-status__title">
-            Сейчас у вас тариф «{planName || registrationPromo?.plan_name || "Премиум"}» по стартовой акции
+            Сейчас у вас тариф «{planName || registrationPromo?.plan_name || "Старт"}» по стартовой акции
           </h2>
           <ul className="upg-status__meta">
             {startedAt ? <li>Начало: {formatDate(startedAt)}</li> : null}
@@ -1779,10 +1778,7 @@ export default function CabinetUpgradePage() {
           {promoDetailsOpen && registrationPromo ? (
             <div className="upg-promo-details" role="region" aria-label="Подробнее об акции">
               <strong>{registrationPromo.title || "Стартовая акция"}</strong>
-              <p>
-                {registrationPromo.message ||
-                  "Всем зарегистрировавшимся — тариф «Премиум» на 3 месяца с даты регистрации."}
-              </p>
+              {registrationPromo.message ? <p>{registrationPromo.message}</p> : null}
               {registrationPromo.until_label ? (
                 <p className="upg-promo-details__meta">
                   Регистрация по акции до {registrationPromo.until_label}

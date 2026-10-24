@@ -10,11 +10,11 @@
        cdn: обратно автоматически НЕ уводим (без петли); через 15 с без загрузки — подсказка со ссылкой. */
     (function () {
       try {
-        var CDN = "cdn.itflux-academy.ru", MAIN = "itflux-academy.ru", KEY = "itfluxPreferCdn";
+        var CDN = "app.itflux-academy.ru", MAIN = "itflux-academy.ru", KEY = "itfluxPreferCdn";
         var TTL = 7 * 24 * 3600 * 1000;
         var host = String(location.hostname || "").toLowerCase();
         var onMain = host === MAIN || host === "www." + MAIN;
-        var onCdn = host === CDN;
+        var onCdn = host === CDN || host === "cdn.itflux-academy.ru"; /* r111: app — новый адрес, cdn остаётся */
         if (!onMain && !onCdn) return;
         var tail = location.pathname + location.search + location.hash;
         var cdnUrl = "https://" + CDN + tail;
@@ -23,11 +23,36 @@
         function get() { try { return ls ? Number(ls.getItem(KEY)) || 0 : 0; } catch (e) { return 0; } }
         function set(v) { try { if (!ls) return false; if (v) ls.setItem(KEY, String(v)); else ls.removeItem(KEY); return true; } catch (e) { return false; } }
         function go(url) { try { (window.__ITFLUX_NAVIGATE || function (u) { location.replace(u); })(url); } catch (e) { /* ignore */ } }
+        /* r111: авторизованных переносим одноразовым токеном (/api/cdn-handoff/issue/), чтобы сохранить сессию; иначе — просто адрес. */
+        function switchToCdn() {
+          var done = false;
+          function fin(u) { if (done) return; done = true; go(u); }
+          try {
+            if (!window.fetch || !/(^|;\s*)sessionid=/.test(document.cookie + ";") && !/(^|;\s*)csrftoken=/.test(document.cookie)) { fin(cdnUrl); return; }
+            var m = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+            setTimeout(function () { fin(cdnUrl); }, 4000);
+            fetch("/api/cdn-handoff/issue/", {
+              method: "POST", credentials: "same-origin",
+              headers: { "Content-Type": "application/json", "X-CSRFToken": m ? decodeURIComponent(m[1]) : "" },
+              body: JSON.stringify({ next: location.pathname + location.search.replace(/([?&])_itflux_v=[^&]*&?/, "$1").replace(/[?&]$/, "") + location.hash, reason: "slow_load" })
+            }).then(function (r) { return r && r.ok ? r.json() : null; }).then(function (d) {
+              var u = d && typeof d.url === "string" ? d.url : "";
+              fin(u.indexOf("https://" + CDN + "/") === 0 || u.indexOf("https://cdn.itflux-academy.ru/") === 0 ? u : cdnUrl);
+            }).catch(function () { fin(cdnUrl); });
+          } catch (e) { fin(cdnUrl); }
+        }
+        function whenVisible(fn) {
+          try {
+            if (!document.hidden) { fn(); return; }
+            var h = function () { if (!document.hidden) { document.removeEventListener("visibilitychange", h); fn(); } };
+            document.addEventListener("visibilitychange", h);
+          } catch (e) { fn(); }
+        }
         if (onMain) {
           if (/[?&]itflux_nocdn=1(&|$)/.test(location.search)) { set(0); window.__ITFLUX_NO_CDN = 1; }
           else {
             var ts = get(), now = Date.now();
-            if (ts && now - ts >= 0 && now - ts < TTL) { window.__ITFLUX_CDN_REDIRECTING = 1; go(cdnUrl); return; }
+            if (ts && now - ts >= 0 && now - ts < TTL) { window.__ITFLUX_CDN_REDIRECTING = 1; switchToCdn(); return; }
             if (ts) set(0);
           }
         }
@@ -57,16 +82,17 @@
           document.body.appendChild(box);
         }
         var ms = Number(window.__ITFLUX_CDN_HINT_MS) || (onCdn ? 15000 : 10000);
-        setTimeout(function () {
+        whenVisible(function () { setTimeout(function () {
           if (window.__ITFLUX_BOOTED) return;
+          if (document.hidden) return; /* r111: в скрытой вкладке не переключаем */
           if (onMain) {
             if (!dismissed()) banner("Откройте через запасной адрес", cdnUrl);
-            if (!window.__ITFLUX_NO_CDN && set(Date.now())) { try { if (window.__itfluxLoadTiming) window.__itfluxLoadTiming("auto_switch"); } catch (e) { /* ignore */ } go(cdnUrl); }
+            if (!window.__ITFLUX_NO_CDN && set(Date.now())) { try { if (window.__itfluxLoadTiming) window.__itfluxLoadTiming("auto_switch"); } catch (e) { /* ignore */ } switchToCdn(); }
           } else if (!dismissed()) {
             var sep = location.search ? "&" : "?";
             banner("Попробуйте основной адрес", "https://" + MAIN + location.pathname + location.search + sep + "itflux_nocdn=1" + location.hash);
           }
-        }, ms);
+        }, ms); });
       } catch (err) { /* подсказка не блокирует запуск */ }
     })();
   </script>
@@ -135,7 +161,7 @@
         var host = String(location.hostname || "").toLowerCase();
         if (!/(^|\.)itflux-academy\.ru$/.test(host) || window.__ITFLUX_CDN_REDIRECTING) return;
         if (!navigator.sendBeacon || !window.performance) return;
-        var sent = false, readyAt = null, FAIL_MS = Number(window.__ITFLUX_LT_FAIL_MS) || 30000, started = Date.now();
+        var sent = false, readyAt = null, FAIL_MS = Number(window.__ITFLUX_LT_FAIL_MS) || 30000, started = document.hidden ? 0 : Date.now();
         function nav() {
           try { var e = performance.getEntriesByType("navigation")[0]; if (e) return e; } catch (err) { /* ignore */ }
           return null;
@@ -153,7 +179,8 @@
             load: e ? ms(e.loadEventEnd) : ms(t.loadEventEnd - base),
             ready: readyAt,
             nav: e && e.type ? String(e.type) : "",
-            sw: navigator.serviceWorker && navigator.serviceWorker.controller ? 1 : 0
+            sw: navigator.serviceWorker && navigator.serviceWorker.controller ? 1 : 0,
+            vis: String(document.visibilityState || "")
           };
           try { navigator.sendBeacon("/api/load-timing/", new Blob([JSON.stringify(p)], { type: "text/plain" })); } catch (err) { /* ignore */ }
         }
@@ -162,6 +189,9 @@
           if (sent) { clearInterval(iv); return; }
           if (readyAt === null && window.__ITFLUX_BOOTED) readyAt = Math.round(performance.now());
           if (readyAt !== null && document.readyState === "complete") { clearInterval(iv); setTimeout(function () { send("ok"); }, 0); return; }
+          /* r111: boot_fail считаем только по времени видимости вкладки */
+          if (document.hidden) { started = 0; return; }
+          if (!started) started = Date.now();
           if (Date.now() - started > FAIL_MS) { clearInterval(iv); send(readyAt !== null ? "ok" : "boot_fail"); }
         }, 500);
         window.addEventListener("pagehide", function () { if (!sent) send(readyAt !== null ? "ok" : "hidden"); });

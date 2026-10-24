@@ -55,7 +55,7 @@ PLAN_DISPLAY_NAMES = {
     "repetitor": "Репетитор",
     "pro": "Профи",
     "profi": "Профи",
-    "premium": "Премиум",
+    "premium": "Профи",
     "school": "Школа",
 }
 

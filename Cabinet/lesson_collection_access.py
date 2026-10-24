@@ -52,7 +52,7 @@ PLAN_LABELS = {
     "pro": "Профи",
     "profi": "Профи",
     "professional": "Профи",
-    "premium": "Премиум",
+    "premium": "Профи",
     "school": "Школа",
     "corporate": "Корпоративный",
 }

@@ -214,7 +214,7 @@ class ContentAccessLevel(models.TextChoices):
     FREE = "free", "Бесплатно"
     TEACHER = "teacher", "Репетитор"
     PROFESSIONAL = "professional", "Профи"
-    PREMIUM = "premium", "Премиум"
+    PREMIUM = "premium", "Полный доступ"
     CORPORATE = "corporate", "Корпоративный"
 
 

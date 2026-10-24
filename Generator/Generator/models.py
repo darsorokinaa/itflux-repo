@@ -912,7 +912,7 @@ class Lesson(models.Model):
         FREE = "free", "Бесплатный (Старт)"
         TEACHER = "teacher", "Репетитор"
         PROFESSIONAL = "professional", "Профи"
-        PREMIUM = "premium", "Премиум"
+        PREMIUM = "premium", "Полный доступ"
         CORPORATE = "corporate", "Корпоративный"
         # Legacy aliases kept for DB values until data migration remaps them.
         PAID = "paid", "Платный (legacy)"
@@ -1103,7 +1103,7 @@ class InterestingItem(models.Model):
         FREE = "free", "Бесплатный (Старт)"
         TEACHER = "teacher", "Репетитор"
         PROFESSIONAL = "professional", "Профи"
-        PREMIUM = "premium", "Премиум"
+        PREMIUM = "premium", "Полный доступ"
         CORPORATE = "corporate", "Корпоративный"
 
     title = models.CharField("Название", max_length=255, db_index=True)

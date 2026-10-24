@@ -181,7 +181,7 @@ export function buildPlanHighlights(plan, opts = {}) {
       groups,
       storageLine,
       ...bank,
-      { text: "полная библиотека и Premium-материалы", accent: true },
+      { text: "расширенная библиотека", accent: true },
       "Запись учеников по ссылке",
       "симуляторы и межпредметные проекты",
       variants,
