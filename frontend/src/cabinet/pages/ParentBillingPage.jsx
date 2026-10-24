@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { claimParentPayment, fetchParentBilling, fetchParentChildren } from "../../utils/cabinetAuth";
 import ParentChildSwitcher from "../parent/ParentChildSwitcher";
 import { StudentErrorState, StudentLoadingState, StudentPageShell } from "../student/StudentSectionUi";
+import { formatParentDate } from "../parent/parentFormat";
 
 export default function ParentBillingPage() {
   const [params, setParams] = useSearchParams();
@@ -128,7 +129,7 @@ export default function ParentBillingPage() {
                     </strong>
                     <p className="st-muted">
                       {tx.title || tx.type || "Операция"}
-                      {tx.created_at ? ` · ${new Date(tx.created_at).toLocaleDateString("ru-RU")}` : ""}
+                      {tx.created_at ? ` · ${formatParentDate(tx.created_at)}` : ""}
                     </p>
                   </li>
                 ))}

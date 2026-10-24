@@ -4,6 +4,7 @@ import { fetchParentChildren, fetchParentJournal } from "../../utils/cabinetAuth
 import ParentChildSwitcher from "../parent/ParentChildSwitcher";
 import { StudentErrorState, StudentLoadingState, StudentPageShell } from "../student/StudentSectionUi";
 import { isHomeworkOverdue } from "../homeworkDueAt";
+import { formatParentDate, parentStatusText } from "../parent/parentFormat";
 
 export default function ParentResultsPage() {
   const [params, setParams] = useSearchParams();
@@ -113,10 +114,11 @@ export default function ParentResultsPage() {
               <strong>{item.title}</strong>
             </div>
             <p className="st-muted">
-              {item.date || "—"}
-              {item.score_percent != null ? ` · ${item.score_percent}%` : ""}
-              {item.status_label || item.status ? ` · ${item.status_label || item.status}` : ""}
-              {isHomeworkOverdue(item) ? " · просрочено" : ""}
+              {[
+                formatParentDate(item.date),
+                item.score_percent != null ? `${item.score_percent}%` : "",
+                isHomeworkOverdue(item) ? "Просрочено" : parentStatusText(item),
+              ].filter(Boolean).join(" · ")}
             </p>
             {item.comment ? <p className="st-muted">{item.comment}</p> : null}
           </li>

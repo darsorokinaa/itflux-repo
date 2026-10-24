@@ -10,20 +10,10 @@ import {
 } from "../student/StudentSectionUi";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { isHomeworkOverdue } from "../homeworkDueAt";
+import { formatParentDateTime, parentStatusText } from "../parent/parentFormat";
 
 function formatWhen(iso) {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString("ru-RU", {
-      weekday: "short",
-      day: "numeric",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
+  return formatParentDateTime(iso);
 }
 
 function studiesLine(child, summary) {
@@ -177,8 +167,10 @@ export default function ParentDashboardPage() {
                   {isHomeworkOverdue(hw) ? <StudentStatusBadge status="overdue" label="Просрочено" /> : null}
                 </div>
                 <p className="st-muted">
-                  {hw.status_label || hw.status}
-                  {hw.due_at ? ` · до ${formatWhen(hw.due_at)}` : ""}
+                  {[
+                    parentStatusText(hw, { overdueShown: isHomeworkOverdue(hw) }),
+                    hw.due_at ? `до ${formatWhen(hw.due_at)}` : "",
+                  ].filter(Boolean).join(" · ")}
                 </p>
               </li>
             ))}

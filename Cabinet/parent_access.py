@@ -65,7 +65,9 @@ def serialize_child_card(rel: ParentStudentRelationship) -> dict:
         {
             "id": s.id,
             "subject": s.subject,
-            "title": s.title or s.subject,
+            # r112: родителю — русское название предмета («Алгебра · ОГЭ»), а не код (algebra).
+            "title": s.display_label,
+            "subject_label": s.subject_label,
             "direction": s.direction,
             "level": s.level,
         }

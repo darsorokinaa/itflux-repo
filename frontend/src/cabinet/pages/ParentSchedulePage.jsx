@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { fetchParentChildren, fetchParentSchedule } from "../../utils/cabinetAuth";
 import ParentChildSwitcher from "../parent/ParentChildSwitcher";
 import { StudentErrorState, StudentLoadingState, StudentPageShell } from "../student/StudentSectionUi";
+import { formatParentDateTime } from "../parent/parentFormat";
 
 export default function ParentSchedulePage() {
   const [params, setParams] = useSearchParams();
@@ -63,7 +64,7 @@ export default function ParentSchedulePage() {
           <li key={ev.id} className="st-list-card">
             <strong>{ev.topic || ev.title}</strong>
             <p className="st-muted">
-              {ev.starts_at ? new Date(ev.starts_at).toLocaleString("ru-RU") : "—"}
+              {formatParentDateTime(ev.starts_at)}
               {ev.format_label ? ` · ${ev.format_label}` : ev.format ? ` · ${ev.format}` : ""}
             </p>
             <p className="st-muted">Вход в видеоурок для родителя недоступен</p>

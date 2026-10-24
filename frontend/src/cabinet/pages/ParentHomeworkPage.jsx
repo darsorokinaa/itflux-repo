@@ -9,6 +9,7 @@ import {
   StudentStatusBadge,
 } from "../student/StudentSectionUi";
 import { isHomeworkOverdue } from "../homeworkDueAt";
+import { formatParentDateTime, parentStatusText } from "../parent/parentFormat";
 
 const HANDED_IN = ["submitted", "checked", "needs_fix", "returned", "needs_revision"];
 
@@ -96,9 +97,12 @@ export default function ParentHomeworkPage() {
                     <strong>{hw.title}</strong>
                   </div>
                   <p className="st-muted">
-                    {hw.status_label || hw.status}
-                    {hw.score_percent != null ? ` · ${hw.score_percent}%` : ""}
-                    {hw.attempt_count ? ` · попыток: ${hw.attempt_count}` : ""}
+                    {[
+                      parentStatusText(hw, { overdueShown: isHomeworkOverdue(hw) }),
+                      hw.due_at ? `до ${formatParentDateTime(hw.due_at)}` : "",
+                      hw.score_percent != null ? `${hw.score_percent}%` : "",
+                      hw.attempt_count ? `попыток: ${hw.attempt_count}` : "",
+                    ].filter(Boolean).join(" · ")}
                   </p>
                   {isHomeworkOverdue(hw) ? <StudentStatusBadge status="overdue" label="Просрочено" /> : null}
                   {hw.review_comment_conflict ? (

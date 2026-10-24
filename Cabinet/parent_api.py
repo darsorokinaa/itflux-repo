@@ -572,9 +572,12 @@ def _parent_activity_summary(child: dict, *, next_lesson, homework_attention) ->
         or hw.get("status") in {"not_submitted", "overdue", "returned", "needs_revision", "submitted"}
     ]
     if open_hw:
-        hw = open_hw[0]
-        label = hw.get("title") or "домашнее задание"
-        focus_parts.append(f"ДЗ: {label}")
+        # r112: было «ДЗ: <название>» → при названии «ДЗ» выходило «ДЗ: ДЗ». Показываем количество.
+        overdue = sum(1 for hw in open_hw if hw.get("is_overdue") or hw.get("status") == "overdue")
+        label = f"Открытых ДЗ: {len(open_hw)}"
+        if overdue:
+            label += f", из них просрочено: {overdue}"
+        focus_parts.append(label)
     if next_lesson and next_lesson.get("topic"):
         focus_parts.append(f"следующая тема: {next_lesson['topic']}")
     return {
