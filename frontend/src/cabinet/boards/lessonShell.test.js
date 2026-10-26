@@ -143,9 +143,16 @@ describe("lesson shell", () => {
     expect(lessonZoomLabel(1)).toBe("100%");
     expect(lessonZoomLabel(1.26)).toBe("126%");
     expect(lessonZoomLabel(0)).toBe("100%");
-    expect(LESSON_ZOOM_STEPS[0]).toBe(0.25);
-    expect(LESSON_ZOOM_STEPS[3] - LESSON_ZOOM_STEPS[2]).toBeCloseTo(0.25);
+    expect(LESSON_ZOOM_STEPS[0]).toBe(0.02);
+    expect(LESSON_ZOOM_STEPS[0]).toBeGreaterThan(0);
     expect(LESSON_ZOOM_STEPS.at(-1)).toBe(8);
+    expect(LESSON_ZOOM_STEPS).toContain(1);
+    for (let i = 1; i < LESSON_ZOOM_STEPS.length; i++) {
+      const ratio = LESSON_ZOOM_STEPS[i] / LESSON_ZOOM_STEPS[i - 1];
+      expect(ratio).toBeGreaterThan(1);
+      expect(ratio).toBeLessThanOrEqual(1.6);
+    }
+    expect(lessonZoomLabel(0.02)).toBe("2%");
     const start = "2026-10-03T10:00:00.000Z";
     const end = "2026-10-03T11:00:00.000Z";
     const now = Date.parse("2026-10-03T10:18:00.000Z");

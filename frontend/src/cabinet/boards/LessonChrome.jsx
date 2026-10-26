@@ -15,6 +15,7 @@ import {
   lessonRoomChromeMessage,
   lessonZoomLabel,
   LESSON_ZOOM_STEPS,
+  LESSON_ZOOM_PRESETS,
   lessonClockText,
   readLessonBoardTitleParam,
 } from "./lessonShell";
@@ -405,7 +406,7 @@ function LessonTimer() {
   );
 }
 
-const ZOOM_PRESETS = LESSON_ZOOM_STEPS.filter((value) => value <= 2);
+const ZOOM_PRESETS = LESSON_ZOOM_PRESETS;
 
 function BoardDocks() {
   const editor = useEditor();
@@ -415,7 +416,7 @@ function BoardDocks() {
   const redo = useValue("lesson-redo", () => editor.getCanRedo(), [editor]);
   const center = () => editor.getViewportScreenCenter();
   useEffect(() => {
-    editor.setCameraOptions({ zoomSteps: LESSON_ZOOM_STEPS });
+    editor.setCameraOptions({ ...editor.getCameraOptions(), zoomSteps: LESSON_ZOOM_STEPS });
   }, [editor]);
   function setZoom(value) {
     const camera = editor.getCamera();
@@ -443,7 +444,7 @@ function BoardDocks() {
           </button>
           <button type="button" className="lesson-icon" aria-label="Увеличить" onClick={() => editor.zoomIn(center(), ZOOM_ANIMATION)}>+</button>
           <span className="lesson-dock__rule" aria-hidden="true" />
-          <button type="button" className="lesson-icon lesson-zoom__fit" aria-label="Вместить" title="Показать всё" onClick={() => editor.zoomToFit({ animation: { duration: 120 } })}>
+          <button type="button" className="lesson-icon lesson-zoom__fit" aria-label="Показать всё" title="Показать всё" onClick={() => editor.zoomToFit({ animation: { duration: 120 } })}>
             <Maximize2 size={16} strokeWidth={1.7} aria-hidden="true" />
           </button>
           {open ? (
@@ -451,7 +452,7 @@ function BoardDocks() {
               {ZOOM_PRESETS.map((value) => (
                 <button key={value} type="button" onClick={() => setZoom(value)}>{lessonZoomLabel(value)}</button>
               ))}
-              <button type="button" onClick={() => { editor.zoomToFit({ animation: { duration: 120 } }); setOpen(false); }}>Вместить</button>
+              <button type="button" onClick={() => { editor.zoomToFit({ animation: { duration: 120 } }); setOpen(false); }}>Показать всё</button>
               <button type="button" onClick={() => { editor.zoomToSelection({ animation: { duration: 120 } }); setOpen(false); }}>К выделению</button>
             </span>
           ) : null}

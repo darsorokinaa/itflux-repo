@@ -508,7 +508,16 @@ export function lessonZoomLabel(zoom) {
   return `${Math.round(value * 100)}%`;
 }
 
-export const LESSON_ZOOM_STEPS = Array.from({ length: 32 }, (_, index) => (index + 1) * 0.25);
+// r113: масштаб «от нуля до максимума». Шаги геометрические (×1.5 и меньше),
+// поэтому +/− и колесо быстро уводят далеко; минимум 2% (> 0, чтобы не делить на ноль),
+// максимум 800% как раньше. tldraw берёт min/max из первого/последнего шага —
+// это ограничивает колесо, pinch, +/−, setCamera, zoomToFit и следование за участником.
+export const LESSON_ZOOM_STEPS = [
+  0.02, 0.03, 0.04, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25, 0.33, 0.5, 0.67, 1, 1.5, 2, 3, 4, 6, 8,
+];
+export const LESSON_ZOOM_MIN = LESSON_ZOOM_STEPS[0];
+export const LESSON_ZOOM_MAX = LESSON_ZOOM_STEPS[LESSON_ZOOM_STEPS.length - 1];
+export const LESSON_ZOOM_PRESETS = [0.05, 0.1, 0.25, 0.5, 1, 1.5, 2];
 
 export const LESSON_BOARD_PAGE_FALLBACK = "Доска урока";
 export const LESSON_ROOM_CHROME_SOURCE = "itflux-lesson-room";
