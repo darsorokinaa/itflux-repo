@@ -42,6 +42,7 @@ import {
 } from "./boardDocumentTelemetry";
 import { createLessonBoardAssetStore } from "./lessonBoardAssetStore";
 import { revealBoardContent } from "./boardOpenFrame";
+import { installLessonViewportMemory } from "./lessonViewportMemory";
 import BoardV2ErrorBoundary from "./BoardV2ErrorBoundary";
 import LessonBoardMessage from "./LessonBoardMessage";
 import "../styles/boards.css";
@@ -271,7 +272,15 @@ function TldrawBoardSynced({
           boardId,
           storage: window.localStorage,
         });
-        const stopReveal = boardDebug.has("nosheets") ? () => {} : revealBoardContent(editor);
+        // r114: своя камера с прошлого закрытия (после выбора листа); без неё — прежнее «показать лист».
+        const viewportMemory = installLessonViewportMemory(editor, {
+          userId,
+          boardId,
+          storage: window.localStorage,
+        });
+        const stopReveal = boardDebug.has("nosheets") || viewportMemory.restored
+          ? () => {}
+          : revealBoardContent(editor);
         const disposeEraserInput = boardDebug.has("noinput") ? () => {} : installCoalescedEraserInput(editor);
         const disposeThickness = installLessonThickness(editor);
         const disposeThumbnail = installLessonThumbnail(editor, { boardId, canEdit });
@@ -281,6 +290,7 @@ function TldrawBoardSynced({
           ));
         }
         return () => {
+          viewportMemory.dispose();
           stopReveal();
           disposeThumbnail();
           disposePdfNotice(editor);

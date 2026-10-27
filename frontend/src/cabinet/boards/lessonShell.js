@@ -519,6 +519,85 @@ export const LESSON_ZOOM_MIN = LESSON_ZOOM_STEPS[0];
 export const LESSON_ZOOM_MAX = LESSON_ZOOM_STEPS[LESSON_ZOOM_STEPS.length - 1];
 export const LESSON_ZOOM_PRESETS = [0.05, 0.1, 0.25, 0.5, 1, 1.5, 2];
 
+// r114: доска открывается там, где её закрыли. Камера (x, y, zoom) хранится в localStorage
+// отдельно для каждого пользователя и доски, внутри — по листам (у каждого листа своя камера).
+export const LESSON_VIEWPORT_STORAGE_PREFIX = "itflux.boardViewport";
+export const LESSON_VIEWPORT_SAVE_DELAY_MS = 400;
+export const LESSON_VIEWPORT_MAX_PAGES = 30;
+const LESSON_VIEWPORT_MAX_OFFSET = 1e9;
+
+export function lessonViewportStorageKey(userId, boardId) {
+  const user = String(userId ?? "").trim();
+  const board = String(boardId ?? "").trim();
+  if (!user || !board) return "";
+  return `${LESSON_VIEWPORT_STORAGE_PREFIX}.${user}.${board}`;
+}
+
+/** Масштаб в пределах 2%–800%; мусор (NaN, 0, отрицательный, строка) — null. */
+export function clampLessonZoom(zoom) {
+  if (zoom === null || zoom === undefined || zoom === "" || typeof zoom === "boolean") return null;
+  const value = Number(zoom);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return Math.min(LESSON_ZOOM_MAX, Math.max(LESSON_ZOOM_MIN, value));
+}
+
+function finiteOffset(value) {
+  if (value === null || value === undefined || value === "" || typeof value === "boolean") return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || Math.abs(number) > LESSON_VIEWPORT_MAX_OFFSET) return null;
+  return number;
+}
+
+/** { x, y, z } камеры tldraw или null, если сохранённое значение негодное. */
+export function normalizeLessonViewport(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const x = finiteOffset(raw.x);
+  const y = finiteOffset(raw.y);
+  const z = clampLessonZoom(raw.z);
+  if (x === null || y === null || z === null) return null;
+  return { x, y, z };
+}
+
+function readViewportRecord(storage, key) {
+  if (!storage || !key) return { pages: {} };
+  try {
+    const parsed = JSON.parse(storage.getItem(key) || "null");
+    if (!parsed || typeof parsed !== "object" || !parsed.pages || typeof parsed.pages !== "object") {
+      return { pages: {} };
+    }
+    return { pages: { ...parsed.pages } };
+  } catch {
+    return { pages: {} };
+  }
+}
+
+export function readLessonViewport(storage, userId, boardId, pageId) {
+  const key = lessonViewportStorageKey(userId, boardId);
+  const page = String(pageId ?? "");
+  if (!key || !page) return null;
+  const record = readViewportRecord(storage, key);
+  return normalizeLessonViewport(record.pages[page]);
+}
+
+export function writeLessonViewport(storage, userId, boardId, pageId, viewport, now = Date.now()) {
+  const key = lessonViewportStorageKey(userId, boardId);
+  const page = String(pageId ?? "");
+  const value = normalizeLessonViewport(viewport);
+  if (!storage || !key || !page || !value) return false;
+  const record = readViewportRecord(storage, key);
+  record.pages[page] = { ...value, t: Number.isFinite(now) ? now : Date.now() };
+  const kept = Object.entries(record.pages)
+    .filter(([, item]) => normalizeLessonViewport(item))
+    .sort((a, b) => (Number(b[1].t) || 0) - (Number(a[1].t) || 0))
+    .slice(0, LESSON_VIEWPORT_MAX_PAGES);
+  try {
+    storage.setItem(key, JSON.stringify({ v: 1, pages: Object.fromEntries(kept) }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const LESSON_BOARD_PAGE_FALLBACK = "Доска урока";
 export const LESSON_ROOM_CHROME_SOURCE = "itflux-lesson-room";
 export const LESSON_BOARD_CHROME_SOURCE = "itflux-board";
