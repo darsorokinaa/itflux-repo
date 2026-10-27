@@ -18,6 +18,8 @@ import {
   updateMyFile,
   updateMyFilesFolder,
   uploadMyFile,
+  isMyFileTooLarge,
+  MY_FILES_TOO_LARGE_MESSAGE,
 } from "../../utils/cabinetAuth";
 import { formatStorageBytes, isQuotaExceededError, quotaExceededMessage, quotaPayloadFromError } from "../storageFormat";
 import QuotaExceededNotice from "./QuotaExceededNotice";
@@ -307,8 +309,19 @@ export default function MyFilesManager({
   };
 
   const handleUploadFiles = async (fileList) => {
-    const files = Array.from(fileList || []);
-    if (!files.length) return;
+    const picked = Array.from(fileList || []);
+    if (!picked.length) return;
+    const tooLarge = picked.filter(isMyFileTooLarge);
+    const files = picked.filter((file) => !isMyFileTooLarge(file));
+    const tooLargeMessage = tooLarge.length
+      ? `${MY_FILES_TOO_LARGE_MESSAGE}: ${tooLarge.map((file) => file.name).join(", ")}`
+      : "";
+    if (!files.length) {
+      setQuotaError(null);
+      setError(tooLargeMessage);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
     const targetFolderId = currentUploadFolderId();
     const totalSize = files.reduce((sum, file) => sum + (Number(file.size) || 0), 0);
     const used = Number(quota?.storage_used_bytes ?? quota?.used_bytes ?? 0);
@@ -327,7 +340,7 @@ export default function MyFilesManager({
     }
     const jobs = files.map((file) => ({ name: file.name, progress: 0, error: "", done: false }));
     setUploads(jobs);
-    setError("");
+    setError(tooLargeMessage);
     setQuotaError(null);
     for (let index = 0; index < files.length; index += 1) {
       const file = files[index];
@@ -355,6 +368,7 @@ export default function MyFilesManager({
       }
     }
     await load();
+    if (tooLargeMessage) setError(tooLargeMessage);
     window.setTimeout(() => setUploads([]), 1800);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };

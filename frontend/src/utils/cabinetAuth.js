@@ -2718,16 +2718,38 @@ export function restoreMyFilesFolder(folderId, payload = {}) {
   });
 }
 
+// r115: лимит одного файла в «Файлах» — синхронно с nginx (1g) и CABINET_MAX_UPLOAD_BYTES.
+export const MY_FILES_MAX_UPLOAD_BYTES = 1024 * 1024 * 1024;
+export const MY_FILES_TOO_LARGE_MESSAGE = "Файл больше 1 ГБ";
+
+export function isMyFileTooLarge(file) {
+  return Number(file?.size || 0) > MY_FILES_MAX_UPLOAD_BYTES;
+}
+
+function myFileTooLargeError(cause) {
+  const err = new Error(MY_FILES_TOO_LARGE_MESSAGE);
+  err.code = "FILE_TOO_LARGE";
+  err.status = 413;
+  if (cause?.data) err.data = cause.data;
+  return err;
+}
+
 export function uploadMyFile(file, { folderId, displayName, student = false, onProgress } = {}) {
+  if (isMyFileTooLarge(file)) return Promise.reject(myFileTooLargeError());
   const formData = new FormData();
   formData.append("file", file);
   if (folderId) formData.append("folder_id", folderId);
   if (displayName) formData.append("display_name", displayName);
   const path = `${filesBase(student)}/upload/`;
-  if (typeof onProgress === "function") {
-    return ensureCsrfCookie().then(() => cabinetFetchMultipartWithProgress(path, formData, { onProgress }));
-  }
-  return cabinetFetchMultipart(path, formData);
+  const request = typeof onProgress === "function"
+    ? ensureCsrfCookie().then(() => cabinetFetchMultipartWithProgress(path, formData, { onProgress }))
+    : cabinetFetchMultipart(path, formData);
+  return request.catch((err) => {
+    if (err?.status === 413 || err?.code === "FILE_TOO_LARGE" || err?.data?.code === "FILE_TOO_LARGE") {
+      throw myFileTooLargeError(err);
+    }
+    throw err;
+  });
 }
 
 export function fetchHomeworkAttachments(homeworkId) {
