@@ -119,7 +119,7 @@ function loadImageSize(url) {
  * Pages that already have ink keep the photo where the old background sat, so marks stay aligned.
  * Returns null when nothing new should be written.
  */
-export async function placeReviewContent(doc, { loadSize = loadImageSize } = {}) {
+export async function placeReviewContent(doc, { loadSize = loadImageSize, headerTop = 0 } = {}) {
   if (!doc || doc.readonly || doc.owner_role === "student") return null;
   const answer = plainAnswerText(doc.answer_text);
   let textUsed = (doc.pages || []).some((page) => (
@@ -146,7 +146,9 @@ export async function placeReviewContent(doc, { loadSize = loadImageSize } = {})
       top = (existingText.y || fontSize) - fontSize + lines * fontSize * 1.25 + 18;
       textUsed = true;
     }
-    if (answer && !textUsed && !marked) {
+    // r117: шапка листа сама показывает условие и ответ — текстовый объект не создаём, фото кладём ниже шапки.
+    if (headerTop > 0) top = Math.max(top, headerTop);
+    if (answer && !textUsed && !marked && !(headerTop > 0)) {
       const block = textBlock(page, answer, top);
       if (block && !objects.some((obj) => obj.sourceKey === "answer-text" || obj.id === block.object.id)) {
         additions.push(block.object);

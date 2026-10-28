@@ -31,7 +31,7 @@ import {
   uploadNotebookPageBackground,
 } from "./notebookApi";
 import { hasMod, isTypingTarget, shortcutLabel, useEditorShortcuts } from "./useEditorShortcuts";
-import { placeReviewContent } from "./notebookPlacement";
+import { placeReviewContent, plainAnswerText } from "./notebookPlacement";
 import {
   flushNotebookForPublish,
   localNotebookFile,
@@ -319,7 +319,8 @@ export default function HomeworkNotebookEditor({
     setTool(TOOL.SELECT);
     let placed = null;
     try {
-      placed = await placeReviewContent(docRef.current?.id === next.id ? docRef.current : next);
+      const base = docRef.current?.id === next.id ? docRef.current : next;
+      placed = await placeReviewContent(base, { headerTop: sheetHeaderReserve(base) });
     } catch {
       placedNotebookRef.current = "";
       return;
@@ -673,9 +674,11 @@ export default function HomeworkNotebookEditor({
   };
 
   const showReview = Boolean(doc && doc.owner_role !== "student");
-  const [taskInfoOpen, setTaskInfoOpen] = useState(true);
   const taskConditionHtml = showReview ? String(doc?.task_condition_html || "") : "";
   const studentAnswerText = showReview ? String(doc?.answer_text || "").trim() : "";
+  // r117: старый текстовый объект с ответом на листе — не дублируем ответ в шапке.
+  const answerObjectOnSheet = (pages || []).some((item) => pageAnnotations(item).some((obj) => obj?.sourceKey === "answer-text"));
+  const sheetHeaderAnswer = answerObjectOnSheet ? "" : studentAnswerText;
   const pageFeedback = objects.find((obj) => obj?.type === "page_feedback") || null;
   const withPageMeta = (list, index) => (list || [])
     .filter((obj) => obj?.type === "comment")
@@ -806,27 +809,6 @@ export default function HomeworkNotebookEditor({
             ) : null}
           </div>
         ) : null}
-        {taskConditionHtml || studentAnswerText ? (
-          <div className={`hw-nb-taskinfo${taskInfoOpen ? "" : " is-collapsed"}`} aria-label="Условие и ответ ученика">
-            <button type="button" className="hw-nb-taskinfo__toggle" onClick={() => setTaskInfoOpen((v) => !v)}>
-              {taskInfoOpen ? "Скрыть условие и ответ" : "Показать условие и ответ"}
-            </button>
-            {taskInfoOpen ? (
-              <div className="hw-nb-taskinfo__body">
-                {taskConditionHtml ? (
-                  <div className="hw-nb-taskinfo__section">
-                    <strong>Условие</strong>
-                    <MathContent html={taskConditionHtml} className="task-text hw-nb-taskinfo__condition" />
-                  </div>
-                ) : null}
-                <div className="hw-nb-taskinfo__section">
-                  <strong>Ответ ученика</strong>
-                  <p className="hw-nb-taskinfo__answer">{studentAnswerText || "—"}</p>
-                </div>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
         <div
         className="hw-notebook__stage"
         ref={stageRef}
@@ -860,6 +842,9 @@ export default function HomeworkNotebookEditor({
           style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${fit ? 1 : zoom})` }}
         >
           <NotebookPageBackground page={page} url={backgroundUrl} isPdf={isPdf} isImage={isImage} pdfCache={pdfCache} />
+          {page && (pageIndex === 0 || pages.length <= 1) && (taskConditionHtml || sheetHeaderAnswer) ? (
+            <NotebookSheetHeader page={page} conditionHtml={taskConditionHtml} answerText={sheetHeaderAnswer} />
+          ) : null}
           {page ? (
             <NotebookCanvas
               page={page}
@@ -1036,6 +1021,40 @@ export default function HomeworkNotebookEditor({
       ) : null}
     </div>,
     document.body,
+  );
+}
+
+/** r117: высота (в координатах листа), которую занимает шапка «Условие + ответ», чтобы новое фото ученика легло ниже. */
+function sheetHeaderReserve(doc) {
+  if (!doc || doc.owner_role === "student") return 0;
+  const cond = plainAnswerText(doc.task_condition_html || "");
+  const ans = plainAnswerText(doc.answer_text || "");
+  if (!cond && !ans) return 0;
+  const lines = Math.ceil(cond.length / 80) + Math.ceil(Math.max(1, ans.length) / 80) + 2;
+  return Math.min(700, 48 + lines * 30);
+}
+
+/** r117: условие задания и ответ ученика — часть листа (масштабируются с ним), пометки рисуются поверх. */
+function NotebookSheetHeader({ page, conditionHtml, answerText }) {
+  const w = page?.width || 1000;
+  const h = page?.height || 1414;
+  return (
+    <svg className="hw-nb-sheet-header" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid meet" aria-label="Условие и ответ ученика">
+      <foreignObject x="36" y="24" width={w - 72} height={h - 48}>
+        <div xmlns="http://www.w3.org/1999/xhtml" className="hw-nb-sheet-header__box">
+          {conditionHtml ? (
+            <div className="hw-nb-sheet-header__section">
+              <strong>Условие</strong>
+              <MathContent html={conditionHtml} className="task-text hw-nb-sheet-header__condition" />
+            </div>
+          ) : null}
+          <div className="hw-nb-sheet-header__section">
+            <strong>Ответ ученика: </strong>
+            <span className="hw-nb-sheet-header__answer">{answerText || "—"}</span>
+          </div>
+        </div>
+      </foreignObject>
+    </svg>
   );
 }
 

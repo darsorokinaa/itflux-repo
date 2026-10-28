@@ -1410,41 +1410,22 @@ body:has(.hw-notebook) .cb-ai-embed-launcher {
 .hw-nb-tool { color: #71819c; }
 .hw-nb-tool:hover { background: #f1f5fc; color: #325da4; }
 
-/* r116: условие задания и ответ ученика над тетрадью учителя */
-.hw-nb-taskinfo {
+/* r117: условие и ответ ученика прямо на листе (часть листа, под пометками) */
+.hw-nb-sheet-header {
   position: absolute;
-  top: 64px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(860px, calc(100% - 32px));
-  z-index: 7;
-  background: #fff;
-  border: 1px solid #d4dced;
-  border-radius: 10px;
-  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.12);
-  font-size: 14px;
-  color: #111827;
-}
-.hw-nb-taskinfo__toggle {
-  display: block;
+  inset: 0;
   width: 100%;
-  padding: 6px 12px;
-  background: none;
-  border: 0;
-  text-align: left;
-  color: #4f46e5;
-  cursor: pointer;
-  font: inherit;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
 }
-.hw-nb-taskinfo__body {
-  max-height: 34vh;
-  overflow: auto;
-  padding: 0 12px 10px;
+.hw-nb-sheet-header__box {
+  font-size: 20px;
+  line-height: 1.35;
+  color: #111827;
+  font-family: inherit;
 }
-.hw-nb-taskinfo__section + .hw-nb-taskinfo__section { margin-top: 8px; }
-.hw-nb-taskinfo__condition img { max-width: 100%; height: auto; }
-.hw-nb-taskinfo__answer { margin: 2px 0 0; white-space: pre-wrap; word-break: break-word; }
-@media (max-width: 720px) {
-  .hw-nb-taskinfo { top: 60px; width: calc(100% - 16px); font-size: 13px; }
-  .hw-nb-taskinfo__body { max-height: 28vh; }
-}
+.hw-nb-sheet-header__section + .hw-nb-sheet-header__section { margin-top: 10px; }
+.hw-nb-sheet-header__condition { margin-top: 4px; }
+.hw-nb-sheet-header__condition img { max-width: 100%; height: auto; }
+.hw-nb-sheet-header__answer { white-space: pre-wrap; word-break: break-word; }
