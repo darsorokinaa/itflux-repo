@@ -470,6 +470,33 @@ def notebook_answer_text(submission: HomeworkSubmission, task_key: str) -> str:
     return ""
 
 
+def notebook_task_condition(submission: HomeworkSubmission, task_key: str) -> str:
+    """r116: HTML условия задания из банка для шапки тетради учителя ("" если не найдено)."""
+    keys = []
+    raw = str(task_key or "").strip()
+    if raw and raw != SUBMISSION_NOTEBOOK_TASK_KEY:
+        keys.append(raw)
+    else:
+        homework = getattr(submission, "homework", None)
+        tasks = list(homework.tasks.filter(is_active=True)[:2]) if homework is not None else []
+        if len(tasks) == 1 and getattr(tasks[0], "task_id", None):
+            keys.append(str(tasks[0].task_id))
+    try:
+        from Generator.models import Task as BankTask
+    except Exception:
+        return ""
+    for key in keys:
+        if not key.isdigit():
+            continue
+        try:
+            task = BankTask.objects.filter(pk=int(key)).only("task_template").first()
+        except Exception:
+            task = None
+        if task is not None and (task.task_template or "").strip():
+            return str(task.task_template)
+    return ""
+
+
 def serialize_notebook(notebook: HomeworkNotebook, *, include_pages: bool = True) -> dict:
     pages = []
     if include_pages:
@@ -489,6 +516,11 @@ def serialize_notebook(notebook: HomeworkNotebook, *, include_pages: bool = True
         "pages": pages,
         "answer_text": (
             notebook_answer_text(notebook.submission, notebook.task_key)
+            if include_pages and notebook.owner_role == HomeworkAttachmentOwnerRole.TEACHER
+            else ""
+        ),
+        "task_condition_html": (
+            notebook_task_condition(notebook.submission, notebook.task_key)
             if include_pages and notebook.owner_role == HomeworkAttachmentOwnerRole.TEACHER
             else ""
         ),

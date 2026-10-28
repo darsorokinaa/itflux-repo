@@ -5,6 +5,7 @@ import { ArrowLeft, CircleHelp, Maximize, MessageSquare, Minus, PanelLeft, Plus,
 import { openMaterialPdf } from "../materials/collab/pdfjsLoader";
 import EducationalLoading, { LOADING_MESSAGES } from "../../components/EducationalLoading";
 import NotebookCanvas from "./NotebookCanvas";
+import MathContent from "../../components/MathContent";
 import NotebookPagesDrawer from "./NotebookPagesDrawer";
 import NotebookReviewPanel from "./NotebookReviewPanel";
 import NotebookToolbar from "./NotebookToolbar";
@@ -672,6 +673,9 @@ export default function HomeworkNotebookEditor({
   };
 
   const showReview = Boolean(doc && doc.owner_role !== "student");
+  const [taskInfoOpen, setTaskInfoOpen] = useState(true);
+  const taskConditionHtml = showReview ? String(doc?.task_condition_html || "") : "";
+  const studentAnswerText = showReview ? String(doc?.answer_text || "").trim() : "";
   const pageFeedback = objects.find((obj) => obj?.type === "page_feedback") || null;
   const withPageMeta = (list, index) => (list || [])
     .filter((obj) => obj?.type === "comment")
@@ -798,6 +802,27 @@ export default function HomeworkNotebookEditor({
               <div className="hw-notebook__conflict-actions">
                 <button type="button" onClick={saveLocalSeparately}>Сохранить пометки отдельно</button>
                 <button type="button" onClick={reloadServerNotebook} disabled={busy}>Обновить тетрадь</button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {taskConditionHtml || studentAnswerText ? (
+          <div className={`hw-nb-taskinfo${taskInfoOpen ? "" : " is-collapsed"}`} aria-label="Условие и ответ ученика">
+            <button type="button" className="hw-nb-taskinfo__toggle" onClick={() => setTaskInfoOpen((v) => !v)}>
+              {taskInfoOpen ? "Скрыть условие и ответ" : "Показать условие и ответ"}
+            </button>
+            {taskInfoOpen ? (
+              <div className="hw-nb-taskinfo__body">
+                {taskConditionHtml ? (
+                  <div className="hw-nb-taskinfo__section">
+                    <strong>Условие</strong>
+                    <MathContent html={taskConditionHtml} className="task-text hw-nb-taskinfo__condition" />
+                  </div>
+                ) : null}
+                <div className="hw-nb-taskinfo__section">
+                  <strong>Ответ ученика</strong>
+                  <p className="hw-nb-taskinfo__answer">{studentAnswerText || "—"}</p>
+                </div>
               </div>
             ) : null}
           </div>
