@@ -31,7 +31,7 @@ import {
   uploadNotebookPageBackground,
 } from "./notebookApi";
 import { hasMod, isTypingTarget, shortcutLabel, useEditorShortcuts } from "./useEditorShortcuts";
-import { placeReviewContent, plainAnswerText } from "./notebookPlacement";
+import { placeReviewContent, plainAnswerText, wrapPlainText } from "./notebookPlacement";
 import {
   flushNotebookForPublish,
   localNotebookFile,
@@ -43,6 +43,7 @@ import {
 
 const HINT_KEY = "itflux.notebook.hint.space";
 const CLIP_KEY = "itflux.notebook.clipboard";
+const CLIP_MARK = "itflux-notebook-objects";
 const ZOOM_MIN = 0.25;
 const ZOOM_MAX = 4;
 
@@ -125,6 +126,12 @@ export default function HomeworkNotebookEditor({
   const stageRef = useRef(null);
   const prevToolRef = useRef(TOOL.PEN);
   const clipboardRef = useRef([]);
+  const pasteHandlerRef = useRef(null);
+  useEffect(() => {
+    const onPaste = (event) => pasteHandlerRef.current?.(event);
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, []);
   const placedNotebookRef = useRef("");
   const placeLoadedRef = useRef(async () => {});
 
@@ -381,6 +388,127 @@ export default function HomeworkNotebookEditor({
     const items = selectedObjects().map((obj) => toPersistedAnnotation(obj));
     clipboardRef.current = items;
     try { sessionStorage.setItem(CLIP_KEY, JSON.stringify(items)); } catch { /* ignore */ }
+    // r118: метка в системном буфере — при вставке понимаем, что вставлять наши объекты, а не чужой текст.
+    try { await navigator.clipboard?.writeText?.(CLIP_MARK); } catch { /* ignore */ }
+  };
+
+  // r118: точка в видимой части листа (координаты листа) — туда кладём вставленное.
+  const visiblePagePoint = () => {
+    const pw = page?.width || 1000;
+    const ph = page?.height || 1414;
+    const stage = stageRef.current;
+    const wrap = stage?.querySelector?.(".hw-notebook__page-wrap");
+    if (!stage || !wrap) return { cx: pw / 2, top: 80 };
+    const r = wrap.getBoundingClientRect();
+    const v = stage.getBoundingClientRect();
+    if (!r.width || !r.height) return { cx: pw / 2, top: 80 };
+    const left = Math.max(r.left, v.left);
+    const right = Math.min(r.right, v.right);
+    const top = Math.max(r.top, v.top);
+    const cx = right > left ? (((left + right) / 2 - r.left) / r.width) * pw : pw / 2;
+    const ty = ((top - r.top) / r.height) * ph + 40;
+    return { cx: Math.min(Math.max(cx, 40), pw - 40), top: Math.min(Math.max(ty, 20), ph - 120) };
+  };
+
+  const addPastedObject = (obj) => {
+    const created = normalizeAnnotation({ ...obj, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, page.id);
+    commitObjects([...objects, created], "ADD_ANNOTATION");
+    setSelectedIds([created.id]);
+    setTool(TOOL.SELECT);
+  };
+
+  const pasteImageFile = async (file) => {
+    const pw = page?.width || 1000;
+    const ph = page?.height || 1414;
+    const at = visiblePagePoint();
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = reject;
+        el.src = url;
+      });
+      const nw = img.naturalWidth || img.width;
+      const nh = img.naturalHeight || img.height;
+      if (!nw || !nh) return;
+      const k = Math.min(1, 1600 / Math.max(nw, nh));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(nw * k));
+      canvas.height = Math.max(1, Math.round(nh * k));
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      let src = canvas.toDataURL("image/png");
+      if (src.length > 900000) src = canvas.toDataURL("image/jpeg", 0.88);
+      const scale = Math.min(1, (pw * 0.8) / nw, (ph * 0.6) / nh);
+      const w = Math.round(nw * scale);
+      const h = Math.round(nh * scale);
+      addPastedObject({
+        id: crypto.randomUUID?.() || `img-${Date.now()}`,
+        type: "image",
+        pageId: page.id,
+        src,
+        x: Math.round(Math.min(Math.max(at.cx - w / 2, 0), pw - w)),
+        y: Math.round(Math.min(at.top, ph - h)),
+        w,
+        h,
+      });
+    } catch {
+      setError("Не удалось вставить картинку из буфера");
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  };
+
+  const pasteText = (text) => {
+    const pw = page?.width || 1000;
+    const at = visiblePagePoint();
+    const width = Math.min(pw - 72, 640);
+    const x = Math.round(Math.min(Math.max(at.cx - width / 2, 36), pw - width - 36));
+    addPastedObject({
+      id: crypto.randomUUID?.() || `text-${Date.now()}`,
+      type: "text",
+      pageId: page.id,
+      x,
+      y: Math.round(at.top + fontSize),
+      w: width,
+      text: wrapPlainText(text, { maxWidth: width, fontSize }) || text,
+      stroke: color,
+      color,
+      fontSize,
+      opacity: 1,
+      strokeWidth: 1,
+    });
+  };
+
+  pasteHandlerRef.current = (event) => {
+    if (!doc || !page || readOnly) return;
+    if (isTypingTarget(event.target) || editingText) return;
+    const dt = event.clipboardData;
+    const fileItem = Array.from(dt?.items || []).find((item) => item.kind === "file" && String(item.type || "").startsWith("image/"));
+    const file = fileItem?.getAsFile?.() || Array.from(dt?.files || []).find((f) => String(f.type || "").startsWith("image/"));
+    if (file) {
+      event.preventDefault();
+      pasteImageFile(file);
+      return;
+    }
+    const text = String(dt?.getData?.("text/plain") || "");
+    let internal = clipboardRef.current;
+    try {
+      const raw = sessionStorage.getItem(CLIP_KEY);
+      if (raw) internal = JSON.parse(raw);
+    } catch { /* ignore */ }
+    if ((text === CLIP_MARK || !text.trim()) && internal?.length) {
+      event.preventDefault();
+      pasteClipboard();
+      return;
+    }
+    if (text.trim()) {
+      event.preventDefault();
+      pasteText(text);
+    }
   };
 
   const pasteClipboard = () => {
@@ -466,7 +594,10 @@ export default function HomeworkNotebookEditor({
       return;
     }
     if (typing && !hasMod(event) && event.key !== "Escape") return;
-    const key = event.key.toLowerCase();
+    // r118: буква по физической клавише — шорткаты работают и в русской раскладке (Ctrl+М = Ctrl+V).
+    const key = /^Key[A-Z]$/.test(event.code || "") ? event.code.slice(3).toLowerCase() : String(event.key || "").toLowerCase();
+    // r118: в поле ввода копирование/вставка/выделение/отмена — родные, не перехватываем.
+    if (typing && hasMod(event) && ["a", "c", "x", "v", "z", "y"].includes(key)) return;
     if (hasMod(event) && key === "s") {
       event.preventDefault();
       flushSave(docRef.current, { snapshot: true }).catch(() => {});
@@ -489,9 +620,10 @@ export default function HomeworkNotebookEditor({
       setTool(TOOL.SELECT);
       return;
     }
-    if (hasMod(event) && key === "c") { event.preventDefault(); copySelected(); return; }
-    if (hasMod(event) && key === "x") { event.preventDefault(); copySelected(); deleteSelected(); return; }
-    if (hasMod(event) && key === "v") { event.preventDefault(); pasteClipboard(); return; }
+    if (hasMod(event) && key === "c") { if (!selectedIds.length) return; event.preventDefault(); copySelected(); return; }
+    if (hasMod(event) && key === "x") { if (!selectedIds.length) return; event.preventDefault(); copySelected(); deleteSelected(); return; }
+    // r118: Ctrl/⌘+V не гасим — браузер сам пришлёт событие paste (картинка/текст из буфера или наши объекты).
+    if (hasMod(event) && key === "v") return;
     if (hasMod(event) && key === "d") { event.preventDefault(); duplicateSelected(); return; }
     if (hasMod(event) && key === "0") { event.preventDefault(); fitPage(); return; }
     if (hasMod(event) && key === "1") { event.preventDefault(); setFit(false); setZoom(1); setPan({ x: 0, y: 0 }); return; }

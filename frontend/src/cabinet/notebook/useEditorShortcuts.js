@@ -18,7 +18,8 @@ export function modSymbol() {
 }
 
 export function hasMod(event) {
-  return isMacPlatform() ? event.metaKey : event.ctrlKey;
+  // r118: на Mac принимаем и ⌘, и Ctrl (пользователи жмут Ctrl+V по привычке).
+  return isMacPlatform() ? Boolean(event.metaKey || event.ctrlKey) : Boolean(event.ctrlKey);
 }
 
 export function shortcutLabel(keys, { mac = isMacPlatform() } = {}) {
