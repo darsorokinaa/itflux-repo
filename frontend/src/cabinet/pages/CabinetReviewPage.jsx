@@ -11,6 +11,7 @@ import {
 } from "../CabinetSectionUi";
 import { deleteHomework, fetchReviewItems, normalizeCabinetList } from "../../utils/cabinetAuth";
 import HomeworkCopyModal from "../components/HomeworkCopyModal";
+import ReviewAssignHomeworkLauncher from "../components/ReviewAssignHomeworkLauncher";
 import {
   formatAutoCheckLine,
   formatResultCounts,
@@ -333,6 +334,7 @@ export default function CabinetReviewPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteError, setDeleteError] = useState("");
   const [copyTarget, setCopyTarget] = useState(null);
+  const [assignOpen, setAssignOpen] = useState(false);
 
   const setFilterValue = useCallback((patch) => {
     setSearchParams(patchSearchParams(searchParams, patch), { replace: true });
@@ -526,7 +528,21 @@ export default function CabinetReviewPage() {
 
   return (
     <CabinetPageShell className="cb-section--review">
-      <CabinetPageHeader title="Проверка домашних заданий" />
+      <CabinetPageHeader
+        title="Домашние задания"
+        actions={[{ label: "+ Задать ДЗ", primary: true, onClick: () => setAssignOpen(true) }]}
+      />
+      {assignOpen ? (
+        <ReviewAssignHomeworkLauncher
+          initialStudentId={studentScope !== "all" ? studentScope : ""}
+          onClose={() => setAssignOpen(false)}
+          onAssigned={() => {
+            setAssignOpen(false);
+            window.dispatchEvent(new Event("cabinet:nav-counts-refresh"));
+            load({ soft: true });
+          }}
+        />
+      ) : null}
 
       <div className="cb-review-toolbar">
         <CabinetSearchableSelect

@@ -40,7 +40,7 @@ export const CABINET_NAV_GROUPS = [
     id: "control",
     label: "Контроль",
     items: [
-      { id: "review", label: "Проверка", path: "/cabinet/review", icon: "check" },
+      { id: "review", label: "Домашние задания", path: "/cabinet/review", icon: "check" },
       { id: "journal", label: "Журнал", path: "/cabinet/journal", icon: "note" },
     ],
   },
@@ -63,7 +63,7 @@ export const CABINET_MOBILE_NAV = [
   { id: "home", label: "Главная", path: "/cabinet", icon: "home" },
   { id: "students", label: "Ученики", path: "/cabinet/students", icon: "students" },
   { id: "schedule", label: "Расписание", path: "/cabinet/schedule", icon: "calendar", featured: true },
-  { id: "review", label: "Проверка", path: "/cabinet/review", icon: "check" },
+  { id: "review", label: "ДЗ", path: "/cabinet/review", icon: "check" },
   { id: "more", label: "Ещё", path: "/cabinet/more", icon: "expand" },
 ];
 
@@ -152,7 +152,7 @@ export function getCabinetSectionTitle(pathname) {
   if (pathname.startsWith("/cabinet/library")) return "Библиотека";
   if (pathname.startsWith("/cabinet/upgrade")) return "Подписка и оплата";
   if (pathname.startsWith("/cabinet/homework/")) return "Редактировать ДЗ";
-  if (pathname.startsWith("/cabinet/review/")) return "Проверка";
+  if (pathname.startsWith("/cabinet/review/")) return "Домашние задания";
   if (pathname.startsWith("/cabinet/journal/lesson/")) return "Итоги урока";
   if (pathname.startsWith("/cabinet/journal/analytics")) return "Сводка";
   if (pathname.startsWith("/cabinet/plans/") && pathname.includes("/edit")) return "Редактирование плана";

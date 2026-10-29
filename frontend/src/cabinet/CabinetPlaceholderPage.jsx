@@ -13,7 +13,7 @@ const PLACEHOLDERS = {
     icon: "lessons",
   },
   review: {
-    title: "Проверка",
+    title: "Домашние задания",
     subtitle: "Здесь будут работы учеников, ожидающие проверки, оценки и комментарии.",
     icon: "check",
   },
