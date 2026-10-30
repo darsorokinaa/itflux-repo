@@ -182,25 +182,73 @@ describe("TldrawBoard", () => {
     vi.useFakeTimers();
     syncResult = { status: "error", error: new Error("offline") };
     render(boardTree());
-    expect(screen.getByText("Не удалось подключить доску")).toBeTruthy();
+    expect(screen.getByText("Соединение с доской прервалось, переподключаем…")).toBeTruthy();
     const before = syncCalls.length;
     act(() => {
-      vi.advanceTimersByTime(1200);
+      vi.advanceTimersByTime(600);
     });
     expect(syncCalls.length).toBeGreaterThan(before);
     expect(syncCalls.every((call) => call.roomId === BOARD)).toBe(true);
     vi.useRealTimers();
   });
 
-  it("offers a retry when sync fails and does not drop the lesson chrome", () => {
-    syncResult = { status: "error", error: new Error("offline") };
+  it("r124: reconnects a board stuck in loading after 12s", () => {
+    vi.useFakeTimers();
+    syncResult = { status: "loading" };
     render(boardTree());
+    const before = syncCalls.length;
+    act(() => {
+      vi.advanceTimersByTime(11_000);
+    });
+    expect(syncCalls.length).toBe(before);
+    act(() => {
+      vi.advanceTimersByTime(1_500);
+    });
+    expect(syncCalls.length).toBeGreaterThan(before);
+    expect(screen.getByText("Переподключаем доску…")).toBeTruthy();
+    vi.useRealTimers();
+  });
+
+  it("r124: after five stalled attempts offers «Переподключить» and lesson chrome stays", () => {
+    vi.useFakeTimers();
+    syncResult = { status: "loading" };
+    render(boardTree());
+    for (let i = 0; i < 6; i += 1) {
+      act(() => {
+        vi.advanceTimersByTime(30_000);
+      });
+    }
     expect(screen.getByText("Не удалось подключить доску")).toBeTruthy();
     expect(screen.getByText("Видеозвонок")).toBeTruthy();
     const before = syncCalls.length;
-    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    act(() => {
+      vi.advanceTimersByTime(120_000);
+    });
+    expect(syncCalls.length).toBe(before);
+    fireEvent.click(screen.getByRole("button", { name: "Переподключить" }));
     expect(syncCalls.length).toBeGreaterThan(before);
     expect(syncCalls.every((call) => call.roomId === BOARD)).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("r124: reconnects at once when a stalled board becomes visible again", () => {
+    syncResult = { status: "loading" };
+    render(boardTree());
+    const before = syncCalls.length;
+    act(() => {
+      window.dispatchEvent(new Event("pageshow"));
+    });
+    expect(syncCalls.length).toBeGreaterThan(before);
+  });
+
+  it("r124: does not reconnect a synced board on visibility", () => {
+    syncResult = { status: "synced-remote", store: { ok: true } };
+    render(boardTree());
+    const before = syncCalls.length;
+    act(() => {
+      window.dispatchEvent(new Event("pageshow"));
+    });
+    expect(syncCalls.length).toBe(before);
   });
 
   it("reports the sync status transition without opening another room", () => {

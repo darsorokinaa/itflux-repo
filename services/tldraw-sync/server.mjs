@@ -10,7 +10,7 @@ import { createUserId } from "@tldraw/tlschema";
 import { WebSocketServer } from "ws";
 
 import { lessonSyncSchema } from "./schema.mjs";
-import { verifySyncToken } from "./token.mjs";
+import { verifySyncToken, peekSyncTokenClaims, clientIpFromRequest } from "./token.mjs";
 import { backupRoomFile, mergeIntoRoom, unmergeRoom } from "./merge.mjs";
 
 const ROOM_PATH = /^\/ws\/tldraw\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i;
@@ -30,6 +30,9 @@ function logWsLifecycle(fields) {
     lesson_id: fields.lesson_id || "",
     board_id: fields.board_id || "",
     close_code: fields.close_code ?? "",
+    ...(fields.ip ? { ip: fields.ip } : {}),
+    ...(fields.result ? { result: fields.result } : {}),
+    ...(fields.reason ? { reason: fields.reason } : {}),
     ts: (Date.now() / 1000).toFixed(3),
   };
   if (fields.duration_s != null) line.duration_s = fields.duration_s;
@@ -315,21 +318,44 @@ export async function createSyncServer({ port = 5858, host = "127.0.0.1", secret
     res.writeHead(404);
     res.end();
   });
+  // r124: каждая попытка до рукопожатия и до проверки токена — кто, к какой доске, откуда.
+  httpServer.on("upgrade", (request) => {
+    let boardId = "";
+    let claims = { state: "missing" };
+    try {
+      const url = new URL(request.url || "/", "http://127.0.0.1");
+      const match = url.pathname.match(ROOM_PATH);
+      boardId = match ? match[1].toLowerCase() : "";
+      claims = peekSyncTokenClaims(url.searchParams.get("access_token"));
+    } catch {
+      claims = { state: "bad_url" };
+    }
+    logWsLifecycle({
+      event: "attempt",
+      request_id: requestIdFromHeader(request.headers["x-request-id"]),
+      user_id: claims.user_id || "",
+      board_id: boardId,
+      ip: clientIpFromRequest(request),
+      result: "received",
+      reason: `token_${claims.state}`,
+    });
+  });
   const wss = new WebSocketServer({ server: httpServer });
 
   wss.on("connection", (socket, request) => {
     const requestId = requestIdFromHeader(request.headers["x-request-id"]);
+    const ip = clientIpFromRequest(request);
     let url;
     try {
       url = new URL(request.url || "/", "http://127.0.0.1");
     } catch {
-      logWsLifecycle({ event: "disconnect", request_id: requestId, close_code: 4400 });
+      logWsLifecycle({ event: "disconnect", request_id: requestId, close_code: 4400, ip, result: "rejected", reason: "bad_url" });
       socket.close(4400, "bad request");
       return;
     }
     const match = url.pathname.match(ROOM_PATH);
     if (!match) {
-      logWsLifecycle({ event: "disconnect", request_id: requestId, close_code: 4404 });
+      logWsLifecycle({ event: "disconnect", request_id: requestId, close_code: 4404, ip, result: "rejected", reason: "bad_path" });
       socket.close(4404, "unknown room");
       return;
     }
@@ -340,15 +366,26 @@ export async function createSyncServer({ port = 5858, host = "127.0.0.1", secret
       lastActivity = Date.now();
     });
     logWsLifecycle({ event: "connect", request_id: requestId, board_id: boardId });
-    const payload = verifySyncToken(url.searchParams.get("access_token"), secret);
+    const rawToken = url.searchParams.get("access_token");
+    const payload = verifySyncToken(rawToken, secret);
     if (!payload || String(payload.board_id).toLowerCase() !== boardId) {
-      logWsLifecycle({ event: "disconnect", request_id: requestId, board_id: boardId, close_code: 4401 });
+      const claims = peekSyncTokenClaims(rawToken);
+      logWsLifecycle({
+        event: "disconnect",
+        request_id: requestId,
+        user_id: claims.user_id || "",
+        board_id: boardId,
+        close_code: 4401,
+        ip,
+        result: "unauthorized",
+        reason: payload ? "board_mismatch" : (claims.state === "present" ? "bad_signature" : `token_${claims.state}`),
+      });
       socket.close(4401, "unauthorized");
       return;
     }
     const sessionId = url.searchParams.get("sessionId");
     if (!sessionId) {
-      logWsLifecycle({ event: "disconnect", request_id: requestId, board_id: boardId, close_code: 4400 });
+      logWsLifecycle({ event: "disconnect", request_id: requestId, user_id: payload.user_id ?? "", board_id: boardId, close_code: 4400, ip, result: "rejected", reason: "missing_session" });
       socket.close(4400, "missing session");
       return;
     }
@@ -358,6 +395,8 @@ export async function createSyncServer({ port = 5858, host = "127.0.0.1", secret
       request_id: requestId,
       user_id: payload.user_id ?? "",
       board_id: boardId,
+      ip,
+      result: "ok",
     });
     sessionUsers.set(sessionId, presenceUserId);
     const slotKey = `${boardId}:${sessionId}`;

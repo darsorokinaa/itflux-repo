@@ -4,6 +4,11 @@ const TOKEN_FRESH_MS = 30_000;
 const tokens = new Map();
 let editorModule = null;
 
+/** r124: при переподключении нужен свежий токен, а не кэш открытия. */
+export function forgetTldrawSyncToken(boardId) {
+  tokens.delete(String(boardId || "").trim());
+}
+
 /** Один запрос токена на открытие. Повтор в течение 30 секунд берёт тот же ответ. */
 export function prefetchTldrawSyncToken(boardId) {
   const id = String(boardId || "").trim();

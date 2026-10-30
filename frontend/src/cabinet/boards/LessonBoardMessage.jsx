@@ -1,4 +1,4 @@
-export default function LessonBoardMessage({ title, text, onRetry }) {
+export default function LessonBoardMessage({ title, text, onRetry, retryLabel = "Повторить" }) {
   return (
     <div
       className={`lesson-board__status${title ? " lesson-board__status--error" : " lesson-board__status--loading"}`}
@@ -10,7 +10,7 @@ export default function LessonBoardMessage({ title, text, onRetry }) {
         {text ? <p>{text}</p> : null}
         {onRetry ? (
           <button type="button" className="cb-board-editor__btn cb-board-editor__btn--primary" onClick={onRetry}>
-            Повторить
+            {retryLabel}
           </button>
         ) : null}
       </div>

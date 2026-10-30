@@ -3993,6 +3993,19 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
   const workspaceHeld = Boolean(workspaceMaterial);
   const workspaceOpen = workspaceHeld && !workspaceMinimized && !workspaceHiddenByTeacher && !focusCall;
   const boardChromeOpen = Boolean(workspaceOpen && workspaceMaterial?.kind === "board");
+  // r124: доску показали (в т.ч. повторно после скрытия учителем) — сообщаем
+  // рамке, чтобы незагруженная доска сразу переподключилась.
+  useEffect(() => {
+    if (!boardChromeOpen) return;
+    try {
+      boardFrameRef.current?.contentWindow?.postMessage(
+        { source: LESSON_ROOM_CHROME_SOURCE, type: "board-visible" },
+        window.location.origin,
+      );
+    } catch {
+      /* доска ещё не готова */
+    }
+  }, [boardChromeOpen]);
   useEffect(() => {
     if (!boardChromeOpen) return undefined;
     const send = () => {

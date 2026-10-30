@@ -33,7 +33,14 @@ import {
   lessonBoardSyncUri,
   tldrawLicenseKey,
 } from "./boardProvider";
-import { prefetchTldrawSyncToken } from "./boardSyncPrefetch";
+import { forgetTldrawSyncToken, prefetchTldrawSyncToken } from "./boardSyncPrefetch";
+import {
+  BOARD_LOADING_STALL_MS,
+  boardReconnectDelay,
+  canAutoReconnect,
+  isBoardSyncPending,
+  watchBoardWake,
+} from "./boardSyncWatchdog";
 import { markPerf } from "../../utils/appBoot";
 import { reportClientEvent } from "../../utils/clientTelemetry";
 import {
@@ -113,7 +120,8 @@ function createLessonUserStore({ userId, displayName, color, avatarUrl }) {
 
 const SYNC_TOKEN_RETRY_MS = [0, 400, 1200];
 
-async function lessonBoardConnectUri(boardId) {
+async function lessonBoardConnectUri(boardId, { fresh = false } = {}) {
+  if (fresh) forgetTldrawSyncToken(boardId);
   let lastError = null;
   for (let index = 0; index < SYNC_TOKEN_RETRY_MS.length; index += 1) {
     if (SYNC_TOKEN_RETRY_MS[index] > 0) {
@@ -152,8 +160,8 @@ function lessonUserPresence(store, user) {
   return { ...presence, color: appearance.color, meta };
 }
 
-function useLessonBoardSync({ boardId, roomId, users, assets }) {
-  const uri = useCallback(() => lessonBoardConnectUri(boardId), [boardId]);
+function useLessonBoardSync({ boardId, roomId, users, assets, fresh = false }) {
+  const uri = useCallback(() => lessonBoardConnectUri(boardId, { fresh }), [boardId, fresh]);
   // ?tldebug=nopresence — не отправлять присутствие (курсоры, выделение) в комнату.
   const getUserPresence = useCallback(
     boardDebug.has("nopresence") ? () => null : lessonUserPresence,
@@ -169,8 +177,6 @@ function useLessonBoardSync({ boardId, roomId, users, assets }) {
   });
 }
 
-const BOARD_SYNC_AUTO_RETRY_MS = 1200;
-const BOARD_SYNC_AUTO_RETRIES = 2;
 
 function TldrawBoardSynced({
   boardId,
@@ -182,13 +188,14 @@ function TldrawBoardSynced({
   canEdit,
   onRetry,
   attempt = 0,
+  reconnect = false,
 }) {
   const users = useMemo(
     () => createLessonUserStore({ userId, displayName, color, avatarUrl }),
     [userId, displayName, color, avatarUrl],
   );
   const assets = useMemo(() => createLessonBoardAssetStore(boardId), [boardId]);
-  const sync = useLessonBoardSync({ boardId, roomId, users, assets });
+  const sync = useLessonBoardSync({ boardId, roomId, users, assets, fresh: reconnect });
   const licenseKey = tldrawLicenseKey();
   const onRetryRef = useRef(onRetry);
   onRetryRef.current = onRetry;
@@ -225,23 +232,64 @@ function TldrawBoardSynced({
     });
   }, [boardId, sync.status]);
 
+  // r124: «loading» дольше 12 с или «error» — пересоздаём соединение со свежим токеном,
+  // с нарастающей паузой, не больше BOARD_MAX_AUTO_RECONNECTS раз подряд.
+  const pending = isBoardSyncPending(sync.status);
+  const autoLeft = canAutoReconnect(attempt);
   useEffect(() => {
-    if (sync.status !== "error" || attempt >= BOARD_SYNC_AUTO_RETRIES) return undefined;
-    const timer = window.setTimeout(() => onRetryRef.current?.(), BOARD_SYNC_AUTO_RETRY_MS);
+    if (!pending || !autoLeft) return undefined;
+    const wait = sync.status === "error"
+      ? boardReconnectDelay(attempt)
+      : BOARD_LOADING_STALL_MS + (attempt > 0 ? boardReconnectDelay(attempt) : 0);
+    const timer = window.setTimeout(() => {
+      reportClientEvent("board_sync_reconnect", {
+        board_id: String(boardId || "").slice(0, 64),
+        reason: sync.status === "error" ? "error" : "loading-stall",
+        attempt: String(attempt),
+      });
+      onRetryRef.current?.({ auto: true });
+    }, wait);
     return () => window.clearTimeout(timer);
-  }, [attempt, sync.status]);
+  }, [attempt, autoLeft, boardId, pending, sync.status]);
 
-  if (sync.status === "loading") {
-    return <LessonBoardMessage text="Подключаем доску…" />;
-  }
-  if (sync.status === "error") {
+  // r124: доска снова видна (учитель показал её повторно, вкладка вернулась,
+  // iOS Safari восстановил страницу из bfcache, вернулась сеть) и всё ещё не
+  // подключена — переподключаемся сразу, не дожидаясь таймера.
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
+  useEffect(() => {
+    const node = typeof document !== "undefined"
+      ? document.querySelector('[data-testid="tldraw-board"]')
+      : null;
+    return watchBoardWake({
+      node,
+      onWake: (reason) => {
+        if (!pendingRef.current) return;
+        reportClientEvent("board_sync_reconnect", {
+          board_id: String(boardId || "").slice(0, 64),
+          reason: String(reason || "wake").slice(0, 32),
+          attempt: String(attempt),
+        });
+        onRetryRef.current?.({ auto: false });
+      },
+    });
+  }, [attempt, boardId]);
+
+  if (pending && !autoLeft) {
     return (
       <LessonBoardMessage
         title="Не удалось подключить доску"
-        text="Соединение с доской прервалось. Можно повторить, не выходя из урока."
-        onRetry={onRetry}
+        text="Доска не загружается: соединение с сервером доски не устанавливается. Проверьте интернет (лучше Wi‑Fi, без VPN) и нажмите «Переподключить»."
+        onRetry={() => onRetryRef.current?.({ auto: false })}
+        retryLabel="Переподключить"
       />
     );
+  }
+  if (sync.status === "loading") {
+    return <LessonBoardMessage text={attempt > 0 ? "Переподключаем доску…" : "Подключаем доску…"} />;
+  }
+  if (sync.status === "error") {
+    return <LessonBoardMessage text="Соединение с доской прервалось, переподключаем…" />;
   }
 
   return (
@@ -306,7 +354,7 @@ function TldrawBoardSynced({
   );
 }
 
-function TldrawBoardSession({ boardId, userId, displayName, role, avatarUrl, canEdit, onRetry, attempt = 0 }) {
+function TldrawBoardSession({ boardId, userId, displayName, role, avatarUrl, canEdit, onRetry, attempt = 0, reconnect = false }) {
   const roomId = lessonBoardRoomId(boardId);
   const name = lessonBoardDisplayName(displayName, role);
   const color = lessonBoardPresenceColor(role, userId);
@@ -331,6 +379,7 @@ function TldrawBoardSession({ boardId, userId, displayName, role, avatarUrl, can
       canEdit={canEdit}
       onRetry={onRetry}
       attempt={attempt}
+      reconnect={reconnect}
     />
   );
 }
@@ -340,20 +389,25 @@ function TldrawBoardSession({ boardId, userId, displayName, role, avatarUrl, can
  * Растровые картинки уходят в TLAssetStore и хранятся как URL доски.
  */
 export default function TldrawBoard(props) {
-  const [attempt, setAttempt] = useState(0);
+  // key — пересоздание сессии; auto — номер автоматической попытки подряд
+  // (ручное «Переподключить» и повторный показ доски сбрасывают счётчик).
+  const [session, setSession] = useState({ key: 0, auto: 0 });
   useEffect(() => {
     markBoard("tldrawMountedAt", new Date().toISOString());
     return () => {
       markBoard("tldrawUnmountAt", new Date().toISOString());
     };
   }, []);
-  const retry = () => setAttempt((value) => value + 1);
+  const retry = (options) => setSession((value) => ({
+    key: value.key + 1,
+    auto: options?.auto ? value.auto + 1 : 0,
+  }));
   const roomId = lessonBoardRoomId(props.boardId);
 
   return (
     <LessonBoardFrame roomId={roomId} boardId={props.boardId}>
       <BoardV2ErrorBoundary onRetry={retry}>
-        <TldrawBoardSession key={attempt} {...props} onRetry={retry} attempt={attempt} />
+        <TldrawBoardSession key={session.key} {...props} onRetry={retry} attempt={session.auto} reconnect={session.key > 0} />
       </BoardV2ErrorBoundary>
     </LessonBoardFrame>
   );
