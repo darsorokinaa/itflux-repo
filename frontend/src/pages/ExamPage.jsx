@@ -90,8 +90,8 @@ import VariantThemeSelector from "../variantThemes/VariantThemeSelector";
 import { TravelMiniMap } from "../variantThemes/TravelMarks";
 import { assignVariantTheme } from "../variantThemes/variantThemeApi";
 import { meetingUuidFromFrame } from "../cabinet/meetingPresent";
-import { fetchCabinetSession, fetchVideoMeetingLiveAnswers, isTeacherRole } from "../utils/cabinetAuth";
-import LiveVariantAnswersTable from "../cabinet/components/LiveVariantAnswersTable";
+import { fetchCabinetSession, fetchVideoMeetingLiveAnswers, isTeacherRole, saveVideoMeetingLiveScore } from "../utils/cabinetAuth";
+import LiveVariantAnswersTable, { liveStudentAnswer, lockedScoreFor } from "../cabinet/components/LiveVariantAnswersTable";
 import "../cabinet/styles/live-variant-answers.css";
 import HomeworkReviewResults, {
   HomeworkTaskReviewNote,
@@ -904,6 +904,10 @@ function ExamPage() {
   const [liveAnswersLoading, setLiveAnswersLoading] = useState(false);
   /** Учитель на вкладке варианта во время урока — определяем по доступу к live-answers. */
   const [isLiveTeacherView, setIsLiveTeacherView] = useState(false);
+  // r122: оценка второй части учителем прямо в варианте (живой урок).
+  const [liveGradeStudentId, setLiveGradeStudentId] = useState(null);
+  const [liveGradeBusy, setLiveGradeBusy] = useState(false);
+  const [liveGradeError, setLiveGradeError] = useState("");
   const [liveViewerSettled, setLiveViewerSettled] = useState(false);
   const liveAnswersSeqRef = useRef(0);
   const themeAssignSeqRef = useRef(0);
@@ -2725,7 +2729,7 @@ function ExamPage() {
     if (scoringMode === "axes" && axes.length > 0) {
       const selected = selectedAxesByTask[task.id] || {};
       const result = computeAxesTaskScore(axes, selected);
-      const disabled = isHomework && (hRead || numLocked(task));
+      const disabled = liveGradeMode(task) ? liveGradeLocked(task) : isHomework && (hRead || numLocked(task));
       const useScoreMatrix = axesNeedScoreMatrix(axes);
       const scoreResult = (
         <div className="score-result">
@@ -2955,9 +2959,9 @@ function ExamPage() {
                   value={String(c.id)}
                   className="criterion-card__input"
                   checked={selectedCriterionByTask[task.id] === c.id}
-                  disabled={isHomework && (hRead || numLocked(task))}
+                  disabled={liveGradeMode(task) ? liveGradeLocked(task) : isHomework && (hRead || numLocked(task))}
                   onChange={() => {
-                    if (isHomework && (hRead || numLocked(task))) return;
+                    if (liveGradeMode(task) ? liveGradeLocked(task) : isHomework && (hRead || numLocked(task))) return;
                     selectCriterion(task.id, c, maxSc);
                   }}
                 />
@@ -3096,6 +3100,132 @@ function ExamPage() {
     );
   }
 
+  function liveGradeTask(task) {
+    if (!isLiveTeacherView || !liveAnswers || !task) return null;
+    const row = (liveAnswers.tasks || []).find((t) => String(t.id) === String(task.id));
+    return row && row.part === 2 ? row : null;
+  }
+
+  function liveGradeStudent() {
+    const list = liveAnswers?.students || [];
+    if (!list.length) return null;
+    return list.find((st) => st.studentId === liveGradeStudentId) || list[0];
+  }
+
+  function liveGradeMode(task) {
+    return Boolean(liveGradeTask(task) && liveGradeStudent());
+  }
+
+  function liveGradeLocked(task) {
+    return lockedScoreFor(liveGradeStudent(), task) != null;
+  }
+
+  function resetLiveGradeSelection() {
+    setLiveGradeError("");
+    const part2Ids = (liveAnswers?.tasks || []).filter((t) => t.part === 2).map((t) => String(t.id));
+    const drop = (prev) => {
+      const next = { ...prev };
+      part2Ids.forEach((id) => { delete next[id]; });
+      return next;
+    };
+    setScores(drop);
+    setSelectedCriterionByTask(drop);
+    setSelectedAxesByTask(drop);
+  }
+
+  function liveGradeHeader(task) {
+    const lt = liveGradeTask(task);
+    if (!lt) return null;
+    const students = liveAnswers?.students || [];
+    const current = liveGradeStudent();
+    if (!current) {
+      return <div className="ev2-live-grade ev2-live-grade--empty">Ученик ещё не начал вариант.</div>;
+    }
+    const answer = liveStudentAnswer(current.result || {}, lt, liveAnswers?.tasks || []);
+    return (
+      <div className="ev2-live-grade">
+        {students.length > 1 ? (
+          <div className="ev2-live-grade__students" role="tablist" aria-label="Ученик">
+            {students.map((st) => (
+              <button
+                key={st.studentId}
+                type="button"
+                role="tab"
+                aria-selected={st.studentId === current.studentId}
+                className={st.studentId === current.studentId ? "btn-outline is-active" : "btn-ghost"}
+                onClick={() => {
+                  if (st.studentId === current.studentId) return;
+                  setLiveGradeStudentId(st.studentId);
+                  resetLiveGradeSelection();
+                }}
+              >
+                {st.displayName}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <div className="ev2-live-grade__label">
+          Ответ ученика{students.length > 1 ? "" : ` · ${current.displayName}`}
+        </div>
+        <div className="ev2-live-grade__answer">
+          {answer.trim() ? answer : <span className="ev2-live-grade__muted">Ответа пока нет</span>}
+        </div>
+      </div>
+    );
+  }
+
+  function liveGradeFooter(task) {
+    const lt = liveGradeTask(task);
+    const current = liveGradeStudent();
+    if (!lt || !current) return null;
+    const max = Number(lt.maxScore ?? getTaskMaxScore(task));
+    const locked = lockedScoreFor(current, task);
+    if (locked != null) {
+      return (
+        <div className="score-result ev2-live-grade__saved" data-testid="live-grade-saved">
+          Балл: <span className="score-result__value">{locked} / {max}</span> · сохранено
+        </div>
+      );
+    }
+    if (criteriaOpenForTask !== task.id) {
+      return <div className="ev2-live-grade__hint">Откройте «Критерии оценки» и выберите балл.</div>;
+    }
+    const picked = scores[task.id];
+    const ready = picked != null && Number.isInteger(Number(picked)) && Number(picked) >= 0 && Number(picked) <= max;
+    const save = async () => {
+      if (!ready || liveGradeBusy) return;
+      const value = Number(picked);
+      if (!window.confirm(`Сохранить балл ${value} из ${max} для ученика «${current.displayName}»? Изменить его потом будет нельзя.`)) return;
+      setLiveGradeBusy(true);
+      setLiveGradeError("");
+      try {
+        await saveVideoMeetingLiveScore(meetingUuid, { studentId: current.studentId, taskId: task.id, score: value });
+      } catch (err) {
+        setLiveGradeError(err?.message || "Не удалось сохранить балл");
+      }
+      try {
+        const data = await fetchVideoMeetingLiveAnswers(meetingUuid);
+        if (data?.presented) setLiveAnswers(data);
+      } catch {
+        /* следующий опрос обновит */
+      }
+      setLiveGradeBusy(false);
+    };
+    return (
+      <div className="ev2-live-grade__actions">
+        <button
+          type="button"
+          className="exam-edu-btn exam-edu-btn--primary"
+          disabled={!ready || liveGradeBusy}
+          onClick={save}
+        >
+          {liveGradeBusy ? "Сохранение…" : ready ? `Сохранить балл ${picked} / ${max}` : "Выберите балл в критериях"}
+        </button>
+        {liveGradeError ? <span className="ev2-live-grade__error">{liveGradeError}</span> : null}
+      </div>
+    );
+  }
+
   function ev2Part2Main(task) {
     const showSolBtn = (!isHomework || hSol) && task.answer != null && task.answer !== "";
     const showCritBtn = !hwScorePart1Only && (task.task_list_id != null || task.number != null);
@@ -3112,9 +3242,9 @@ function ExamPage() {
               <button
                 type="button"
                 className="btn-ghost"
-                disabled={isHomework && hRead}
+                disabled={isHomework && hRead && !liveGradeMode(task)}
                 onClick={() => {
-                  if (isHomework && hRead) return;
+                  if (isHomework && hRead && !liveGradeMode(task)) return;
                   toggleCriteriaPanel(task);
                 }}
               >
@@ -3134,7 +3264,9 @@ function ExamPage() {
             </div>
           </div>
         ) : null}
+        {liveGradeHeader(task)}
         {criteriaOpenForTask === task.id ? renderEv2CriteriaPanel(task) : null}
+        {liveGradeFooter(task)}
       </>
     );
   }

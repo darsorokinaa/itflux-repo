@@ -5231,12 +5231,6 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
             event={event}
             liveAnswers={liveAnswers}
             liveAnswersLoading={liveAnswersLoading}
-            meetingUuid={meetingUuid}
-            onLiveScoreSaved={() => {
-              fetchVideoMeetingLiveAnswers(meetingUuid)
-                .then((data) => setLiveAnswers(data))
-                .catch(() => {});
-            }}
             materialPresence={materialPresence}
             attachError={attachError}
             toast={materialsToast}

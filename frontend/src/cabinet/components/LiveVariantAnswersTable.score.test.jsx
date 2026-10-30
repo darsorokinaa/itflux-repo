@@ -1,33 +1,25 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { Part2ScoreCell, lockedScoreFor } from "./LiveVariantAnswersTable.jsx";
+import { describe, it, expect } from "vitest";
+import { render, screen } from "@testing-library/react";
+import LiveVariantAnswersTable, { part2ScoreLabel, lockedScoreFor } from "./LiveVariantAnswersTable.jsx";
 
-const task = { id: 101, part: 2, maxScore: 3 };
-
-describe("r120 Part2ScoreCell", () => {
-  it("locked score is read-only", () => {
-    render(<Part2ScoreCell meetingUuid="u" row={{ studentId: 1, lockedScores: { 101: { score: 2 } } }} task={task} />);
-    expect(screen.getByTestId("part2-locked").textContent).toContain("2 / 3");
-    expect(screen.queryByRole("button")).toBeNull();
-  });
-  it("saves once then becomes read-only", async () => {
-    window.confirm = () => true;
-    const saveFn = vi.fn().mockResolvedValue({ ok: true });
-    render(<Part2ScoreCell meetingUuid="u" row={{ studentId: 1 }} task={task} saveFn={saveFn} />);
-    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "3" } });
-    fireEvent.click(screen.getByRole("button"));
-    await waitFor(() => expect(screen.getByTestId("part2-locked")).toBeTruthy());
-    expect(saveFn).toHaveBeenCalledWith("u", { studentId: 1, taskId: 101, score: 3 });
-  });
-  it("rejects out-of-range", () => {
-    const saveFn = vi.fn();
-    render(<Part2ScoreCell meetingUuid="u" row={{ studentId: 1 }} task={task} saveFn={saveFn} />);
-    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "5" } });
-    fireEvent.click(screen.getByRole("button"));
-    expect(saveFn).not.toHaveBeenCalled();
-  });
-  it("lockedScoreFor", () => {
+describe("r122 compact part-2 score", () => {
+  it("label", () => {
+    expect(part2ScoreLabel({ lockedScores: { 7: { score: 2 } } }, { id: 7, maxScore: 3 })).toBe("2/3");
+    expect(part2ScoreLabel({}, { id: 7, maxScore: 3 })).toBe("—");
     expect(lockedScoreFor({ lockedScores: { 7: 1 } }, { id: 7 })).toBe(1);
-    expect(lockedScoreFor({}, { id: 7 })).toBeNull();
+  });
+  it("table has no inputs or criteria, part-1 rows unchanged", () => {
+    const answers = {
+      tasks: [
+        { id: 1, number: 1, answer: "15", part: 1, maxScore: 1 },
+        { id: 7, number: 20, answer: "", part: 2, maxScore: 3 },
+      ],
+      students: [{ studentId: 1, displayName: "У", result: { by_task_id: { 1: "15", 7: "x" }, checked: { 1: true } }, lockedScores: { 7: { score: 2 } } }],
+    };
+    const { container } = render(<LiveVariantAnswersTable answers={answers} compact />);
+    expect(container.querySelector("input")).toBeNull();
+    expect(container.querySelector("details")).toBeNull();
+    expect(screen.getByText("2/3")).toBeTruthy();
+    expect(screen.getByText("верно")).toBeTruthy();
   });
 });

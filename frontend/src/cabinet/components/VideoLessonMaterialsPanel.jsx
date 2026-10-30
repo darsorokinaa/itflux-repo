@@ -240,8 +240,6 @@ export default function VideoLessonMaterialsPanel({
   event,
   liveAnswers,
   liveAnswersLoading,
-  meetingUuid = "",
-  onLiveScoreSaved,
   materialPresence = [],
   attachError = "",
   toast = "",
@@ -346,13 +344,7 @@ export default function VideoLessonMaterialsPanel({
       <div className="video-lesson-aside__scroll">
         {canManage && presented?.kind === "variant" ? (
           <section className="video-lesson-aside__section video-lesson-aside__section--live">
-            <LiveVariantAnswersTable
-              answers={liveAnswers}
-              loading={liveAnswersLoading}
-              compact
-              meetingUuid={canManage ? meetingUuid : ""}
-              onScoreSaved={onLiveScoreSaved}
-            />
+            <LiveVariantAnswersTable answers={liveAnswers} loading={liveAnswersLoading} compact />
           </section>
         ) : null}
         {!count && canManage ? (

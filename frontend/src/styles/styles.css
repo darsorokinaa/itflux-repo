@@ -16926,3 +16926,50 @@ body.exam-variant-view--edu main.container {
         width: auto;
     }
 }
+
+/* r122: оценка второй части учителем на живом уроке */
+.exam-variant-v2 .ev2-live-grade {
+    margin: 0 0 12px;
+    background: #f7f8ff;
+    border: 1px solid #e0e7ff;
+    border-radius: 10px;
+    padding: 12px 16px;
+}
+.exam-variant-v2 .ev2-live-grade--empty { color: #6b7280; }
+.exam-variant-v2 .ev2-live-grade__students {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+.exam-variant-v2 .ev2-live-grade__students .is-active {
+    border-color: #4f46e5;
+    color: #4f46e5;
+    font-weight: 600;
+}
+.exam-variant-v2 .ev2-live-grade__label {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    color: #6366f1;
+    margin-bottom: 6px;
+}
+.exam-variant-v2 .ev2-live-grade__answer {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 15px;
+    line-height: 1.5;
+}
+.exam-variant-v2 .ev2-live-grade__muted,
+.exam-variant-v2 .ev2-live-grade__hint { color: #6b7280; font-size: 14px; }
+.exam-variant-v2 .ev2-live-grade__hint { margin-top: 8px; }
+.exam-variant-v2 .ev2-live-grade__actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 12px;
+}
+.exam-variant-v2 .ev2-live-grade__error { color: #dc2626; font-size: 14px; }
+.exam-variant-v2 .ev2-live-grade__saved { margin-top: 12px; color: #15803d; }
