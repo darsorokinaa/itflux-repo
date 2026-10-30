@@ -190,6 +190,23 @@ def link_allowlist() -> tuple[str, ...]:
     return tuple(item.strip().casefold().rstrip(".") for item in raw if str(item).strip())
 
 
+def email_allowlist() -> tuple[str, ...]:
+    # r121: официальные адреса платформы, остальные email по-прежнему блокируются.
+    raw = getattr(settings, "MESSAGING_EMAIL_ALLOWLIST", None) or (
+        "itflux.academy@yandex.com",
+        "itflux.academy@yandex.ru",
+    )
+    return tuple(str(item).strip().casefold() for item in raw if str(item).strip())
+
+
+_EMAIL_FULL = re.compile(r"(?<![a-z0-9._%+-])[a-z0-9._%+-]{1,64}@[a-z0-9.-]+\.[a-z]{2,}(?![a-z0-9.-])", re.IGNORECASE)
+
+
+def _strip_allowed_emails(value: str) -> str:
+    allowed = set(email_allowlist())
+    return _EMAIL_FULL.sub(lambda m: " " if m.group(0).casefold().rstrip(".") in allowed else m.group(0), value)
+
+
 def host_allowed(hostname: str) -> bool:
     host = (hostname or "").casefold().rstrip(".")
     if not host or host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}:
@@ -254,7 +271,7 @@ def inspect_text(text: str, *, mention_labels: list[str] | None = None) -> Safet
     if not (text or "").strip():
         return allow()
     plain = _plain(text)
-    folded = _for_links(plain)
+    folded = _strip_allowed_emails(_for_links(plain))
     mentioned = _strip_mentions(plain, mention_labels or [])
 
     if _ACTIVE_HTML.search(plain) or _ACTIVE_HTML.search(text or ""):

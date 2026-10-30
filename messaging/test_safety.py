@@ -216,3 +216,29 @@ class PlatformDomainLinksR94Tests(TestCase):
         for url in ("https://itflux-academy.ru.evil.com/book/x", "https://evilitflux-academy.ru/x",
                     "https://itflux-academy.ru@evil.com/x", "https://google.com/"):
             self.assertIsNotNone(_verdict_for_url(url), url)
+
+
+@override_settings(MESSAGING_LINK_ALLOWLIST=["itflux-academy.ru"])
+class R121PlatformAddressAllowlistTests(TestCase):
+    def test_platform_addresses_allowed(self):
+        for text in [
+            "Откройте https://app.itflux-academy.ru и войдите",
+            "app.itflux-academy.ru",
+            "www.itflux-academy.ru, lesson.itflux-academy.ru, cdn.itflux-academy.ru, itflux-academy.ru",
+            "Пишите на itflux.academy@yandex.com, мы разберёмся.",
+            "или itflux.academy@yandex.ru",
+        ]:
+            self.assertFalse(inspect_text(text).blocked, text)
+
+    def test_everything_else_still_blocked(self):
+        for text in [
+            "https://example.com",
+            "itflux-academy.ru.evil.com",
+            "other@yandex.com",
+            "itflux.academy@gmail.com",
+            "xitflux.academy@yandex.com",
+            "itflux.academy@yandex.com.evil.org",
+            "+7 912 345-67-89",
+            "4276 1600 1234 5678",
+        ]:
+            self.assertTrue(inspect_text(text).blocked, text)
