@@ -16973,3 +16973,54 @@ body.exam-variant-view--edu main.container {
 }
 .exam-variant-v2 .ev2-live-grade__error { color: #dc2626; font-size: 14px; }
 .exam-variant-v2 .ev2-live-grade__saved { margin-top: 12px; color: #15803d; }
+
+/* r123: балл второй части, видимый ученику; кнопка сохранения балла учителем */
+.exam-variant-v2 .ev2-student-grade {
+  margin-top: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: #ecfdf3;
+  color: #067647;
+  font-size: 14px;
+  font-weight: 700;
+}
+.exam-variant-v2 .ev2-student-grade__value {
+  font-weight: 800;
+}
+.exam-variant-v2 .ev2-student-grade--pending {
+  background: #f4f3ff;
+  color: #5b54d6;
+  font-weight: 600;
+}
+.exam-variant-v2 .ev2-student-total {
+  margin-bottom: 16px;
+}
+.exam-variant-v2 .ev2-live-grade__save {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 18px;
+  border: none;
+  border-radius: 10px;
+  background: #4d43e6;
+  color: #fff;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(77, 67, 230, 0.2);
+  transition: background 0.16s ease, transform 0.16s ease;
+}
+.exam-variant-v2 .ev2-live-grade__save:hover:not(:disabled) {
+  background: #3d34c9;
+  transform: translateY(-1px);
+}
+.exam-variant-v2 .ev2-live-grade__save:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}

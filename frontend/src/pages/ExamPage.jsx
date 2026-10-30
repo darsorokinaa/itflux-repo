@@ -908,6 +908,8 @@ function ExamPage() {
   const [liveGradeStudentId, setLiveGradeStudentId] = useState(null);
   const [liveGradeBusy, setLiveGradeBusy] = useState(false);
   const [liveGradeError, setLiveGradeError] = useState("");
+  // r123: ученик видит баллы, зафиксированные учителем на уроке (опрос своей работы).
+  const [studentPollRaw, setStudentPollRaw] = useState(null);
   const [liveViewerSettled, setLiveViewerSettled] = useState(false);
   const liveAnswersSeqRef = useRef(0);
   const themeAssignSeqRef = useRef(0);
@@ -1274,6 +1276,27 @@ function ExamPage() {
       window.clearInterval(intervalId);
     };
   }, [meetingUuid, lessonEmbedParams.token]);
+
+  useEffect(() => {
+    if (!homeworkStudentMode || !isLiveVariant || !cabinetAssignmentId || isLiveTeacherView) return undefined;
+    let cancelled = false;
+    const opts = lessonEmbedParams.token ? { lessonToken: lessonEmbedParams.token } : undefined;
+    const tick = () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      fetchHomeworkAssignment(cabinetAssignmentId, opts)
+        .then((data) => {
+          if (!cancelled && data) setStudentPollRaw(data);
+        })
+        .catch(() => {
+          /* следующий опрос */
+        });
+    };
+    const id = window.setInterval(tick, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [homeworkStudentMode, isLiveVariant, cabinetAssignmentId, isLiveTeacherView, lessonEmbedParams.token]);
 
   useEffect(() => {
     if (!variant?.tasks || !hwApiRaw || isLiveTeacherView) return;
@@ -2179,6 +2202,17 @@ function ExamPage() {
     variant?.id,
     homeworkVariantList(hwApiRaw).map((row) => row.variantId),
   ) || {};
+  const studentGradeRaw = homeworkStudentMode ? (studentPollRaw || hwApiRaw) : null;
+  const studentGradeResult = studentGradeRaw
+    ? parseMaybeJsonObject(pickHomeworkFields(studentGradeRaw, cabinetAssignmentId || "").result) || {}
+    : {};
+  const studentLocks = studentGradeResult.lesson_locked_scores && typeof studentGradeResult.lesson_locked_scores === "object"
+    ? studentGradeResult.lesson_locked_scores
+    : {};
+  const studentScoring = studentGradeResult.scoring && typeof studentGradeResult.scoring === "object"
+    ? studentGradeResult.scoring
+    : null;
+  const showStudentLessonGrades = homeworkStudentMode && (isLiveVariant || Object.keys(studentLocks).length > 0);
   const homeworkReviewData = showHomeworkReviewedResults && variant?.tasks?.length
     ? buildHomeworkReviewFromVariant(variant.tasks, hwResultPayload, level, subject)
     : null;
@@ -3215,13 +3249,69 @@ function ExamPage() {
       <div className="ev2-live-grade__actions">
         <button
           type="button"
-          className="exam-edu-btn exam-edu-btn--primary"
+          className="ev2-live-grade__save"
           disabled={!ready || liveGradeBusy}
           onClick={save}
         >
           {liveGradeBusy ? "Сохранение…" : ready ? `Сохранить балл ${picked} / ${max}` : "Выберите балл в критериях"}
         </button>
         {liveGradeError ? <span className="ev2-live-grade__error">{liveGradeError}</span> : null}
+      </div>
+    );
+  }
+
+  function studentLessonGrade(task) {
+    if (!showStudentLessonGrades) return null;
+    let row = studentLocks[String(task.id)];
+    if (row == null && Array.isArray(studentScoring?.tasks)) {
+      // Балл, выставленный обычной проверкой ДЗ (не на уроке).
+      const sr = studentScoring.tasks.find((r) => String(r?.id) === String(task.id));
+      if (sr && sr.status !== "pending_review" && sr.status !== "unanswered" && sr.points != null) {
+        row = { score: sr.points, max: sr.max_points };
+      }
+    }
+    const value = row != null && typeof row === "object" ? row.score : row;
+    if (value == null) {
+      return (
+        <div className="ev2-student-grade ev2-student-grade--pending" data-testid="student-grade-pending">
+          Ожидает проверки
+        </div>
+      );
+    }
+    const max = Number((row && typeof row === "object" && row.max) ?? getTaskMaxScore(task));
+    return (
+      <div className="ev2-student-grade" data-testid="student-grade">
+        Балл: <span className="ev2-student-grade__value">{value} / {max}</span>
+      </div>
+    );
+  }
+
+  function studentLessonTotal() {
+    if (!showStudentLessonGrades || !studentScoring || studentScoring.max_points == null) return null;
+    const earned = Number(studentScoring.earned_points) || 0;
+    const max = Number(studentScoring.max_points) || 0;
+    const pending = Number(studentScoring.pending_review_count) || 0;
+    const pct = max > 0 ? Math.min(100, (earned / max) * 100) : 0;
+    return (
+      <div className="ev2-p2-summary ev2-student-total" data-testid="student-total">
+        <div className="ev2-p2-summary__left">
+          <div className="ev2-p2-summary__headline">
+            <span className="ev2-p2-summary__title">Итог варианта</span>
+            <span className="ev2-p2-summary__meta">
+              {" "}
+              · {pending > 0 ? `ожидает проверки: ${pending}` : "все задания проверены"}
+            </span>
+          </div>
+          <div className="ev2-p2-summary__bar-wrap">
+            <div className="ev2-p2-summary__bar">
+              <div className="ev2-p2-summary__bar-fill" style={{ width: `${pct}%` }} />
+            </div>
+          </div>
+        </div>
+        <div className="ev2-p2-summary__right">
+          <span className="ev2-p2-summary__score">{earned}</span>
+          <span className="ev2-p2-summary__max"> / {max}</span>
+        </div>
       </div>
     );
   }
@@ -4066,6 +4156,7 @@ function ExamPage() {
                               ev2Part2Main(task)
                             )}
                             {revisionAnswerNote(task)}
+                            {studentLessonGrade(task)}
                           </div>
                           </ExamTaskDrawingShell>
                           <LessonSolutionUpload
@@ -4180,6 +4271,7 @@ function ExamPage() {
                           ev2Part2Main(task)
                         )}
                         {revisionAnswerNote(task)}
+                        {studentLessonGrade(task)}
                       </div>
                       </ExamTaskDrawingShell>
                       <LessonSolutionUpload
@@ -4218,6 +4310,7 @@ function ExamPage() {
                   );
                 })}
 
+                {studentLessonTotal()}
                 {!hwScorePart1Only && (
                 <div className="ev2-p2-summary">
                   <div className="ev2-p2-summary__left">
