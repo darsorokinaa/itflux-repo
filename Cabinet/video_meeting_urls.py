@@ -79,6 +79,11 @@ urlpatterns = [
         name="video_meeting_live_answers",
     ),
     path(
+        "<uuid:meeting_uuid>/live-score/",
+        video_meeting_api.VideoMeetingLiveScoreView.as_view(),
+        name="video_meeting_live_score",
+    ),
+    path(
         "<uuid:meeting_uuid>/material-session/",
         video_meeting_api.VideoMeetingMaterialSessionView.as_view(),
         name="video_meeting_material_session",

@@ -681,6 +681,14 @@ export function fetchVideoMeetingLiveAnswers(meetingUuid) {
   return videoMeetingFetch(`/${meetingUuid}/live-answers/`, { method: "GET" });
 }
 
+/** r120: балл второй части на уроке — сохраняется один раз (повтор → 409). */
+export function saveVideoMeetingLiveScore(meetingUuid, { studentId, taskId, score }) {
+  return videoMeetingFetch(`/${meetingUuid}/live-score/`, {
+    method: "POST",
+    body: JSON.stringify({ studentId, taskId, score }),
+  });
+}
+
 export function fetchMeetingMaterialSession(meetingUuid) {
   return videoMeetingFetch(`/${meetingUuid}/material-session/`, { method: "GET" });
 }

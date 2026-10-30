@@ -3039,6 +3039,9 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
                 previous_snapshot = previous.get("tasks_snapshot")
                 previous_grading = previous.get("grading_snapshot")
                 payload = overlay_payload_attachments(submission, payload)
+                from .lesson_locked_scores import reapply_locked_scores
+
+                payload = reapply_locked_scores(payload, submission.result_payload)
                 if should_rescore:
                     payload = store_variant_scoring(
                         payload,

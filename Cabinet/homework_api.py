@@ -1474,7 +1474,7 @@ _RESULT_MAP_KEYS = (
     "comments_by_task_id",
     "comments_by_number",
 )
-_SERVER_RESULT_KEYS = ("scoring", "tasks_snapshot", "grading_snapshot", "legacy_view_snapshot")
+_SERVER_RESULT_KEYS = ("scoring", "tasks_snapshot", "grading_snapshot", "legacy_view_snapshot", "lesson_locked_scores")
 
 
 def _scoring_rows(payload) -> list[dict]:
@@ -2194,6 +2194,9 @@ class HomeworkAssignmentSaveDraftView(HomeworkAssignmentBaseView):
 
             ensure_payload_migrated(submission)
             merged = overlay_payload_attachments(submission, merged)
+            from .lesson_locked_scores import reapply_locked_scores
+
+            merged = reapply_locked_scores(merged, previous)
             merged = store_variant_scoring(
                 merged,
                 homework,

@@ -174,6 +174,9 @@ def submit_homework_for_student(
 
         ensure_payload_migrated(submission)
         merged = overlay_payload_attachments(submission, merged)
+        from .lesson_locked_scores import reapply_locked_scores
+
+        merged = reapply_locked_scores(merged, previous)
         merged = store_variant_scoring(
             merged,
             homework,

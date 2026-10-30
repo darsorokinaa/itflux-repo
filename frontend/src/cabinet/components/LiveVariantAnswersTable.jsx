@@ -1,4 +1,6 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import MathContent from "../../components/MathContent";
+import { saveVideoMeetingLiveScore } from "../../utils/cabinetAuth";
 import { isUserAnswerCorrect } from "../../utils/examAnswerCheck";
 import { TaskPosition } from "../../components/taskDocument/TaskNumber";
 
@@ -85,6 +87,9 @@ function buildTasks(answers) {
       number: t.number,
       displayNumber: index + 1,
       answer: t.answer || "",
+      part: t.part ?? null,
+      maxScore: t.maxScore ?? null,
+      criteria: t.criteria || null,
     }));
   }
   const byIdKeys = new Set();
@@ -109,11 +114,123 @@ function buildTasks(answers) {
   }));
 }
 
+export function lockedScoreFor(row, task) {
+  const locks = row?.lockedScores || {};
+  const lock = task?.id != null ? locks[String(task.id)] : undefined;
+  if (lock == null) return null;
+  const score = typeof lock === "object" ? lock.score : lock;
+  return score == null ? null : Number(score);
+}
+
+function CriteriaView({ criteria }) {
+  if (!criteria) return <p className="live-variant-answers__empty">Критерии не заданы</p>;
+  const axes = Array.isArray(criteria.axes) ? criteria.axes : [];
+  const list = Array.isArray(criteria.criteria) ? criteria.criteria : [];
+  if (criteria.scoring_mode === "axes" && axes.length) {
+    return (
+      <div className="live-variant-answers__criteria">
+        {axes.map((axis) => (
+          <div key={axis.code || axis.title}>
+            <strong>{axis.title}</strong>
+            {axis.max_score ? ` (макс. ${axis.max_score})` : null}
+            <ul>
+              {(axis.levels || []).map((lv) => (
+                <li key={lv.id}>
+                  <b>{lv.criteria_score}</b> — <MathContent html={lv.criteria_text || ""} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (!list.length) return <p className="live-variant-answers__empty">Критерии не заданы</p>;
+  return (
+    <ul className="live-variant-answers__criteria">
+      {list.map((c) => (
+        <li key={c.id}>
+          <b>{c.criteria_score}</b> — <MathContent html={c.criteria_text || ""} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Ввод балла второй части: один раз, после сохранения — только чтение. */
+export function Part2ScoreCell({ meetingUuid, row, task, onSaved, saveFn = saveVideoMeetingLiveScore }) {
+  const locked = lockedScoreFor(row, task);
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [savedLocal, setSavedLocal] = useState(null);
+  const max = Number(task.maxScore ?? 0);
+  const shown = locked ?? savedLocal;
+  if (shown != null) {
+    return (
+      <span className="live-variant-answers__ok" data-testid="part2-locked">
+        {shown} / {max} · сохранено
+      </span>
+    );
+  }
+  if (!meetingUuid) return <span className="live-variant-answers__empty">—</span>;
+  const submit = async () => {
+    const text = String(value).trim();
+    if (!/^\d+$/.test(text) || Number(text) > max) {
+      setError(`Введите целое от 0 до ${max}`);
+      return;
+    }
+    if (typeof window !== "undefined" && window.confirm &&
+        !window.confirm(`Сохранить ${text} из ${max}? Изменить балл потом будет нельзя.`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await saveFn(meetingUuid, { studentId: row.studentId, taskId: task.id, score: Number(text) });
+      setSavedLocal(Number(text));
+      onSaved?.();
+    } catch (err) {
+      if (err?.status === 409) {
+        setSavedLocal(Number(text));
+        onSaved?.();
+      }
+      setError(err?.message || "Не удалось сохранить");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <span className="live-variant-answers__score">
+      <input
+        type="number"
+        min={0}
+        max={max}
+        step={1}
+        value={value}
+        disabled={busy}
+        aria-label={`Балл из ${max}`}
+        onChange={(e) => setValue(e.target.value)}
+        style={{ width: "3.5em" }}
+      />
+      <span> / {max} </span>
+      <button type="button" disabled={busy || String(value).trim() === ""} onClick={submit}>
+        Сохранить
+      </button>
+      {error ? <span className="live-variant-answers__bad"> {error}</span> : null}
+    </span>
+  );
+}
+
 /**
  * Таблица ответов учеников по live-варианту на уроке.
  * @param {{ answers: object|null, loading?: boolean, compact?: boolean }} props
  */
-export default function LiveVariantAnswersTable({ answers, loading = false, compact = false }) {
+export default function LiveVariantAnswersTable({
+  answers,
+  loading = false,
+  compact = false,
+  meetingUuid = "",
+  onScoreSaved,
+}) {
   const students = answers?.students || [];
   const tasks = useMemo(() => buildTasks(answers), [answers]);
   const subject = String(answers?.subject || "").toLowerCase();
@@ -170,9 +287,26 @@ export default function LiveVariantAnswersTable({ answers, loading = false, comp
                             />
                           </td>
                           <td className="live-variant-answers__pre">{value.trim() ? value : "—"}</td>
-                          <td className="live-variant-answers__pre">{correct || "—"}</td>
+                          <td className="live-variant-answers__pre">
+                            {task.part === 2 ? (
+                              <details>
+                                <summary>Критерии</summary>
+                                {correct ? <div>{correct}</div> : null}
+                                <CriteriaView criteria={task.criteria} />
+                              </details>
+                            ) : (
+                              correct || "—"
+                            )}
+                          </td>
                           <td>
-                            {ok === true ? (
+                            {task.part === 2 ? (
+                              <Part2ScoreCell
+                                meetingUuid={meetingUuid}
+                                row={row}
+                                task={task}
+                                onSaved={onScoreSaved}
+                              />
+                            ) : ok === true ? (
                               <span className="live-variant-answers__ok">верно</span>
                             ) : ok === false ? (
                               <span className="live-variant-answers__bad">ошибка</span>

@@ -29,6 +29,7 @@ from .models import (
     VideoMeeting,
 )
 from .video_meeting_service import VideoMeetingError, assert_can_manage_meeting, resolve_access
+from .lesson_locked_scores import LOCK_KEY, grading_tasks, locked_scores, reapply_locked_scores
 
 
 PRESENT_KINDS = frozenset({"board", "variant"})
@@ -506,7 +507,7 @@ def live_variant_answers(*, meeting: VideoMeeting, user: User) -> dict:
         return {
             "presented": True,
             "students": [],
-            "tasks": _variant_tasks_answer_key(variant_id),
+            "tasks": _with_grading(_variant_tasks_answer_key(variant_id), variant_id),
             "variantId": variant_id,
             "title": payload.get("title") or "",
         }
@@ -515,7 +516,7 @@ def live_variant_answers(*, meeting: VideoMeeting, user: User) -> dict:
         return {
             "presented": True,
             "students": [],
-            "tasks": _variant_tasks_answer_key(variant_id),
+            "tasks": _with_grading(_variant_tasks_answer_key(variant_id), variant_id),
             "variantId": variant_id,
             "title": payload.get("title") or "",
         }
@@ -528,7 +529,7 @@ def live_variant_answers(*, meeting: VideoMeeting, user: User) -> dict:
         .order_by("updated_at", "id")
     ):
         submissions[row.student_id] = row
-    tasks = _variant_tasks_answer_key(variant_id)
+    tasks = _with_grading(_variant_tasks_answer_key(variant_id), variant_id)
     rows = []
     for student in event_students:
         submission = submissions.get(student.id)
@@ -547,6 +548,7 @@ def live_variant_answers(*, meeting: VideoMeeting, user: User) -> dict:
                     "scores": {},
                 },
                 "updatedAt": submission.updated_at.isoformat() if submission else None,
+                "lockedScores": locked_scores(submission.result_payload) if submission else {},
             }
         )
     return {
@@ -556,4 +558,105 @@ def live_variant_answers(*, meeting: VideoMeeting, user: User) -> dict:
         "title": payload.get("title") or homework.title,
         "tasks": tasks,
         "students": rows,
+    }
+
+
+def _with_grading(tasks: list[dict], variant_id) -> list[dict]:
+    """r120: часть, максимум и критерии второй части — только в учительском ответе."""
+    try:
+        info = {row["id"]: row for row in grading_tasks(variant_id)}
+    except Exception:
+        import logging
+        logging.getLogger("cabinet.meeting").exception("live grading info failed variant=%s", variant_id)
+        return tasks
+    for task in tasks:
+        extra = info.get(task.get("id"))
+        if extra:
+            task["part"] = extra["part"]
+            task["maxScore"] = extra["maxScore"]
+            if "criteria" in extra:
+                task["criteria"] = extra["criteria"]
+    return tasks
+
+
+def live_variant_set_score(*, meeting: VideoMeeting, user: User, student_id, task_id, score) -> dict:
+    """r120: учитель один раз выставляет балл за задание второй части на уроке."""
+    assert_can_manage_meeting(user, meeting)
+    if meeting.presented_kind != "variant":
+        raise VideoMeetingError("Вариант сейчас не показан.", status=400)
+    payload = meeting.presented_payload or {}
+    homework_id = payload.get("homeworkId")
+    variant_id = payload.get("variantId")
+    if not homework_id or not variant_id:
+        raise VideoMeetingError("Вариант не выдан ученикам.", status=400)
+    try:
+        student_id = int(student_id)
+        task_id = int(task_id)
+    except (TypeError, ValueError):
+        raise VideoMeetingError("Неверный ученик или задание.", status=400)
+    if student_id not in {s.id for s in list_event_students(meeting.schedule_event)}:
+        raise VideoMeetingError("Ученик не участвует в этом уроке.", status=400)
+    task = next((t for t in grading_tasks(variant_id) if t["id"] == task_id), None)
+    if task is None:
+        raise VideoMeetingError("Задание не входит в вариант.", status=400)
+    if task["part"] != 2:
+        raise VideoMeetingError("Балл вручную ставится только за вторую часть.", status=400)
+    max_score = int(task["maxScore"])
+    raw_score = str(score).strip() if isinstance(score, (int, str)) and not isinstance(score, bool) else ""
+    if not raw_score.isdigit():
+        raise VideoMeetingError(f"Балл должен быть целым числом от 0 до {max_score}.", status=400)
+    value = int(raw_score)
+    if value < 0 or value > max_score:
+        raise VideoMeetingError(f"Балл должен быть от 0 до {max_score}.", status=400)
+
+    homework = Homework.objects.filter(pk=homework_id).first()
+    if homework is None:
+        raise VideoMeetingError("Работа не найдена.", status=404)
+    from .homework_api import assign_submission_score, store_variant_scoring
+
+    with transaction.atomic():
+        submission = (
+            HomeworkSubmission.objects.select_for_update()
+            .filter(homework=homework, student_id=student_id)
+            .order_by("-updated_at", "-id")
+            .first()
+        )
+        if submission is None:
+            raise VideoMeetingError("Ученик ещё не начал вариант.", status=400)
+        result = dict(submission.result_payload) if isinstance(submission.result_payload, dict) else {}
+        locks = dict(locked_scores(result))
+        key = str(task_id)
+        if key in locks:
+            raise VideoMeetingError("Балл уже сохранён и не может быть изменён.", status=409)
+        locks[key] = {
+            "score": value,
+            "max": max_score,
+            "at": timezone.now().isoformat(),
+            "by": getattr(user, "pk", None),
+        }
+        result[LOCK_KEY] = locks
+        result = reapply_locked_scores(result)
+        previous = submission.result_payload if isinstance(submission.result_payload, dict) else {}
+        result = store_variant_scoring(
+            result,
+            homework,
+            previous_snapshot=previous.get("tasks_snapshot") if isinstance(previous.get("tasks_snapshot"), list) else None,
+            previous_grading=previous.get("grading_snapshot") if isinstance(previous.get("grading_snapshot"), list) else None,
+        )
+        submission.result_payload = result
+        assign_submission_score(submission, result)
+        submission.save(update_fields=["result_payload", "score", "updated_at"])
+    score_out = submission.score
+    try:
+        score_out = float(score_out) if score_out is not None else None
+    except (TypeError, ValueError):
+        score_out = None
+    return {
+        "ok": True,
+        "studentId": student_id,
+        "taskId": task_id,
+        "score": value,
+        "maxScore": max_score,
+        "lockedScores": locks,
+        "total": score_out,
     }

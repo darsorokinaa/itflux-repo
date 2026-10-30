@@ -26,6 +26,7 @@ from .meeting_material_session import (
 from .meeting_present import (
     clear_presented,
     live_variant_answers,
+    live_variant_set_score,
     present_board,
     present_variant,
     redact_plan_item_for_student,
@@ -547,6 +548,27 @@ class VideoMeetingLiveAnswersView(APIView):
         try:
             meeting = get_meeting_by_uuid(meeting_uuid)
             payload = live_variant_answers(meeting=meeting, user=request.user)
+        except VideoMeetingError as exc:
+            return _error_response(exc)
+        return Response(payload)
+
+
+class VideoMeetingLiveScoreView(APIView):
+    """r120: учитель один раз сохраняет балл за задание второй части (дальше 409)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, meeting_uuid):
+        data = request.data if isinstance(request.data, dict) else {}
+        try:
+            meeting = get_meeting_by_uuid(meeting_uuid)
+            payload = live_variant_set_score(
+                meeting=meeting,
+                user=request.user,
+                student_id=data.get("studentId"),
+                task_id=data.get("taskId"),
+                score=data.get("score"),
+            )
         except VideoMeetingError as exc:
             return _error_response(exc)
         return Response(payload)
