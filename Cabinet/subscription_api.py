@@ -103,6 +103,7 @@ def _plan_public(plan, *, promotion=None) -> dict:
             "lessons": plan.max_lessons,
             "interactives": plan.max_interactives,
             "variants_monthly": plan.max_variants_monthly,
+            "variants_per_student_monthly": plan.max_variants_per_student_monthly,
             "workbooks_monthly": plan.max_workbooks_monthly,
             "storage_mb": plan.max_storage_mb,
             "teacher_tasks": getattr(plan, "max_teacher_tasks", 20),

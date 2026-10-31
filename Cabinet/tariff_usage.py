@@ -293,6 +293,7 @@ class TariffUsageService:
             "lessons": plan.max_lessons,
             "interactives": plan.max_interactives,
             "variants_monthly": plan.max_variants_monthly,
+            "variants_per_student_monthly": plan.max_variants_per_student_monthly,
             "workbooks_monthly": plan.max_workbooks_monthly,
             "storage_mb": plan.max_storage_mb,
             "ai_requests": plan.ai_requests_monthly_limit,

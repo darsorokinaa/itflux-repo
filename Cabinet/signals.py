@@ -176,3 +176,21 @@ def _connect_r43():
 
 
 _connect_r43()
+
+
+# r125: учёт/лимит выдачи вариантов ученикам через ДЗ.
+from .models import HomeworkTask as _R125HomeworkTask  # noqa: E402
+
+
+@receiver(pre_save, sender=_R125HomeworkTask)
+def r125_variant_limit_pre_save(sender, instance, **kwargs):
+    from .variant_issuance import on_homework_task_pre_save
+
+    on_homework_task_pre_save(instance)
+
+
+@receiver(post_save, sender=_R125HomeworkTask)
+def r125_variant_issuance_post_save(sender, instance, **kwargs):
+    from .variant_issuance import on_homework_task_post_save
+
+    on_homework_task_post_save(instance)

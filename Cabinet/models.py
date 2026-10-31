@@ -3487,6 +3487,12 @@ class TariffPlan(models.Model):
         default=5,
         help_text="Пусто — без лимита",
     )
+    max_variants_per_student_monthly = models.PositiveIntegerField(
+        "Вариантов на ученика / мес",
+        null=True,
+        blank=True,
+        help_text="r125: уникальных вариантов одному ученику в календарный месяц. Пусто — без лимита",
+    )
     max_variants_monthly = models.PositiveIntegerField(
         "Лимит вариантов / мес",
         null=True,
@@ -5501,3 +5507,4 @@ class SocialAccount(models.Model):
 from .r50_models import EmailOptOut, SubscriptionReminderLog, TrialGrant  # noqa: E402, F401
 from .oneshot_models import OneShotPopup  # noqa: E402, F401
 from .cdn_handoff_models import CdnHandoffToken, CdnPreference  # noqa: E402, F401
+from .variant_live_models import VariantIssuance, VariantLiveSession  # noqa: E402, F401

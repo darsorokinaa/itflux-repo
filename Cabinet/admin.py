@@ -975,7 +975,7 @@ class TariffPlanAdmin(admin.ModelAdmin):
         ("Лимиты", {
             "fields": (
                 "max_students", "max_groups", "max_lessons", "max_interactives",
-                "max_variants_monthly", "max_workbooks_monthly",
+                "max_variants_monthly", "max_variants_per_student_monthly", "max_workbooks_monthly",
                 "content_access_rank", "max_storage_mb",
                 "max_teacher_tasks", "max_teacher_task_copies_monthly",
                 "max_teacher_task_collections",

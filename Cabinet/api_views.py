@@ -797,7 +797,10 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
                         after=after,
                         exclude_event_id=exclude_event_id,
                     )
-                homework = assign_custom_homework(
+                from .variant_issuance import enforce_variant_limits
+
+                with enforce_variant_limits():
+                  homework = assign_custom_homework(
                     teacher=self.get_teacher(),
                     student=student,
                     title=request.data.get("title"),
@@ -809,7 +812,7 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         except PermissionError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+            return Response(exc.to_dict() if hasattr(exc, "to_dict") else {"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
 
         if ss_id:
             from .student_subjects import get_teacher_student_subject
@@ -3525,7 +3528,10 @@ class HomeworkDetailView(TeacherScopedMixin, APIView):
             return err
         data = request.data if isinstance(request.data, dict) else {}
         try:
-            result = update_issued_homework(
+            from .variant_issuance import enforce_variant_limits
+
+            with enforce_variant_limits():
+                result = update_issued_homework(
                 homework=homework,
                 teacher=request.user,
                 data=data,
@@ -3541,7 +3547,7 @@ class HomeworkDetailView(TeacherScopedMixin, APIView):
                 status=status.HTTP_409_CONFLICT,
             )
         except PermissionError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+            return Response(exc.to_dict() if hasattr(exc, "to_dict") else {"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(result, status=status.HTTP_200_OK)
@@ -3622,7 +3628,10 @@ class HomeworkTasksAddView(TeacherScopedMixin, APIView):
         homework = get_object_or_404(Homework, pk=homework_id, teacher=request.user)
         data = request.data if isinstance(request.data, dict) else {}
         try:
-            result = add_tasks_to_homework(
+            from .variant_issuance import enforce_variant_limits
+
+            with enforce_variant_limits():
+                result = add_tasks_to_homework(
                 homework=homework,
                 teacher=request.user,
                 material_ids=data.get("material_ids") or [],
@@ -3631,7 +3640,7 @@ class HomeworkTasksAddView(TeacherScopedMixin, APIView):
                 text_title=data.get("text_title") or data.get("title") or "",
             )
         except PermissionError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+            return Response(exc.to_dict() if hasattr(exc, "to_dict") else {"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(result, status=status.HTTP_200_OK)
@@ -3677,6 +3686,13 @@ class HomeworkCopyView(TeacherScopedMixin, APIView):
         due_at = data.get("due_at") if "due_at" in data else None
 
         try:
+            from .variant_issuance import precheck_homework_copy
+
+            precheck_homework_copy(
+                request.user,
+                homework,
+                list(Student.objects.filter(teacher=request.user, pk__in=[int(s) for s in student_ids if str(s).isdigit()])),
+            )
             result = copy_homework_to_students(
                 teacher=request.user,
                 source_homework=homework,
@@ -3685,7 +3701,7 @@ class HomeworkCopyView(TeacherScopedMixin, APIView):
                 keep_due_at=keep_due,
             )
         except PermissionError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+            return Response(exc.to_dict() if hasattr(exc, "to_dict") else {"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 

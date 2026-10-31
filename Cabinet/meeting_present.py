@@ -317,6 +317,16 @@ def present_variant(
     if not variant_url:
         raise VideoMeetingError("Нужна ссылка на вариант", code="invalid_variant", status=400)
 
+    # r125: показ варианта на уроке тоже расходует лимит «вариантов на ученика в месяц».
+    from . import variant_issuance
+
+    try:
+        variant_issuance.check_and_record(
+            user, list_event_students(event), extract_variant_id(variant_url), source="lesson",
+        )
+    except variant_issuance.VariantLimitExceeded as exc:
+        raise VideoMeetingError(exc.message, code=variant_issuance.LIMIT_CODE, status=403)
+
     homework = _ensure_live_variant_homework(
         event=event,
         teacher=user,
@@ -521,17 +531,26 @@ def live_variant_answers(*, meeting: VideoMeeting, user: User) -> dict:
             "title": payload.get("title") or "",
         }
 
-    event_students = list_event_students(meeting.schedule_event)
+    return build_live_answers(
+        homework=homework,
+        variant_id=variant_id,
+        students=list_event_students(meeting.schedule_event),
+        title=payload.get("title") or homework.title,
+    )
+
+
+def build_live_answers(*, homework, variant_id, students, title="") -> dict:
+    """r125: общий ответ таблицы live-ответов (урок и «Решать вариант»)."""
     # При дублях берём последнюю правку, иначе опрос показывает старый черновик.
     submissions = {}
     for row in (
-        HomeworkSubmission.objects.filter(homework=homework, student__in=event_students)
+        HomeworkSubmission.objects.filter(homework=homework, student__in=students)
         .order_by("updated_at", "id")
     ):
         submissions[row.student_id] = row
     tasks = _with_grading(_variant_tasks_answer_key(variant_id), variant_id)
     rows = []
-    for student in event_students:
+    for student in students:
         submission = submissions.get(student.id)
         assignment = serialize_assignment_payload(homework=homework, submission=submission)
         rows.append(
@@ -555,7 +574,7 @@ def live_variant_answers(*, meeting: VideoMeeting, user: User) -> dict:
         "presented": True,
         "homeworkId": homework.id,
         "variantId": variant_id,
-        "title": payload.get("title") or homework.title,
+        "title": title or homework.title,
         "tasks": tasks,
         "students": rows,
     }
@@ -589,13 +608,29 @@ def live_variant_set_score(*, meeting: VideoMeeting, user: User, student_id, tas
     variant_id = payload.get("variantId")
     if not homework_id or not variant_id:
         raise VideoMeetingError("Вариант не выдан ученикам.", status=400)
+    homework = Homework.objects.filter(pk=homework_id).first()
+    if homework is None:
+        raise VideoMeetingError("Работа не найдена.", status=404)
+    return set_locked_live_score(
+        homework=homework,
+        variant_id=variant_id,
+        allowed_student_ids={s.id for s in list_event_students(meeting.schedule_event)},
+        user=user,
+        student_id=student_id,
+        task_id=task_id,
+        score=score,
+    )
+
+
+def set_locked_live_score(*, homework, variant_id, allowed_student_ids, user, student_id, task_id, score) -> dict:
+    """r125: общий для урока и «Решать вариант» одноразовый балл второй части."""
     try:
         student_id = int(student_id)
         task_id = int(task_id)
     except (TypeError, ValueError):
         raise VideoMeetingError("Неверный ученик или задание.", status=400)
-    if student_id not in {s.id for s in list_event_students(meeting.schedule_event)}:
-        raise VideoMeetingError("Ученик не участвует в этом уроке.", status=400)
+    if student_id not in set(allowed_student_ids):
+        raise VideoMeetingError("Ученик не участвует в этой работе.", status=400)
     task = next((t for t in grading_tasks(variant_id) if t["id"] == task_id), None)
     if task is None:
         raise VideoMeetingError("Задание не входит в вариант.", status=400)
@@ -609,9 +644,6 @@ def live_variant_set_score(*, meeting: VideoMeeting, user: User, student_id, tas
     if value < 0 or value > max_score:
         raise VideoMeetingError(f"Балл должен быть от 0 до {max_score}.", status=400)
 
-    homework = Homework.objects.filter(pk=homework_id).first()
-    if homework is None:
-        raise VideoMeetingError("Работа не найдена.", status=404)
     from .homework_api import assign_submission_score, store_variant_scoring
 
     with transaction.atomic():

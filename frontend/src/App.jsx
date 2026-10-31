@@ -44,6 +44,8 @@ const CabinetLibraryPage = lazy(() => import("./cabinet/pages/CabinetLibraryPage
 const CabinetSchedulePage = lazy(() => import("./cabinet/pages/CabinetSchedulePage"));
 const CabinetMessagesPage = lazy(() => import("./cabinet/pages/CabinetMessagesPage"));
 const CommunityInvitePage = lazy(() => import("./cabinet/pages/CommunityInvitePage"));
+const VariantLiveJoinPage = lazy(() => import("./cabinet/pages/VariantLiveJoinPage"));
+const LiveVariantsPage = lazy(() => import("./cabinet/pages/LiveVariantsPage"));
 const CabinetLessonPlansPage = lazy(() => import("./cabinet/pages/CabinetLessonPlansPage"));
 const CabinetLessonPlanDetailPage = lazy(() => import("./cabinet/pages/CabinetLessonPlanDetailPage"));
 const CabinetLessonPlanEditorPage = lazy(() => import("./cabinet/pages/CabinetLessonPlanEditorPage"));
@@ -428,6 +430,7 @@ function App() {
           <Route path="/book/:token/" element={<TeacherBookingPage />} />
           <Route path="/invite/:token" element={<CabinetJoinPage />} />
           <Route path="/invite/:token/" element={<CabinetJoinPage />} />
+          <Route path="/variant-live/:sessionId" element={<VariantLiveJoinPage />} />
           <Route path="/community/invite/:token" element={<CommunityInvitePage />} />
           <Route path="/community/invite/:token/" element={<CommunityInvitePage />} />
           <Route path="/parent/invite/accept/:token" element={<ParentInviteAcceptPage />} />
@@ -594,6 +597,7 @@ function App() {
             <Route path="ai" element={<Navigate to="/cabinet" replace />} />
             <Route path="more" element={<CabinetMorePage />} />
             <Route path="upgrade" element={<CabinetUpgradePage />} />
+            <Route path="live-variants" element={<LiveVariantsPage />} />
             <Route path="variant-themes" element={<CabinetVariantThemesPage />} />
             <Route path="variant-themes/:themeId" element={<CabinetVariantThemeEditorPage />} />
           </Route>

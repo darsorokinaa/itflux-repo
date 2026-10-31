@@ -2885,3 +2885,64 @@ export function myFilePreviewUrl(fileId, { student = false, shared = false } = {
   if (shared) return `${apiBase()}/student/files/shared/${fileId}/preview/`;
   return `${apiBase()}${filesBase(student)}/${fileId}/preview/`;
 }
+
+// ---------- r125: «Решать вариант» вне урока ----------
+
+export function createVariantLiveSession({ variantUrl, title = "", studentId = null }) {
+  return cabinetFetch("/variant-live/", {
+    method: "POST",
+    body: JSON.stringify({ variantUrl, title, studentId }),
+  });
+}
+
+export function fetchVariantLiveSessions({ variantId } = {}) {
+  const q = variantId ? `?variant_id=${encodeURIComponent(variantId)}` : "";
+  return cabinetFetch(`/variant-live/${q}`, { method: "GET" });
+}
+
+export function fetchVariantLiveSession(sessionId) {
+  return cabinetFetch(`/variant-live/${encodeURIComponent(sessionId)}/`, { method: "GET" });
+}
+
+export function closeVariantLiveSession(sessionId) {
+  return cabinetFetch(`/variant-live/${encodeURIComponent(sessionId)}/`, { method: "DELETE" });
+}
+
+export function joinVariantLiveSession(sessionId) {
+  return cabinetFetch(`/variant-live/${encodeURIComponent(sessionId)}/join/`, { method: "POST" });
+}
+
+export function fetchVariantLiveAnswers(sessionId) {
+  return cabinetFetch(`/variant-live/${encodeURIComponent(sessionId)}/answers/`, { method: "GET" });
+}
+
+export function saveVariantLiveScore(sessionId, { studentId, taskId, score }) {
+  return cabinetFetch(`/variant-live/${encodeURIComponent(sessionId)}/score/`, {
+    method: "POST",
+    body: JSON.stringify({ studentId, taskId, score }),
+  });
+}
+
+export function fetchVariantIssueQuota(variantId) {
+  return cabinetFetch(`/variant-live/quota/?variant_id=${encodeURIComponent(variantId || "")}`, { method: "GET" });
+}
+
+/** r125: live-ответы из урока (meeting) или из «Решать вариант» (session). */
+export function fetchLiveAnswersFor({ meetingUuid = "", sessionId = "" } = {}) {
+  if (meetingUuid) return fetchVideoMeetingLiveAnswers(meetingUuid);
+  return fetchVariantLiveAnswers(sessionId);
+}
+
+export function saveLiveScoreFor({ meetingUuid = "", sessionId = "" } = {}, payload) {
+  if (meetingUuid) return saveVideoMeetingLiveScore(meetingUuid, payload);
+  return saveVariantLiveScore(sessionId, payload);
+}
+
+export const VARIANT_LIMIT_CODE = "VARIANT_PER_STUDENT_LIMIT";
+
+/** Сообщение об ошибке лимита вариантов (или null, если это другая ошибка). */
+export function variantLimitMessage(err) {
+  const data = err?.data || {};
+  if (err?.code !== VARIANT_LIMIT_CODE && data.code !== VARIANT_LIMIT_CODE) return null;
+  return { text: data.detail || err?.message || "Достигнут лимит вариантов", upgradeUrl: data.upgrade_url || "/cabinet/upgrade" };
+}

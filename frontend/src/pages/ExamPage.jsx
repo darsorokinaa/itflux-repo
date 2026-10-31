@@ -90,7 +90,8 @@ import VariantThemeSelector from "../variantThemes/VariantThemeSelector";
 import { TravelMiniMap } from "../variantThemes/TravelMarks";
 import { assignVariantTheme } from "../variantThemes/variantThemeApi";
 import { meetingUuidFromFrame } from "../cabinet/meetingPresent";
-import { fetchCabinetSession, fetchVideoMeetingLiveAnswers, isTeacherRole, saveVideoMeetingLiveScore } from "../utils/cabinetAuth";
+import { fetchCabinetSession, fetchLiveAnswersFor, isTeacherRole, saveLiveScoreFor } from "../utils/cabinetAuth";
+import LiveSolveModal from "../cabinet/components/LiveSolveModal";
 import LiveVariantAnswersTable, { liveStudentAnswer, lockedScoreFor } from "../cabinet/components/LiveVariantAnswersTable";
 import "../cabinet/styles/live-variant-answers.css";
 import HomeworkReviewResults, {
@@ -893,6 +894,16 @@ function ExamPage() {
     }
     return meetingUuidFromFrame(location.search, parentPath);
   }, [location.search]);
+  // r125: «Решать вариант» вне урока — учитель открывает вариант с ?live_session=<uuid>.
+  const liveSessionId = useMemo(() => {
+    try {
+      return new URLSearchParams(location.search).get("live_session") || "";
+    } catch {
+      return "";
+    }
+  }, [location.search]);
+  const liveSource = meetingUuid || liveSessionId;
+  const [liveSolveOpen, setLiveSolveOpen] = useState(false);
   const isEmbeddedHomework = isHomework && lessonEmbedParams.embed;
   const isCabinetHomework = isHomework && !lessonEmbedParams.embed;
   /** Полноэкранный EdTech-макет с сайдбаром: не урок (в т.ч. ДЗ из кабинета ученика) */
@@ -917,7 +928,7 @@ function ExamPage() {
   const isTeacherHomeworkView =
     (isHomework && lessonEmbedParams.embed && !lessonEmbedParams.student)
     || isLiveTeacherView
-    || Boolean(isLiveVariant && meetingUuid && isTeacherRole(cabinetUser));
+    || Boolean(isLiveVariant && liveSource && isTeacherRole(cabinetUser));
   const homeworkStudentMode = isHomework && !isTeacherHomeworkView;
   const [hwApiRaw, setHwApiRaw] = useState(null);
   const [hwLoading, setHwLoading] = useState(() => Boolean(
@@ -1223,7 +1234,7 @@ function ExamPage() {
   // Учитель на вкладке варианта (?meeting=): таблица ответов только в сайдбаре,
   // чтобы не перекрывать задачи. Не завязаны на live_meeting в URL — достаточно live-answers.
   useEffect(() => {
-    if (!meetingUuid) {
+    if (!liveSource) {
       setIsLiveTeacherView(false);
       setLiveAnswers(null);
       setLiveViewerSettled(false);
@@ -1245,7 +1256,7 @@ function ExamPage() {
       const my = ++liveAnswersSeqRef.current;
       setLiveAnswersLoading(true);
       try {
-        const data = await fetchVideoMeetingLiveAnswers(meetingUuid);
+        const data = await fetchLiveAnswersFor({ meetingUuid, sessionId: liveSessionId });
         if (cancelled || my !== liveAnswersSeqRef.current) return;
         const show = Boolean(data?.presented);
         setIsLiveTeacherView(show);
@@ -1275,7 +1286,7 @@ function ExamPage() {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [meetingUuid, lessonEmbedParams.token]);
+  }, [liveSource, meetingUuid, liveSessionId, lessonEmbedParams.token]);
 
   useEffect(() => {
     if (!homeworkStudentMode || !isLiveVariant || !cabinetAssignmentId || isLiveTeacherView) return undefined;
@@ -1961,13 +1972,13 @@ function ExamPage() {
 
   // Живой урок: в базу уходят ответы и прогресс попытки (задание, startedAt).
   useEffect(() => {
-    const teacherSide = isLiveTeacherView || Boolean(isLiveVariant && meetingUuid && isTeacherRole(cabinetUser));
+    const teacherSide = isLiveTeacherView || Boolean(isLiveVariant && liveSource && isTeacherRole(cabinetUser));
     const studentSide = Boolean(cabinetUser) && !isTeacherRole(cabinetUser);
     if (
       !shouldAutosaveLiveVariant({
         isLiveVariant,
         teacherSide,
-        meetingUuid,
+        meetingUuid: liveSource,
         viewerSettled: liveViewerSettled,
         studentSide,
       })
@@ -2022,7 +2033,7 @@ function ExamPage() {
   }, [
     isLiveVariant,
     isLiveTeacherView,
-    meetingUuid,
+    liveSource,
     liveViewerSettled,
     cabinetUser,
     cabinetAssignmentId,
@@ -3233,12 +3244,12 @@ function ExamPage() {
       setLiveGradeBusy(true);
       setLiveGradeError("");
       try {
-        await saveVideoMeetingLiveScore(meetingUuid, { studentId: current.studentId, taskId: task.id, score: value });
+        await saveLiveScoreFor({ meetingUuid, sessionId: liveSessionId }, { studentId: current.studentId, taskId: task.id, score: value });
       } catch (err) {
         setLiveGradeError(err?.message || "Не удалось сохранить балл");
       }
       try {
-        const data = await fetchVideoMeetingLiveAnswers(meetingUuid);
+        const data = await fetchLiveAnswersFor({ meetingUuid, sessionId: liveSessionId });
         if (data?.presented) setLiveAnswers(data);
       } catch {
         /* следующий опрос обновит */
@@ -3626,6 +3637,16 @@ function ExamPage() {
                       >
                         {linkCopied ? "Скопировано" : "Скопировать ссылку"}
                       </button>
+                      {isTeacherRole(cabinetUser) && !isHomework && (
+                        <button
+                          type="button"
+                          className="exam-edu-btn exam-edu-btn--live"
+                          onClick={() => setLiveSolveOpen(true)}
+                          title="Ученик решает по ссылке, а вы видите ответы в реальном времени"
+                        >
+                          Решать вариант
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -4528,6 +4549,14 @@ function ExamPage() {
         open={lightbox.open}
         onClose={() => setLightbox((s) => ({ ...s, open: false }))}
       />
+      {liveSolveOpen && (
+        <LiveSolveModal
+          variantUrl={`/${level}/${subject}/variant/${variant_id}`}
+          variantId={variant_id}
+          title={variant?.title || ""}
+          onClose={() => setLiveSolveOpen(false)}
+        />
+      )}
       <SupportInfoModal
         open={supportInfo.open}
         items={supportInfo.items}

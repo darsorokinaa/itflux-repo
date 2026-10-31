@@ -51,7 +51,15 @@ router.register("schedule-series", schedule_api.ScheduleSeriesViewSet, basename=
 router.register("notifications", schedule_api.NotificationViewSet, basename="cabinet-notifications")
 router.register("materials", api_views.MaterialViewSet, basename="cabinet-materials")
 
+from . import variant_live as _r125_variant_live  # noqa: E402
+
 urlpatterns = [
+    path("variant-live/", _r125_variant_live.VariantLiveListView.as_view(), name="variant_live_list"),
+    path("variant-live/quota/", _r125_variant_live.VariantIssueQuotaView.as_view(), name="variant_live_quota"),
+    path("variant-live/<uuid:session_id>/", _r125_variant_live.VariantLiveDetailView.as_view(), name="variant_live_detail"),
+    path("variant-live/<uuid:session_id>/join/", _r125_variant_live.VariantLiveJoinView.as_view(), name="variant_live_join"),
+    path("variant-live/<uuid:session_id>/answers/", _r125_variant_live.VariantLiveAnswersView.as_view(), name="variant_live_answers"),
+    path("variant-live/<uuid:session_id>/score/", _r125_variant_live.VariantLiveScoreView.as_view(), name="variant_live_score"),
     path(
         "client-telemetry/",
         client_telemetry.client_telemetry,
