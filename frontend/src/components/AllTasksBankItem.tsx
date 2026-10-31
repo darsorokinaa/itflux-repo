@@ -7,6 +7,7 @@ import MathContent from "./MathContent";
 import { TaskFileAttachments } from "./TaskFileAttachment";
 // @ts-ignore JSX module without d.ts
 import TaskNoAnswerBadge from "./TaskNoAnswerBadge";
+import TaskAnswerCheck from "./TaskAnswerCheck"; // r130
 import { AllTasksTaskTagsEditor, type TaskTag } from "./AllTasksTagEditor";
 // @ts-ignore JS module without d.ts
 import { isOgeMathPictureTask } from "../utils/examTaskPart";
@@ -220,6 +221,9 @@ const AllTasksTaskBody = memo(function AllTasksTaskBody({
           showGroup
           onSaved={onStaffSaved}
         />
+      ) : null}
+      {answerHtml && Number((task as { part_id?: number | string | null }).part_id) !== 2 ? (
+        <TaskAnswerCheck taskId={task.id} />
       ) : null}
       {answerHtml ? (
         <div className="all-tasks-item__answer-foot">

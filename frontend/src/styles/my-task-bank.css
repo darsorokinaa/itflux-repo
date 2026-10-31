@@ -1206,3 +1206,18 @@
   color: #64748b;
   font-size: 0.8rem;
 }
+
+/* r130: открытый банк задач */
+.public-tasks-shell { min-height: 60vh; }
+.public-tasks-banner { margin: 12px auto 0; max-width: 1200px; padding: 10px 16px; border-radius: 12px; background: #efeefe; color: #2b2670; font-size: 14px; line-height: 1.45; }
+.public-tasks-banner a { color: #4d43e6; font-weight: 600; }
+.all-tasks-check { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 4px; }
+.all-tasks-check__input { flex: 0 1 220px; min-width: 140px; padding: 8px 12px; border: 1px solid #d6d4f5; border-radius: 10px; font: inherit; }
+.all-tasks-check__input:focus { outline: 2px solid #4d43e6; outline-offset: 1px; }
+.all-tasks-check__btn { padding: 8px 16px; border: 0; border-radius: 10px; background: #4d43e6; color: #fff; font-weight: 600; cursor: pointer; }
+.all-tasks-check__btn:disabled { opacity: .5; cursor: default; }
+.all-tasks-check__msg { flex-basis: 100%; font-size: 14px; }
+.all-tasks-check__msg--correct { color: #16833a; font-weight: 600; }
+.all-tasks-check__msg--wrong, .all-tasks-check__msg--error, .all-tasks-check__msg--limit { color: #b42318; }
+.all-tasks-check__reg { color: #4d43e6; font-weight: 600; }
+@media (max-width: 640px) { .all-tasks-check__input { flex: 1 1 100%; } .all-tasks-check__btn { flex: 1 1 100%; } }

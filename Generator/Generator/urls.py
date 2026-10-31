@@ -9,6 +9,7 @@ from . import views
 from . import cdn_handoff  # r93
 from . import load_timing  # r105
 from . import seo_tasks  # r36
+from . import public_task_check  # r130
 from . import seasonal_theme_api
 from . import variant_theme_api
 from Cabinet import homework_api
@@ -343,6 +344,7 @@ urlpatterns = [
         name="api_task_bank_filters",
     ),
     path("api/<str:level>/<str:subject>/task-bank/", views.api_task_bank, name="api_task_bank"),
+    path("api/tasks/<int:task_id>/check-answer/", public_task_check.api_task_check_answer, name="api_task_check_answer"),  # r130
     path("api/task-tags/", views.api_task_tags_catalog, name="api_task_tags_catalog"),
     path(
         "api/task-tags/<int:tag_id>/",

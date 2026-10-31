@@ -32,6 +32,7 @@ import { openSupport } from "./support";
 import SoonModal from "../components/SoonModal";
 import EducationalLoading, { LOADING_MESSAGES } from "../components/EducationalLoading";
 import { rememberReturnPath, safeReturnPath } from "../accessGate/accessGate";
+import { isPublicTasksPath } from "./publicTasks"; // r130
 import { redirectIfServerPrefersCdn, reportFallbackArrival } from "./cdnAutoSwitch"; // r93b, r95
 import TimewebAiEmbed, { planHasTimewebAi } from "./TimewebAiEmbed";
 import "../styles/cabinet-dashboard.css";
@@ -338,6 +339,19 @@ export default function CabinetLayout() {
     return (
       <div className="cb-loading-screen">
         <EducationalLoading message={LOADING_MESSAGES.page} />
+      </div>
+    );
+  }
+
+  if (!user && isPublicTasksPath(location.pathname)) {
+    // r130: банк задач открыт без регистрации (условия, файлы, проверка ответа без сохранения)
+    return (
+      <div className="public-tasks-shell">
+        <div className="public-tasks-banner" role="note">
+          <span>Все задачи открыты без регистрации. Проверяйте ответы бесплатно — чтобы сохранять результаты и прогресс, </span>
+          <Link to="/cabinet/login?next=%2Ftasks">войдите или зарегистрируйтесь</Link>.
+        </div>
+        <Outlet />
       </div>
     );
   }
