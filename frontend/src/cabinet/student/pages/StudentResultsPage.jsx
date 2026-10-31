@@ -53,6 +53,7 @@ function formatLessonTimeRange(item) {
 }
 
 function resultDetailHref(item) {
+  if (item?.live_session_id) return `/variant-live/${item.live_session_id}`;
   const homeworkId = item?.homework_id || item?.homework_result?.homework_id;
   if (item?.entry_type === "homework" || (homeworkId && String(item?.id).startsWith("hw-"))) {
     return homeworkId

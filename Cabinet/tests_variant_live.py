@@ -1,4 +1,4 @@
-"""r125: «Решать вариант» вне урока и лимит вариантов на ученика в месяц."""
+"""r125/r126: «Решать вариант» вне урока, лимит вариантов (без ДЗ) и строки журнала."""
 from types import SimpleNamespace
 from unittest import mock
 
@@ -137,32 +137,32 @@ class VariantLiveTests(TestCase):
     def test_limit_start_three_distinct_variants(self):
         self.plan_mock.return_value = _plan(3)
         for vid in (1, 2, 3):
-            variant_issuance.check_and_record(self.teacher, [self.student], vid, source="homework")
+            variant_issuance.check_and_record(self.teacher, [self.student], vid, source="live_solve")
         # тот же вариант повторно — бесплатно
         variant_issuance.check_and_record(self.teacher, [self.student], 2, source="live_solve")
         with self.assertRaises(VariantLimitExceeded) as ctx:
-            variant_issuance.check_and_record(self.teacher, [self.student], 4, source="homework")
+            variant_issuance.check_and_record(self.teacher, [self.student], 4, source="live_solve")
         self.assertIn("не больше 3", ctx.exception.message)
         self.assertIn("/cabinet/upgrade", ctx.exception.message)
         self.assertEqual(ctx.exception.to_dict()["remaining"], 0)
         # другому ученику можно
-        variant_issuance.check_and_record(self.teacher, [self.student2], 4, source="homework")
+        variant_issuance.check_and_record(self.teacher, [self.student2], 4, source="live_solve")
         self.assertEqual(VariantIssuance.objects.filter(student=self.student).count(), 3)
 
     def test_limit_unlimited_for_pro(self):
         for vid in range(1, 15):
-            variant_issuance.check_and_record(self.teacher, [self.student], vid, source="homework")
+            variant_issuance.check_and_record(self.teacher, [self.student], vid, source="live_solve")
         self.assertEqual(VariantIssuance.objects.count(), 14)
 
     def test_month_boundary(self):
         self.plan_mock.return_value = _plan(1)
-        variant_issuance.check_and_record(self.teacher, [self.student], 1, source="homework")
+        variant_issuance.check_and_record(self.teacher, [self.student], 1, source="live_solve")
         VariantIssuance.objects.update(month="2000-01")
-        variant_issuance.check_and_record(self.teacher, [self.student], 2, source="homework")
+        variant_issuance.check_and_record(self.teacher, [self.student], 2, source="live_solve")
 
     def test_create_for_student_blocked_with_message(self):
         self.plan_mock.return_value = _plan(1)
-        variant_issuance.check_and_record(self.teacher, [self.student], 7, source="homework")
+        variant_issuance.check_and_record(self.teacher, [self.student], 7, source="live_solve")
         r = self._create(studentId=self.student.pk)
         self.assertEqual(r.status_code, 403, r.content)
         self.assertEqual(r.data["code"], "VARIANT_PER_STUDENT_LIMIT")
@@ -172,36 +172,99 @@ class VariantLiveTests(TestCase):
     def test_join_blocked_without_tariff_details(self):
         sid = self._create().data["session"]["id"]
         self.plan_mock.return_value = _plan(1)
-        variant_issuance.check_and_record(self.teacher, [self.student], 7, source="homework")
+        variant_issuance.check_and_record(self.teacher, [self.student], 7, source="live_solve")
         j = self._join(sid, self.su)
         self.assertEqual(j.status_code, 403)
         self.assertEqual(j.data["code"], "VARIANT_PER_STUDENT_LIMIT")
         self.assertNotIn("Старт", j.data["detail"])
 
-    def test_homework_variant_task_counts_and_blocks_manual_issue(self):
+    def test_homework_not_counted_nor_blocked(self):
+        """r126: ДЗ (ручное, авто, копия) не входят в лимит и не блокируются."""
         self.plan_mock.return_value = _plan(1)
-        hw = Homework.objects.create(teacher=self.teacher, title="ДЗ", student=self.student, status=HomeworkStatus.ASSIGNED)
-        HomeworkTask.objects.create(homework=hw, task_type=HomeworkTaskType.GENERATED_TASK, title="В", description="/ege/inf/variant/11", order=0)
-        self.assertTrue(VariantIssuance.objects.filter(student=self.student, variant_id=11, source="homework").exists())
-        with self.assertRaises(VariantLimitExceeded):
-            with enforce_variant_limits():
-                hw2 = Homework.objects.create(teacher=self.teacher, title="ДЗ2", student=self.student, status=HomeworkStatus.ASSIGNED)
-                HomeworkTask.objects.create(homework=hw2, task_type=HomeworkTaskType.GENERATED_TASK, title="В", description="/ege/inf/variant/12", order=0)
-        self.assertFalse(Homework.objects.filter(title="ДЗ2").exists())  # откат
+        with enforce_variant_limits():
+            for vid in (11, 12, 13):
+                hw = Homework.objects.create(teacher=self.teacher, title=f"ДЗ{vid}", student=self.student, status=HomeworkStatus.ASSIGNED)
+                HomeworkTask.objects.create(homework=hw, task_type=HomeworkTaskType.GENERATED_TASK, title="В", description=f"/ege/inf/variant/{vid}", order=0)
+        self.assertEqual(Homework.objects.filter(title__startswith="ДЗ").count(), 3)
+        self.assertFalse(VariantIssuance.objects.filter(source="homework").exists())
+        self.assertEqual(variant_issuance.quota(self.teacher, self.student)["used"], 0)
+        # live-ссылка после трёх ДЗ всё ещё доступна
+        self.assertEqual(self._create(studentId=self.student.pk).status_code, 201)
 
-    def test_copy_precheck(self):
+    def test_copy_homework_not_limited(self):
         self.plan_mock.return_value = _plan(1)
-        variant_issuance.check_and_record(self.teacher, [self.student2], 3, source="homework")
+        variant_issuance.check_and_record(self.teacher, [self.student2], 3, source="live_solve")
         src = Homework.objects.create(teacher=self.teacher, title="ДЗ", student=self.student, status=HomeworkStatus.ASSIGNED)
         HomeworkTask.objects.create(homework=src, task_type=HomeworkTaskType.GENERATED_TASK, title="В", description="/ege/inf/variant/9", order=0)
         self.client.force_login(self.teacher)
         r = self.client.post(f"/api/cabinet/homework/{src.pk}/copy/", {"student_ids": [self.student2.pk]}, format="json")
-        self.assertEqual(r.status_code, 403, r.content)
-        self.assertEqual(r.data["code"], "VARIANT_PER_STUDENT_LIMIT")
+        self.assertNotEqual(r.status_code, 403, r.content)
+
+    def test_legacy_homework_rows_ignored_and_upgraded(self):
+        self.plan_mock.return_value = _plan(1)
+        VariantIssuance.objects.create(teacher=self.teacher, student=self.student, variant_id=5, month=variant_issuance.current_month(), source="homework")
+        self.assertEqual(variant_issuance.quota(self.teacher, self.student)["used"], 0)
+        variant_issuance.check_and_record(self.teacher, [self.student], 5, source="live_solve")
+        self.assertEqual(variant_issuance.quota(self.teacher, self.student)["used"], 1)
+
+    # ---------- journal (r126)
+
+    def _solved_session(self):
+        sess = self._create().data["session"]
+        self._join(sess["id"], self.su)
+        return sess
+
+    def _fake_scoring(self, homework, submission):
+        scores = (submission.result_payload or {}).get("scores") or {}
+        p2 = scores.get("101")
+        return {"earned_points": 1 + (p2 or 0), "max_points": 4, "pending_review_count": 0 if p2 is not None else 1}
+
+    def test_journal_row_and_updates_after_part2(self):
+        from Cabinet.journal_service import build_journal_entries_feed
+
+        with mock.patch("Cabinet.variant_live_journal._scoring", side_effect=self._fake_scoring):
+            sess = self._solved_session()
+            feed = build_journal_entries_feed(self.teacher, student_id=self.student.pk)
+            rows = [e for e in feed["entries"] if e.get("entry_subtype") == "live_variant"]
+            self.assertEqual(len(rows), 1)
+            row = rows[0]
+            self.assertIn(sess["title"], row["title"])
+            self.assertEqual(row["status"], "pending_review")
+            self.assertEqual(row["earned_points"], 1)
+            self.assertTrue(row["date"])
+            self.client.post(f"/api/cabinet/variant-live/{sess['id']}/score/", {"studentId": self.student.pk, "taskId": 101, "score": 3}, format="json")
+            row = [e for e in build_journal_entries_feed(self.teacher, student_id=self.student.pk)["entries"] if e.get("entry_subtype") == "live_variant"][0]
+            self.assertEqual(row["earned_points"], 4)
+            self.assertEqual(row["score_percent"], 100.0)
+            self.assertEqual(row["status"], "checked")
+            # отдельная строка на каждую сессию
+            self._solved_session()
+            rows = [e for e in build_journal_entries_feed(self.teacher)["entries"] if e.get("entry_subtype") == "live_variant"]
+            self.assertEqual(len(rows), 2)
+            # другой ученик не видит чужую строку
+            self.assertFalse([e for e in build_journal_entries_feed(self.teacher, student_id=self.student2.pk)["entries"] if e.get("entry_subtype") == "live_variant"])
+
+    def test_student_results_and_parent_feed(self):
+        from Cabinet.parent_api import _filter_parent_journal_entries
+        from Cabinet.journal_service import build_journal_entries_feed
+
+        with mock.patch("Cabinet.variant_live_journal._scoring", side_effect=self._fake_scoring):
+            sess = self._solved_session()
+            c = APIClient()
+            c.force_login(self.su)
+            r = c.get("/api/cabinet/student/results/")
+            self.assertEqual(r.status_code, 200, r.content)
+            live = [x for x in r.data["results"] if x.get("live_session_id") == sess["id"]]
+            self.assertEqual(len(live), 1)
+            self.assertIsNone(live[0]["review_url"])
+            rel = SimpleNamespace(has_permission=lambda p: True)
+            feed = build_journal_entries_feed(self.teacher, student_id=self.student.pk)
+            parent = _filter_parent_journal_entries(feed["entries"], rel=rel, include_comments=True)
+            self.assertTrue([e for e in parent if e.get("live_session_id") == sess["id"]])
 
     def test_quota_endpoint(self):
         self.plan_mock.return_value = _plan(3)
-        variant_issuance.check_and_record(self.teacher, [self.student], 42, source="homework")
+        variant_issuance.check_and_record(self.teacher, [self.student], 42, source="live_solve")
         self.client.force_login(self.teacher)
         r = self.client.get("/api/cabinet/variant-live/quota/?variant_id=42")
         self.assertEqual(r.status_code, 200)

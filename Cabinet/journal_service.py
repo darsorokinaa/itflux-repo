@@ -3354,6 +3354,24 @@ def build_journal_entries_feed(
                     }
                 )
 
+    if include_homework and not homework_status and not overdue_only and reviewed != "no":
+        # r126: «Решать вариант» — отдельная строка на ученика и сессию.
+        from .variant_live_journal import live_entries
+
+        live_student_ids = student_ids or None
+        if group_id and not student_ids:
+            live_student_ids = []
+        if live_student_ids is None or live_student_ids:
+            entries.extend(
+                live_entries(
+                    teacher=teacher,
+                    student_ids=live_student_ids,
+                    date_from=d_from,
+                    date_to=d_to,
+                    limit=limit,
+                )
+            )
+
     entries.sort(key=lambda e: e.get("sort_at") or "", reverse=True)
     entries = entries[:limit]
     summary = homework_journal_summary(entries)

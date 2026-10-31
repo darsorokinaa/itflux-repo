@@ -1271,6 +1271,26 @@ def _student_result_lesson_fields(record: StudentLessonRecord) -> dict:
     }
 
 
+def _live_variant_result_entries(roster) -> list[dict]:
+    """r126: «Решать вариант» в «Моих результатах» ученика."""
+    from .variant_live_journal import live_entries
+
+    out = []
+    for e in live_entries(student_ids=list(roster.values_list("id", flat=True)), limit=100):
+        out.append(
+            {
+                **e,
+                "lesson_date": e.get("date"),
+                "starts_at": e.get("sort_at"),
+                "ends_at": None,
+                "topic": e.get("title"),
+                "overall_score": e.get("score_percent"),
+                "review_url": None,
+            }
+        )
+    return out
+
+
 def _checked_homework_result_entries(roster, already_homework_ids: set[int]) -> list[dict]:
     """Проверенные ДЗ, которых ещё нет в опубликованных итогах урока."""
     from .choices import SubmissionStatus
@@ -1380,6 +1400,7 @@ class StudentResultsListView(APIView):
                 }
             )
         results.extend(_checked_homework_result_entries(roster, already_homework_ids))
+        results.extend(_live_variant_result_entries(roster))
         results.sort(
             key=lambda item: item.get("starts_at") or item.get("lesson_date") or "",
             reverse=True,

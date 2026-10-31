@@ -74,7 +74,10 @@ def per_student_limit(teacher) -> int | None:
 def _used_qs(teacher, student, month):
     from .models import VariantIssuance
 
-    return VariantIssuance.objects.filter(teacher=teacher, student=student, month=month)
+    # r126: ДЗ (ручные и автоматические) в лимит не входят.
+    return VariantIssuance.objects.filter(teacher=teacher, student=student, month=month).exclude(
+        source=VariantIssuance.SOURCE_HOMEWORK
+    )
 
 
 def quota(teacher, student, *, variant_id=None, month=None) -> dict:
@@ -148,13 +151,16 @@ def record(teacher, students, variant_id, *, source: str, month=None) -> None:
             continue
         try:
             with transaction.atomic():
-                VariantIssuance.objects.get_or_create(
+                obj, created = VariantIssuance.objects.get_or_create(
                     teacher=teacher,
                     student=student,
                     variant_id=int(variant_id),
                     month=month,
                     defaults={"source": source},
                 )
+                if not created and obj.source == VariantIssuance.SOURCE_HOMEWORK and source != obj.source:
+                    obj.source = source
+                    obj.save(update_fields=["source"])
         except IntegrityError:
             pass
 
@@ -205,6 +211,7 @@ def homework_task_variant_id(task) -> int | None:
 
 
 def on_homework_task_pre_save(task) -> None:
+    return  # r126: ДЗ не блокируется лимитом
     if not is_enforcing():
         return
     variant_id = homework_task_variant_id(task)
@@ -215,6 +222,7 @@ def on_homework_task_pre_save(task) -> None:
 
 
 def on_homework_task_post_save(task) -> None:
+    return  # r126: ДЗ не учитывается в лимите
     variant_id = homework_task_variant_id(task)
     if not variant_id:
         return
@@ -228,6 +236,7 @@ def on_homework_task_post_save(task) -> None:
 
 
 def precheck_homework_copy(teacher, source_homework, students) -> None:
+    return  # r126: копирование ДЗ не проверяет лимит
     from .homework_api import extract_variant_id
 
     ids = []
