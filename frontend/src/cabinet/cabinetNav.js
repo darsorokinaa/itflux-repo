@@ -41,6 +41,7 @@ export const CABINET_NAV_GROUPS = [
     label: "Контроль",
     items: [
       { id: "review", label: "Домашние задания", path: "/cabinet/review", icon: "check" },
+      { id: "live-variants", label: "Решаемые варианты", path: "/cabinet/live-variants", icon: "quiz" },
       { id: "journal", label: "Журнал", path: "/cabinet/journal", icon: "note" },
     ],
   },
@@ -73,6 +74,7 @@ export const CABINET_MORE_GROUPS = [
     id: "work",
     label: "Работа",
     items: [
+      { id: "live-variants", label: "Решаемые варианты", path: "/cabinet/live-variants", icon: "quiz" },
       { id: "journal", label: "Журнал", path: "/cabinet/journal", icon: "note" },
     ],
   },
