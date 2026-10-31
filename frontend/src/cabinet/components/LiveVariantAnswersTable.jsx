@@ -1,6 +1,41 @@
 import { useMemo } from "react";
 import { isUserAnswerCorrect } from "../../utils/examAnswerCheck";
 import { TaskPosition } from "../../components/taskDocument/TaskNumber";
+import { homeworkTaskAttachments } from "../../utils/cabinetHomework";
+import { withFileIntent } from "./AttachmentPreviewModal";
+
+/** r127: файлы ученика к задаче (фото, тетрадь) — в live-таблице учителя. */
+export function liveTaskAttachments(result, task) {
+  if (!result || !task) return [];
+  try {
+    return (homeworkTaskAttachments(result, task.id, task.number) || []).filter((f) => f && (f.url || f.file_url));
+  } catch {
+    return [];
+  }
+}
+
+export function LiveAttachmentLinks({ files }) {
+  if (!files?.length) return null;
+  return (
+    <span className="live-variant-answers__files">
+      {files.map((f, i) => {
+        const href = String(f.url || f.file_url || "");
+        return (
+          <a
+            key={f.id || href || i}
+            href={withFileIntent(href, "inline") || href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="live-variant-answers__file"
+            title={f.name || f.filename || "Файл ученика"}
+          >
+            📎 {f.name || f.filename || `Файл ${i + 1}`}
+          </a>
+        );
+      })}
+    </span>
+  );
+}
 
 export function stripAnswerHtml(html) {
   return String(html || "")
@@ -191,7 +226,10 @@ export default function LiveVariantAnswersTable({
                               level={answers?.level}
                             />
                           </td>
-                          <td className="live-variant-answers__pre">{value.trim() ? value : "—"}</td>
+                          <td className="live-variant-answers__pre">
+                            {value.trim() ? value : liveTaskAttachments(result, task).length ? "" : "—"}
+                            <LiveAttachmentLinks files={liveTaskAttachments(result, task)} />
+                          </td>
                           <td className="live-variant-answers__pre">{task.part === 2 ? "—" : correct || "—"}</td>
                           <td>
                             {task.part === 2 ? (

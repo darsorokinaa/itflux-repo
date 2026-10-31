@@ -92,7 +92,7 @@ import { assignVariantTheme } from "../variantThemes/variantThemeApi";
 import { meetingUuidFromFrame } from "../cabinet/meetingPresent";
 import { fetchCabinetSession, fetchLiveAnswersFor, isTeacherRole, saveLiveScoreFor } from "../utils/cabinetAuth";
 import LiveSolveModal from "../cabinet/components/LiveSolveModal";
-import LiveVariantAnswersTable, { liveStudentAnswer, lockedScoreFor } from "../cabinet/components/LiveVariantAnswersTable";
+import LiveVariantAnswersTable, { liveStudentAnswer, lockedScoreFor, LiveAttachmentLinks, liveTaskAttachments } from "../cabinet/components/LiveVariantAnswersTable";
 import "../cabinet/styles/live-variant-answers.css";
 import HomeworkReviewResults, {
   HomeworkTaskReviewNote,
@@ -3213,7 +3213,8 @@ function ExamPage() {
           Ответ ученика{students.length > 1 ? "" : ` · ${current.displayName}`}
         </div>
         <div className="ev2-live-grade__answer">
-          {answer.trim() ? answer : <span className="ev2-live-grade__muted">Ответа пока нет</span>}
+          {answer.trim() ? answer : liveTaskAttachments(current.result || {}, lt).length ? null : <span className="ev2-live-grade__muted">Ответа пока нет</span>}
+          <LiveAttachmentLinks files={liveTaskAttachments(current.result || {}, lt)} />
         </div>
       </div>
     );
