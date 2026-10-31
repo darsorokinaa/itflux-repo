@@ -41,7 +41,7 @@ export const CABINET_NAV_GROUPS = [
     label: "Контроль",
     items: [
       { id: "review", label: "Домашние задания", path: "/cabinet/review", icon: "check" },
-      { id: "live-variants", label: "Решаемые варианты", path: "/cabinet/live-variants", icon: "quiz" },
+      { id: "my-variants", label: "Мои варианты", path: "/cabinet/my-variants", icon: "quiz" },
       { id: "journal", label: "Журнал", path: "/cabinet/journal", icon: "note" },
     ],
   },
@@ -74,7 +74,7 @@ export const CABINET_MORE_GROUPS = [
     id: "work",
     label: "Работа",
     items: [
-      { id: "live-variants", label: "Решаемые варианты", path: "/cabinet/live-variants", icon: "quiz" },
+      { id: "my-variants", label: "Мои варианты", path: "/cabinet/my-variants", icon: "quiz" },
       { id: "journal", label: "Журнал", path: "/cabinet/journal", icon: "note" },
     ],
   },
@@ -164,6 +164,7 @@ export function getCabinetSectionTitle(pathname) {
   if (pathname.startsWith("/cabinet/interactives/new")) return "Создать интерактив";
   if (pathname.startsWith("/cabinet/interactives/")) return "Интерактив";
   if (pathname.startsWith("/cabinet/variant-themes")) return "Темы вариантов";
+  if (pathname.startsWith("/cabinet/live-variants") || pathname.startsWith("/cabinet/my-variants")) return "Мои варианты";
 
   // Desktop-навигация приоритетнее mobile (там другие подписи, напр. «Расписание» vs «Календарь»).
   const candidates = [

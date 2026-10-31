@@ -82,12 +82,21 @@ def session_students(session) -> list[Student]:
     return sorted(students.values(), key=lambda s: (s.full_name or "").lower())
 
 
+def _display_title(session) -> str:
+    from .my_variants import live_session_title  # r129
+
+    try:
+        return live_session_title(session)
+    except Exception:
+        return session.title or f"Вариант №{session.variant_id}"
+
+
 def serialize_session(session, *, with_counts=True) -> dict:
     data = {
         "id": str(session.pk),
         "variantId": session.variant_id,
         "variantUrl": session.variant_url,
-        "title": session.title or f"Вариант №{session.variant_id}",
+        "title": _display_title(session),
         "homeworkId": session.homework_id,
         "studentId": session.student_id,
         "studentName": session.student.full_name if session.student_id and session.student else "",

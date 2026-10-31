@@ -170,7 +170,7 @@ export default function LiveSolveModal({ variantUrl, variantId, title = "", onCl
                 </li>
               ))}
             </ul>
-            <a className="ls-all" href="/cabinet/live-variants">Все live-решения</a>
+            <a className="ls-all" href="/cabinet/my-variants">Мои варианты</a>
           </div>
         )}
       </div>

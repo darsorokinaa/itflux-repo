@@ -440,6 +440,7 @@ class Variant(models.Model):
         related_name="owned_variants",
         verbose_name="Владелец (учитель)",
     )
+    title = models.CharField("Название (учитель)", max_length=120, blank=True, default="")
     local_number = models.PositiveIntegerField(
         "Номер варианта в банке учителя",
         null=True,

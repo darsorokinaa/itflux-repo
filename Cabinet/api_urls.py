@@ -52,8 +52,11 @@ router.register("notifications", schedule_api.NotificationViewSet, basename="cab
 router.register("materials", api_views.MaterialViewSet, basename="cabinet-materials")
 
 from . import variant_live as _r125_variant_live  # noqa: E402
+from . import my_variants as _r129_my_variants  # noqa: E402
 
 urlpatterns = [
+    path("my-variants/", _r129_my_variants.MyVariantsView.as_view(), name="my_variants"),
+    path("my-variants/<int:variant_id>/", _r129_my_variants.MyVariantDetailView.as_view(), name="my_variant_detail"),
     path("variant-live/", _r125_variant_live.VariantLiveListView.as_view(), name="variant_live_list"),
     path("variant-live/quota/", _r125_variant_live.VariantIssueQuotaView.as_view(), name="variant_live_quota"),
     path("variant-live/<uuid:session_id>/", _r125_variant_live.VariantLiveDetailView.as_view(), name="variant_live_detail"),

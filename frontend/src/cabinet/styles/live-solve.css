@@ -31,3 +31,8 @@
 /* r127: файлы ученика в live-таблице */
 .live-variant-answers__files { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 2px; }
 .live-variant-answers__file { font-size: 12px; text-decoration: underline; word-break: break-all; }
+
+/* r129: файлы учеников под заданием */
+.live-task-files { margin-top: 10px; }
+.live-task-files__row { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.live-task-files__name { font-size: 13px; font-weight: 600; color: #4d43e6; }

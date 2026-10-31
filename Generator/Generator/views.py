@@ -4191,6 +4191,7 @@ def _variant_detail_payload(request, variant, *, include_answers=True):
 
     payload = {
         "id": variant.id,
+        "title": getattr(variant, "title", "") or "",
         "level": variant.level.level,
         "subject": variant.var_subject.subject_short,
         "tasks": tasks_data,

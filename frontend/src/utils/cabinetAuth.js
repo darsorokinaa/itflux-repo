@@ -2895,6 +2895,17 @@ export function createVariantLiveSession({ variantUrl, title = "", studentId = n
   });
 }
 
+export function fetchMyVariants() {
+  return cabinetFetch("/my-variants/", { method: "GET" });
+}
+
+export function renameMyVariant(variantId, title) {
+  return cabinetFetch(`/my-variants/${encodeURIComponent(variantId)}/`, {
+    method: "PATCH",
+    body: JSON.stringify({ title }),
+  });
+}
+
 export function fetchVariantLiveSessions({ variantId } = {}) {
   const q = variantId ? `?variant_id=${encodeURIComponent(variantId)}` : "";
   return cabinetFetch(`/variant-live/${q}`, { method: "GET" });

@@ -51,7 +51,9 @@ def build_entry(session, submission, *, student) -> dict:
     percent = _num(scoring.get("percentage"))
     if percent is None and earned is not None and max_points:
         percent = round(earned * 100 / max_points, 2)
-    title = session.title or f"Вариант №{session.variant_id}"
+    from .my_variants import live_session_title  # r129: своё название + номер
+
+    title = live_session_title(session)
     when = session.created_at or submission.updated_at
     local = timezone.localtime(when) if when else None
     status = "pending_review" if pending else "checked"

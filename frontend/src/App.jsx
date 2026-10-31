@@ -45,7 +45,7 @@ const CabinetSchedulePage = lazy(() => import("./cabinet/pages/CabinetSchedulePa
 const CabinetMessagesPage = lazy(() => import("./cabinet/pages/CabinetMessagesPage"));
 const CommunityInvitePage = lazy(() => import("./cabinet/pages/CommunityInvitePage"));
 const VariantLiveJoinPage = lazy(() => import("./cabinet/pages/VariantLiveJoinPage"));
-const LiveVariantsPage = lazy(() => import("./cabinet/pages/LiveVariantsPage"));
+const MyVariantsPage = lazy(() => import("./cabinet/pages/MyVariantsPage"));
 const CabinetLessonPlansPage = lazy(() => import("./cabinet/pages/CabinetLessonPlansPage"));
 const CabinetLessonPlanDetailPage = lazy(() => import("./cabinet/pages/CabinetLessonPlanDetailPage"));
 const CabinetLessonPlanEditorPage = lazy(() => import("./cabinet/pages/CabinetLessonPlanEditorPage"));
@@ -597,7 +597,8 @@ function App() {
             <Route path="ai" element={<Navigate to="/cabinet" replace />} />
             <Route path="more" element={<CabinetMorePage />} />
             <Route path="upgrade" element={<CabinetUpgradePage />} />
-            <Route path="live-variants" element={<LiveVariantsPage />} />
+            <Route path="my-variants" element={<MyVariantsPage />} />
+            <Route path="live-variants" element={<MyVariantsPage />} />
             <Route path="variant-themes" element={<CabinetVariantThemesPage />} />
             <Route path="variant-themes/:themeId" element={<CabinetVariantThemeEditorPage />} />
           </Route>

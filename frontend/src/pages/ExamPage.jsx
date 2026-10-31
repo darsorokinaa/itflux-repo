@@ -92,6 +92,7 @@ import { assignVariantTheme } from "../variantThemes/variantThemeApi";
 import { meetingUuidFromFrame } from "../cabinet/meetingPresent";
 import { fetchCabinetSession, fetchLiveAnswersFor, isTeacherRole, saveLiveScoreFor } from "../utils/cabinetAuth";
 import LiveSolveModal from "../cabinet/components/LiveSolveModal";
+import LiveTaskStudentFiles from "../cabinet/components/LiveTaskStudentFiles";
 import LiveVariantAnswersTable, { liveStudentAnswer, lockedScoreFor, LiveAttachmentLinks, liveTaskAttachments } from "../cabinet/components/LiveVariantAnswersTable";
 import "../cabinet/styles/live-variant-answers.css";
 import HomeworkReviewResults, {
@@ -209,6 +210,12 @@ function normalizeMediaUrl(url) {
 /** Урок/ДЗ: ученик прикрепляет файлы решения (часть 2). */
 function fileIdentity(file) {
   return `${file?.name || ""}-${file?.size || 0}-${file?.lastModified || 0}`;
+}
+
+/** r129: заголовок варианта с учётом названия учителя — номер всегда виден. */
+export function variantHeroLabel(variant) {
+  const t = String(variant?.title || "").trim();
+  return t ? `${t} · № ${variant.id}` : `Вариант № ${variant?.id}`;
 }
 
 function LessonSolutionUpload({
@@ -904,6 +911,7 @@ function ExamPage() {
   }, [location.search]);
   const liveSource = meetingUuid || liveSessionId;
   const [liveSolveOpen, setLiveSolveOpen] = useState(false);
+
   const isEmbeddedHomework = isHomework && lessonEmbedParams.embed;
   const isCabinetHomework = isHomework && !lessonEmbedParams.embed;
   /** Полноэкранный EdTech-макет с сайдбаром: не урок (в т.ч. ДЗ из кабинета ученика) */
@@ -943,7 +951,7 @@ function ExamPage() {
   const showLessonSolutionUpload =
     lessonEmbedParams.embed && lessonEmbedParams.student && !!lessonEmbedParams.token;
   const showCabinetPart2SolutionUpload =
-    isCabinetHomework && homeworkStudentMode && !!cabinetAssignmentId && !isLiveVariant;
+    isCabinetHomework && homeworkStudentMode && !!cabinetAssignmentId && (!isLiveVariant || !meetingUuid);
   /** ДЗ из кабинета: без ID заданий, статус-плашек, номера варианта, PDF и ссылки */
   const hideHomeworkVariantChrome = isCabinetHomework && homeworkStudentMode && !isLiveVariant;
 
@@ -973,6 +981,19 @@ function ExamPage() {
   const testTaskLabels = location.state?.testTaskLabels || [];
 
   const [variant, setVariant] = useState(null);
+  const openPdfRef = useRef(null);
+  // r129: действия из «Мои варианты»: ?action=pdf / ?action=live
+  const variantActionDoneRef = useRef("");
+  useEffect(() => {
+    if (!variant?.tasks?.length) return;
+    let action = "";
+    try { action = new URLSearchParams(location.search).get("action") || ""; } catch { action = ""; }
+    if (!action || variantActionDoneRef.current === action) return;
+    variantActionDoneRef.current = action;
+    if (action === "pdf") openPdfRef.current?.();
+    if (action === "live" && isTeacherRole(cabinetUser)) setLiveSolveOpen(true);
+    else if (action === "live" && !cabinetUser) variantActionDoneRef.current = "";
+  }, [variant, location.search, cabinetUser]);
   const [error, setError] = useState(null);
   const [variantLoadingUrl, setVariantLoadingUrl] = useState("");
 
@@ -2610,6 +2631,8 @@ function ExamPage() {
     });
   };
 
+  openPdfRef.current = openPdf;
+
   const copyVariantLink = async () => {
     const loc = window.location;
     const isLocal =
@@ -2639,7 +2662,7 @@ function ExamPage() {
 
   const heroTitle =
     isLiveVariant
-      ? `Вариант № ${variant.id}`
+      ? variantHeroLabel(variant)
       : (isEmbeddedHomework && !isTeacherHomeworkView) || hideHomeworkVariantChrome
       ? "Домашнее задание"
       : mode === "test"
@@ -2650,7 +2673,7 @@ function ExamPage() {
                 : [...new Set(variant.tasks.map((t) => t.number).filter(Boolean))]
                     .sort((a, b) => a - b)
                     .map(String);
-            const variantLabel = `Вариант № ${variant.id}`;
+            const variantLabel = variantHeroLabel(variant);
             if (labels.length === 0) return variantLabel;
             if (labels.length === 1) return `${variantLabel} · Задание ${labels[0]}`;
             return `${variantLabel} · Задания ${labels.join(", ")}`;
@@ -2659,7 +2682,7 @@ function ExamPage() {
           ? `Вариант № ${variant.id} · Часть 1`
           : mode === "part2" || (/^part\d+$/.test(String(mode || "")) && mode !== "part1")
             ? `Вариант № ${variant.id} · ${part2SectionTitle}`
-            : `Вариант № ${variant.id}`;
+            : variantHeroLabel(variant);
   const ruTasksWord = (n) => {
     const k = n % 10;
     const kk = n % 100;
@@ -4076,6 +4099,7 @@ function ExamPage() {
                       && (!isHomework || (!hRead && !numLocked(task)))
                     }
                   />
+                  {isLiveTeacherView && liveAnswers ? <LiveTaskStudentFiles answers={liveAnswers} task={task} /> : null}
                   {!isHomework && (
                   <div className="task-report-error-wrap">
                     <TaskReportErrorButton taskId={task.id} taskNumber={task.number} onClick={handleReportErrorClick} />
@@ -4198,6 +4222,7 @@ function ExamPage() {
                               && (!isHomework || (!hRead && !numLocked(task)))
                             }
                           />
+                          {isLiveTeacherView && liveAnswers ? <LiveTaskStudentFiles answers={liveAnswers} task={task} /> : null}
                           {showHomeworkReviewedResults ? (
                             <HomeworkTaskReviewNote
                               task={task}
@@ -4313,6 +4338,7 @@ function ExamPage() {
                           && (!isHomework || (!hRead && !numLocked(task)))
                         }
                       />
+                      {isLiveTeacherView && liveAnswers ? <LiveTaskStudentFiles answers={liveAnswers} task={task} /> : null}
                       {showHomeworkReviewedResults ? (
                         <HomeworkTaskReviewNote
                           task={task}
