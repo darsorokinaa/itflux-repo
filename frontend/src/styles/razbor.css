@@ -55,3 +55,9 @@
   .razbor-foot .razbor-btn { justify-content: center; }
   .razbor-foot > span:empty { display: none; }
 }
+
+/* r135: блоки кода — фон, отступы, без лигатур (!= не превращается в ≠), скролл на мобильном */
+.razbor-body pre { background: #f5f7ff; border: 1px solid var(--border-card, #e4e8ff); border-radius: var(--r-sm, 10px); padding: 12px 14px; margin: 12px 0; overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: pre; max-width: 100%; box-sizing: border-box; tab-size: 4; }
+.razbor-body pre code { font-size: 14px; line-height: 1.5; background: none; padding: 0; color: inherit; white-space: pre; font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
+.razbor-body code { font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
+@media (max-width: 640px) { .razbor-body pre { padding: 10px 12px; margin-left: -4px; margin-right: -4px; } .razbor-body pre code { font-size: 13px; } }
