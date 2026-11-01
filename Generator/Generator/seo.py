@@ -223,6 +223,9 @@ def organization_ld():
     }
 
 
+_RAZBOR_SUBJ_PREP = {"math": "математике", "math_base": "базовой математике", "inf": "информатике"}  # r132
+
+
 def _subject_name(short):
     from .models import Subject
     s = Subject.objects.filter(subject_short=short).only("subject_name").first()
@@ -259,7 +262,7 @@ def resolve(path):
         r = m and Razbor.objects.filter(published=True, exam=m.group(1), subject=m.group(2), number=int(m.group(3))).first()
         if not r:
             return None
-        core = f"Разбор задания №{r.number} {r.exam_name} по {r.subject_name.lower()}"
+        core = f"Разбор задания №{r.number} {r.exam_name} по {_RAZBOR_SUBJ_PREP.get(r.subject, r.subject_name.lower())}"
         meta.update(title=short_title(core, BRAND),
                     description=_clip(f"{core}: что проверяет задание, теория простым языком, алгоритм решения и разобранные примеры из банка с ответами."),
                     canonical=SITE_ORIGIN + r.path, h1=f"Разбор задания №{r.number}")
