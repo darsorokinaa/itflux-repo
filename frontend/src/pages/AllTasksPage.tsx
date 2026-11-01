@@ -1,3 +1,4 @@
+import "../styles/razbor.css"; // r131
 import {
   useCallback,
   useEffect,
@@ -6,7 +7,7 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { getLevelDef } from "../data/levels";
 import {
   GRADES_BY_LEVEL,
@@ -444,6 +445,21 @@ export default function AllTasksPage() {
   );
 
   const [filterOptions, setFilterOptions] = useState<FiltersResponse | null>(null);
+  // r131: номера, для которых есть опубликованный разбор
+  const [razborNums, setRazborNums] = useState<number[]>([]);
+  useEffect(() => {
+    if (!level || !subject) return undefined;
+    let cancelled = false;
+    fetch(`/api/razbor/?exam=${encodeURIComponent(level)}&subject=${encodeURIComponent(String(subject))}`, { credentials: "omit" })
+      .then((r) => (r.ok ? r.json() : { items: [] }))
+      .then((d) => {
+        if (!cancelled) setRazborNums((d.items || []).map((x: { number: number }) => Number(x.number)));
+      })
+      .catch(() => !cancelled && setRazborNums([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [level, subject]);
   const [filtersLoading, setFiltersLoading] = useState(false);
   const [groupByTaskListId, setGroupByTaskListId] = useState<
     Map<string, GroupBankDescriptor>
@@ -1465,6 +1481,24 @@ export default function AllTasksPage() {
                           : ""}
                       </span>
                     ) : null}
+                    {(() => {
+                      const nums = bankUsesGroups
+                        ? activeGroupDescriptor?.taskNumbers ?? []
+                        : selectedTaskNum
+                          ? [selectedTaskNum.task_number]
+                          : [];
+                      return nums
+                        .filter((n) => razborNums.includes(Number(n)))
+                        .map((n) => (
+                          <Link
+                            key={`razbor-${n}`}
+                            to={`/razbor/${level}/${subject}/${n}`}
+                            className="all-tasks-razbor-link"
+                          >
+                            Разбор задания №{n}
+                          </Link>
+                        ));
+                    })()}
                     {selectedSubtopic ? (
                       <span className="all-tasks-meta__sub">
                         {selectedSubtopic.title}

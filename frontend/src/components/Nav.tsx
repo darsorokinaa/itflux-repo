@@ -111,6 +111,13 @@ function TabIcon({ tabKey }: { tabKey: string }) {
       </FluxIcon>
     );
   }
+  if (tabKey === "razbor") {
+    return (
+      <FluxIcon>
+        <path d="M5 4h10l4 4v12H5ZM15 4v4h4M8 12h8M8 16h5" />
+      </FluxIcon>
+    );
+  }
   if (tabKey === "interesting") {
     return (
       <FluxIcon>

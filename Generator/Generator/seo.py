@@ -248,6 +248,27 @@ def resolve(path):
             meta["title"] = "Личный кабинет — " + BRAND
         return meta
 
+    if p == "/razbor" or p.startswith("/razbor/"):  # r131
+        from .razbor_models import Razbor
+        if p == "/razbor":
+            meta.update(title="Разборы заданий ОГЭ и ЕГЭ по математике и информатике — " + BRAND,
+                        description="Разборы по типам заданий ОГЭ и ЕГЭ: теория простым языком, алгоритм решения и примеры из банка с ответами.",
+                        canonical=SITE_ORIGIN + "/razbor", h1="Разборы заданий ОГЭ и ЕГЭ")
+            return meta
+        m = re.fullmatch(r"/razbor/([a-z]+)/([a-z_]+)/(\d+)", p)
+        r = m and Razbor.objects.filter(published=True, exam=m.group(1), subject=m.group(2), number=int(m.group(3))).first()
+        if not r:
+            return None
+        core = f"Разбор задания №{r.number} {r.exam_name} по {r.subject_name.lower()}"
+        meta.update(title=short_title(core, BRAND),
+                    description=_clip(f"{core}: что проверяет задание, теория простым языком, алгоритм решения и разобранные примеры из банка с ответами."),
+                    canonical=SITE_ORIGIN + r.path, h1=f"Разбор задания №{r.number}")
+        meta["ld"].append({"@context": "https://schema.org", "@type": "LearningResource", "name": core,
+                           "description": meta["description"], "url": meta["canonical"], "inLanguage": "ru",
+                           "learningResourceType": "Разбор", "isAccessibleForFree": True,
+                           "provider": {"@type": "Organization", "name": BRAND, "url": SITE_ORIGIN + "/"}})
+        return meta
+
     if canon_path in STATIC_PAGES:
         meta["title"], meta["description"] = STATIC_PAGES[canon_path]
         meta["canonical"] = SITE_ORIGIN + canon_path

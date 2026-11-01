@@ -1712,3 +1712,5 @@ class ReportNextStepTemplate(models.Model):
 # Сезонное / праздничное оформление (импорт для Django model discovery)
 from .seasonal_theme_models import SeasonalTheme, SeasonalThemeDecoration  # noqa: E402,F401
 from .variant_theme_models import VariantTheme  # noqa: E402,F401
+# r131: разборы заданий
+from .razbor_models import Razbor  # noqa: E402,F401

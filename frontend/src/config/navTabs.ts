@@ -1,6 +1,6 @@
 import { WORKSHEETS_CONSTRUCTOR_ENABLED } from "../cabinet/featureFlags";
 
-export type NavTabKey = "tasks" | "my-tasks" | "generator" | "lessons" | "worksheets" | "interesting" | "teachers";
+export type NavTabKey = "tasks" | "my-tasks" | "generator" | "lessons" | "worksheets" | "interesting" | "razbor" | "teachers";
 
 export type NavTabDef = {
   key: NavTabKey;
@@ -24,6 +24,7 @@ export const NAV_TABS: ReadonlyArray<NavTabDef> = [
     soon: !WORKSHEETS_CONSTRUCTOR_ENABLED,
   },
   { key: "interesting", label: "Тренажёры и интерактивы", to: "/interesting" },
+  { key: "razbor", label: "Разборы", to: "/razbor" }, // r131
   { key: "teachers", label: "Сообщество учителей", to: "/teachers" },
 ];
 
@@ -49,6 +50,9 @@ export function getActiveNavTab(
   }
   if (p === "/interesting" || p.startsWith("/interesting/")) {
     return "interesting";
+  }
+  if (p === "/razbor" || p.startsWith("/razbor/")) {
+    return "razbor";
   }
   if (p === "/teachers") {
     return "teachers";

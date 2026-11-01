@@ -10,6 +10,7 @@ from . import cdn_handoff  # r93
 from . import load_timing  # r105
 from . import seo_tasks  # r36
 from . import public_task_check  # r130
+from . import razbor_api  # r131
 from . import seasonal_theme_api
 from . import variant_theme_api
 from Cabinet import homework_api
@@ -313,6 +314,8 @@ urlpatterns = [
     path("robots.txt", views.robots_txt),
     path("sitemap.xml", views.sitemap_xml),
     path("api/seo/meta/", views.api_seo_meta, name="api_seo_meta"),
+    path("api/razbor/", razbor_api.api_razbor_list, name="api_razbor_list"),  # r131
+    path("api/razbor/<str:exam>/<str:subject>/<int:number>/", razbor_api.api_razbor_detail, name="api_razbor_detail"),
     # r87: дубль /gotovye-uroki -> 301 /lessons (query сохраняется); хабы /zadaniya
     re_path(r"^gotovye-uroki/?$", RedirectView.as_view(url="/lessons", permanent=True, query_string=True)),
     path("zadaniya", seo_tasks.zadaniya_root),

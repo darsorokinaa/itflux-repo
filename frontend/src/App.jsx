@@ -4,6 +4,8 @@ import { BrowserRouter, Routes, Route, useLocation, Navigate, useNavigate, usePa
 import Layout from "./pages/Layout";
 import HomePage from "./pages/HomePage";
 const AllTasksPage = lazy(() => import("./pages/AllTasksPage"));
+const RazborListPage = lazy(() => import("./pages/RazborListPage")); // r131
+const RazborPage = lazy(() => import("./pages/RazborPage")); // r131
 const MyTaskBankPage = lazy(() => import("./pages/MyTaskBankPage"));
 const MyTaskEditorPage = lazy(() => import("./pages/MyTaskEditorPage"));
 const MyTaskDetailPage = lazy(() => import("./pages/MyTaskDetailPage"));
@@ -421,6 +423,8 @@ function App() {
           <Route path="/worksheets/ai" element={WORKSHEETS_CONSTRUCTOR_ENABLED ? <WorksheetAIWizard /> : <WorksheetSoonPage />} />
           <Route path="/worksheets" element={WORKSHEETS_CONSTRUCTOR_ENABLED ? <CabinetWorksheetEditorPage /> : <WorksheetSoonPage />} />
           <Route path="/interesting" element={<InterestingPage />} />
+          <Route path="/razbor" element={<RazborListPage />} />
+          <Route path="/razbor/:exam/:subject/:number" element={<RazborPage />} />
           <Route path="/interesting/:slug/view" element={<InterestingViewerPage />} />
           <Route path="/teachers" element={<ForTeachersPage />} />
           <Route path="/for-teachers" element={<Navigate to="/teachers" replace />} />

@@ -1414,3 +1414,16 @@ class VariantThemeAdmin(admin.ModelAdmin):
     def save_model(self, request, obj, form, change):
         obj.config = sanitize_variant_theme_config(obj.config)
         super().save_model(request, obj, form, change)
+
+
+# r131: разборы заданий
+from .razbor_models import Razbor as _Razbor  # noqa: E402
+
+
+@admin.register(_Razbor)
+class RazborAdmin(admin.ModelAdmin):
+    list_display = ("exam", "subject", "number", "title", "published", "updated_at")
+    list_filter = ("exam", "subject", "published")
+    list_editable = ("published",)
+    search_fields = ("title", "content_md")
+    ordering = ("exam", "subject", "number")
