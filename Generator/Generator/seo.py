@@ -263,7 +263,8 @@ def resolve(path):
         if not r:
             return None
         core = f"Разбор задания №{r.number} {r.exam_name} по {_RAZBOR_SUBJ_PREP.get(r.subject, r.subject_name.lower())}"
-        meta.update(title=short_title(core, BRAND),
+        meta.update(title=short_title(core),  # r133: BRAND добавляет сам short_title
+
                     description=_clip(f"{core}: что проверяет задание, теория простым языком, алгоритм решения и разобранные примеры из банка с ответами."),
                     canonical=SITE_ORIGIN + r.path, h1=f"Разбор задания №{r.number}")
         meta["ld"].append({"@context": "https://schema.org", "@type": "LearningResource", "name": core,

@@ -6,6 +6,9 @@ import { renderRazborMarkdown } from "../utils/razborMarkdown";
 import { typesetElement } from "../utils/loadMathJax";
 import "../styles/razbor.css";
 
+// r133: как _RAZBOR_SUBJ_PREP в seo.py
+const SUBJ_PREP: Record<string, string> = { math: "математике", math_base: "базовой математике", inf: "информатике" };
+
 type RazborDetail = {
   ok: boolean;
   exam: string;
@@ -37,7 +40,7 @@ export default function RazborPage() {
         const d = (await r.json()) as RazborDetail;
         setData(d);
         setStatus("ok");
-        document.title = `Разбор задания №${d.number} ${d.exam_name} по ${d.subject_name.toLowerCase()} — Цифровой поток`;
+        document.title = `Разбор задания №${d.number} ${d.exam_name} по ${SUBJ_PREP[d.subject] ?? d.subject_name.toLowerCase()} | Цифровой поток`;
       })
       .catch(() => !cancelled && setStatus("error"));
     window.scrollTo(0, 0);

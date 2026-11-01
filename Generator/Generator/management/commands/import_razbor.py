@@ -43,6 +43,7 @@ class Command(BaseCommand):
             h1 = re.search(r"^#\s+(.+)$", raw, re.M)
             title = (h1.group(1).strip() if h1 else f"Задание №{number}")
             title = re.sub(r"\.?\s*Методическое руководство\.?$", "", title).strip()
+            title = re.sub(r"№\s+(?=\d)", "№", title)  # r133
             body = raw[h1.end():].lstrip("\n") if h1 else raw
 
             probs = []

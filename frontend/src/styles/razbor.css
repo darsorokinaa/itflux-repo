@@ -27,7 +27,7 @@
 .razbor-body h3 { font-size: 19px; margin: 28px 0 6px; color: var(--blue-dark, #0B2F9F); }
 .razbor-body p, .razbor-body ul, .razbor-body ol { margin: 0 0 12px; }
 .razbor-body li { margin: 4px 0; }
-.razbor-body img { display: block; max-width: 100%; height: auto; margin: 12px auto; border-radius: var(--r-sm, 10px); border: 1px solid var(--border-card, #e4e8ff); background: #fff; }
+.razbor-body img { display: block; max-width: 100%; height: auto; margin: 12px auto; border-radius: var(--r-sm, 10px); border: 1px solid var(--border-card, #e4e8ff); background: #fff; padding: 8px; box-sizing: border-box; color-scheme: light; } /* r133: белая подложка для прозрачных графиков */
 .razbor-body strong { font-weight: 700; }
 .razbor-table-wrap { overflow-x: auto; margin: 12px 0 16px; -webkit-overflow-scrolling: touch; }
 .razbor-body table { border-collapse: collapse; min-width: 100%; font-size: 15px; }
