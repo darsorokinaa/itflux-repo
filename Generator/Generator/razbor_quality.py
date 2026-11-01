@@ -35,13 +35,48 @@ def rewrite_images(md):
 def norm_answer(s):
     s = html.unescape(re.sub(r"<[^>]+>", " ", s or ""))
     s = re.sub(r"\.?\s*В банке тот же ответ\.?\s*$", "", s.strip(), flags=re.I)  # r134
+    # r136: обёртки \( \) и \[ \] из банка
+    s = re.sub(r"\\[()\[\]]", "", s)
     # r133: LaTeX-оформление ответа -> текст как в базе ($-5$; $(2{,}5;0)$; \sqrt{5}; \le)
     s = s.replace("$", "").replace("{,}", ",").replace("\\,", "").replace("\\;", "").replace("\\!", "")
+    s = s.replace("\\ ", " ").replace("\\left", "").replace("\\right", "").replace("\\{", "{").replace("\\}", "}")
     s = re.sub(r"\\sqrt\{([^{}]*)\}", r"√\1", s)
-    for a, b in (("\\le", "≤"), ("\\ge", "≥"), ("\\pi", "π"), ("\\cdot", "·"), ("−", "-"), ("–", "-")):
+    # r136: \frac{a}{b}, \dfrac{a}b, \dfrac32 -> a/b
+    arg = r"(\{[^{}]*\}|[0-9A-Za-z])"
+    s = re.sub(r"\\[dt]?frac\s*" + arg + r"\s*" + arg,
+               lambda m: m.group(1).strip("{}") + "/" + m.group(2).strip("{}"), s)
+    for a, b in (("\\le", "≤"), ("\\ge", "≥"), ("\\pi", "π"), ("\\cdot", "·"), ("\\infty", "∞"),
+                 ("\\in", "∈"), ("\\cup", "∪"), ("\\pm", "±"), ("−", "-"), ("–", "-")):
         s = s.replace(a, b)
     s = s.replace("\u00a0", " ").strip().rstrip(".").replace(" ", "").replace(".", ",").lower()
+    s = re.sub(r"^[a-zа-я]∈", "", s)  # r136: «a∈(…)» == «(…)»
+    s = re.sub(r"(\d),0+(?!\d)", r"\1", s)  # r136: 90,0 == 90
+    s = re.sub(r"(\d,\d*?[1-9])0+(?!\d)", r"\1", s)  # 2,50 == 2,5
     return s
+
+
+NUM_RE = re.compile(r"\d+(?:,\d+)?")
+LONG_ANSWER = 40  # r136: длиннее — развёрнутый ответ-решение из банка
+
+
+def answer_parts(s):
+    """r136: «а)X;б)Y» -> ['X', 'Y'] (пусто, если пунктов нет)."""
+    parts = re.split(r"(?:^|[;,])\s*[абвг]\)", s)
+    return [p.strip(";,") for p in parts[1:]] if len(parts) > 1 else []
+
+
+def answers_match(got_raw, want_raw):
+    """r136: -> (ok, lenient). lenient=True: банк хранит развёрнутое решение, сверено только число."""
+    got, want = norm_answer(got_raw), norm_answer(want_raw)
+    cands = [got] + answer_parts(got)
+    if any(c == want or strip_unit(c) == want for c in cands):
+        return True, False
+    if len(want) > LONG_ANSWER:
+        final = (answer_parts(got) or [got])[-1]
+        nums = NUM_RE.findall(final)
+        wnums = set(NUM_RE.findall(want))
+        return bool(nums) and all(n in wnums for n in nums), True
+    return False, False
 
 
 def strip_unit(s):
@@ -124,7 +159,7 @@ def image_problems(md, media_root, img_root=None, copy=False):
     return probs, copied
 
 
-def answer_problems(md, exam, subject, number):
+def answer_problems(md, exam, subject, number, notes=None):
     from .models import Task
     probs = []
     heads = list(TASK_HEAD_RE.finditer(md))
@@ -149,7 +184,10 @@ def answer_problems(md, exam, subject, number):
         got, want = norm_answer(am.group(1)), norm_answer(t.answer)
         if not re.search(r"\d", want):
             continue  # r133: ответ-доказательство/без чисел в базе — формат не сверяем
-        if got != want and strip_unit(got) != want:
+        ok, lenient = answers_match(am.group(1), t.answer)
+        if ok and lenient and notes is not None:
+            notes.append(f"task_id {tid}: развёрнутый ответ в банке, сверено итоговое число «{am.group(1)}»")
+        if not ok:
             probs.append(f"task_id {tid}: ответ в разборе «{am.group(1)}», в базе «{norm_answer(t.answer)}»")
     return probs
 

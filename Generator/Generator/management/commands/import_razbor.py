@@ -46,8 +46,8 @@ class Command(BaseCommand):
             title = re.sub(r"№\s+(?=\d)", "№", title)  # r133
             body = raw[h1.end():].lstrip("\n") if h1 else raw
 
-            probs = []
-            probs += q.answer_problems(body, exam, subject, number)
+            probs, notes = [], []
+            probs += q.answer_problems(body, exam, subject, number, notes=notes)
             probs += q.latex_text_problems(body)
             probs += q.latex_render_problems(body, o["frontend_dir"])
             img_probs, copied = q.image_problems(body, settings.MEDIA_ROOT, o["img_root"] or None,
@@ -61,6 +61,8 @@ class Command(BaseCommand):
             self.stdout.write(f"{p.name}: {exam}/{subject}/{number} «{title}» — {status}")
             for pr in probs:
                 self.stdout.write(f"   - {pr}")
+            for n in notes:
+                self.stdout.write(f"   ~ {n}")
             for c in copied:
                 self.stdout.write(f"   + скопирована картинка /media/{c}")
             if probs:
