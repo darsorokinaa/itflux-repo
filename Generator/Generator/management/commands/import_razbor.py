@@ -53,6 +53,9 @@ class Command(BaseCommand):
             img_probs, copied = q.image_problems(body, settings.MEDIA_ROOT, o["img_root"] or None,
                                                  copy=not o["dry_run"])
             probs += img_probs
+            f_probs, f_copied = q.file_problems(body, settings.MEDIA_ROOT, o["img_root"] or None,
+                                                copy=not o["dry_run"])  # r134
+            probs += f_probs; copied += f_copied
             publish = bool(o["publish"]) and not probs
             status = "OK" if not probs else f"ПРОБЛЕМЫ ({len(probs)})"
             self.stdout.write(f"{p.name}: {exam}/{subject}/{number} «{title}» — {status}")
@@ -66,7 +69,7 @@ class Command(BaseCommand):
                 continue
             obj, created = Razbor.objects.update_or_create(
                 exam=exam, subject=subject, number=number,
-                defaults={"title": title, "content_md": q.rewrite_images(body), "source_file": p.name,
+                defaults={"title": title, "content_md": q.rewrite_files(q.rewrite_images(body)), "source_file": p.name,
                           "published": publish})
             self.stdout.write(f"   {'создан' if created else 'обновлён'}, published={obj.published}, {obj.path}")
         self.stdout.write(f"RAZBOR_IMPORT files={len(files)} with_problems={bad}")

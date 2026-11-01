@@ -34,6 +34,7 @@ def rewrite_images(md):
 
 def norm_answer(s):
     s = html.unescape(re.sub(r"<[^>]+>", " ", s or ""))
+    s = re.sub(r"\.?\s*В банке тот же ответ\.?\s*$", "", s.strip(), flags=re.I)  # r134
     # r133: LaTeX-оформление ответа -> текст как в базе ($-5$; $(2{,}5;0)$; \sqrt{5}; \le)
     s = s.replace("$", "").replace("{,}", ",").replace("\\,", "").replace("\\;", "").replace("\\!", "")
     s = re.sub(r"\\sqrt\{([^{}]*)\}", r"√\1", s)
@@ -141,6 +142,8 @@ def answer_problems(md, exam, subject, number):
         tl = t.task
         if tl and (tl.level.level != exam or tl.subject.subject_short != subject or tl.task_number != number):
             probs.append(f"task_id {tid}: в базе это {tl.level.level}/{tl.subject.subject_short} №{tl.task_number}")
+        if not am and not re.search(r"\d", norm_answer(t.answer)):
+            continue  # r134: практическое задание (файл/программа), числового ответа в базе нет
         if not am:
             probs.append(f"task_id {tid}: в разборе нет строки «**Ответ: …**»"); continue
         got, want = norm_answer(am.group(1)), norm_answer(t.answer)
@@ -149,3 +152,34 @@ def answer_problems(md, exam, subject, number):
         if got != want and strip_unit(got) != want:
             probs.append(f"task_id {tid}: ответ в разборе «{am.group(1)}», в базе «{norm_answer(t.answer)}»")
     return probs
+
+
+# r134: `…/img/<rel>` (архивы/файлы к заданию) -> ссылка на скачивание /media/<rel>
+FILE_RE = re.compile(r"`(/[^`\s]*/img/([^`\s]+\.(?:zip|rar|7z|csv|ods|xlsx|xls|txt|docx|odt|py)))`", re.I)
+
+
+def rewrite_files(md):
+    return FILE_RE.sub(lambda m: f"[{Path(m.group(2)).name}](/media/{m.group(2)})", md)
+
+
+def file_problems(md, media_root, img_root=None, copy=False):
+    import shutil
+    probs, copied = [], []
+    for m in FILE_RE.finditer(md):
+        rel = m.group(2)
+        if ".." in Path(rel).parts:
+            probs.append(f"недопустимый путь файла: {rel}"); continue
+        dst = Path(media_root) / rel
+        if dst.is_file() and dst.stat().st_size > 0:
+            continue
+        src = Path(img_root) / rel if img_root else None
+        if src is None or not src.is_file():
+            probs.append(f"файла нет ни на сервере, ни в исходниках: {rel}"); continue
+        if copy:
+            dst.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(src, dst); copied.append(rel)
+    rest = FILE_RE.sub("", md)
+    rest = IMG_RE.sub("", rest)
+    for line in rest.splitlines():
+        if "/workspace/" in line:
+            probs.append(f"в тексте остался локальный путь: {line.strip()[:120]}")
+    return probs, copied
