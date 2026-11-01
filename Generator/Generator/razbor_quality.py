@@ -8,7 +8,7 @@ from pathlib import Path
 
 IMG_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
 TASK_HEAD_RE = re.compile(r"^#{2,4}\s.*?task_id\s*(\d+)", re.M)
-ANSWER_RE = re.compile(r"\*\*\s*Ответ\s*:\s*(.+?)\s*\*\*")
+ANSWER_RE = re.compile(r"\*\*\s*Ответ\s*:\s*(?:\*\*\s*)?([^*\n]+?)\s*(?:\*\*|$)", re.M)  # r132: и «**Ответ:** X»
 MATH_RE = re.compile(r"\$\$(.+?)\$\$|(?<!\\)\$(.+?)(?<!\\)\$", re.S)
 TEX_OUTSIDE_RE = re.compile(r"\\(?:cdot|times|dfrac|frac|sqrt|le|ge|approx|pi|text|left|right)\b|\{,\}|\\%")
 CODE_RE = re.compile(r"```.*?```|`[^`\n]*`", re.S)
