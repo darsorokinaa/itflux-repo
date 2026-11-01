@@ -34,8 +34,19 @@ def rewrite_images(md):
 
 def norm_answer(s):
     s = html.unescape(re.sub(r"<[^>]+>", " ", s or ""))
+    # r133: LaTeX-оформление ответа -> текст как в базе ($-5$; $(2{,}5;0)$; \sqrt{5}; \le)
+    s = s.replace("$", "").replace("{,}", ",").replace("\\,", "").replace("\\;", "").replace("\\!", "")
+    s = re.sub(r"\\sqrt\{([^{}]*)\}", r"√\1", s)
+    for a, b in (("\\le", "≤"), ("\\ge", "≥"), ("\\pi", "π"), ("\\cdot", "·"), ("−", "-"), ("–", "-")):
+        s = s.replace(a, b)
     s = s.replace("\u00a0", " ").strip().rstrip(".").replace(" ", "").replace(".", ",").lower()
     return s
+
+
+def strip_unit(s):
+    """r133: «65км/ч» -> «65» (только хвост из букв/единиц после числа)."""
+    m = re.fullmatch(r"(-?\d+(?:,\d+)?)[a-zа-яё/²³°]+", s)
+    return m.group(1) if m else s
 
 
 def math_segments(md):
@@ -132,6 +143,9 @@ def answer_problems(md, exam, subject, number):
             probs.append(f"task_id {tid}: в базе это {tl.level.level}/{tl.subject.subject_short} №{tl.task_number}")
         if not am:
             probs.append(f"task_id {tid}: в разборе нет строки «**Ответ: …**»"); continue
-        if norm_answer(am.group(1)) != norm_answer(t.answer):
+        got, want = norm_answer(am.group(1)), norm_answer(t.answer)
+        if not re.search(r"\d", want):
+            continue  # r133: ответ-доказательство/без чисел в базе — формат не сверяем
+        if got != want and strip_unit(got) != want:
             probs.append(f"task_id {tid}: ответ в разборе «{am.group(1)}», в базе «{norm_answer(t.answer)}»")
     return probs
