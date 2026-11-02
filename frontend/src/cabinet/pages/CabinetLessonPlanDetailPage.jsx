@@ -18,7 +18,9 @@ import { canPublishCatalogPlans } from "../planCatalogPublish";
 import { homeworkResourceRows, lessonResourceRows } from "../planItemAttachments";
 import {
   copyLessonPlan,
+  createPlanMissingLessons,
   deleteLessonPlan,
+  fetchPlanMissingLessons,
   fetchCabinetSession,
   fetchLessonPlan,
   updateLessonPlan,
@@ -153,6 +155,9 @@ export default function CabinetLessonPlanDetailPage() {
   const [publishing, setPublishing] = useState(false);
   const [canPublishCatalog, setCanPublishCatalog] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [missingLessons, setMissingLessons] = useState([]);
+  const [creatingLessons, setCreatingLessons] = useState(false);
+  const [missingNote, setMissingNote] = useState("");
   usePageTitle(plan?.title || "План занятий");
 
   useEffect(() => {
@@ -192,6 +197,36 @@ export default function CabinetLessonPlanDetailPage() {
   }, [planId]);
 
   useEffect(() => { load(); }, [load]);
+
+  const loadMissing = useCallback(async () => {
+    try {
+      const data = await fetchPlanMissingLessons(planId);
+      setMissingLessons(Array.isArray(data?.items) ? data.items : []);
+    } catch {
+      setMissingLessons([]);
+    }
+  }, [planId]);
+
+  useEffect(() => { loadMissing(); }, [loadMissing]);
+
+  const handleCreateMissing = async () => {
+    setCreatingLessons(true);
+    setMissingNote("");
+    try {
+      const res = await createPlanMissingLessons(planId);
+      const created = res?.created?.length || 0;
+      const conflicts = res?.conflicts?.length || 0;
+      setMissingNote(
+        `Создано уроков: ${created}${conflicts ? ` · пересечений с другими занятиями: ${conflicts}` : ""}`,
+      );
+      await load();
+      await loadMissing();
+    } catch (err) {
+      setMissingNote(err.message || "Не удалось создать уроки");
+    } finally {
+      setCreatingLessons(false);
+    }
+  };
 
   const handleCopyPlan = async () => {
     if (copyingRef.current) return;
@@ -382,6 +417,26 @@ export default function CabinetLessonPlanDetailPage() {
               {remainingItems ? ` · осталось ${remainingLessonsLabel(remainingItems)}` : " · план завершён"}
             </p>
           ) : null}
+          {missingLessons.length > 0 ? (
+            <div className="cb-plan-detail-banner cb-plan-detail-banner--warn" role="status">
+              <p>
+                {`Темы без урока в календаре: ${missingLessons.length}. `}
+                {missingLessons.slice(0, 5).map((it) => `${it.topic || "Тема"} (${it.scheduled_date})`).join(", ")}
+                {missingLessons.length > 5 ? "…" : ""}
+              </p>
+              {missingLessons.some((it) => !it.past) ? (
+                <button
+                  type="button"
+                  className="cb-btn cb-btn--outline cb-btn--sm"
+                  onClick={handleCreateMissing}
+                  disabled={creatingLessons}
+                >
+                  {creatingLessons ? "…" : "Создать уроки"}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          {missingNote ? <p className="cb-plan-detail-hint" role="status">{missingNote}</p> : null}
           {showFinishedBanner ? (
             <div className="cb-plan-detail-banner cb-plan-detail-banner--done">
               <p>План завершён. Все темы пройдены.</p>

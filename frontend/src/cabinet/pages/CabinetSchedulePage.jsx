@@ -104,8 +104,8 @@ const MONTHS_NOM = [
   "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
 ];
 
-const HOUR_START = 8;
-const HOUR_END = 22;
+const HOUR_START = 6;
+const HOUR_END = 23;
 const HOUR_HEIGHT = 52;
 const EVENT_MIN_HEIGHT = 22;
 
@@ -2060,7 +2060,15 @@ function MonthGrid({
                     onPointerDown={onPointerDown}
                   />
                 ))}
-                {rest > 0 ? <span className="cb-sch-month__more">+ ещё {rest}</span> : null}
+                {rest > 0 ? (
+                  <button
+                    type="button"
+                    className="cb-sch-month__more"
+                    onClick={() => onDayClick(date)}
+                  >
+                    + ещё {rest}
+                  </button>
+                ) : null}
               </div>
             </div>
           );
@@ -3505,7 +3513,7 @@ export default function CabinetSchedulePage() {
           && eventDate(ev).getFullYear() === focusDate.getFullYear(),
       );
     }
-    return filteredEvents.filter((ev) => eventDate(ev) >= startOfDay(new Date())).slice(0, 20);
+    return filteredEvents.filter((ev) => eventDate(ev) >= startOfDay(new Date()));
   }, [filteredEvents, view, focusDate]);
 
   const handleToday = () => {

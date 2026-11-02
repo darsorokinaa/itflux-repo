@@ -55,6 +55,18 @@ def _sync_event_datetime_to_linked_records(event, *, changed_by=None):
     item = event.lesson_plan_item
     if item is None:
         item = event.plan_items.order_by("order", "id").first()
+    inactive = (ScheduleEvent.Status.CANCELLED, ScheduleEvent.Status.SKIPPED)
+    if item is not None and event.status == ScheduleEvent.Status.CANCELLED:
+        # r137: отменённое занятие не держит тему и не двигает её дату.
+        item = None
+    if (
+        item is not None
+        and item.scheduled_event_id
+        and item.scheduled_event_id != event.pk
+        and ScheduleEvent.objects.filter(pk=item.scheduled_event_id).exclude(status__in=inactive).exists()
+    ):
+        # тема уже стоит на другом активном занятии
+        item = None
     if item is not None and local_date is not None:
         fields = []
         if item.scheduled_date != local_date:
@@ -444,7 +456,7 @@ def _bounds_for_item(item, slots, counters, zone):
 
 
 @transaction.atomic
-def materialize_plan_calendar(plan, *, teacher, enrollment=None, slots=None, notify=False):
+def materialize_plan_calendar(plan, *, teacher, enrollment=None, slots=None, notify=False, only_missing=False):
     """Создаёт недостающие занятия календаря по датам плана. Повторный вызов не плодит дубли."""
     from .plan_sync import PlanSyncService
     from .schedule_service import check_conflicts
@@ -484,6 +496,21 @@ def materialize_plan_calendar(plan, *, teacher, enrollment=None, slots=None, not
         event = item.scheduled_event
         if event is None:
             event = item.schedule_events_linked.order_by("starts_at").first()
+        if only_missing:
+            # r137: «Создать уроки» — только темы без активного занятия, будущие даты, без переносов.
+            if item.status in (PlanItemStatus.COMPLETED, PlanItemStatus.SKIPPED):
+                continue
+            if item.scheduled_date < timezone.localdate():
+                continue
+            active = item.schedule_events_linked.exclude(
+                status__in=[ScheduleEvent.Status.CANCELLED, ScheduleEvent.Status.SKIPPED]
+            ).exists()
+            if active or (event is not None and event.status not in (
+                ScheduleEvent.Status.CANCELLED, ScheduleEvent.Status.SKIPPED,
+            )):
+                kept.append(event.pk if event is not None else None)
+                continue
+            event = None
         starts_at, ends_at, slot_for_bounds = _bounds_for_item(item, normalized, counters, zone)
         if event is not None and event.status in protected:
             kept.append(event.pk)

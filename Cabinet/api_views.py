@@ -1547,6 +1547,28 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         result["mode"] = mode
         return Response(result)
 
+    @action(detail=True, methods=["get", "post"], url_path="missing-lessons")
+    def missing_lessons(self, request, pk=None):
+        """r137: темы с датой без активного занятия; POST создаёт для них уроки (без уведомлений)."""
+        from .lesson_lifecycle import materialize_plan_calendar
+        from .management.commands.plan_calendar_audit import collect
+
+        plan = self.get_object()
+        if plan.teacher_id != request.user.id:
+            return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
+        if request.method == "POST":
+            result = materialize_plan_calendar(plan, teacher=request.user, notify=False, only_missing=True)
+            result["kept"] = [k for k in result.get("kept", []) if k]
+            code = status.HTTP_200_OK if result.get("ok") else status.HTTP_400_BAD_REQUEST
+            return Response(result, status=code)
+        data = collect(request.user.id)
+        rows = [r for r in data["without_lesson"] if r["plan_id"] == plan.pk]
+        today = timezone.localdate().isoformat()
+        return Response({
+            "items": [{"id": r["item_id"], "order": r["order"], "topic": r["topic"],
+                       "scheduled_date": r["scheduled_date"], "past": r["scheduled_date"] < today} for r in rows],
+        })
+
     @action(detail=True, methods=["post"], url_path="fill-dates")
     def fill_dates(self, request, pk=None):
         """Проставить даты занятий от даты первого урока."""

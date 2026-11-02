@@ -1411,6 +1411,14 @@ export function fetchLessonPlan(id) {
   return cabinetFetch(`/lesson-plans/${id}/`, { method: "GET" });
 }
 
+export function fetchPlanMissingLessons(id) {
+  return cabinetFetch(`/lesson-plans/${id}/missing-lessons/`, { method: "GET" });
+}
+
+export function createPlanMissingLessons(id) {
+  return cabinetFetch(`/lesson-plans/${id}/missing-lessons/`, { method: "POST", body: "{}" });
+}
+
 export function fetchLessonPlanSubjects() {
   return cabinetFetch("/lesson-plans/subjects/", { method: "GET" });
 }

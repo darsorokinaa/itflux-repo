@@ -194,3 +194,41 @@ def r125_variant_issuance_post_save(sender, instance, **kwargs):
     from .variant_issuance import on_homework_task_post_save
 
     on_homework_task_post_save(instance)
+
+# --- r137: смена starts_at любым путём (save) подтягивает дату темы плана ----
+
+_pre_save_starts: dict[int, object] = {}
+
+
+@receiver(pre_save, sender=ScheduleEvent)
+def r137_capture_starts_at(sender, instance, **kwargs):
+    if not instance.pk:
+        return
+    update_fields = kwargs.get("update_fields")
+    if update_fields is not None and "starts_at" not in update_fields:
+        return
+    try:
+        _pre_save_starts[instance.pk] = (
+            ScheduleEvent.objects.filter(pk=instance.pk).values_list("starts_at", flat=True).first()
+        )
+    except Exception:
+        pass
+
+
+@receiver(post_save, sender=ScheduleEvent)
+def r137_sync_plan_date_on_move(sender, instance, created, **kwargs):
+    old = _pre_save_starts.pop(instance.pk, None)
+    if created or old is None or old == instance.starts_at:
+        return
+    if not (instance.lesson_plan_item_id or instance.plan_items.exists()):
+        return
+    try:
+        # Внутри _sync_guard: повторный вход из сохранения пункта/журнала невозможен.
+        # Уведомлений не шлёт — только дата пункта плана и открытого журнала.
+        from .lesson_lifecycle import sync_event_datetime_to_linked_records
+
+        sync_event_datetime_to_linked_records(instance)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception("r137 plan date sync failed event=%s", instance.pk)

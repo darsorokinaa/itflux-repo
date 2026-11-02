@@ -468,16 +468,24 @@ class PlanSyncService:
                 return event
         event.lesson_plan_item = item
         update_event_fields = ["lesson_plan_item", "updated_at"]
+        # r137: дата темы = фактическая локальная дата занятия (иначе план и календарь расходятся).
+        from .plan_schedule import event_local_date
+
+        local_date = None
+        if event.status not in (ScheduleEvent.Status.CANCELLED, ScheduleEvent.Status.SKIPPED):
+            local_date = event_local_date(event)
+        item_fields = []
         if item.scheduled_event_id != event.pk:
             item.scheduled_event = event
-            item_fields = ["scheduled_event", "updated_at"]
-            if item.status == PlanItemStatus.NOT_STARTED:
-                item.status = PlanItemStatus.PLANNED
-                item_fields.append("status")
-            item.save(update_fields=item_fields)
-        elif item.status == PlanItemStatus.NOT_STARTED:
+            item_fields.append("scheduled_event")
+        if local_date is not None and item.scheduled_date != local_date:
+            item.scheduled_date = local_date
+            item_fields.append("scheduled_date")
+        if item.status == PlanItemStatus.NOT_STARTED:
             item.status = PlanItemStatus.PLANNED
-            item.save(update_fields=["status", "updated_at"])
+            item_fields.append("status")
+        if item_fields:
+            item.save(update_fields=item_fields + ["updated_at"])
 
         LessonPlanItem.objects.filter(
             scheduled_event_id=event.pk,

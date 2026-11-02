@@ -18883,3 +18883,14 @@ select.cb-lesson-card__about-input.is-empty {
     display: inline;
   }
 }
+
+/* r137: «+ ещё N» — кнопка, открывает день */
+button.cb-sch-month__more {
+  background: none;
+  border: 0;
+  padding: 0 0 0 4px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.cb-sch-month__more:hover { text-decoration: underline; }
