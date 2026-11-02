@@ -16,6 +16,7 @@ import { installLessonThumbnail } from "./lessonThumbnail";
 
 const boardComponents = debugBoardComponents(lessonBoardComponents);
 import { LessonGeoShapeUtil } from "./lessonGeoShape";
+import { lessonEmbedDefinitions } from "./lessonEmbeds";
 import { LessonNoteShapeUtil, lessonCanvasShapeUtils, lessonShapeUtils, lessonTools, lessonUiOverrides } from "./lessonShapes";
 
 const lessonSyncShapeUtils = [
@@ -299,6 +300,7 @@ function TldrawBoardSynced({
       options={lessonTldrawOptions}
       shapeUtils={[LessonGeoShapeUtil, LessonNoteShapeUtil, ...lessonCanvasShapeUtils]}
       tools={lessonTools}
+      embeds={lessonEmbedDefinitions}
       overrides={lessonUiOverrides}
       components={boardComponents}
       onMount={(editor) => {

@@ -16,6 +16,7 @@ import {
 } from "tldraw";
 
 import { lessonGraphPoints, lessonStickerResize } from "./lessonShell";
+import LessonEmbedDialog from "./LessonEmbedDialog";
 
 const formulaVersions = createShapePropsMigrationIds("formula", { Init: 1, Defaults: 2 });
 const graphVersions = createShapePropsMigrationIds("graph", { Init: 1, Defaults: 2 });
@@ -592,9 +593,23 @@ export const lessonCanvasShapeUtils = [LessonHighlightShapeUtil, ...lessonShapeU
 export const lessonTools = [FormulaShapeTool, GraphShapeTool, TaskShapeTool];
 
 export const lessonUiOverrides = {
-  tools(editor, tools) {
+  actions(editor, actions, helpers) {
+    if (!actions["insert-embed"]) return actions;
+    return {
+      ...actions,
+      "insert-embed": { ...actions["insert-embed"], onSelect() { helpers.addDialog({ component: LessonEmbedDialog }); } },
+    };
+  },
+  tools(editor, tools, helpers) {
     return {
       ...tools,
+      // r139: русская «Вставка» в одно поле (Desmos, GeoGebra, RuTube, VK, YouTube, ссылка).
+      embed: {
+        ...(tools.embed || { id: "embed", icon: "dot", label: "tool.embed" }),
+        onSelect() {
+          helpers.addDialog({ component: LessonEmbedDialog });
+        },
+      },
       formula: {
         id: "formula",
         label: "tool.formula",
