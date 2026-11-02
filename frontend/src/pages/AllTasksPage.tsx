@@ -845,6 +845,17 @@ export default function AllTasksPage() {
     if (!ok) setTaskListId("");
   }, [filterOptions, taskListId, filtersLoading]);
 
+  // r136: ?num=N из разборов — выбрать номер задания по его номеру в экзамене (один раз)
+  const pendingNumRef = useRef<number | null>(Number(searchParams.get("num")) || null);
+  useEffect(() => {
+    const want = pendingNumRef.current;
+    if (!want || filtersLoading || !filterOptions) return;
+    pendingNumRef.current = null;
+    if (taskListId) return;
+    const hit = filterOptions.task_numbers?.find((t) => Number(t.task_number) === want);
+    if (hit?.task_list_id) setTaskListId(String(hit.task_list_id));
+  }, [filterOptions, filtersLoading, taskListId]);
+
   useEffect(() => {
     let cancelled = false;
     const url = `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/tasks/${buildQuery(level, vprGrade, vprAdvanced, {
