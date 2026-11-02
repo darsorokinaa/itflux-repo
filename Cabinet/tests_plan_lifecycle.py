@@ -119,9 +119,9 @@ class PlanLifecycleTests(TestCase):
         )
         self.items[0].refresh_from_db()
         self.assertNotEqual(self.items[0].status, PlanItemStatus.COMPLETED)
-        self.assertEqual(self.items[0].scheduled_event_id, event.pk)
+        self.assertIsNone(self.items[0].scheduled_event_id)  # r138: тема вернулась в план
         next_item = PlanSyncService.get_next_plan_item(self.enrollment)
-        self.assertEqual(next_item.id, self.items[1].id)
+        self.assertEqual(next_item.id, self.items[0].id)  # r138: следующей идёт возвращённая тема
 
     def test_unplanned_lesson_does_not_break_sequence(self):
         planned = self._event(1)
@@ -390,7 +390,7 @@ class PlanLifecycleTests(TestCase):
         self.items[1].refresh_from_db()
 
         self.assertEqual(first.lesson_plan_item_id, self.items[0].id)
-        self.assertEqual(self.items[0].scheduled_event_id, first.pk)
+        self.assertIsNone(self.items[0].scheduled_event_id)  # r138: тема вернулась в план
         self.assertEqual(self.items[0].homework_description, "Решить №12")
         self.assertTrue(self.items[0].materials.filter(pk=lesson_material.pk).exists())
         self.assertTrue(self.items[0].homework_materials.filter(pk=homework_material.pk).exists())
@@ -423,7 +423,7 @@ class PlanLifecycleTests(TestCase):
         self.assertEqual(third.topic, self.items[2].topic)
         self.assertEqual(self.items[1].scheduled_event_id, second.pk)
         self.items[0].refresh_from_db()
-        self.assertEqual(self.items[0].scheduled_event_id, first.pk)
+        self.assertIsNone(self.items[0].scheduled_event_id)  # r138: тема вернулась в план
 
     def test_conducted_attendance_consumes_topic_and_shifts_remaining(self):
         from Cabinet.journal_models import AttendanceStatus
@@ -671,3 +671,19 @@ class PlanLifecycleTests(TestCase):
         self.assertEqual(second.topic, self.items[2].topic)
         self.assertEqual(third.lesson_plan_item_id, self.items[1].id)
         self.assertEqual(third.topic, self.items[1].topic)
+
+
+class PlanCancelReturnsTopicR138Tests(PlanLifecycleTests):
+    def test_cancel_returns_topic_and_restore_relinks(self):
+        from Cabinet.lesson_lifecycle import restore_event
+
+        event = self._event(1, lesson_plan_item=self.items[0].id)
+        cancel_event_with_scope(event, changed_by=self.teacher, notify=False, plan_cancel_action="shift")
+        self.items[0].refresh_from_db()
+        self.assertIsNone(self.items[0].scheduled_event_id)
+        self.assertEqual(self.items[0].status, PlanItemStatus.PLANNED)
+        event.refresh_from_db()
+        self.assertEqual(event.lesson_plan_item_id, self.items[0].id)
+        restore_event(event, changed_by=self.teacher)
+        self.items[0].refresh_from_db()
+        self.assertEqual(self.items[0].scheduled_event_id, event.pk)

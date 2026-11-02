@@ -604,9 +604,22 @@ class PlanSyncService:
             logger.info("lesson cancelled event=%s item=%s skipped", event.pk, item.pk)
             return action
         logger.info(
-            "lesson cancelled event=%s item=%s topic kept on this lesson",
+            "lesson cancelled event=%s item=%s topic returned to plan",
             event.pk,
             item.pk,
+        )
+        # r138: тема возвращается в план — «запланирована», без урока. У отменённого урока
+        # lesson_plan_item остаётся для истории и для восстановления. Дальше reflow
+        # раздаёт свободные темы будущим автоурокам строго по порядку плана; уроки с
+        # вручную выбранной темой не трогаются. update() — без сигналов и уведомлений.
+        from .models import LessonPlanItem
+
+        LessonPlanItem.objects.filter(pk=item.pk, scheduled_event_id=event.pk).exclude(
+            status=PlanItemStatus.COMPLETED,
+        ).update(
+            scheduled_event=None,
+            status=PlanItemStatus.PLANNED,
+            updated_at=timezone.now(),
         )
         try:
             from .plan_autolink import shift_after_cancel

@@ -367,9 +367,9 @@ class LessonPlanCancelAndLinkTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.items[0].refresh_from_db()
         self.assertNotEqual(self.items[0].status, PlanItemStatus.SKIPPED)
-        self.assertEqual(self.items[0].scheduled_event_id, event.pk)
+        self.assertIsNone(self.items[0].scheduled_event_id)  # r138: тема вернулась в план
         next_item = PlanSyncService.get_next_plan_item(self.enrollment)
-        self.assertEqual(next_item.id, self.items[1].id)
+        self.assertEqual(next_item.id, self.items[0].id)  # r138: следующей идёт возвращённая тема
 
     def test_complete_retry_does_not_duplicate(self):
         event = self._event(1)
