@@ -8,6 +8,7 @@ import { LessonTimerControls, LessonTimerWidget } from "./lessonTimer.jsx";
 import { LessonPaperControl } from "./LessonPaper.jsx";
 import LessonSheetSwitcher from "./LessonSheetSwitcher";
 import LessonRail from "./LessonToolbar";
+import { LessonFollowTeacherButton, LessonFollowTeacherEnforcer } from "./lessonFollowTeacher";
 import { stopFollowing } from "./lessonBoardActions";
 import {
   LESSON_BOARD_CHROME_SOURCE,
@@ -29,6 +30,7 @@ export default function LessonChrome() {
       <StickerEnter />
       <LessonTop onStudentView={setStudentView} />
       {studentView ? <StudentBanner onExit={() => setStudentView(false)} /> : null}
+      <LessonFollowTeacherEnforcer />
       <LessonRail />
       <LessonContextBar />
       <BoardDocks />
@@ -225,6 +227,7 @@ function LessonTop({ onStudentView }) {
               </TopIcon>
             </span>
           ) : null}
+          <LessonFollowTeacherButton />
           <PeopleButton
             people={people}
             followingId={followingId}

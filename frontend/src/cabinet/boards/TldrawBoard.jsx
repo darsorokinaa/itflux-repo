@@ -54,6 +54,7 @@ import { installLessonViewportMemory } from "./lessonViewportMemory";
 import BoardV2ErrorBoundary from "./BoardV2ErrorBoundary";
 import LessonBoardMessage from "./LessonBoardMessage";
 import "../styles/boards.css";
+import { LessonRoleContext } from "./lessonFollowTeacher";
 
 import { markBoard } from "../lessonLoadTrace";
 
@@ -187,6 +188,7 @@ function TldrawBoardSynced({
   color,
   avatarUrl,
   canEdit,
+  role = "",
   onRetry,
   attempt = 0,
   reconnect = false,
@@ -196,6 +198,7 @@ function TldrawBoardSynced({
     [userId, displayName, color, avatarUrl],
   );
   const assets = useMemo(() => createLessonBoardAssetStore(boardId), [boardId]);
+  const roleContext = useMemo(() => ({ role: String(role || ""), selfId: createUserId(String(userId)) }), [role, userId]);
   const sync = useLessonBoardSync({ boardId, roomId, users, assets, fresh: reconnect });
   const licenseKey = tldrawLicenseKey();
   const onRetryRef = useRef(onRetry);
@@ -294,6 +297,7 @@ function TldrawBoardSynced({
   }
 
   return (
+    <LessonRoleContext.Provider value={roleContext}>
     <Tldraw
       store={sync.store}
       licenseKey={licenseKey}
@@ -353,6 +357,7 @@ function TldrawBoardSynced({
         };
       }}
     />
+    </LessonRoleContext.Provider>
   );
 }
 
@@ -379,6 +384,7 @@ function TldrawBoardSession({ boardId, userId, displayName, role, avatarUrl, can
       color={color}
       avatarUrl={avatarUrl || ""}
       canEdit={canEdit}
+      role={role}
       onRetry={onRetry}
       attempt={attempt}
       reconnect={reconnect}
