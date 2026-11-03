@@ -131,6 +131,12 @@ def event_duration_minutes(event):
     return minutes if minutes > 0 else None
 
 
+def _moves_future_into_past(event, target_date):
+    """r140: дата плана в прошлом не тащит будущий урок назад (вставка темы сдвигает сетку дат)."""
+    today = timezone.localdate()
+    return target_date < today and event_local_date(event) >= today
+
+
 def sync_plan_item_date_to_event(item, *, changed_by):
     """Дата в плане двигает связанное будущее занятие, не трогая проведённую историю."""
     event = item.scheduled_event
@@ -155,6 +161,12 @@ def sync_plan_item_date_to_event(item, *, changed_by):
         }
     if event_local_date(event) == item.scheduled_date:
         return {"moved": False, "unchanged": True, "reason": ""}
+    if _moves_future_into_past(event, item.scheduled_date):
+        return {
+            "moved": False,
+            "code": "past_kept",
+            "reason": "Будущее занятие не переносится на прошедшую дату плана.",
+        }
     zone = event_zone(event)
     local_start = event.starts_at.astimezone(zone)
     new_start = datetime.combine(item.scheduled_date, local_start.timetz())
@@ -515,6 +527,21 @@ def materialize_plan_calendar(plan, *, teacher, enrollment=None, slots=None, not
         if event is not None and event.status in protected:
             kept.append(event.pk)
             continue
+        if event is not None and _moves_future_into_past(event, item.scheduled_date):
+            kept.append(event.pk)
+            continue
+        if event is not None and not slots:
+            # r140: время в слотах не задано явно — меняем только дату, время урока сохраняем.
+            # Иначе слот по умолчанию (16:00) упирается в соседний урок и перенос не удаётся.
+            ev_zone = event_zone(event)
+            local_start = event.starts_at.astimezone(ev_zone)
+            duration = event.ends_at - event.starts_at
+            if duration <= timedelta(0):
+                duration = timedelta(minutes=60)
+            starts_at = timezone.make_aware(
+                datetime.combine(item.scheduled_date, local_start.time().replace(tzinfo=None)), ev_zone,
+            )
+            ends_at = starts_at + duration
         # original_start_at есть у каждого экземпляра серии, а MOVED — у любого
         # переноса. Это не повод оставлять карточку на старой дате плана.
         # Исключение по времени сохраняем только пока дата плана совпадает с карточкой.
