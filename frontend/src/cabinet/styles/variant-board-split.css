@@ -44,3 +44,7 @@ html.vb-split-open { overflow-x: hidden; }
 html.vb-split-mobile #root { padding-top: 44px; }
 .vb-panel--mobile { top: 44px; left: 0; width: auto; border-left: none; }
 .vb-panel--hidden { visibility: hidden; pointer-events: none; }
+
+/* r147: выбор ученика (только учитель группового урока) */
+.vb-pick-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; align-items: center; }
+.vb-student-select { margin-left: auto; max-width: 45%; font: inherit; font-size: 13px; padding: 3px 6px; border-radius: 6px; }

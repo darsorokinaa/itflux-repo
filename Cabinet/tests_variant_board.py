@@ -34,15 +34,20 @@ class VariantBoardLiveTests(TestCase):
         return c.post("/api/cabinet/variant-board/", body, format="json")
 
     def test_teacher_and_student_share_board(self):
-        r1 = self._post(self.teacher, {"live_session": self.sess["id"]})
-        self.assertEqual(r1.status_code, 200, r1.content)
+        self.assertEqual(self._post(self.teacher, {"live_session": self.sess["id"]}).status_code, 404)
         j = APIClient(); j.force_login(self.su)
         j.post(f"/api/cabinet/variant-live/{self.sess['id']}/join/", {}, format="json")
+        r1 = self._post(self.teacher, {"live_session": self.sess["id"]})
+        self.assertEqual(r1.status_code, 200, r1.content)
         r2 = self._post(self.su, {"homework_id": self.sess["homeworkId"]})
         self.assertEqual(r2.status_code, 200, r2.content)
         self.assertEqual(r1.data["boardId"], r2.data["boardId"])
         board = InteractiveBoard.objects.get(pk=r1.data["boardId"])
         self.assertEqual(board.owner_id, self.teacher.pk)
+        self.assertEqual(board.student.user_id, self.su.pk)
+        self.assertFalse(board.description.startswith("variant-live-board:"))
+        self.assertEqual(board.student.user_id, self.su.pk)
+        self.assertFalse(board.description.startswith("variant-live-board:"))
         self.assertEqual(board.get_permission_for(self.su), "edit")
         self.assertTrue(InteractiveBoardAccess.objects.filter(board=board, user=self.su).exists())
 
@@ -50,3 +55,79 @@ class VariantBoardLiveTests(TestCase):
         r = self._post(self.out, {"live_session": self.sess["id"]})
         self.assertEqual(r.status_code, 403)
         self.assertEqual(self._post(self.su, {}).status_code, 400)
+
+
+class VariantBoardStudentRuleTests(TestCase):
+    """r147: строго доска ученика (та же, что на его уроках), без выбора чужой."""
+
+    def setUp(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from Cabinet.schedule_service import create_single_event
+        from Cabinet.video_meeting_service import get_or_create_meeting_for_event
+
+        def mk(name, role):
+            u = User.objects.create_user(username=name, password="x")
+            Profile.objects.update_or_create(user=u, defaults=dict(role=role))
+            return User.objects.get(pk=u.pk)
+
+        self.teacher = mk("r147_t", Profile.Role.TEACHER)
+        self.ua, self.ub = mk("r147_a", Profile.Role.STUDENT), mk("r147_b", Profile.Role.STUDENT)
+        self.out = mk("r147_o", Profile.Role.STUDENT)
+        self.sa = Student.objects.create(teacher=self.teacher, user=self.ua, first_name="Аня", status="active")
+        self.sb = Student.objects.create(teacher=self.teacher, user=self.ub, first_name="Боря", status="active")
+        now = timezone.now()
+
+        def ev(ids):
+            e = create_single_event(teacher=self.teacher, data=dict(
+                title="Урок", starts_at=now, ends_at=now + timedelta(hours=1), event_type="individual_lesson",
+                format="online", notify_participants=False), notify=False, student_ids=ids)
+            e = e[0] if isinstance(e, (list, tuple)) else e
+            m = get_or_create_meeting_for_event(event=e, created_by=self.teacher)
+            m = m[0] if isinstance(m, tuple) else m
+            return str(m.uuid)
+
+        self.m1 = ev([self.sa.pk])
+        self.mg = ev([self.sa.pk, self.sb.pk])
+
+    def _post(self, user, body):
+        c = APIClient(); c.force_login(user)
+        return c.post("/api/cabinet/variant-board/", body, format="json")
+
+    def test_individual_lesson_same_student_board(self):
+        old = InteractiveBoard.objects.create(owner=self.teacher, student=self.sa, title="Доска Ани")
+        rt = self._post(self.teacher, {"meeting": self.m1, "boardId": "x", "board": "y"})
+        rs = self._post(self.ua, {"meeting": self.m1})
+        self.assertEqual(rt.status_code, 200, rt.content)
+        self.assertEqual(rt.data["boardId"], str(old.pk))
+        self.assertEqual(rs.data["boardId"], str(old.pk))
+        self.assertEqual(old.get_permission_for(self.ua), "edit")
+        self.assertIsNone(old.get_permission_for(self.ub))
+        self.assertEqual(self._post(self.out, {"meeting": self.m1}).status_code, 403)
+        self.assertEqual(self._post(self.ub, {"meeting": self.m1}).status_code, 403)
+
+    def test_created_once_and_old_session_boards_ignored(self):
+        InteractiveBoard.objects.create(owner=self.teacher, student=self.sa, title="old",
+                                        description="variant-live-board:abc")
+        r1 = self._post(self.ua, {"meeting": self.m1})
+        r2 = self._post(self.ua, {"meeting": self.m1})
+        self.assertEqual(r1.data["boardId"], r2.data["boardId"])
+        b = InteractiveBoard.objects.get(pk=r1.data["boardId"])
+        self.assertEqual((b.student_id, b.group_id, b.owner_id), (self.sa.pk, None, self.teacher.pk))
+        self.assertEqual(InteractiveBoard.objects.filter(student=self.sa).count(), 2)
+
+    def test_group_lesson_each_student_own_board(self):
+        r = self._post(self.teacher, {"meeting": self.mg})
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual({s["id"] for s in r.data["students"]}, {self.sa.pk, self.sb.pk})
+        ra = self._post(self.ua, {"meeting": self.mg, "student_id": self.sb.pk})
+        rb = self._post(self.ub, {"meeting": self.mg})
+        self.assertNotEqual(ra.data["boardId"], rb.data["boardId"])
+        self.assertEqual(ra.data["studentId"], self.sa.pk)  # student_id ученика игнорируется
+        tb = self._post(self.teacher, {"meeting": self.mg, "student_id": self.sb.pk})
+        self.assertEqual(tb.data["boardId"], rb.data["boardId"])
+        self.assertEqual(len(tb.data["students"]), 2)
+        self.assertEqual(self._post(self.teacher, {"meeting": self.mg, "student_id": 999999}).status_code, 403)
+        # чужая доска по id → 403
+        c = APIClient(); c.force_login(self.ua)
+        self.assertEqual(c.get(f"/api/cabinet/interactive-boards/{rb.data['boardId']}/").status_code, 403)

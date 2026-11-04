@@ -225,7 +225,7 @@ class InteractiveBoardApiTests(TestCase):
         board = InteractiveBoard.objects.create(owner=self.teacher, title="Secret")
         self._auth(self.other_teacher)
         res = self.client.get(f"/api/cabinet/interactive-boards/{board.id}/")
-        self.assertEqual(res.status_code, 404)
+        self.assertEqual(res.status_code, 403)
 
     def test_sync_token_is_issued_only_to_someone_who_can_open_the_board(self):
         board = InteractiveBoard.objects.create(owner=self.teacher, title="Sync")
@@ -238,7 +238,7 @@ class InteractiveBoardApiTests(TestCase):
         self._auth(self.other_teacher)
         with override_settings(TLDRAW_SYNC_SECRET="test-sync-secret", DEBUG=False):
             denied = self.client.post(f"/api/cabinet/interactive-boards/{board.id}/sync-token/")
-        self.assertEqual(denied.status_code, 404)
+        self.assertEqual(denied.status_code, 403)
 
     def test_save_scene_and_version_bump(self):
         board = InteractiveBoard.objects.create(owner=self.teacher, title="Scene")
@@ -597,12 +597,12 @@ class InteractiveBoardApiTests(TestCase):
         self.assertEqual(dl.status_code, 200)
         self.assertEqual(dl["Content-Type"], "image/png")
 
-        # Чужой учитель — 404
+        # Чужой учитель — 403
         self._auth(self.other_teacher)
         denied = self.client.get(
             f"/api/cabinet/interactive-boards/{board.id}/assets/{asset.id}/"
         )
-        self.assertEqual(denied.status_code, 404)
+        self.assertEqual(denied.status_code, 403)
 
     def test_pdf_upload_and_protected_asset(self):
         board = InteractiveBoard.objects.create(owner=self.teacher, title="PdfOk")

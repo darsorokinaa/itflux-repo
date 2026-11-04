@@ -1497,11 +1497,26 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
             )
         return Response({"token": token, "can_edit": can_edit})
 
+    def get_object(self):
+        # r147: чужая существующая доска → 403 (а не 404), несуществующая → 404.
+        try:
+            return super().get_object()
+        except Http404:
+            lookup = self.kwargs.get(self.lookup_url_kwarg or self.lookup_field)
+            try:
+                exists = InteractiveBoard.objects.filter(id=lookup).exists()
+            except Exception:
+                exists = False
+            if exists:
+                from rest_framework.exceptions import PermissionDenied
+                raise PermissionDenied("Нет доступа к этой доске.")
+            raise
+
     def retrieve(self, request, *args, **kwargs):
         board = self.get_object()
         perm = board.get_permission_for(request.user)
         if not perm:
-            return Response({"detail": "Доска не найдена."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"detail": "Нет доступа к этой доске."}, status=status.HTTP_403_FORBIDDEN)
         data = InteractiveBoardDetailSerializer(board, context={"request": request}).data
         data["permission"] = perm
         data["can_edit"] = perm in ("owner", InteractiveBoardAccess.EDIT)

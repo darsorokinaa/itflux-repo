@@ -23,6 +23,11 @@ export function variantBoardRequest({ meetingUuid, liveSessionId, homeworkId }) 
   return null;
 }
 
+/** r147: доска во встроенном режиме — без «Назад»/«Поделиться», без перехода к списку досок. */
+export function variantBoardFrameSrc(boardId) {
+  return `/cabinet/boards/${encodeURIComponent(boardId)}?embed=variant`;
+}
+
 function readWidth() {
   try {
     return clampBoardWidth(window.localStorage.getItem(VB_WIDTH_KEY), window.innerWidth);
@@ -53,21 +58,34 @@ export default function VariantBoardSplit({ meetingUuid, liveSessionId, homework
   const [width, setWidth] = useState(readWidth);
   const [tab, setTab] = useState("board");
   const [dragging, setDragging] = useState(false);
+  const [students, setStudents] = useState(null);
+  const [studentId, setStudentId] = useState(null);
   const isMobile = useIsMobile();
   const reqKey = request ? JSON.stringify(request) : "";
   const widthRef = useRef(width);
   widthRef.current = width;
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (pickId) => {
     if (!reqKey) return;
     setLoading(true);
     setError("");
     try {
-      const data = await fetchVariantBoard(JSON.parse(reqKey));
+      const body = JSON.parse(reqKey);
+      const sid = pickId ?? null;
+      if (sid) body.student_id = sid;
+      const data = await fetchVariantBoard(body);
       if (!data?.boardId) throw new Error("Доска недоступна");
       setBoard(data);
+      setStudentId(data.studentId ?? null);
+      if (Array.isArray(data.students)) setStudents(data.students);
     } catch (e) {
-      setError(e?.message || "Не удалось открыть доску");
+      if (e?.status === 409 && Array.isArray(e?.data?.students)) {
+        setBoard(null);
+        setStudents(e.data.students);
+        setStudentId(null);
+        return;
+      }
+      setError(e?.data?.detail || e?.message || "Не удалось открыть доску");
     } finally {
       setLoading(false);
     }
@@ -75,6 +93,8 @@ export default function VariantBoardSplit({ meetingUuid, liveSessionId, homework
 
   useEffect(() => {
     setBoard(null);
+    setStudents(null);
+    setStudentId(null);
   }, [reqKey]);
 
   const toggle = () => {
@@ -140,11 +160,22 @@ export default function VariantBoardSplit({ meetingUuid, liveSessionId, homework
           <button type="button" className="vb-link" onClick={load}>Повторить</button>
         </div>
       )}
+      {!board && !loading && !error && students && (
+        <div className="vb-board-status" data-testid="variant-board-pick">
+          Чью доску открыть?
+          <div className="vb-pick-list">
+            {students.map((s) => (
+              <button key={s.id} type="button" className="vb-link" onClick={() => load(s.id)}>{s.name}</button>
+            ))}
+          </div>
+        </div>
+      )}
       {board && !loading && (
         <iframe
+          key={board.boardId}
           className="vb-board-frame"
           title={board.title || "Доска"}
-          src={`/cabinet/boards/${encodeURIComponent(board.boardId)}`}
+          src={variantBoardFrameSrc(board.boardId)}
           allow="clipboard-read; clipboard-write; fullscreen"
         />
       )}
@@ -178,9 +209,18 @@ export default function VariantBoardSplit({ meetingUuid, liveSessionId, homework
           {!isMobile && (
             <div className="vb-panel-head">
               <button type="button" className="vb-close" onClick={toggle} aria-label="Закрыть доску" title="Закрыть доску">✕ Закрыть</button>
-              <span className="vb-panel-title">{board?.title || "Доска"}</span>
-              {board && (
-                <a className="vb-link" href={`/cabinet/boards/${encodeURIComponent(board.boardId)}`} target="_blank" rel="noreferrer">В новой вкладке</a>
+              <span className="vb-panel-title">{board?.studentName ? `Доска ученика: ${board.studentName}` : (board?.title || "Доска")}</span>
+              {students && students.length > 1 && (
+                <select
+                  className="vb-student-select"
+                  aria-label="Ученик"
+                  data-testid="variant-board-student"
+                  value={studentId ?? ""}
+                  onChange={(e) => e.target.value && load(e.target.value)}
+                >
+                  <option value="" disabled>Ученик…</option>
+                  {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
               )}
             </div>
           )}

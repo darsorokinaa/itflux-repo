@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { isVariantEmbed } from "./variantEmbed";
 import { ChevronLeft, FileText, Maximize2, Menu, PhoneOff, Redo2, Share2, Timer, Undo2 } from "lucide-react";
 import { createShapeId } from "@tldraw/tlschema";
 import { useEditor, useValue } from "tldraw";
@@ -148,6 +149,8 @@ function LessonTop({ onStudentView }) {
     document.addEventListener("pointerdown", close);
     return () => document.removeEventListener("pointerdown", close);
   }, [menu]);
+  // r147: доска внутри «Доска рядом» — строго доска ученика, без перехода к другим доскам.
+  const variantEmbed = isVariantEmbed();
   async function shareBoard() {
     try {
       await navigator.clipboard.writeText(window.location.href);
@@ -162,19 +165,23 @@ function LessonTop({ onStudentView }) {
     <header className="lesson-top" role="toolbar" aria-label="Доска" onPointerDown={(event) => editor.markEventAsHandled(event)}>
       <div className="lesson-topbar lesson-topbar--info">
         <div className="lesson-topbar__side">
-          <TopIcon label="Назад" onClick={() => (room.inRoom ? postRoomAction("collapse") : window.history.back())}>
-            <ChevronLeft size={14} strokeWidth={1.8} aria-hidden="true" />
-          </TopIcon>
+          {variantEmbed ? null : (
+            <TopIcon label="Назад" onClick={() => (room.inRoom ? postRoomAction("collapse") : window.history.back())}>
+              <ChevronLeft size={14} strokeWidth={1.8} aria-hidden="true" />
+            </TopIcon>
+          )}
           <span className="lesson-topbar__pop">
             <TopIcon label="Меню" pressed={menu === "paper"} onClick={() => toggle("paper")}>
               <Menu size={14} strokeWidth={1.8} aria-hidden="true" />
             </TopIcon>
             {menu === "paper" ? (
               <div className="lesson-top__popover lesson-board-menu" role="menu" aria-label="Меню доски">
+{variantEmbed ? null : (
                 <button type="button" className="lesson-menu__item" onClick={shareBoard}>
                   <Share2 size={16} strokeWidth={1.8} aria-hidden="true" />
                   {copied ? "Скопировано" : "Поделиться"}
                 </button>
+                )}
                 <button
                   type="button"
                   className="lesson-menu__item"

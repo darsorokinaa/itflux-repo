@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { clampBoardWidth, variantBoardRequest, VB_MIN } from "./VariantBoardSplit";
+import { clampBoardWidth, variantBoardFrameSrc, variantBoardRequest, VB_MIN } from "./VariantBoardSplit";
+import { isVariantEmbed } from "../boards/variantEmbed";
 
 describe("VariantBoardSplit helpers", () => {
   it("clamps width", () => {
@@ -8,10 +9,16 @@ describe("VariantBoardSplit helpers", () => {
     expect(clampBoardWidth(600, 1400)).toBe(600);
     expect(clampBoardWidth(null, 1000)).toBe(450);
   });
-  it("builds request by priority", () => {
+  it("builds request by priority, never with a board id", () => {
     expect(variantBoardRequest({ meetingUuid: "m", liveSessionId: "s", homeworkId: 3 })).toEqual({ meeting: "m" });
     expect(variantBoardRequest({ liveSessionId: "s", homeworkId: 3 })).toEqual({ live_session: "s" });
     expect(variantBoardRequest({ homeworkId: 3 })).toEqual({ homework_id: 3 });
     expect(variantBoardRequest({})).toBeNull();
+  });
+  it("embeds board in variant mode", () => {
+    expect(variantBoardFrameSrc("a b")).toBe("/cabinet/boards/a%20b?embed=variant");
+    expect(isVariantEmbed("?embed=variant")).toBe(true);
+    expect(isVariantEmbed("?embed=other")).toBe(false);
+    expect(isVariantEmbed("")).toBe(false);
   });
 });
