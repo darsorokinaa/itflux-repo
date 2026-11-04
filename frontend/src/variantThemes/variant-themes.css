@@ -558,7 +558,7 @@ body.variant-theme--route .variant-theme-nav {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 700;
-  color: #4b6174;
+  color: var(--variant-theme-card-text-secondary, #4b6174);
   cursor: pointer;
 }
 
@@ -943,6 +943,22 @@ body.variant-theme--route .variant-theme-nav {
 /* --- Токены темы (config.tokens) и тёмный режим (config.theme_mode = "dark") --- */
 html.variant-theme-active #main-wrapper.exam-page--edu .exam-task-card.is-theme-current {
   border-color: var(--variant-theme-accent, #2f6f9f) !important;
+}
+
+/* Вторичный текст на карточках: токен card_text_secondary, иначе #4b6174. */
+html.variant-theme-active #main-wrapper.exam-page--edu .exam-task-card,
+html.variant-theme-active #main-wrapper.exam-page--edu .exam-edu-side-card,
+html.variant-theme-active .mobile-panel-sheet .exam-edu-side-card,
+html.variant-theme-active .mobile-variant-bar,
+html.variant-theme-active #main-wrapper.exam-page--edu .variant-theme-selector {
+  --text-secondary: var(--variant-theme-card-text-secondary, #4b6174);
+}
+
+html.variant-theme-active #main-wrapper.exam-page--edu .exam-task-card__meta,
+html.variant-theme-active #main-wrapper.exam-page--edu .exam-task-card__status,
+html.variant-theme-active #main-wrapper.exam-page--edu .exam-edu-side-card .text-secondary,
+html.variant-theme-active .variant-theme-card-text--secondary {
+  color: var(--variant-theme-card-text-secondary, #4b6174);
 }
 
 /* Тёмная тема: светлый текст только прямо на фоне страницы (между карточками). */

@@ -24,6 +24,7 @@ export const TOKEN_VARS = [
   ["on_accent", "--variant-theme-on-accent"],
   ["page_text_primary", "--variant-theme-page-text"],
   ["page_text_secondary", "--variant-theme-page-text-secondary"],
+  ["card_text_secondary", "--variant-theme-card-text-secondary"],
   ["hero_overlay", "--variant-theme-hero-overlay"],
 ];
 

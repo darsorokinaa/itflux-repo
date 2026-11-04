@@ -111,3 +111,11 @@ describe("theme mode and tokens", () => {
   });
 });
 
+describe("card_text_secondary token", () => {
+  it("keeps hex only", () => {
+    expect(resolveForTokens({ slug: "a", config: { tokens: { card_text_secondary: "#2c3e50" } } }).tokens)
+      .toEqual({ card_text_secondary: "#2c3e50" });
+    expect(resolveForTokens({ slug: "a", config: { tokens: { card_text_secondary: "rgba(0,0,0,.5)" } } }).tokens).toEqual({});
+  });
+});
+

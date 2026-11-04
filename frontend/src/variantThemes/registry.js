@@ -34,7 +34,7 @@ export const CLASSIC_VARIANT_THEME = {
 
 const HEX_TOKEN = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const RGBA_TOKEN = /^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*(0|1|0?\.\d{1,3}|1\.0+))?\s*\)$/i;
-export const THEME_COLOR_TOKENS = ["accent", "accent_hover", "on_accent", "page_text_primary", "page_text_secondary"];
+export const THEME_COLOR_TOKENS = ["accent", "accent_hover", "on_accent", "page_text_primary", "page_text_secondary", "card_text_secondary"];
 
 export function pickTokens(raw) {
   const src = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};

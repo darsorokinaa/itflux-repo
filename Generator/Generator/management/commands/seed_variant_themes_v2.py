@@ -74,6 +74,7 @@ def config_from_tokens(tokens: dict) -> dict:
             "page_text_secondary": tokens.get("page_text_secondary") or (
                 tokens.get("text_secondary") if tokens.get("theme_mode") == "dark" else None
             ),
+            "card_text_secondary": tokens.get("card_text_secondary"),
             "hero_overlay": tokens.get("hero_overlay"),
         },
     }

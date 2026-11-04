@@ -546,3 +546,19 @@ class SeedVariantThemesV2Tests(TestCase):
                 space.refresh_from_db()
                 self.assertTrue(space.is_published)
                 self.assertFalse(VariantTheme.objects.get(slug="winter").is_published)
+
+
+class CardTextSecondaryTokenTests(SimpleTestCase):
+    def test_hex_kept_non_hex_dropped(self):
+        from .variant_theme_service import sanitize_variant_theme_config
+        ok = sanitize_variant_theme_config({"tokens": {"card_text_secondary": "#2c3e50"}})
+        self.assertEqual(ok["tokens"], {"card_text_secondary": "#2c3e50"})
+        for bad in ("rgba(0,0,0,.5)", "red", "var(--x)", "#12", "url(x)"):
+            out = sanitize_variant_theme_config({"tokens": {"card_text_secondary": bad}})
+            self.assertNotIn("card_text_secondary", out["tokens"], bad)
+
+    def test_seed_config_passes_token(self):
+        from .management.commands.seed_variant_themes_v2 import config_from_tokens
+        cfg = config_from_tokens({"card_text_secondary": "#1f2d3a", "hero_overlay": "rgba(22,60,96,.66)"})
+        self.assertEqual(cfg["tokens"]["card_text_secondary"], "#1f2d3a")
+        self.assertEqual(cfg["tokens"]["hero_overlay"], "rgba(22, 60, 96, 0.66)")

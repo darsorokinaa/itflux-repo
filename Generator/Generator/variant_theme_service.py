@@ -87,6 +87,7 @@ ALLOWED_TOKEN_COLOR_KEYS = (
     "on_accent",
     "page_text_primary",
     "page_text_secondary",
+    "card_text_secondary",
 )
 _RGBA_RE = re.compile(
     r"^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*(0|1|0?\.\d{1,3}|1\.0+))?\s*\)$",
