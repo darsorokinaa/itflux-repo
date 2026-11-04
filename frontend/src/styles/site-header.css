@@ -879,3 +879,15 @@
     transition: none !important;
   }
 }
+
+/* r143: флаг России (4 ноября 2026) */
+.flux-brand-flag {
+  display: block;
+  flex: none;
+  width: 27px;
+  height: 18px;
+  align-self: center;
+}
+@media (max-width: 420px) {
+  .flux-brand-flag { width: 21px; height: 14px; }
+}

@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import UnityDayFlag from "./UnityDayFlag";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { getActiveNavTab, NAV_TABS, type NavTabDef } from "../config/navTabs";
 import SoonModal from "./SoonModal";
@@ -530,6 +531,7 @@ export default function Nav() {
         <div className="flux-secondary" aria-label="Дополнительные инструменты">
           <Link to="/" className="flux-brand" aria-label="Цифровой поток — главная">
             <LogoMark />
+            <UnityDayFlag />
             <span className="flux-brand-text">
               <span className="flux-wordmark">Цифровой поток</span>
               <span className="flux-brand-caption">ОГЭ · ЕГЭ · Школьная программа</span>
