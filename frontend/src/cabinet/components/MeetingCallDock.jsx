@@ -24,6 +24,7 @@ import {
 } from "../meetingCallOwnership";
 import { useFloatingDrag } from "../useFloatingDrag";
 import FloatingResizeHandles from "../FloatingResizeHandles";
+import { floatingTopBelowBoard, useBoardHeaderInset } from "../boardHeaderInset";
 import LiveKitCallView from "./LiveKitCallView";
 import "../styles/video-meeting.css";
 
@@ -79,6 +80,9 @@ export default function MeetingCallDock() {
   const callSessionIdRef = useRef(createCallSessionId());
   const intendedMediaRef = useRef({ micOn: false, camOn: false, screenSharing: false });
   const manualDockReconnectRef = useRef(() => {});
+  // r149: окно держим ниже шапки «Доски рядом», иначе его рамка ловит клики по переключателю.
+  const boardHeaderBottom = useBoardHeaderInset();
+  const dockMinTop = floatingTopBelowBoard(boardHeaderBottom, 16);
   const {
     nodeRef: dockRef,
     style: dockStyle,
@@ -93,7 +97,16 @@ export default function MeetingCallDock() {
     minHeight: 140,
     storageKey: meetingUuid ? `meeting-call-dock:${meetingUuid}` : null,
     handleSelector: ".meeting-call-dock__bar",
+    marginTop: dockMinTop,
   });
+  const dockStyleSafe = (() => {
+    const base = dockStyle || {};
+    const maxHeight = `calc(100dvh - ${dockMinTop + 8}px)`;
+    if (typeof base.top === "number") {
+      return base.top < dockMinTop ? { ...base, top: dockMinTop, maxHeight } : { ...base, maxHeight };
+    }
+    return { ...base, top: dockMinTop, maxHeight };
+  })();
 
   useEffect(() => {
     // Встроенный просмотр на странице звонка: док не нужен и ломает микрофон.
@@ -435,7 +448,7 @@ export default function MeetingCallDock() {
       <div
         ref={dockRef}
         className={`meeting-call-dock meeting-call-dock--collapsed${dockDragging ? " meeting-call-dock--dragging" : ""}`}
-        style={dockStyle}
+        style={dockStyleSafe}
         role="status"
         onPointerDown={onDockPointerDown}
       >
@@ -465,7 +478,7 @@ export default function MeetingCallDock() {
         dockDragging || dockResizing ? "meeting-call-dock--dragging" : "",
         visible && !collapsed ? "meeting-call-dock--resizable" : "",
       ].filter(Boolean).join(" ")}
-      style={dockStyle}
+      style={dockStyleSafe}
       role="complementary"
       aria-label="Свёрнутый видеозвонок"
       onPointerDown={onDockPointerDown}
