@@ -53,8 +53,10 @@ router.register("materials", api_views.MaterialViewSet, basename="cabinet-materi
 
 from . import variant_live as _r125_variant_live  # noqa: E402
 from . import my_variants as _r129_my_variants  # noqa: E402
+from . import variant_board as _r145_variant_board  # noqa: E402
 
 urlpatterns = [
+    path("variant-board/", _r145_variant_board.VariantBoardView.as_view(), name="variant_board"),
     path("my-variants/", _r129_my_variants.MyVariantsView.as_view(), name="my_variants"),
     path("my-variants/<int:variant_id>/", _r129_my_variants.MyVariantDetailView.as_view(), name="my_variant_detail"),
     path("variant-live/", _r125_variant_live.VariantLiveListView.as_view(), name="variant_live_list"),

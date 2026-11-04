@@ -2965,3 +2965,8 @@ export function variantLimitMessage(err) {
   if (err?.code !== VARIANT_LIMIT_CODE && data.code !== VARIANT_LIMIT_CODE) return null;
   return { text: data.detail || err?.message || "Достигнут лимит вариантов", upgradeUrl: data.upgrade_url || "/cabinet/upgrade" };
 }
+
+/** r145: общая доска рядом с вариантом. */
+export function fetchVariantBoard(body) {
+  return cabinetFetch("/variant-board/", { method: "POST", body: JSON.stringify(body || {}) });
+}

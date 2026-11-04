@@ -93,6 +93,7 @@ import { meetingUuidFromFrame } from "../cabinet/meetingPresent";
 import { fetchCabinetSession, fetchLiveAnswersFor, isTeacherRole, saveLiveScoreFor } from "../utils/cabinetAuth";
 import LiveSolveModal from "../cabinet/components/LiveSolveModal";
 import LiveTaskStudentFiles from "../cabinet/components/LiveTaskStudentFiles";
+import VariantBoardSplit from "../cabinet/components/VariantBoardSplit";
 import LiveVariantAnswersTable, { liveStudentAnswer, lockedScoreFor, LiveAttachmentLinks, liveTaskAttachments } from "../cabinet/components/LiveVariantAnswersTable";
 import "../cabinet/styles/live-variant-answers.css";
 import HomeworkReviewResults, {
@@ -3399,6 +3400,13 @@ function ExamPage() {
   return (
     <VariantThemeRoot payload={variant?.theme}>
     <>
+    {(meetingUuid || liveSessionId || (isLiveVariant && cabinetAssignmentId)) && (
+      <VariantBoardSplit
+        meetingUuid={meetingUuid}
+        liveSessionId={liveSessionId}
+        homeworkId={isLiveVariant ? cabinetAssignmentId : null}
+      />
+    )}
     <div className="exam-edu-shell digital-flow-page">
     </div>
     <div
