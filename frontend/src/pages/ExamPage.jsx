@@ -3400,7 +3400,8 @@ function ExamPage() {
   return (
     <VariantThemeRoot payload={variant?.theme}>
     <>
-    {(meetingUuid || liveSessionId || (isLiveVariant && cabinetAssignmentId)) && (
+    {/* r151: «Доска рядом» — только у учителя. */}
+    {isTeacherRole(cabinetUser) && (meetingUuid || liveSessionId || (isLiveVariant && cabinetAssignmentId)) && (
       <VariantBoardSplit
         meetingUuid={meetingUuid}
         liveSessionId={liveSessionId}

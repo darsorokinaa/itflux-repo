@@ -40,8 +40,7 @@ class VariantBoardLiveTests(TestCase):
         r1 = self._post(self.teacher, {"live_session": self.sess["id"]})
         self.assertEqual(r1.status_code, 200, r1.content)
         r2 = self._post(self.su, {"homework_id": self.sess["homeworkId"]})
-        self.assertEqual(r2.status_code, 200, r2.content)
-        self.assertEqual(r1.data["boardId"], r2.data["boardId"])
+        self.assertEqual((r2.status_code, r2.data.get("code")), (403, "teacher_only"))  # r151
         board = InteractiveBoard.objects.get(pk=r1.data["boardId"])
         self.assertEqual(board.owner_id, self.teacher.pk)
         self.assertEqual(board.student.user_id, self.su.pk)
@@ -100,7 +99,7 @@ class VariantBoardStudentRuleTests(TestCase):
         rs = self._post(self.ua, {"meeting": self.m1})
         self.assertEqual(rt.status_code, 200, rt.content)
         self.assertEqual(rt.data["boardId"], str(old.pk))
-        self.assertEqual(rs.data["boardId"], str(old.pk))
+        self.assertEqual((rs.status_code, rs.data.get("code")), (403, "teacher_only"))  # r151
         self.assertEqual(old.get_permission_for(self.ua), "edit")
         self.assertIsNone(old.get_permission_for(self.ub))
         self.assertEqual(self._post(self.out, {"meeting": self.m1}).status_code, 403)
@@ -109,8 +108,8 @@ class VariantBoardStudentRuleTests(TestCase):
     def test_created_once_and_old_session_boards_ignored(self):
         InteractiveBoard.objects.create(owner=self.teacher, student=self.sa, title="old",
                                         description="variant-live-board:abc")
-        r1 = self._post(self.ua, {"meeting": self.m1})
-        r2 = self._post(self.ua, {"meeting": self.m1})
+        r1 = self._post(self.teacher, {"meeting": self.m1})
+        r2 = self._post(self.teacher, {"meeting": self.m1})
         self.assertEqual(r1.data["boardId"], r2.data["boardId"])
         b = InteractiveBoard.objects.get(pk=r1.data["boardId"])
         self.assertEqual((b.student_id, b.group_id, b.owner_id), (self.sa.pk, None, self.teacher.pk))
@@ -120,12 +119,13 @@ class VariantBoardStudentRuleTests(TestCase):
         r = self._post(self.teacher, {"meeting": self.mg})
         self.assertEqual(r.status_code, 409)
         self.assertEqual({s["id"] for s in r.data["students"]}, {self.sa.pk, self.sb.pk})
-        ra = self._post(self.ua, {"meeting": self.mg, "student_id": self.sb.pk})
-        rb = self._post(self.ub, {"meeting": self.mg})
-        self.assertNotEqual(ra.data["boardId"], rb.data["boardId"])
-        self.assertEqual(ra.data["studentId"], self.sa.pk)  # student_id ученика игнорируется
+        for body in ({"meeting": self.mg, "student_id": self.sb.pk}, {"meeting": self.mg}):
+            self.assertEqual(self._post(self.ua, body).status_code, 403)  # r151
+        ta = self._post(self.teacher, {"meeting": self.mg, "student_id": self.sa.pk})
         tb = self._post(self.teacher, {"meeting": self.mg, "student_id": self.sb.pk})
-        self.assertEqual(tb.data["boardId"], rb.data["boardId"])
+        rb = tb
+        self.assertNotEqual(ta.data["boardId"], tb.data["boardId"])
+        self.assertEqual(InteractiveBoard.objects.get(pk=tb.data["boardId"]).get_permission_for(self.ub), "edit")
         self.assertEqual(len(tb.data["students"]), 2)
         self.assertEqual(self._post(self.teacher, {"meeting": self.mg, "student_id": 999999}).status_code, 403)
         # чужая доска по id → 403
@@ -158,24 +158,24 @@ class VariantBoardGroupTests(VariantBoardStudentRuleTests):
         self.assertEqual(r.status_code, 409, r.content)
         self.assertEqual(r.data["group"]["id"], self.g.pk)
         ta = self._post(self.teacher, {"meeting": self.mgr, "target": "group"})
-        sa = self._post(self.ua, {"meeting": self.mgr, "target": "group"})
-        sb = self._post(self.ub, {"meeting": self.mgr, "target": "group", "boardId": "x"})
         self.assertEqual(ta.status_code, 200, ta.content)
-        self.assertEqual({ta.data["boardId"], sa.data["boardId"], sb.data["boardId"]}, {ta.data["boardId"]})
+        for u in (self.ua, self.ub):  # r151: ученикам «Доска рядом» недоступна
+            for t in ("group", "mine", None, "board"):
+                body = {"meeting": self.mgr, **({"target": t} if t else {})}
+                self.assertEqual(self._post(u, body).status_code, 403, (u.username, t))
         b = InteractiveBoard.objects.get(pk=ta.data["boardId"])
         self.assertEqual((b.group_id, b.title), (self.g.pk, "Доска группы — 9А"))
         self.assertEqual(b.get_permission_for(self.ub), "edit")
-        mine = self._post(self.ua, {"meeting": self.mgr, "target": "mine"})
+        mine = self._post(self.teacher, {"meeting": self.mgr, "student_id": self.sa.pk})
         self.assertEqual(mine.data["kind"], "student")
-        self.assertNotEqual(mine.data["boardId"], b.pk)
-        self.assertEqual(self._post(self.ua, {"meeting": self.mgr}).data["boardId"], mine.data["boardId"])
-        self.assertEqual(self._post(self.ua, {"meeting": self.mgr, "target": "board"}).status_code, 400)
+        self.assertNotEqual(mine.data["boardId"], str(b.pk))
+        self.assertEqual(self._post(self.teacher, {"meeting": self.mgr, "target": "board"}).status_code, 400)
         self.assertEqual(self._post(self.teacher, {"meeting": self.mgr, "target": "mine"}).status_code, 400)
         self.assertEqual(self._post(self.out, {"meeting": self.mgr, "target": "group"}).status_code, 403)
         c = APIClient(); c.force_login(self.out)
         self.assertEqual(c.get(f"/api/cabinet/interactive-boards/{b.pk}/").status_code, 403)
         # индивидуальный урок — без группы
-        self.assertEqual(self._post(self.ua, {"meeting": self.m1, "target": "group"}).status_code, 403)
-        self.assertNotIn("group", self._post(self.ua, {"meeting": self.m1}).data)
+        self.assertEqual(self._post(self.teacher, {"meeting": self.m1, "target": "group"}).status_code, 403)
+        self.assertNotIn("group", self._post(self.teacher, {"meeting": self.m1}).data)
         # повтор — та же доска
-        self.assertEqual(self._post(self.ub, {"meeting": self.mgr, "target": "group"}).data["boardId"], str(b.pk))
+        self.assertEqual(self._post(self.teacher, {"meeting": self.mgr, "target": "group"}).data["boardId"], str(b.pk))

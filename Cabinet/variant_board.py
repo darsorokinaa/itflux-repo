@@ -204,6 +204,9 @@ def meeting_board(*, user, meeting_uuid, student_id=None, target=None):
     if not access.allowed or access.role not in TEACHER_ROLES + ("student",):
         raise VariantBoardError("Нет доступа к доске урока.", 403, "forbidden")
     is_teacher = access.role in TEACHER_ROLES
+    if not is_teacher:
+        # r151: «Доска рядом» — только у учителя урока.
+        raise VariantBoardError("Доска рядом доступна только учителю.", 403, "teacher_only")
     students = sorted(list_event_students(event), key=lambda s: _student_name(s).lower())
     if not is_teacher and not any(s.user_id == user.pk for s in students):
         raise VariantBoardError("Нет доступа к доске.", 403, "forbidden")
@@ -235,6 +238,9 @@ def live_board(*, user, live_session=None, homework_id=None, student_id=None, ta
     if session is None:
         raise VariantBoardError("Сессия варианта не найдена.", 404, "not_found")
     is_teacher = session.teacher_id == user.pk or user.is_staff
+    if not is_teacher:
+        # r151: «Доска рядом» — только у учителя варианта.
+        raise VariantBoardError("Доска рядом доступна только учителю.", 403, "teacher_only")
     if not is_teacher and session.closed_at:
         raise VariantBoardError("Учитель завершил эту сессию.", 410, "closed")
     students = session_students(session)
