@@ -966,6 +966,7 @@ html.variant-theme-mode--dark #main-wrapper.exam-page--edu,
 html.variant-theme-mode--dark #main-wrapper.exam-page--edu > h1,
 html.variant-theme-mode--dark #main-wrapper.exam-page--edu > h2,
 html.variant-theme-mode--dark #main-wrapper.exam-page--edu > p,
+html.variant-theme-mode--dark #main-wrapper.exam-page--edu .exam-edu-section-title,
 html.variant-theme-mode--dark .variant-theme-page-text {
   color: var(--variant-theme-page-text, #f2f4ff);
 }
