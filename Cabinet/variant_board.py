@@ -39,10 +39,11 @@ def meeting_board(*, user, meeting_uuid):
         raise VariantBoardError("Нет доступа к доске урока.", 403)
     with transaction.atomic():
         board = None
-        payload = meeting.presented_payload or {}
-        board_id = payload.get("boardId") or payload.get("board_id")
-        if board_id:
-            board = InteractiveBoard.objects.filter(pk=board_id, is_archived=False).first()
+        if meeting.presented_kind == "board":
+            payload = meeting.presented_payload or {}
+            board_id = payload.get("boardId") or payload.get("board_id")
+            if board_id:
+                board = InteractiveBoard.objects.filter(pk=board_id, is_archived=False).first()
         if board is None:
             board = (
                 InteractiveBoard.objects.select_for_update()

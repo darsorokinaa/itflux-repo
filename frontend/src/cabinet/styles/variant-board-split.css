@@ -27,6 +27,7 @@ html.vb-split-open { overflow-x: hidden; }
   font-size: 14px;
 }
 .vb-panel-title { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vb-close { border: 1px solid #ddd !important; border-radius: 8px; background: #fff !important; font-size: 13px !important; order: -1; }
 .vb-close, .vb-tabs-close { border: none; background: transparent; cursor: pointer; font-size: 16px; padding: 4px 8px; }
 .vb-link { background: none; border: none; color: #5b4bdb; cursor: pointer; font-size: 13px; text-decoration: underline; padding: 0; }
 .vb-board-body { position: relative; flex: 1; min-height: 0; }

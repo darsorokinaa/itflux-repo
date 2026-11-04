@@ -177,11 +177,11 @@ export default function VariantBoardSplit({ meetingUuid, liveSessionId, homework
           )}
           {!isMobile && (
             <div className="vb-panel-head">
+              <button type="button" className="vb-close" onClick={toggle} aria-label="Закрыть доску" title="Закрыть доску">✕ Закрыть</button>
               <span className="vb-panel-title">{board?.title || "Доска"}</span>
               {board && (
                 <a className="vb-link" href={`/cabinet/boards/${encodeURIComponent(board.boardId)}`} target="_blank" rel="noreferrer">В новой вкладке</a>
               )}
-              <button type="button" className="vb-close" onClick={toggle} aria-label="Закрыть доску">✕</button>
             </div>
           )}
           {boardBody}
