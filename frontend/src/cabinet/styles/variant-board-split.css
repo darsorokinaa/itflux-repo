@@ -48,3 +48,10 @@ html.vb-split-mobile #root { padding-top: 44px; }
 /* r147: выбор ученика (только учитель группового урока) */
 .vb-pick-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; align-items: center; }
 .vb-student-select { margin-left: auto; max-width: 45%; font: inherit; font-size: 13px; padding: 3px 6px; border-radius: 6px; }
+
+/* r148: «Моя доска» / «Доска группы» */
+.vb-switch { display: inline-flex; margin-left: auto; border: 1px solid rgba(120,130,160,.35); border-radius: 8px; overflow: hidden; }
+.vb-switch button { font: inherit; font-size: 13px; padding: 4px 10px; background: transparent; border: 0; cursor: pointer; color: inherit; }
+.vb-switch button.is-active { background: #4f6bff; color: #fff; }
+.vb-board-body > .vb-switch { position: absolute; top: 8px; right: 8px; z-index: 5; background: var(--vb-panel-bg, #fff); }
+.vb-pick-group { font-weight: 600; }

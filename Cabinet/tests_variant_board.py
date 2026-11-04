@@ -131,3 +131,51 @@ class VariantBoardStudentRuleTests(TestCase):
         # чужая доска по id → 403
         c = APIClient(); c.force_login(self.ua)
         self.assertEqual(c.get(f"/api/cabinet/interactive-boards/{rb.data['boardId']}/").status_code, 403)
+
+
+class VariantBoardGroupTests(VariantBoardStudentRuleTests):
+    """r148: общая доска группы."""
+
+    def setUp(self):
+        super().setUp()
+        from datetime import timedelta
+        from django.utils import timezone
+        from Cabinet.models import StudentGroup
+        from Cabinet.schedule_service import create_single_event
+        from Cabinet.video_meeting_service import get_or_create_meeting_for_event
+        self.g = StudentGroup.objects.create(teacher=self.teacher, title="9А")
+        self.g.students.add(self.sa, self.sb)
+        now = timezone.now()
+        e = create_single_event(teacher=self.teacher, data=dict(
+            title="Группа", starts_at=now, ends_at=now + timedelta(hours=1), event_type="group_lesson",
+            format="online", notify_participants=False), notify=False, group_id=self.g.pk)
+        e = e[0] if isinstance(e, (list, tuple)) else e
+        m = get_or_create_meeting_for_event(event=e, created_by=self.teacher)
+        self.mgr = str((m[0] if isinstance(m, tuple) else m).uuid)
+
+    def test_group_board_shared(self):
+        r = self._post(self.teacher, {"meeting": self.mgr})
+        self.assertEqual(r.status_code, 409, r.content)
+        self.assertEqual(r.data["group"]["id"], self.g.pk)
+        ta = self._post(self.teacher, {"meeting": self.mgr, "target": "group"})
+        sa = self._post(self.ua, {"meeting": self.mgr, "target": "group"})
+        sb = self._post(self.ub, {"meeting": self.mgr, "target": "group", "boardId": "x"})
+        self.assertEqual(ta.status_code, 200, ta.content)
+        self.assertEqual({ta.data["boardId"], sa.data["boardId"], sb.data["boardId"]}, {ta.data["boardId"]})
+        b = InteractiveBoard.objects.get(pk=ta.data["boardId"])
+        self.assertEqual((b.group_id, b.title), (self.g.pk, "Доска группы — 9А"))
+        self.assertEqual(b.get_permission_for(self.ub), "edit")
+        mine = self._post(self.ua, {"meeting": self.mgr, "target": "mine"})
+        self.assertEqual(mine.data["kind"], "student")
+        self.assertNotEqual(mine.data["boardId"], b.pk)
+        self.assertEqual(self._post(self.ua, {"meeting": self.mgr}).data["boardId"], mine.data["boardId"])
+        self.assertEqual(self._post(self.ua, {"meeting": self.mgr, "target": "board"}).status_code, 400)
+        self.assertEqual(self._post(self.teacher, {"meeting": self.mgr, "target": "mine"}).status_code, 400)
+        self.assertEqual(self._post(self.out, {"meeting": self.mgr, "target": "group"}).status_code, 403)
+        c = APIClient(); c.force_login(self.out)
+        self.assertEqual(c.get(f"/api/cabinet/interactive-boards/{b.pk}/").status_code, 403)
+        # индивидуальный урок — без группы
+        self.assertEqual(self._post(self.ua, {"meeting": self.m1, "target": "group"}).status_code, 403)
+        self.assertNotIn("group", self._post(self.ua, {"meeting": self.m1}).data)
+        # повтор — та же доска
+        self.assertEqual(self._post(self.ub, {"meeting": self.mgr, "target": "group"}).data["boardId"], str(b.pk))

@@ -22,3 +22,13 @@ describe("VariantBoardSplit helpers", () => {
     expect(isVariantEmbed("")).toBe(false);
   });
 });
+
+import { variantBoardPickBody } from "./VariantBoardSplit";
+describe("r148 pick body", () => {
+  it("only group/mine/student_id, never a board id", () => {
+    expect(variantBoardPickBody({ meeting: "m" }, "group")).toEqual({ meeting: "m", target: "group" });
+    expect(variantBoardPickBody({ meeting: "m" }, "mine")).toEqual({ meeting: "m", target: "mine" });
+    expect(variantBoardPickBody({ meeting: "m" }, 5)).toEqual({ meeting: "m", student_id: 5 });
+    expect(variantBoardPickBody({ meeting: "m" }, null)).toEqual({ meeting: "m" });
+  });
+});

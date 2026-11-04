@@ -24,6 +24,14 @@ export function variantBoardRequest({ meetingUuid, liveSessionId, homeworkId }) 
 }
 
 /** r147: доска во встроенном режиме — без «Назад»/«Поделиться», без перехода к списку досок. */
+/** r148: тело запроса с выбором — только 'group' или id ученика (учитель) / 'mine'|'group' (ученик). */
+export function variantBoardPickBody(base, pick) {
+  const body = { ...(base || {}) };
+  if (pick === "group" || pick === "mine") body.target = pick;
+  else if (pick !== null && pick !== undefined && pick !== "") body.student_id = pick;
+  return body;
+}
+
 export function variantBoardFrameSrc(boardId) {
   return `/cabinet/boards/${encodeURIComponent(boardId)}?embed=variant`;
 }
@@ -60,6 +68,7 @@ export default function VariantBoardSplit({ meetingUuid, liveSessionId, homework
   const [dragging, setDragging] = useState(false);
   const [students, setStudents] = useState(null);
   const [studentId, setStudentId] = useState(null);
+  const [group, setGroup] = useState(null);
   const isMobile = useIsMobile();
   const reqKey = request ? JSON.stringify(request) : "";
   const widthRef = useRef(width);
@@ -70,18 +79,17 @@ export default function VariantBoardSplit({ meetingUuid, liveSessionId, homework
     setLoading(true);
     setError("");
     try {
-      const body = JSON.parse(reqKey);
-      const sid = pickId ?? null;
-      if (sid) body.student_id = sid;
-      const data = await fetchVariantBoard(body);
+      const data = await fetchVariantBoard(variantBoardPickBody(JSON.parse(reqKey), pickId));
       if (!data?.boardId) throw new Error("Доска недоступна");
       setBoard(data);
-      setStudentId(data.studentId ?? null);
+      setStudentId(data.kind === "group" ? "group" : (data.studentId ?? null));
       if (Array.isArray(data.students)) setStudents(data.students);
+      setGroup(data.group || null);
     } catch (e) {
       if (e?.status === 409 && Array.isArray(e?.data?.students)) {
         setBoard(null);
         setStudents(e.data.students);
+        setGroup(e.data.group || null);
         setStudentId(null);
         return;
       }
@@ -95,6 +103,7 @@ export default function VariantBoardSplit({ meetingUuid, liveSessionId, homework
     setBoard(null);
     setStudents(null);
     setStudentId(null);
+    setGroup(null);
   }, [reqKey]);
 
   const toggle = () => {
@@ -151,8 +160,16 @@ export default function VariantBoardSplit({ meetingUuid, liveSessionId, homework
 
   if (!request || typeof document === "undefined") return null;
 
+  const switchEl = board && group && !students ? (
+                <span className="vb-switch" role="group" aria-label="Какая доска" data-testid="variant-board-switch">
+                  <button type="button" aria-pressed={board.kind !== "group"} className={board.kind !== "group" ? "is-active" : ""} onClick={() => load("mine")}>Моя доска</button>
+                  <button type="button" aria-pressed={board.kind === "group"} className={board.kind === "group" ? "is-active" : ""} onClick={() => load("group")}>Доска группы</button>
+                </span>
+                ) : null;
+
   const boardBody = (
     <div className="vb-board-body">
+      {isMobile && switchEl}
       {loading && <div className="vb-board-status">Открываем доску…</div>}
       {error && !loading && (
         <div className="vb-board-status vb-board-status--error">
@@ -164,6 +181,9 @@ export default function VariantBoardSplit({ meetingUuid, liveSessionId, homework
         <div className="vb-board-status" data-testid="variant-board-pick">
           Чью доску открыть?
           <div className="vb-pick-list">
+            {group && (
+              <button type="button" className="vb-link vb-pick-group" onClick={() => load("group")}>Общая доска группы</button>
+            )}
             {students.map((s) => (
               <button key={s.id} type="button" className="vb-link" onClick={() => load(s.id)}>{s.name}</button>
             ))}
@@ -209,8 +229,11 @@ export default function VariantBoardSplit({ meetingUuid, liveSessionId, homework
           {!isMobile && (
             <div className="vb-panel-head">
               <button type="button" className="vb-close" onClick={toggle} aria-label="Закрыть доску" title="Закрыть доску">✕ Закрыть</button>
-              <span className="vb-panel-title">{board?.studentName ? `Доска ученика: ${board.studentName}` : (board?.title || "Доска")}</span>
-              {students && students.length > 1 && (
+              <span className="vb-panel-title">
+                {board?.kind === "group" ? `Доска группы: ${board.group?.title || ""}` : board?.studentName ? `Доска ученика: ${board.studentName}` : (board?.title || "Доска")}
+              </span>
+              {switchEl}
+              {students && (students.length > 1 || group) && (
                 <select
                   className="vb-student-select"
                   aria-label="Ученик"
@@ -219,6 +242,7 @@ export default function VariantBoardSplit({ meetingUuid, liveSessionId, homework
                   onChange={(e) => e.target.value && load(e.target.value)}
                 >
                   <option value="" disabled>Ученик…</option>
+                  {group && <option value="group">Общая доска группы</option>}
                   {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               )}

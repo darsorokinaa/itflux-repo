@@ -1,4 +1,4 @@
-"""r145/r147: «Доска рядом» — рядом с вариантом открывается строго доска ученика.
+"""r145/r147/r148: «Доска рядом» — рядом с вариантом открывается строго доска ученика.
 
 Доска ученика = личная доска пары «учитель ↔ ученик» (InteractiveBoard.student,
 без группы) — та же, что используется на его индивидуальных уроках. Клиент не
@@ -64,6 +64,98 @@ def get_or_create_student_board(*, teacher, student, event=None):
     return board
 
 
+def group_boards_qs(*, teacher, group):
+    return (
+        InteractiveBoard.objects.filter(owner=teacher, group=group, is_archived=False)
+        .exclude(description__startswith=LIVE_BOARD_MARKER)
+    )
+
+
+def get_or_create_group_board(*, teacher, group, event=None):
+    """r148: общая доска группы — существующая групповая доска, иначе создаётся один раз."""
+    from .models import Student
+
+    with transaction.atomic():
+        type(group).objects.select_for_update().filter(pk=group.pk).first()
+        qs = group_boards_qs(teacher=teacher, group=group)
+        board = None
+        if event is not None:
+            board = qs.filter(schedule_event=event).order_by("-updated_at").first()
+        if board is None:
+            board = qs.filter(schedule_event__isnull=False).order_by("-updated_at").first()
+        if board is None:
+            board = qs.order_by("-updated_at").first()
+        if board is None:
+            board = InteractiveBoard.objects.create(
+                owner=teacher, group=group,
+                title=f"Доска группы — {(group.title or '').strip() or group.pk}"[:255],
+            )
+        user_ids = (
+            Student.objects.filter(groups=group, user__isnull=False).exclude(status="archived")
+            .values_list("user_id", flat=True)
+        )
+        for uid in set(user_ids):
+            InteractiveBoardAccess.objects.update_or_create(
+                board=board, user_id=uid, defaults={"permission": InteractiveBoardAccess.EDIT},
+            )
+    return board
+
+
+def live_group(session, students):
+    """Группа для «Решать вариант»: группа учителя, где состоят все ≥2 ученика сессии."""
+    from .models import StudentGroup
+
+    if len(students) < 2:
+        return None
+    qs = StudentGroup.objects.filter(teacher=session.teacher)
+    for st in students:
+        qs = qs.filter(students=st)
+    return qs.distinct().order_by("id").first()
+
+
+def _group_info(group):
+    return {"id": group.pk, "title": (group.title or "").strip() or "Группа"}
+
+
+def _serve(*, user, is_teacher, students, student_id, target, group, teacher, event, source):
+    """Только разрешённые значения: ученик — mine/group, учитель — group/student_id."""
+    target = str(target or "").strip().lower()
+    if target not in ("", "mine", "group"):
+        raise VariantBoardError("Недопустимый выбор доски.", 400, "bad_target")
+    if target == "group":
+        if group is None:
+            raise VariantBoardError("У этого урока нет группы.", 403, "no_group")
+        if not is_teacher and not any(s.user_id == user.pk for s in students):
+            raise VariantBoardError("Нет доступа к доске.", 403, "forbidden")
+        board = get_or_create_group_board(teacher=teacher, group=group, event=event)
+        out = {"boardId": str(board.id), "title": board.title or "Доска группы", "source": source,
+               "kind": "group", "group": _group_info(group)}
+        if is_teacher:
+            out["students"] = [{"id": s.pk, "name": _student_name(s)} for s in students]
+        return out
+    if target == "mine" and is_teacher:
+        raise VariantBoardError("Недопустимый выбор доски.", 400, "bad_target")
+    try:
+        student = _pick(user=user, is_teacher=is_teacher, students=students,
+                        student_id=student_id if is_teacher else None)
+    except VariantBoardError as exc:
+        if exc.code == "choose_student":
+            exc.extra = _students_payload(students)
+            if group is not None:
+                exc.extra["group"] = _group_info(group)
+        raise
+    if student.teacher_id != teacher.pk and source == "live":
+        raise VariantBoardError("Нет доступа к доске.", 403, "forbidden")
+    board = get_or_create_student_board(teacher=teacher, student=student, event=event)
+    out = _result(board, student, students, is_teacher, source)
+    out["kind"] = "student"
+    if group is not None:
+        out["group"] = _group_info(group)
+        if is_teacher:
+            out["students"] = [{"id": s.pk, "name": _student_name(s)} for s in students]
+    return out
+
+
 def _pick(*, user, is_teacher, students, student_id):
     if not is_teacher:
         mine = [s for s in students if s.user_id == user.pk]
@@ -99,7 +191,7 @@ def _students_payload(students):
     return {"students": [{"id": s.pk, "name": _student_name(s)} for s in students]}
 
 
-def meeting_board(*, user, meeting_uuid, student_id=None):
+def meeting_board(*, user, meeting_uuid, student_id=None, target=None):
     from .meeting_present import list_event_students
     from .video_meeting_service import get_meeting_by_uuid, resolve_access
 
@@ -113,14 +205,11 @@ def meeting_board(*, user, meeting_uuid, student_id=None):
         raise VariantBoardError("Нет доступа к доске урока.", 403, "forbidden")
     is_teacher = access.role in TEACHER_ROLES
     students = sorted(list_event_students(event), key=lambda s: _student_name(s).lower())
-    try:
-        student = _pick(user=user, is_teacher=is_teacher, students=students, student_id=student_id)
-    except VariantBoardError as exc:
-        if exc.code == "choose_student":
-            exc.extra = _students_payload(students)
-        raise
-    board = get_or_create_student_board(teacher=event.owner, student=student, event=event)
-    return _result(board, student, students, is_teacher, "lesson")
+    if not is_teacher and not any(s.user_id == user.pk for s in students):
+        raise VariantBoardError("Нет доступа к доске.", 403, "forbidden")
+    group = event.group if event.group_id else None
+    return _serve(user=user, is_teacher=is_teacher, students=students, student_id=student_id, target=target,
+                  group=group, teacher=event.owner, event=event, source="lesson")
 
 
 def _live_session(*, live_session=None, homework_id=None):
@@ -139,7 +228,7 @@ def _live_session(*, live_session=None, homework_id=None):
     return session
 
 
-def live_board(*, user, live_session=None, homework_id=None, student_id=None):
+def live_board(*, user, live_session=None, homework_id=None, student_id=None, target=None):
     from .variant_live import session_students
 
     session = _live_session(live_session=live_session, homework_id=homework_id)
@@ -149,16 +238,11 @@ def live_board(*, user, live_session=None, homework_id=None, student_id=None):
     if not is_teacher and session.closed_at:
         raise VariantBoardError("Учитель завершил эту сессию.", 410, "closed")
     students = session_students(session)
-    try:
-        student = _pick(user=user, is_teacher=is_teacher, students=students, student_id=student_id)
-    except VariantBoardError as exc:
-        if exc.code == "choose_student":
-            exc.extra = _students_payload(students)
-        raise
-    if student.teacher_id != session.teacher_id:
+    if not is_teacher and not any(s.user_id == user.pk for s in students):
         raise VariantBoardError("Нет доступа к доске.", 403, "forbidden")
-    board = get_or_create_student_board(teacher=session.teacher, student=student)
-    return _result(board, student, students, is_teacher, "live")
+    group = live_group(session, students)
+    return _serve(user=user, is_teacher=is_teacher, students=students, student_id=student_id, target=target,
+                  group=group, teacher=session.teacher, event=None, source="live")
 
 
 class VariantBoardView(APIView):
@@ -170,14 +254,15 @@ class VariantBoardView(APIView):
         live_session = str(data.get("live_session") or data.get("liveSession") or "").strip()
         homework_id = data.get("homework_id") or data.get("homeworkId")
         student_id = data.get("student_id") or data.get("studentId")
+        target = data.get("target")
         # id доски от клиента намеренно игнорируется (board/boardId не читаем).
         try:
             if meeting:
-                return Response(meeting_board(user=request.user, meeting_uuid=meeting, student_id=student_id))
+                return Response(meeting_board(user=request.user, meeting_uuid=meeting, student_id=student_id, target=target))
             if live_session or homework_id:
                 return Response(live_board(
                     user=request.user, live_session=live_session or None,
-                    homework_id=homework_id, student_id=student_id,
+                    homework_id=homework_id, student_id=student_id, target=target,
                 ))
         except VariantBoardError as exc:
             return Response({"detail": str(exc), "code": exc.code, **exc.extra}, status=exc.status)
