@@ -961,8 +961,8 @@ html.variant-theme-active .variant-theme-card-text--secondary {
   color: var(--variant-theme-card-text-secondary, #4b6174);
 }
 
-/* Тёмная тема: светлый текст только прямо на фоне страницы (между карточками). */
-html.variant-theme-mode--dark #main-wrapper.exam-page--edu,
+/* Тёмная тема: светлый текст только прямо на фоне страницы (между карточками).
+   Сам #main-wrapper цвет не задаёт — иначе светлый цвет наследуют модалки/таблицы на белом фоне (r150). */
 html.variant-theme-mode--dark #main-wrapper.exam-page--edu > h1,
 html.variant-theme-mode--dark #main-wrapper.exam-page--edu > h2,
 html.variant-theme-mode--dark #main-wrapper.exam-page--edu > p,
@@ -980,8 +980,19 @@ html.variant-theme-mode--dark #main-wrapper.exam-page--edu .exam-task-card,
 html.variant-theme-mode--dark #main-wrapper.exam-page--edu .exam-edu-side-card,
 html.variant-theme-mode--dark .mobile-panel-sheet .exam-edu-side-card,
 html.variant-theme-mode--dark .mobile-variant-bar,
-html.variant-theme-mode--dark #main-wrapper.exam-page--edu .variant-theme-selector {
+html.variant-theme-mode--dark #main-wrapper.exam-page--edu .variant-theme-selector,
+html.variant-theme-mode--dark .live-variant-answers,
+html.variant-theme-mode--dark .mobile-panel-sheet,
+html.variant-theme-mode--dark .ev2-criteria-panel,
+html.variant-theme-mode--dark [role="dialog"],
+html.variant-theme-mode--dark [aria-modal="true"] {
   color: #122033;
+}
+
+/* Подписи-«брови» в светлых боковых карточках: на белом нужен тёмный вторичный цвет (r150). */
+html.variant-theme-mode--dark #main-wrapper.exam-page--edu .exam-edu-side-section__eyebrow,
+html.variant-theme-mode--dark .mobile-panel-sheet .exam-edu-side-section__eyebrow {
+  color: var(--variant-theme-card-text-secondary, #4b6174);
 }
 
 /* Hero: белый текст поверх hero_overlay. */
