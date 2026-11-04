@@ -72,7 +72,7 @@ html.variant-theme--route #main-wrapper.exam-page--edu .exam-edu-hero.exam-edu-h
   overflow: hidden;
   background-color: var(--variant-theme-bg-color, #3e7eab) !important;
   background-image:
-    linear-gradient(135deg, rgba(61, 122, 163, 0.42) 0%, rgba(36, 85, 122, 0.5) 100%),
+    linear-gradient(135deg, var(--variant-theme-hero-overlay, rgba(61, 122, 163, 0.42)) 0%, var(--variant-theme-hero-overlay, rgba(36, 85, 122, 0.5)) 100%),
     var(--variant-theme-block-bg-image, linear-gradient(135deg, #6fa8d0 0%, #3d7aa3 52%, #24557a 100%)) !important;
   background-size: auto, cover !important;
   background-position: center, center !important;
@@ -171,7 +171,7 @@ html.variant-theme--route.variant-theme-has-block-image #main-wrapper.exam-page-
 html.variant-theme-active.variant-theme-has-block-image #main-wrapper.exam-page--edu .exam-edu-hero,
 html.variant-theme--route.variant-theme-has-block-image #main-wrapper.exam-page--edu .exam-edu-hero {
   background-image:
-    linear-gradient(135deg, rgba(61, 122, 163, 0.28) 0%, rgba(36, 85, 122, 0.34) 100%),
+    linear-gradient(135deg, var(--variant-theme-hero-overlay, rgba(61, 122, 163, 0.28)) 0%, var(--variant-theme-hero-overlay, rgba(36, 85, 122, 0.34)) 100%),
     var(--variant-theme-block-bg-image, none) !important;
   background-size: auto, cover !important;
   background-position: center, center !important;
@@ -938,6 +938,38 @@ body.variant-theme--route .variant-theme-nav {
 @keyframes variant-theme-twinkle {
   0%, 100% { opacity: 0.25; transform: scale(0.8); }
   50% { opacity: 0.8; transform: scale(1); }
+}
+
+/* --- Токены темы (config.tokens) и тёмный режим (config.theme_mode = "dark") --- */
+html.variant-theme-active #main-wrapper.exam-page--edu .exam-task-card.is-theme-current {
+  border-color: var(--variant-theme-accent, #2f6f9f) !important;
+}
+
+/* Тёмная тема: светлый текст только прямо на фоне страницы (между карточками). */
+html.variant-theme-mode--dark #main-wrapper.exam-page--edu,
+html.variant-theme-mode--dark #main-wrapper.exam-page--edu > h1,
+html.variant-theme-mode--dark #main-wrapper.exam-page--edu > h2,
+html.variant-theme-mode--dark #main-wrapper.exam-page--edu > p,
+html.variant-theme-mode--dark .variant-theme-page-text {
+  color: var(--variant-theme-page-text, #f2f4ff);
+}
+
+html.variant-theme-mode--dark .variant-theme-page-text--secondary {
+  color: var(--variant-theme-page-text-secondary, #b8c0e8);
+}
+
+/* Карточки остаются светлыми с тёмным текстом. */
+html.variant-theme-mode--dark #main-wrapper.exam-page--edu .exam-task-card,
+html.variant-theme-mode--dark #main-wrapper.exam-page--edu .exam-edu-side-card,
+html.variant-theme-mode--dark .mobile-panel-sheet .exam-edu-side-card,
+html.variant-theme-mode--dark .mobile-variant-bar,
+html.variant-theme-mode--dark #main-wrapper.exam-page--edu .variant-theme-selector {
+  color: #122033;
+}
+
+/* Hero: белый текст поверх hero_overlay. */
+html.variant-theme-mode--dark #main-wrapper.exam-page--edu .exam-edu-hero {
+  color: #fff;
 }
 
 @media (prefers-reduced-motion: reduce) {

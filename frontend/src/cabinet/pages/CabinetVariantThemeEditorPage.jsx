@@ -114,6 +114,8 @@ function configObjectFromForm(form) {
     animation: form.animation,
     background: form.background || defaultBackground(),
     decorations: form.decorations,
+    theme_mode: form.theme_mode === "dark" ? "dark" : "light",
+    tokens: form.tokens && typeof form.tokens === "object" ? form.tokens : {},
   };
 }
 
@@ -130,6 +132,8 @@ function formFromTheme(theme) {
   const decorations = Array.isArray(theme?.config?.decorations) ? theme.config.decorations : [];
   const animation = theme?.config?.animation || "none";
   const background = theme?.config?.background || defaultBackground();
+  const themeMode = theme?.config?.theme_mode === "dark" ? "dark" : "light";
+  const tokens = theme?.config?.tokens && typeof theme.config.tokens === "object" ? theme.config.tokens : {};
   return {
     name: theme?.name || "",
     slug: theme?.slug || "",
@@ -141,6 +145,8 @@ function formFromTheme(theme) {
     decorations,
     animation,
     background,
+    theme_mode: themeMode,
+    tokens,
     preview_image_url: theme?.preview_image_url || "",
     background_image_url: theme?.background_image_url || theme?.config?.background?.url || "",
     background_image_vertical_url: theme?.background_image_vertical_url || "",
@@ -152,6 +158,8 @@ function formFromTheme(theme) {
       animation,
       background,
       decorations,
+      theme_mode: themeMode,
+      tokens,
     }),
   };
 }
@@ -741,6 +749,8 @@ export default function CabinetVariantThemeEditorPage() {
       || resolved.decorations !== undefined
       || resolved.animation !== undefined
       || resolved.background !== undefined
+      || resolved.theme_mode !== undefined
+      || resolved.tokens !== undefined
     ) {
       next.configText = stringifyConfig(configObjectFromForm(next));
     }
@@ -770,6 +780,8 @@ export default function CabinetVariantThemeEditorPage() {
       background: parsed.background && typeof parsed.background === "object" && !Array.isArray(parsed.background)
         ? parsed.background
         : prev.background,
+      theme_mode: parsed.theme_mode === "dark" ? "dark" : (parsed.theme_mode === "light" ? "light" : prev.theme_mode),
+      tokens: parsed.tokens && typeof parsed.tokens === "object" && !Array.isArray(parsed.tokens) ? parsed.tokens : prev.tokens,
       configText: JSON.stringify(parsed, null, 2),
     }));
     return true;
@@ -1264,9 +1276,9 @@ export default function CabinetVariantThemeEditorPage() {
                       </label>
                     </>
                   ) : null}
-                  {pageContrastWarning(form.background?.type === "gradient" ? form.background?.colors?.[0] : form.background?.color) ? (
+                  {pageContrastWarning(form.background?.type === "gradient" ? form.background?.colors?.[0] : form.background?.color, form.theme_mode, form.tokens?.page_text_primary) ? (
                     <p className="te-contrast" role="status">
-                      {pageContrastWarning(form.background?.type === "gradient" ? form.background?.colors?.[0] : form.background?.color)}
+                      {pageContrastWarning(form.background?.type === "gradient" ? form.background?.colors?.[0] : form.background?.color, form.theme_mode, form.tokens?.page_text_primary)}
                     </p>
                   ) : null}
                   <ThemeAssetGrid items={PAGE_IMAGES} form={form} pending={pending} onFile={onImageFile} onRemove={removeImage} />

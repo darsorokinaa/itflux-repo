@@ -54,9 +54,18 @@ export function blendOverWhite(hex, alpha) {
   return `#${mix(0)}${mix(1)}${mix(2)}`;
 }
 
-export function pageContrastWarning(color) {
-  const blended = blendOverWhite(color, 0.26);
-  const ratio = contrastRatio(PAGE_TEXT_COLOR, blended);
+export const PAGE_TEXT_COLOR_DARK = "#f2f4ff";
+
+/**
+ * Светлая тема: тёмный текст #243044 поверх фона, смешанного с белым на 26%.
+ * Тёмная тема (theme_mode=dark): белой вуали нет, светлый текст
+ * (page_text_primary или #F2F4FF) проверяется против самого цвета фона.
+ */
+export function pageContrastWarning(color, mode = "light", pageText = "") {
+  const dark = mode === "dark";
+  const text = dark ? (normalizeHex(pageText) || PAGE_TEXT_COLOR_DARK) : PAGE_TEXT_COLOR;
+  const surface = dark ? normalizeHex(color) : blendOverWhite(color, 0.26);
+  const ratio = contrastRatio(text, surface);
   if (ratio == null || ratio >= 4.5) return "";
   return `Контраст фона и текста ${ratio.toFixed(1)}:1. Для обычного текста лучше от 4.5:1. Выбранный цвет не изменён.`;
 }
@@ -91,7 +100,7 @@ export function cssImageValue(url) {
   return `url("${safe}")`;
 }
 
-export function pageBackgroundStyle(background, pageImageUrl) {
+export function pageBackgroundStyle(background, pageImageUrl, mode = "light") {
   const color = normalizeHex(background?.color) || PAGE_FALLBACK_COLOR;
   const pageImage = cssImageValue(pageImageUrl);
   if (pageImage) {
@@ -104,6 +113,16 @@ export function pageBackgroundStyle(background, pageImageUrl) {
     };
   }
   const layer = paintLayer(background, "");
+  if (mode === "dark") {
+    // Тёмная тема: без белой вуали, иначе фон «серит» и светлый текст теряет контраст.
+    return {
+      backgroundColor: color,
+      backgroundImage: layer || "none",
+      backgroundSize: "100% 100%",
+      backgroundRepeat: "no-repeat",
+      backgroundPosition: "center top",
+    };
+  }
   return {
     backgroundColor: color,
     backgroundImage: layer ? `${PAGE_WASH}, ${layer}` : PAGE_WASH,

@@ -80,6 +80,39 @@ ALLOWED_BACKGROUND_TYPES = frozenset(("none", "color", "image", "gradient"))
 ALLOWED_GRADIENT_DIRECTIONS = frozenset(
     ("sunset", "sunrise", "vertical", "horizontal", "radial")
 )
+ALLOWED_THEME_MODES = frozenset(("light", "dark"))
+ALLOWED_TOKEN_COLOR_KEYS = (
+    "accent",
+    "accent_hover",
+    "on_accent",
+    "page_text_primary",
+    "page_text_secondary",
+)
+_RGBA_RE = re.compile(
+    r"^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*(0|1|0?\.\d{1,3}|1\.0+))?\s*\)$",
+    re.I,
+)
+
+
+def _safe_rgba(value: Any) -> str:
+    """rgba()/rgb() или hex. Всё прочее (url(), var(), выражения) отбрасывается."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    hex_color = _safe_color(raw)
+    if hex_color:
+        return hex_color
+    match = _RGBA_RE.match(raw)
+    if not match:
+        return ""
+    r, g, b, a = match.groups()
+    if any(int(part) > 255 for part in (r, g, b)):
+        return ""
+    if a is None:
+        return f"rgb({int(r)}, {int(g)}, {int(b)})"
+    return f"rgba({int(r)}, {int(g)}, {int(b)}, {float(a):g})"
+
+
 ALLOWED_LABEL_KEYS = ("task", "tasks", "next", "previous", "finish")
 
 DEFAULT_LABELS = {
@@ -181,6 +214,20 @@ def sanitize_variant_theme_config(raw: Any) -> dict:
 
     animation = str(src.get("animation") or "none").strip().lower()
     out["animation"] = animation if animation in ALLOWED_ANIMATIONS else "none"
+
+    mode = str(src.get("theme_mode") or "light").strip().lower()
+    out["theme_mode"] = mode if mode in ALLOWED_THEME_MODES else "light"
+
+    tokens_src = src.get("tokens") if isinstance(src.get("tokens"), dict) else {}
+    tokens: dict[str, str] = {}
+    for key in ALLOWED_TOKEN_COLOR_KEYS:
+        color = _safe_color(tokens_src.get(key))
+        if color:
+            tokens[key] = color
+    overlay = _safe_rgba(tokens_src.get("hero_overlay"))
+    if overlay:
+        tokens["hero_overlay"] = overlay
+    out["tokens"] = tokens
     return out
 
 

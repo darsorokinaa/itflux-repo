@@ -71,4 +71,17 @@ describe("themeSurface", () => {
     expect(style.backgroundSize).toBe("cover");
     expect(style.backgroundImage).not.toContain("#9fc8e4");
   });
+
+  it("dark theme checks light page text against the raw background", () => {
+    expect(pageContrastWarning("#030408", "dark")).toBe("");
+    expect(pageContrastWarning("#030408", "dark", "#F2F4FF")).toBe("");
+    expect(pageContrastWarning("#030408")).toMatch(/не изменён/);
+    expect(pageContrastWarning("#c5e0f2", "dark")).toMatch(/Контраст/);
+  });
+
+  it("dark theme paints the gradient without the white wash", () => {
+    const style = pageBackgroundStyle({ type: "gradient", colors: ["#05060d", "#1a1440"], direction: "radial" }, "", "dark");
+    expect(style.backgroundImage).not.toMatch(/rgba\(255, 255, 255/);
+    expect(style.backgroundImage).toMatch(/radial-gradient/);
+  });
 });

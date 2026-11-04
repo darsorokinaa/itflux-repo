@@ -469,3 +469,80 @@ class VariantThemeApiTests(TestCase):
         user = resp.json().get("user") or {}
         self.assertFalse(user.get("can_manage_variant_themes"))
         self.assertFalse(user.get("can_select_variant_theme"))
+
+
+class VariantThemeModeTokensTests(SimpleTestCase):
+    def test_dark_mode_and_tokens_kept(self):
+        from .variant_theme_service import sanitize_variant_theme_config
+        out = sanitize_variant_theme_config({
+            "theme_mode": "dark",
+            "tokens": {"accent": "#5b4bc4", "page_text_primary": "#F2F4FF",
+                       "hero_overlay": "rgba(22,60,96,.62)", "evil": "#000"},
+        })
+        self.assertEqual(out["theme_mode"], "dark")
+        self.assertEqual(out["tokens"]["accent"], "#5b4bc4")
+        self.assertEqual(out["tokens"]["page_text_primary"], "#F2F4FF")
+        self.assertEqual(out["tokens"]["hero_overlay"], "rgba(22, 60, 96, 0.62)")
+        self.assertNotIn("evil", out["tokens"])
+
+    def test_bad_values_dropped(self):
+        from .variant_theme_service import sanitize_variant_theme_config
+        out = sanitize_variant_theme_config({
+            "theme_mode": "neon",
+            "tokens": {"accent": "red", "hero_overlay": "url(javascript:alert(1))"},
+        })
+        self.assertEqual(out["theme_mode"], "light")
+        self.assertEqual(out["tokens"], {})
+        out = sanitize_variant_theme_config({"tokens": {"hero_overlay": "rgba(300,0,0,.5)"}})
+        self.assertEqual(out["tokens"], {})
+
+    def test_default_is_light_without_tokens(self):
+        from .variant_theme_service import sanitize_variant_theme_config
+        out = sanitize_variant_theme_config({})
+        self.assertEqual(out["theme_mode"], "light")
+        self.assertEqual(out["tokens"], {})
+
+
+class SeedVariantThemesV2Tests(TestCase):
+    def _make_source(self, root):
+        import io, json as _json
+        from pathlib import Path
+        from PIL import Image
+        roles = {"preview": ".webp", "bg_landscape": ".webp", "bg_portrait": ".webp",
+                 "block": ".webp", "sheet_landscape": ".jpg", "sheet_portrait": ".jpg"}
+        for slug in ("space", "mountains", "winter"):
+            d = Path(root) / slug
+            d.mkdir(parents=True)
+            for role, ext in roles.items():
+                Image.new("RGB", (8, 8), (10, 20, 30)).save(d / f"{slug}__{role}{ext}")
+            (d / f"{slug}__tokens.json").write_text(_json.dumps({
+                "bg_color": "#030408", "theme_mode": "dark" if slug == "space" else "light",
+                "text_primary": "#F2F4FF", "accent": "#5b4bc4", "hero_overlay": "rgba(22,60,96,.62)",
+                "labels": {"task": "Планета"}, "decorations": [], "animation": "none",
+            }))
+
+    def test_dry_run_writes_nothing_then_idempotent(self):
+        import tempfile
+        from django.core.management import call_command
+        from django.test import override_settings
+        from .variant_theme_models import VariantTheme
+        with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as media:
+            self._make_source(src)
+            with override_settings(MEDIA_ROOT=media):
+                call_command("seed_variant_themes_v2", source=src, dry_run=True)
+                self.assertFalse(VariantTheme.objects.filter(slug__in=["space", "mountains", "winter"]).exists())
+                call_command("seed_variant_themes_v2", source=src)
+                space = VariantTheme.objects.get(slug="space")
+                self.assertFalse(space.is_published)
+                self.assertEqual(space.config["theme_mode"], "dark")
+                self.assertEqual(space.config["tokens"]["page_text_primary"], "#F2F4FF")
+                self.assertTrue(space.background_image.name.startswith("variant-themes/space/"))
+                first = space.background_image.name
+                call_command("seed_variant_themes_v2", source=src)
+                space.refresh_from_db()
+                self.assertEqual(space.background_image.name, first)
+                self.assertEqual(VariantTheme.objects.filter(slug="space").count(), 1)
+                call_command("seed_variant_themes_v2", source=src, publish=True, only=["space"])
+                space.refresh_from_db()
+                self.assertTrue(space.is_published)
+                self.assertFalse(VariantTheme.objects.get(slug="winter").is_published)

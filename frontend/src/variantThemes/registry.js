@@ -27,8 +27,26 @@ export const CLASSIC_VARIANT_THEME = {
   animation: "none",
   background: { type: "none", color: "", url: "", urlVertical: "", blockUrl: "", colors: [], direction: "" },
   previewImageUrl: "",
+  themeMode: "light",
+  tokens: {},
   isClassic: true,
 };
+
+const HEX_TOKEN = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+const RGBA_TOKEN = /^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*(0|1|0?\.\d{1,3}|1\.0+))?\s*\)$/i;
+export const THEME_COLOR_TOKENS = ["accent", "accent_hover", "on_accent", "page_text_primary", "page_text_secondary"];
+
+export function pickTokens(raw) {
+  const src = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const out = {};
+  for (const key of THEME_COLOR_TOKENS) {
+    const value = String(src[key] || "").trim();
+    if (HEX_TOKEN.test(value)) out[key] = value;
+  }
+  const overlay = String(src.hero_overlay || "").trim();
+  if (HEX_TOKEN.test(overlay) || RGBA_TOKEN.test(overlay)) out.hero_overlay = overlay;
+  return out;
+}
 
 export const variantThemeRegistry = {
   classic: { layout: "classic" },
@@ -91,6 +109,8 @@ export function resolveVariantTheme(payload) {
       direction: String(backgroundSrc.direction || ""),
     },
     previewImageUrl: String(payload.preview_image_url || payload.previewImageUrl || ""),
+    themeMode: String(config.theme_mode || "").toLowerCase() === "dark" ? "dark" : "light",
+    tokens: pickTokens(config.tokens),
     isClassic: layoutType === "classic",
   };
 }

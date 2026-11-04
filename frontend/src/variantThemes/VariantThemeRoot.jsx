@@ -18,8 +18,27 @@ const PAGE_BG_PROPS = [
   "background-color",
 ];
 
+export const TOKEN_VARS = [
+  ["accent", "--variant-theme-accent"],
+  ["accent_hover", "--variant-theme-accent-hover"],
+  ["on_accent", "--variant-theme-on-accent"],
+  ["page_text_primary", "--variant-theme-page-text"],
+  ["page_text_secondary", "--variant-theme-page-text-secondary"],
+  ["hero_overlay", "--variant-theme-hero-overlay"],
+];
+
+export function applyThemeTokens(node, theme) {
+  const tokens = theme?.tokens || {};
+  TOKEN_VARS.forEach(([key, cssVar]) => {
+    if (tokens[key]) node.style.setProperty(cssVar, tokens[key]);
+    else node.style.removeProperty(cssVar);
+  });
+  if (theme?.themeMode === "dark") node.classList.add("variant-theme-mode--dark");
+  else node.classList.remove("variant-theme-mode--dark");
+}
+
 function stripThemeClasses(node) {
-  node.classList.remove("variant-theme-active", "variant-theme-has-block-image", ...LAYOUT_CLASSES);
+  node.classList.remove("variant-theme-active", "variant-theme-has-block-image", "variant-theme-mode--dark", ...LAYOUT_CLASSES);
   [...node.classList].forEach((cls) => {
     if (cls.startsWith(SLUG_PREFIX)) node.classList.remove(cls);
   });
@@ -32,11 +51,12 @@ function clearPageBackground(node) {
   node.style.removeProperty("--variant-theme-block-bg-image");
   node.style.removeProperty("--variant-theme-block-opacity");
   node.style.removeProperty("--variant-theme-bg-color");
+  TOKEN_VARS.forEach(([, cssVar]) => node.style.removeProperty(cssVar));
   PAGE_BG_PROPS.forEach((prop) => node.style.removeProperty(prop));
 }
 
-function applyPageBackground(node, { pageImageUrl, background }) {
-  const style = pageBackgroundStyle(background, pageImageUrl);
+function applyPageBackground(node, { pageImageUrl, background, mode }) {
+  const style = pageBackgroundStyle(background, pageImageUrl, mode);
   node.style.setProperty("background-image", style.backgroundImage, "important");
   node.style.setProperty("background-size", style.backgroundSize, "important");
   node.style.setProperty("background-repeat", style.backgroundRepeat, "important");
@@ -116,11 +136,12 @@ export function VariantThemeRoot({ payload, children }) {
         if (slugClass) node.classList.add(slugClass);
         node.style.setProperty("--variant-theme-block-bg-image", blockImage);
         node.style.setProperty("--variant-theme-block-opacity", String(BLOCK_IMAGE_OPACITY));
+        applyThemeTokens(node, theme);
       });
       return () => nodes.forEach(clearNode);
     }
 
-    const painted = pageBackgroundStyle(theme.background, pageImageUrl);
+    const painted = pageBackgroundStyle(theme.background, pageImageUrl, theme.themeMode);
     nodes.forEach((node) => {
       node.classList.add(...extraClasses);
       if (blockImage) node.classList.add("variant-theme-has-block-image");
@@ -131,7 +152,8 @@ export function VariantThemeRoot({ payload, children }) {
       else node.style.removeProperty("--variant-theme-block-bg-image");
       node.style.setProperty("--variant-theme-block-opacity", String(BLOCK_IMAGE_OPACITY));
       node.style.setProperty("--variant-theme-bg-color", painted.backgroundColor);
-      applyPageBackground(node, { pageImageUrl, background: theme.background });
+      applyPageBackground(node, { pageImageUrl, background: theme.background, mode: theme.themeMode });
+      applyThemeTokens(node, theme);
     });
     return () => {
       nodes.forEach(clearNode);

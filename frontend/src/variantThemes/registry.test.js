@@ -91,3 +91,23 @@ describe("resolveVariantTheme", () => {
     expect(theme.decorations).toEqual(["clouds"]);
   });
 });
+
+import { resolveVariantTheme as resolveForTokens } from "./registry";
+
+describe("theme mode and tokens", () => {
+  it("reads dark mode and safe tokens", () => {
+    const theme = resolveForTokens({
+      slug: "space", layout_type: "route",
+      config: { theme_mode: "dark", tokens: { accent: "#5b4bc4", hero_overlay: "rgba(22,60,96,.62)", page_text_primary: "#F2F4FF", bad: "x" } },
+    });
+    expect(theme.themeMode).toBe("dark");
+    expect(theme.tokens).toEqual({ accent: "#5b4bc4", hero_overlay: "rgba(22,60,96,.62)", page_text_primary: "#F2F4FF" });
+  });
+
+  it("drops unsafe tokens and defaults to light", () => {
+    const theme = resolveForTokens({ slug: "x", config: { theme_mode: "neon", tokens: { hero_overlay: "url(x)", accent: "red" } } });
+    expect(theme.themeMode).toBe("light");
+    expect(theme.tokens).toEqual({});
+  });
+});
+
