@@ -31,16 +31,9 @@ export const CONTACT_EMAIL = "itflux.academy@yandex.com";
 const REGISTER_URL = `/cabinet/login?mode=register&next=${encodeURIComponent("/cabinet")}`;
 const LANDING_SLUGS = ["start", "teacher", "pro"] as const;
 
-type Props = {
-  isTeacher?: boolean;
-  /** r152: скрыть рег./тарифные офферы у учителей с активной платной подпиской */
-  hideAcquisitionOffers?: boolean;
-};
+type Props = { isTeacher?: boolean };
 
-export default function TutorLanding({
-  isTeacher = false,
-  hideAcquisitionOffers = false,
-}: Props) {
+export default function TutorLanding({ isTeacher = false }: Props) {
   const { plans, failed } = useTariffPlans();
   const byslug = (s: string) => plans?.find((p) => p.slug === s);
   const landingPlans = LANDING_SLUGS.map(byslug).filter(Boolean) as PublicPlan[];
@@ -48,10 +41,9 @@ export default function TutorLanding({
   const minPaid = paidPlans.length ? Math.min(...paidPlans.map((p) => Number(p.price_month))) : null;
   const discount = paidPlans.map(yearDiscountPercent).find((x) => x != null) ?? null;
   const startCta = isTeacher ? "/cabinet" : REGISTER_URL;
-  const showOffers = !hideAcquisitionOffers;
 
   return (
-    <div className="tl" data-hide-acquisition={hideAcquisitionOffers ? "1" : "0"}>
+    <div className="tl" data-tutor-landing="1">
       <TutorHero
         ctaTo={startCta}
         studentsTo={
@@ -59,34 +51,31 @@ export default function TutorLanding({
             ? "/cabinet/students"
             : `/cabinet/login?mode=register&next=${encodeURIComponent("/cabinet/students")}`
         }
-        showAcquisitionCtas={showOffers}
       />
       <TutorFeatures />
       <TutorMaterials />
-      <TutorAutocheck ctaTo={startCta} showAcquisitionCta={showOffers} />
-      {showOffers ? (
-        landingPlans.length === 3 ? (
-          <TutorPricing plans={landingPlans} ctaTo={startCta} discount={discount} />
-        ) : failed ? (
-          <section className="tl-section tl-pricing" id="tarify">
-            <h2 className="tl-h2">Тарифы</h2>
-            <p className="tl-lead">
-              <Link to="/pricing">Посмотреть тарифы и цены →</Link>
-            </p>
-          </section>
-        ) : (
-          <section className="tl-section tl-pricing tl-pricing--loading" id="tarify" aria-busy="true">
-            <h2 className="tl-h2">Тарифы</h2>
-          </section>
-        )
-      ) : null}
+      <TutorAutocheck ctaTo={startCta} />
+      {landingPlans.length === 3 ? (
+        <TutorPricing plans={landingPlans} ctaTo={startCta} discount={discount} />
+      ) : failed ? (
+        <section className="tl-section tl-pricing" id="tarify">
+          <h2 className="tl-h2">Тарифы</h2>
+          <p className="tl-lead">
+            <Link to="/pricing">Посмотреть тарифы и цены →</Link>
+          </p>
+        </section>
+      ) : (
+        <section className="tl-section tl-pricing tl-pricing--loading" id="tarify" aria-busy="true">
+          <h2 className="tl-h2">Тарифы</h2>
+        </section>
+      )}
       <TutorFaq minPaid={minPaid} discount={discount} />
-      {showOffers ? <TutorFinalCta ctaTo={startCta} /> : null}
+      <TutorFinalCta ctaTo={startCta} />
     </div>
   );
 }
 
-function TutorHero({ ctaTo, studentsTo, showAcquisitionCtas = true }: { ctaTo: string; studentsTo: string; showAcquisitionCtas?: boolean }) {
+function TutorHero({ ctaTo, studentsTo }: { ctaTo: string; studentsTo: string }) {
   return (
     <section className="tl-hero" aria-labelledby="tl-hero-title">
       <div className="tl-hero__grid">
@@ -99,12 +88,10 @@ function TutorHero({ ctaTo, studentsTo, showAcquisitionCtas = true }: { ctaTo: s
             Рабочее место для подготовки к ОГЭ и ЕГЭ: банк задач ФИПИ, генератор вариантов,
             автопроверка домашки и расписание.
           </p>
-          {showAcquisitionCtas ? (
-            <div className="tl-hero__actions">
-              <Link className="tl-btn" to={ctaTo}>Попробовать бесплатно</Link>
-              <Link className="tl-alt" to={studentsTo}>Добавить первого ученика →</Link>
-            </div>
-          ) : null}
+          <div className="tl-hero__actions">
+            <Link className="tl-btn" to={ctaTo}>Попробовать бесплатно</Link>
+            <Link className="tl-alt" to={studentsTo}>Добавить первого ученика →</Link>
+          </div>
           <div className="tl-tags">
             <span>ОГЭ</span><span>ЕГЭ</span><span>Математика</span><span>Информатика</span>
           </div>
@@ -213,7 +200,7 @@ function TutorMaterials() {
   );
 }
 
-function TutorAutocheck({ ctaTo, showAcquisitionCta = true }: { ctaTo: string; showAcquisitionCta?: boolean }) {
+function TutorAutocheck({ ctaTo }: { ctaTo: string }) {
   return (
     <section className="tl-section" id="avtoproverka" aria-labelledby="tl-autocheck-title">
       <h2 id="tl-autocheck-title" className="tl-h2">Домашку проверяет платформа, а не Вы</h2>
@@ -243,9 +230,7 @@ function TutorAutocheck({ ctaTo, showAcquisitionCta = true }: { ctaTo: string; s
           </div>
         </article>
       </div>
-      {showAcquisitionCta ? (
-        <div className="tl-center"><Link className="tl-btn" to={ctaTo}>Попробовать бесплатно</Link></div>
-      ) : null}
+      <div className="tl-center"><Link className="tl-btn" to={ctaTo}>Попробовать бесплатно</Link></div>
     </section>
   );
 }
