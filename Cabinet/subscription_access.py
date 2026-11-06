@@ -522,3 +522,60 @@ def cleanup_stale_anonymous_usage(*, days: int = 180) -> int:
         registered_user__isnull=True,
     ).delete()
     return deleted
+
+
+def plan_counts_as_paid_platform_tier(plan) -> bool:
+    """Платный тариф платформы: Репетитор/Профи/Школа и аналоги, не «Старт».
+
+    «Школа» (cta=contact) считается платной даже при цене 0 в каталоге.
+    """
+    if plan is None:
+        return False
+    slug = (getattr(plan, "slug", "") or "").strip().lower()
+    if slug == "start" or bool(getattr(plan, "is_free", False)):
+        return False
+    from .models import TariffPlan
+
+    if getattr(plan, "cta_type", "") == TariffPlan.CtaType.CONTACT:
+        return True
+    from decimal import Decimal
+
+    return Decimal(str(getattr(plan, "price_month", 0) or 0)) > 0
+
+
+def teacher_has_active_paid_platform_subscription(user) -> bool:
+    """Учитель с активной платной подпиской (не Старт, не trial / launch promo).
+
+    Ученики и родители — всегда False: их кабинеты и биллинг не затрагиваем.
+    Бесплатный «Старт», Status.TRIAL и Source.LAUNCH_PROMO (в т.ч. legacy promo)
+    считаются НЕ платными — лендинг на главной им оставляем.
+    """
+    if user is None or not getattr(user, "is_authenticated", False):
+        return False
+    try:
+        profile = getattr(user, "profile", None)
+    except Exception:
+        return False
+    if profile is None:
+        return False
+    from .models import Profile, TeacherSubscription
+
+    if getattr(profile, "role", None) != Profile.Role.TEACHER:
+        return False
+    sub = (
+        TeacherSubscription.objects.select_related("plan")
+        .filter(teacher_id=user.pk)
+        .first()
+    )
+    if sub is None or not sub.is_valid():
+        return False
+    if sub.status == TeacherSubscription.Status.TRIAL:
+        return False
+    if (
+        getattr(sub, "source", "") == TeacherSubscription.Source.LAUNCH_PROMO
+        or bool(getattr(sub, "is_legacy_promo", False))
+    ):
+        return False
+    return plan_counts_as_paid_platform_tier(sub.plan)
+
+

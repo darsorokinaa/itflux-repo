@@ -51,6 +51,8 @@ from .yandex_calendar import (
 
 def _profile_payload(user):
     profile = user.profile
+    from .subscription_access import teacher_has_active_paid_platform_subscription
+
     return {
         "id": user.id,
         "username": user.username,
@@ -70,6 +72,8 @@ def _profile_payload(user):
         "can_manage_variant_themes": can_manage_variant_themes(user),
         "can_select_variant_theme": can_select_variant_theme(user),
         "timezone": (profile.timezone or "").strip() or "Europe/Moscow",
+        # r152: главная (/) — лендинг только без платной подписки учителя
+        "has_active_paid_subscription": teacher_has_active_paid_platform_subscription(user),
     }
 
 

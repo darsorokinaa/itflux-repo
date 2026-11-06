@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { fetchCabinetSession } from "../utils/cabinetAuth";
 import {
   BookOpenCheck,
   Target,
@@ -75,6 +76,10 @@ export default function HomePage() {
   const { hash } = useLocation();
   const [selected, setSelected] = useState<LevelId | null>(null);
   const [stats, setStats] = useState<PlatformStats | null>(null);
+  // r152: пока /me неизвестен — скрываем офферы (без вспышки CTA у платных).
+  const [landingReady, setLandingReady] = useState(false);
+  const [isTeacher, setIsTeacher] = useState(false);
+  const [hideAcquisitionOffers, setHideAcquisitionOffers] = useState(true);
   const heroTasksCountLabel =
     stats != null && stats.total_tasks > 0 ? formatIntRu(stats.total_tasks) : "11 667";
   const heroSubjectsCountLabel =
@@ -85,6 +90,29 @@ export default function HomePage() {
     stats != null && stats.generated_variants_count >= 0
       ? formatIntRu(stats.generated_variants_count)
       : "0";
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchCabinetSession()
+      .then((data) => {
+        if (cancelled) return;
+        const user = data?.authenticated ? data.user : null;
+        const teacher = user?.role === "teacher";
+        const paid = Boolean(teacher && user?.has_active_paid_subscription);
+        setIsTeacher(Boolean(teacher));
+        setHideAcquisitionOffers(paid);
+        setLandingReady(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setIsTeacher(false);
+        setHideAcquisitionOffers(false);
+        setLandingReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -127,8 +155,12 @@ export default function HomePage() {
 
       <div className="digital-flow-page__wrap">
         <main className="home-page__main">
-          {/* r103: новый hero/лендинг для репетиторов; прежние блоки (банк задач, генератор) — ниже. */}
-          <TutorLanding />
+          {/* r103/r152: лендинг; платные учителя — без рег./тарифных офферов. */}
+          {landingReady ? (
+            <TutorLanding isTeacher={isTeacher} hideAcquisitionOffers={hideAcquisitionOffers} />
+          ) : (
+            <div className="tl" aria-busy="true" data-landing-pending="1" />
+          )}
           <div className="home-section-divider" role="separator" aria-hidden />
           <HomeValuePathsBlock />
           <div className="home-section-divider" role="separator" aria-hidden />
