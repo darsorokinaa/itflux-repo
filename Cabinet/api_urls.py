@@ -217,6 +217,11 @@ urlpatterns = [
     path("journal/lessons/", journal_api.JournalLessonsListView.as_view(), name="journal_lessons"),
     path("journal/lessons/<int:lesson_id>/", journal_api.JournalLessonDetailView.as_view(), name="journal_lesson_detail"),
     path(
+        "journal/lessons/<int:lesson_id>/variants/<int:variant_id>/report/",
+        journal_api.JournalVariantReportView.as_view(),
+        name="journal_variant_report",
+    ),
+    path(
         "journal/lessons/<int:lesson_id>/topics/",
         journal_api.JournalLessonTopicsView.as_view(),
         name="journal_lesson_topics",

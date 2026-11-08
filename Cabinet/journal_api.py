@@ -260,6 +260,95 @@ class JournalLessonsListView(APIView):
         return Response(serialize_journal(journal), status=status.HTTP_201_CREATED)
 
 
+def _report_student(request, event, roster):
+    requested = request.query_params.get("student_id") or request.GET.get("student_id")
+    if event.owner_id == request.user.id:
+        if not requested:
+            raise PermissionError
+        student = next((item for item in roster if str(item.id) == str(requested)), None)
+        return student
+    own = next((item for item in roster if item.user_id == request.user.id), None)
+    if own is None:
+        raise PermissionError
+    if requested and str(requested) != str(own.id):
+        raise PermissionError
+    return own
+
+
+class JournalVariantReportView(APIView):
+    """PDF того же формата, что «Скачать отчёт» после «Завершить вариант».
+
+    Ничего не отправляет. Чужую сдачу не отдаёт.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, lesson_id: int, variant_id: int):
+        from django.http import JsonResponse
+
+        from Generator.models import Variant
+        from Generator.views import finish_variant_report_response
+
+        from .lesson_variant_report import (
+            VariantReportNotReady,
+            build_finish_variant_report_data,
+            lesson_variant_submission,
+            report_student_name,
+        )
+        from .meeting_present import list_event_students
+
+        event = ScheduleEvent.objects.filter(pk=lesson_id).select_related("owner", "student", "group").first()
+        if event is None:
+            return Response({"detail": "Урок не найден"}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            student = _report_student(request, event, list_event_students(event))
+        except PermissionError:
+            return Response({"detail": "Нет доступа к этому отчёту"}, status=status.HTTP_403_FORBIDDEN)
+        if student is None:
+            return Response({"detail": "Ученик этого урока не найден"}, status=status.HTTP_404_NOT_FOUND)
+
+        variant = Variant.objects.select_related("var_subject", "level").filter(pk=variant_id).first()
+        if variant is None or variant.level_id is None or variant.var_subject_id is None:
+            return Response({"detail": "Вариант не найден"}, status=status.HTTP_404_NOT_FOUND)
+
+        journal = LessonJournal.objects.filter(schedule_event=event).first()
+        teacher = journal.teacher if journal is not None else event.owner
+        lesson_date = journal.lesson_date if journal is not None and journal.lesson_date else (
+            timezone.localtime(event.starts_at).date() if event.starts_at else None
+        )
+
+        class _Ref:
+            pass
+
+        ref = _Ref()
+        ref.schedule_event_id = event.pk
+        ref.teacher = teacher
+        submission = lesson_variant_submission(ref, student, variant_id)
+        if submission is None:
+            return Response({"detail": "Сдача этого варианта на уроке не найдена"}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            data = build_finish_variant_report_data(
+                student_name=report_student_name(student),
+                submission=submission,
+                variant_id=variant_id,
+                lesson_date=lesson_date,
+            )
+        except VariantReportNotReady:
+            return JsonResponse(
+                {
+                    "detail": "Файл отчёта появится после проверки. Незавершённый вариант не считается нулём.",
+                    "code": "report_not_ready",
+                },
+                status=409,
+            )
+        return finish_variant_report_response(
+            request,
+            data,
+            variant.level.level,
+            variant.var_subject.subject_short,
+        )
+
+
 class JournalLessonDetailView(APIView):
     permission_classes = [IsAuthenticated, IsCabinetTeacher]
 

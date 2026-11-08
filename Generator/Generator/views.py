@@ -5989,6 +5989,16 @@ def report_pdf(request, level, subject):
         data = json.loads(request.body)
     except (json.JSONDecodeError, TypeError):
         return JsonResponse({"error": "Неверный формат данных"}, status=400)
+    return finish_variant_report_response(request, data, level, subject)
+
+
+def finish_variant_report_response(request, data, level, subject):
+    """PDF после «Завершить вариант»: шаблон report_template.html, application/pdf.
+
+    data — тот же объект, что ResultsModal отправляет на report-pdf.
+    """
+    if not isinstance(data, dict):
+        return JsonResponse({"error": "Неверный формат данных"}, status=400)
 
     variant_id = data.get("variantId")
     if not variant_id:
@@ -6128,9 +6138,12 @@ def report_pdf(request, level, subject):
         logger.exception("WeasyPrint report PDF failed: %s", e)
         return HttpResponse("Ошибка генерации PDF", status=500, content_type="text/plain; charset=utf-8")
 
-    safe_name = "".join(c if c.isalnum() or c in " -_" else "-" for c in student_name).strip() or "report"
+    from .report_download import finish_variant_report_filename
+
     response = HttpResponse(pdf, content_type="application/pdf")
-    response["Content-Disposition"] = f'attachment; filename="report-{safe_name}.pdf"'
+    response["Content-Disposition"] = (
+        f'attachment; filename="{finish_variant_report_filename(student_name)}"'
+    )
     return response
 
 
