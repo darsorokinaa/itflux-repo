@@ -18,12 +18,17 @@ from .truth_table_check import (
 _FILL_RE = re.compile(r"заполните\s+таблиц\w*\s+истинност", re.IGNORECASE)
 
 
-def affected_tasks():
-    """Только ВПР информатика, 8 класс, задание 6, где просят заполнить таблицу истинности."""
-    from .models import Task
+def affected_tasks(model=None):
+    """Только ВПР информатика, 8 класс, задание 6, где просят заполнить таблицу истинности.
+
+    Миграция 0116 передаёт историческую модель. Живая Task после 0117 содержит
+    source_key, и запрос к ней падает, пока этой колонки в базе ещё нет.
+    """
+    if model is None:
+        from .models import Task as model
 
     return (
-        Task.objects.filter(
+        model.objects.filter(
             task__level__level__iexact="vpr",
             task__subject__subject_short__iexact="inf",
             task__task_number=6,

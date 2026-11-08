@@ -2,6 +2,7 @@
 
 Без --apply ничего не пишет. --apply кладёт неактивные задачи и файлы в закрытое
 хранилище. Скрипты из архива не запускаются. Production этой командой из облака не трогаем.
+После активации партию можно только выключить (--deactivate-batch), не удалить.
 """
 
 import json
@@ -10,7 +11,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from Generator.vpr_answer_spec import APPLY_READY_PACKS, dry_run_zip
-from Generator.vpr_pack_import import activate_batch, apply_zip, rollback_batch
+from Generator.vpr_pack_import import activate_batch, apply_zip, deactivate_batch, rollback_batch
 
 
 class Command(BaseCommand):
@@ -21,24 +22,40 @@ class Command(BaseCommand):
         parser.add_argument("--apply", action="store_true", help="Записать неактивные задачи. Без флага только отчёт.")
         parser.add_argument("--batch", default="", help="Метка партии для source_key, активации и отката.")
         parser.add_argument("--activate-batch", default="", help="Сделать активными только задачи этой партии.")
-        parser.add_argument("--rollback-batch", default="", help="Удалить только задачи и файлы этой партии.")
+        parser.add_argument(
+            "--deactivate-batch",
+            default="",
+            help="Выключить партию, не удаляя задачи и файлы. Это единственный обратный шаг после активации.",
+        )
+        parser.add_argument(
+            "--rollback-batch",
+            default="",
+            help="Удалить черновик партии, который ещё не активировали и никуда не включили.",
+        )
 
     def handle(self, *args, **options):
         activate = (options.get("activate_batch") or "").strip()
+        deactivate = (options.get("deactivate_batch") or "").strip()
         rollback = (options.get("rollback_batch") or "").strip()
-        if activate and rollback:
-            raise CommandError("нельзя одновременно активировать и откатывать")
-        if activate or rollback:
+        chosen = [name for name in (activate, deactivate, rollback) if name]
+        if len(chosen) > 1:
+            raise CommandError("нужна одна операция: активация, деактивация или откат")
+        if chosen:
             if options["paths"] or options["apply"]:
-                raise CommandError("активация и откат не принимают архивы и --apply")
+                raise CommandError("активация, деактивация и откат не принимают архивы и --apply")
             try:
-                result = activate_batch(activate) if activate else rollback_batch(rollback)
+                if activate:
+                    result = activate_batch(activate)
+                elif deactivate:
+                    result = deactivate_batch(deactivate)
+                else:
+                    result = rollback_batch(rollback)
             except RuntimeError as exc:
                 raise CommandError(str(exc)) from exc
             self.stdout.write(json.dumps(result, ensure_ascii=False, indent=2))
             return
         if not options["paths"]:
-            raise CommandError("нужен хотя бы один zip либо --activate-batch/--rollback-batch")
+            raise CommandError("нужен хотя бы один zip либо --activate-batch/--deactivate-batch/--rollback-batch")
         reports = [dry_run_zip(path) for path in options["paths"]]
         total = sum(item.get("count") or 0 for item in reports)
         blocked = []

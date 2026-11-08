@@ -9,10 +9,25 @@ import json
 import zipfile
 
 from django.db import transaction
+from django.db.models import Q
 
-from .models import Criteria, Level, Subject, Task, TaskList, private_media_storage
+from .models import (
+    Criteria,
+    Level,
+    Subject,
+    Task,
+    TaskAttachment,
+    TaskGroupMember,
+    TaskList,
+    VariantContent,
+    private_media_storage,
+)
 from .vpr_answer_spec import APPLY_READY_PACKS, dry_run_zip, storage_from_item
 from .vpr_pack_files import store_item_files
+
+# Ставится при первой активации и больше не снимается. После этого партию
+# можно только выключить: удаление срывает варианты и чужие ссылки по id.
+_ACTIVATED_PREFIX = "vpr-activated:"
 
 
 def _level_and_subject(item: dict):
@@ -62,6 +77,14 @@ def _task_list(item: dict, stored: dict, subject, level) -> TaskList:
     return row
 
 
+def _activated_marker(batch: str) -> str:
+    return f"{_ACTIVATED_PREFIX}{batch}"[:100]
+
+
+def _was_activated(row) -> bool:
+    return str(getattr(row, "created_by", "") or "").startswith(_ACTIVATED_PREFIX)
+
+
 def _save_task(item: dict, stored: dict, task_list: TaskList, *, batch: str, stored_files: list) -> str:
     spec = dict(stored["answer_spec"])
     spec["stored_files"] = stored_files
@@ -88,6 +111,10 @@ def _save_task(item: dict, stored: dict, task_list: TaskList, *, batch: str, sto
     if existing is None:
         Task.objects.create(source_key=stored["source_key"], **defaults)
         return "created"
+    if _was_activated(existing):
+        defaults.pop("is_active", None)
+        defaults.pop("status", None)
+        defaults.pop("created_by", None)
     for field, value in defaults.items():
         setattr(existing, field, value)
     existing.save()
@@ -138,16 +165,82 @@ def activate_batch(batch: str) -> dict:
     total = rows.count()
     if total == 0:
         raise RuntimeError(f"партия {batch!r} не найдена")
-    activated = rows.update(is_active=True, status=Task.Status.READY)
+    activated = rows.update(
+        is_active=True,
+        status=Task.Status.READY,
+        created_by=_activated_marker(batch),
+    )
     return {"batch": batch, "matched": total, "activated": activated}
 
 
 @transaction.atomic
-def rollback_batch(batch: str) -> dict:
-    """Удаляет задачи партии, их закрытые файлы и опустевшие списки этого класса."""
-    rows = list(_batch_tasks(batch).only("id", "task_id", "answer_spec", "source_key"))
-    if not rows:
+def deactivate_batch(batch: str) -> dict:
+    """Выключает партию, не удаляя задачи, файлы и списки."""
+    rows = _batch_tasks(batch)
+    total = rows.count()
+    if total == 0:
         raise RuntimeError(f"партия {batch!r} не найдена")
+    deactivated = rows.update(is_active=False, status=Task.Status.DRAFT)
+    return {
+        "batch": batch,
+        "matched": total,
+        "deactivated": deactivated,
+        "deleted_tasks": 0,
+    }
+
+
+def _usage_reasons(ids: list[int]) -> list[str]:
+    if not ids:
+        return []
+    reasons = []
+    if VariantContent.objects.filter(task_id__in=ids).exists():
+        reasons.append("варианты")
+    if TaskGroupMember.objects.filter(task_id__in=ids).exists():
+        reasons.append("группы")
+    if TaskAttachment.objects.filter(task_id__in=ids).exists():
+        reasons.append("вложения")
+    if Task.objects.filter(source_task_id__in=ids).exists():
+        reasons.append("копии")
+    from django.apps import apps
+
+    if apps.is_installed("Cabinet"):
+        homework = apps.get_model("Cabinet", "HomeworkTask")
+        if homework.objects.filter(task_id__in=[str(item) for item in ids]).exists():
+            reasons.append("домашние задания")
+        history = apps.get_model("Cabinet", "StudentTaskHistory")
+        if history.objects.filter(generator_task_id__in=ids).exists():
+            reasons.append("история выдачи")
+    return reasons
+
+
+@transaction.atomic
+def rollback_batch(batch: str) -> dict:
+    """Удаляет черновик партии, который ещё не активировали и никуда не включили.
+
+    После активации удаление запрещено: варианты и выдача хранят id задачи.
+    Обратный шаг для такой партии — deactivate_batch.
+    """
+    rows_qs = _batch_tasks(batch)
+    if not rows_qs.exists():
+        raise RuntimeError(f"партия {batch!r} не найдена")
+    activated = rows_qs.filter(
+        Q(is_active=True)
+        | Q(status=Task.Status.READY)
+        | Q(created_by__startswith=_ACTIVATED_PREFIX)
+    )
+    if activated.exists():
+        raise RuntimeError(
+            f"партия {batch!r} уже активировалась: удаление запрещено, "
+            "доступно только --deactivate-batch"
+        )
+    ids = list(rows_qs.values_list("pk", flat=True))
+    usage = _usage_reasons(ids)
+    if usage:
+        raise RuntimeError(
+            f"партия {batch!r} уже используется ({', '.join(usage)}): "
+            "удаление запрещено, доступно только --deactivate-batch"
+        )
+    rows = list(rows_qs.only("id", "task_id", "answer_spec", "source_key"))
     list_ids = {row.task_id for row in rows if row.task_id}
     removed_files = 0
     for row in rows:
