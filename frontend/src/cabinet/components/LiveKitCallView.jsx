@@ -7,6 +7,7 @@ import {
   RoomEvent,
   Track,
   VideoPresets,
+  VideoQuality,
 } from "livekit-client";
 
 import { disconnectVideoMeetingParticipant } from "../../utils/cabinetAuth";
@@ -22,6 +23,12 @@ import {
   nextPublishIntent,
   reconnectDelayMs,
 } from "../videoFailover";
+import {
+  SCREEN_SHARE_CAPTURE,
+  liveKitScreenSharePublish,
+  refreshScreenShareSubscription,
+  screenShareCaptureFallback,
+} from "../screenShareQuality";
 
 function useAttachedTrack(track) {
   const ref = useRef(null);
@@ -91,12 +98,8 @@ function MediaTile({ track, muted = false, label, audio = false, avatar = false,
   );
 }
 
-// Без фиксированного 1920x1080: квадратная рамка-ограничение подходит и для портрета, и для ландшафта
-// (по умолчанию LiveKit просит 1920x1080 и при повороте планшета кадр масштабируется под старый формат).
-export const SCREEN_SHARE_CAPTURE = Object.freeze({
-  resolution: { width: 1920, height: 1920, frameRate: 15 },
-  contentHint: "detail",
-});
+// Квадратный потолок захвата (портрет и ландшафт). Частоту в захват не кладём:
+// число в getDisplayMedia становится exact и срывает демонстрацию.
 
 const AUDIO_CONFIRM_MS = 8000;
 
@@ -222,6 +225,7 @@ const LiveKitCallView = forwardRef(function LiveKitCallView({
   const [sideTab, setSideTab] = useState("");
   const [unreadChat, setUnreadChat] = useState(0);
   const [retryTick, setRetryTick] = useState(0);
+  const restoreScreenDetailRef = useRef(() => {});
   const [remotes, setRemotes] = useState([]);
   const [busy, setBusy] = useState("");
   const sideTabRef = useRef("");
@@ -260,7 +264,7 @@ const LiveKitCallView = forwardRef(function LiveKitCallView({
     const stalledRef = { current: false };
     const loweredRef = { current: false };
     const room = new Room({
-      adaptiveStream: true,
+      adaptiveStream: { pixelDensity: "screen" },
       dynacast: true,
       disconnectOnPageLeave: true,
       audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -270,10 +274,18 @@ const LiveKitCallView = forwardRef(function LiveKitCallView({
         videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
         dtx: true,
         red: true,
-        screenShareEncoding: { maxBitrate: 1_200_000, maxFramerate: 15 },
+        ...liveKitScreenSharePublish(),
       },
     });
     roomRef.current = room;
+
+    const restoreScreenDetail = () => {
+      refreshScreenShareSubscription(room, Track.Source.ScreenShare, {
+        expanded: true,
+        highQuality: VideoQuality.HIGH,
+      });
+    };
+    restoreScreenDetailRef.current = restoreScreenDetail;
 
     const applyIntent = async () => {
       const intent = nextPublishIntent(intentRef.current);
@@ -387,12 +399,18 @@ const LiveKitCallView = forwardRef(function LiveKitCallView({
       iceRef.current = false;
       void applyIntent().then(() => {
         refreshTiles();
+        restoreScreenDetail();
         armMediaCheck({ reset: true });
       });
     });
     room.on(RoomEvent.ParticipantConnected, refreshTiles);
     room.on(RoomEvent.ParticipantDisconnected, refreshTiles);
-    room.on(RoomEvent.TrackSubscribed, refreshTiles);
+    room.on(RoomEvent.TrackSubscribed, (track, publication) => {
+      refreshTiles();
+      if (publication?.source === Track.Source.ScreenShare || track?.source === Track.Source.ScreenShare) {
+        restoreScreenDetail();
+      }
+    });
     room.on(RoomEvent.TrackUnsubscribed, refreshTiles);
     room.on(RoomEvent.LocalTrackPublished, refreshTiles);
     room.on(RoomEvent.LocalTrackUnpublished, refreshTiles);
@@ -539,10 +557,15 @@ const LiveKitCallView = forwardRef(function LiveKitCallView({
         /* ignore */
       }
       roomRef.current = null;
+      restoreScreenDetailRef.current = () => {};
     };
     // Намерение микрофона хранится в ref и не пересоздаёт комнату.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, token, retryTick]);
+
+  useEffect(() => {
+    restoreScreenDetailRef.current();
+  }, [tileWide]);
 
   const publishSignal = async (payload) => {
     const participant = roomRef.current?.localParticipant;
@@ -587,7 +610,19 @@ const LiveKitCallView = forwardRef(function LiveKitCallView({
     const next = !sharing;
     setBusy("share");
     try {
-      await roomRef.current?.localParticipant.setScreenShareEnabled(next, next ? SCREEN_SHARE_CAPTURE : undefined);
+      const participant = roomRef.current?.localParticipant;
+      if (next) {
+        const publish = liveKitScreenSharePublish();
+        try {
+          await participant?.setScreenShareEnabled(true, SCREEN_SHARE_CAPTURE, publish);
+        } catch (error) {
+          const fallback = screenShareCaptureFallback(error);
+          if (!fallback) throw error;
+          await participant?.setScreenShareEnabled(true, fallback, publish);
+        }
+      } else {
+        await participant?.setScreenShareEnabled(false);
+      }
       setSharing(next);
       if (!next) setNotice(MEDIA_SCREEN_NOTE);
       refreshTiles();

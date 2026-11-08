@@ -18,6 +18,10 @@ import {
 import { buildJitsiPipConfigOverwrite, disableJitsiAutoIntersectionPip } from "./callPip";
 import { attachScreenSharePresence } from "./jitsiScreenShare";
 import { attachRemoteShareFocus } from "./jitsiRemoteShareFocus"; // r94
+import {
+  JITSI_SCREEN_SHARE_FRAME_RATE,
+  jitsiScreenShareBitrateCaps,
+} from "./screenShareQuality";
 import { attachMediaWatchdog } from "./jitsiMediaWatchdog";
 import { createCallSessionId } from "./jitsiCallState";
 import {
@@ -509,6 +513,19 @@ export function notifyJitsiContainerResize(api) {
   }
 }
 
+/**
+ * Смена раскладки: iframe пересчитывает плитки, а развёрнутая демонстрация
+ * снова просит высокий слой. Свёрнутая полоска этот запрос не шлёт.
+ */
+export function syncJitsiStageLayout(session, { expanded = true } = {}) {
+  notifyJitsiContainerResize(session);
+  try {
+    session?.screenShareFocus?.noteLayout?.({ expanded: expanded !== false });
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Меняет панель Jitsi без переподключения. В компактном виде остаётся короткий набор. */
 export function applyJitsiCallChrome(api, { expanded = false, custom = false, floating = false } = {}) {
   const session = api?.api || api;
@@ -532,6 +549,7 @@ export function buildJitsiConfigOverwrite({
 } = {}) {
   const title = String(subject || "").trim() || "Урок";
   const hosts = buildJitsiHostsOverwrite(domain);
+  const screenBits = jitsiScreenShareBitrateCaps();
   return {
     prejoinConfig: { enabled: false },
     prejoinPageEnabled: false,
@@ -595,8 +613,9 @@ export function buildJitsiConfigOverwrite({
     enableOpusRed: true,
     audioQuality: { stereo: false, enableOpusDtx: false },
     constraints: jitsiCameraConstraints(),
-    // Демонстрация экрана: 5–15 fps, VP9 SVC, высокий битрейт для чёткого текста.
-    desktopSharingFrameRate: { min: 5, max: 15 },
+    // Демонстрация: потолок 15 fps без жёсткого min (min срывал захват).
+    // Битрейт ssHigh — потолок текста, не камера. Сеть может отдать меньше.
+    desktopSharingFrameRate: { ...JITSI_SCREEN_SHARE_FRAME_RATE },
     videoQuality: {
       codecPreferenceOrder: ["VP9", "VP8", "H264"],
       mobileCodecPreferenceOrder: ["VP8", "H264", "VP9"],
@@ -604,9 +623,9 @@ export function buildJitsiConfigOverwrite({
       mobileScreenshareCodec: "VP8",
       enableAdaptiveMode: false,
       // Камера ограничена 1.5 Мбит/с, чтобы не отнимать полосу у экрана у слабых учеников.
-      vp8: { maxBitratesVideo: { low: 200000, standard: 500000, high: 1200000, fullHd: 1500000, ssHigh: 3500000 } },
-      vp9: { maxBitratesVideo: { low: 100000, standard: 300000, high: 1000000, fullHd: 1500000, ssHigh: 3000000 } },
-      h264: { maxBitratesVideo: { low: 200000, standard: 500000, high: 1200000, fullHd: 1500000, ssHigh: 3500000 } },
+      vp8: { maxBitratesVideo: { low: 200000, standard: 500000, high: 1200000, fullHd: 1500000, ssHigh: screenBits.vp8 } },
+      vp9: { maxBitratesVideo: { low: 100000, standard: 300000, high: 1000000, fullHd: 1500000, ssHigh: screenBits.vp9 } },
+      h264: { maxBitratesVideo: { low: 200000, standard: 500000, high: 1200000, fullHd: 1500000, ssHigh: screenBits.h264 } },
       maxFullResolution: JITSI_CAMERA_MAX_HEIGHT,
       minHeightForQualityLvl: {
         360: "standard",
@@ -1212,6 +1231,7 @@ function wireParticipantListeners(api, hooks) {
   return {
     presence,
     screenShare,
+    screenShareFocus: remoteShareFocus,
     watchdog,
     dispose() {
       for (const [name, handler] of extraListeners) {
@@ -1563,7 +1583,7 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
     hasIframe: Boolean(api.getIFrame?.()),
   });
 
-  const { presence, screenShare, watchdog, dispose: disposeParticipantListeners } = wireParticipantListeners(api, {
+  const { presence, screenShare, screenShareFocus, watchdog, dispose: disposeParticipantListeners } = wireParticipantListeners(api, {
     ...hooks,
     subject,
     diagnostics,
@@ -1688,6 +1708,7 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
     roomName,
     presence,
     screenShare,
+    screenShareFocus,
     watchdog,
     callSessionId: diagnostics.callSessionId,
     dispose: () => disposeOnce("user"),

@@ -8,6 +8,7 @@ vi.mock("livekit-client", () => ({
   ConnectionQuality: {},
   DisconnectReason: {},
   VideoPresets: { h180: {}, h360: {}, h540: { resolution: {} } },
+  VideoQuality: { LOW: 0, MEDIUM: 1, HIGH: 2 },
 }));
 
 import { collectTiles } from "./LiveKitCallView";

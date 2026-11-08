@@ -20,7 +20,8 @@ const room = {
 
 vi.mock("livekit-client", () => {
   class MockRoom {
-    constructor() {
+    constructor(options) {
+      room.constructedWith = options;
       return room;
     }
 
@@ -60,6 +61,7 @@ vi.mock("livekit-client", () => {
     h360: { resolution: { width: 640, height: 360 } },
     h540: { resolution: { width: 960, height: 540 } },
   },
+  VideoQuality: { LOW: 0, MEDIUM: 1, HIGH: 2 },
   };
 });
 
@@ -194,14 +196,37 @@ describe("LiveKitCallView", () => {
   });
 });
 
-import { orientationFromSize, SCREEN_SHARE_CAPTURE } from "./LiveKitCallView";
+import { SCREEN_SHARE_CAPTURE } from "../screenShareQuality";
+import { orientationFromSize } from "./LiveKitCallView";
 describe("r107 screen orientation", () => {
   it("classifies orientation", () => {
     expect(orientationFromSize(1080, 1920)).toBe("portrait");
     expect(orientationFromSize(1920, 1080)).toBe("landscape");
     expect(orientationFromSize(0, 0)).toBe("");
   });
-  it("does not force landscape capture", () => {
+  it("does not force landscape capture or an exact frame rate", () => {
     expect(SCREEN_SHARE_CAPTURE.resolution.width).toBe(SCREEN_SHARE_CAPTURE.resolution.height);
+    expect(SCREEN_SHARE_CAPTURE.resolution).not.toHaveProperty("frameRate");
+    expect(SCREEN_SHARE_CAPTURE.contentHint).toBe("detail");
+  });
+
+  it("publishes screen share above the old 1.2 Mbps cap and keeps the camera layers", async () => {
+    render(
+      <LiveKitCallView
+        meetingUuid="meet-1"
+        url="wss://video.example.test"
+        token="header.payload.sig"
+      />,
+    );
+    await screen.findByRole("button", { name: "Выключить микрофон" });
+    const options = room.constructedWith;
+    expect(options.videoCaptureDefaults.resolution).toEqual({ width: 960, height: 540 });
+    expect(options.publishDefaults.videoSimulcastLayers).toHaveLength(2);
+    expect(options.publishDefaults.screenShareEncoding.maxBitrate).toBeGreaterThanOrEqual(2_500_000);
+    expect(options.publishDefaults.screenShareEncoding.maxFramerate).toBeLessThanOrEqual(15);
+    expect(options.publishDefaults.degradationPreference).toBe("maintain-resolution");
+    expect(options.publishDefaults.simulcast).toBe(true);
+    expect(options.adaptiveStream.pixelDensity).toBe("screen");
+    expect(options.audioCaptureDefaults.echoCancellation).toBe(true);
   });
 });

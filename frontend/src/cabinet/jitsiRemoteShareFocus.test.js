@@ -31,6 +31,40 @@ describe("r94 remote screenshare focus (receiver)", () => {
     expect(api.executeCommand).not.toHaveBeenCalled();
   });
 
+  it("re-requests 1080 on layout expand and after reconnect with the same sharer", async () => {
+    const api = fakeApi();
+    let sharers = [];
+    api.getContentSharingParticipants = async () => sharers;
+    const handle = attachRemoteShareFocus(api, { keepAliveMs: 0, schedule: () => {} });
+    api.fire("videoConferenceJoined", { id: "me" });
+    await Promise.resolve();
+    await Promise.resolve();
+    sharers = ["student1"];
+    api.fire("contentSharingParticipantsChanged", { data: ["student1"] });
+    api.executeCommand.mockClear();
+    handle.noteLayout({ expanded: false });
+    expect(api.executeCommand).not.toHaveBeenCalled();
+    handle.noteLayout({ expanded: true });
+    expect(api.executeCommand).toHaveBeenCalledWith("setVideoQuality", SCREENSHARE_RECEIVE_HEIGHT);
+    expect(api.executeCommand).toHaveBeenCalledWith("setLargeVideoParticipant", "student1");
+    api.executeCommand.mockClear();
+    api.fire("videoConferenceJoined", { id: "me" });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(api.executeCommand).toHaveBeenCalledWith("setVideoQuality", SCREENSHARE_RECEIVE_HEIGHT);
+    handle.dispose();
+  });
+
+  it("does not treat a repeated sharer id as a new share", () => {
+    const api = fakeApi();
+    attachRemoteShareFocus(api, { keepAliveMs: 0, schedule: () => {} });
+    api.fire("videoConferenceJoined", { id: "me" });
+    api.fire("contentSharingParticipantsChanged", { data: ["student1"] });
+    api.executeCommand.mockClear();
+    api.fire("contentSharingParticipantsChanged", { data: ["student1"] });
+    expect(api.executeCommand).not.toHaveBeenCalled();
+  });
+
   it("re-pins when stage moves away (throttled), releases when share stops", () => {
     let t = 0;
     const api = fakeApi();
