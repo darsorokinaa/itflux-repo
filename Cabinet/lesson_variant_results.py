@@ -421,6 +421,37 @@ def _stored_variants(raw, *, for_student: bool) -> list[dict]:
     return out
 
 
+_REPORT_LINK_KEYS = ("report_ready", "report_url", "report_filename")
+
+
+def student_report_name(student) -> str:
+    roster = f"{getattr(student, 'first_name', '') or ''} {getattr(student, 'last_name', '') or ''}".strip()
+    return roster or getattr(student, "full_name", "") or "Ученик"
+
+
+def attach_variant_report_link(item: dict, journal, student) -> dict:
+    """Ссылка на тот же PDF, что кнопка «Скачать отчёт» после «Завершить вариант»."""
+    from Generator.report_download import finish_variant_report_filename
+
+    ready = (
+        item.get("status") == "checked"
+        and item.get("score_percent") is not None
+        and item.get("variant_id")
+        and getattr(journal, "schedule_event_id", None)
+    )
+    item["report_ready"] = bool(ready)
+    if not ready:
+        item["report_url"] = None
+        item["report_filename"] = None
+        return item
+    item["report_filename"] = finish_variant_report_filename(student_report_name(student))
+    item["report_url"] = (
+        f"/api/cabinet/journal/lessons/{journal.schedule_event_id}"
+        f"/variants/{item['variant_id']}/report/?student_id={student.id}"
+    )
+    return item
+
+
 def _merge(live: list[dict], stored: list[dict]) -> list[dict]:
     seen = set()
     out = []
@@ -477,7 +508,10 @@ def load_lesson_variant_results(journal, students, *, for_student: bool = False)
         )
         record = by_student_records.get(student.id)
         stored = _stored_variants(getattr(record, "variant_result", None), for_student=for_student) if record else []
-        out[student.id] = _merge(live, stored)
+        out[student.id] = [
+            attach_variant_report_link(item, journal, student)
+            for item in _merge(live, stored)
+        ]
     return out
 
 
@@ -494,7 +528,11 @@ def snapshot_variants_for_storage(variants: list[dict]) -> dict | None:
     for item in variants or []:
         if not isinstance(item, dict):
             continue
-        row = {key: value for key, value in item.items() if key != "lesson_variants"}
+        row = {
+            key: value
+            for key, value in item.items()
+            if key != "lesson_variants" and key not in _REPORT_LINK_KEYS
+        }
         clean.append(row)
     if not clean:
         return None

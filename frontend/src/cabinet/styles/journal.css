@@ -4907,9 +4907,14 @@ button.jg-topic-field--view:disabled {
   text-align: right;
 }
 
-.jl-lesson-variants__row .jl-btn {
+.jl-lesson-variants__row-actions {
   grid-column: 1 / -1;
-  justify-self: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.jl-lesson-variants__row-actions .jl-btn {
   min-height: 44px;
 }
 
@@ -4970,8 +4975,12 @@ html.variant-theme-mode--dark .jl-lesson-variants__text {
   }
 
   .jl-lesson-variants__actions .jl-btn,
-  .jl-lesson-variants__row .jl-btn {
+  .jl-lesson-variants__row-actions {
     width: 100%;
+  }
+
+  .jl-lesson-variants__row-actions .jl-btn {
+    flex: 1 1 100%;
   }
 }
 

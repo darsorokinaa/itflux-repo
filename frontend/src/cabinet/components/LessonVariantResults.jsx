@@ -34,6 +34,30 @@ function downloadReport(filename, text) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function filenameFromDisposition(header, fallback) {
+  const match = /filename="([^"]+)"/.exec(header || "");
+  return match?.[1] || fallback || "report.pdf";
+}
+
+async function downloadVariantFile(variant) {
+  const response = await fetch(variant.report_url, { credentials: "same-origin" });
+  if (!response.ok) {
+    throw new Error("Не удалось скачать отчёт варианта");
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  const fromHeader = filenameFromDisposition(response.headers.get("Content-Disposition"), "");
+  const serverName = fromHeader || variant.report_filename || "report.pdf";
+  // ResultsModal сохраняет файл как report-Имя-Фамилия.pdf, заменяя пробелы.
+  link.download = serverName.replace(/\s+/g, "-");
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 /**
  * Все варианты одного урока и, у учителя, текст отчёта для родителя.
  * Подробности открываются готовой карточкой HomeworkResultBlock.
@@ -49,6 +73,7 @@ export default function LessonVariantResults({
   const [openKey, setOpenKey] = useState(null);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState("");
+  const [fileError, setFileError] = useState("");
   const items = Array.isArray(variants) ? variants : [];
 
   const onCopy = async () => {
@@ -88,15 +113,36 @@ export default function LessonVariantResults({
                     <div className="jl-lesson-variants__score">
                       {score || "Балл не выставлен"}
                     </div>
-                    <button
-                      type="button"
-                      className="jl-btn jl-btn--outline jl-btn--sm"
-                      aria-expanded={open}
-                      onClick={() => setOpenKey(open ? null : key)}
-                    >
-                      {open ? "Скрыть результат" : "Подробный результат"}
-                    </button>
+                    <div className="jl-lesson-variants__row-actions">
+                      <button
+                        type="button"
+                        className="jl-btn jl-btn--outline jl-btn--sm"
+                        aria-expanded={open}
+                        onClick={() => setOpenKey(open ? null : key)}
+                      >
+                        {open ? "Скрыть результат" : "Подробный результат"}
+                      </button>
+                      {variant.report_url ? (
+                        <button
+                          type="button"
+                          className="jl-btn jl-btn--outline jl-btn--sm"
+                          onClick={() => {
+                            setFileError("");
+                            downloadVariantFile(variant).catch(() => {
+                              setFileError("Не удалось скачать файл отчёта. Текст сводки по-прежнему можно скопировать.");
+                            });
+                          }}
+                        >
+                          Скачать отчёт
+                        </button>
+                      ) : (
+                        <button type="button" className="jl-btn jl-btn--ghost jl-btn--sm" disabled>
+                          Файл отчёта после проверки
+                        </button>
+                      )}
+                    </div>
                   </div>
+                  {fileError ? <p className="jl-lesson-variants__error">{fileError}</p> : null}
                   {open ? (
                     <div className="jl-lesson-variants__detail">
                       {tasks.length ? (
@@ -139,7 +185,7 @@ export default function LessonVariantResults({
         <aside className="jl-lesson-variants__report" aria-label="Отчёт для родителя">
           <h4 className="jl-lesson-variants__title">Отчёт для родителя</h4>
           <p className="jl-lesson-variants__hint">
-            Текст никому не отправляется. Скопируйте или скачайте его и передайте родителю сами.
+            Текст никому не отправляется. Файл отчёта у каждого варианта — тот же PDF, что после «Завершить вариант».
           </p>
           <pre className="jl-lesson-variants__text" aria-label="Текст отчёта для родителя">{parentReport || "Сводку можно будет скопировать, когда появятся итоги урока."}</pre>
           <div className="jl-lesson-variants__actions">
@@ -157,7 +203,7 @@ export default function LessonVariantResults({
               onClick={() => downloadReport(reportFilename, parentReport)}
               disabled={!parentReport}
             >
-              Скачать
+              Скачать текст
             </button>
           </div>
           {copyError ? <p className="jl-lesson-variants__error">{copyError}</p> : null}
