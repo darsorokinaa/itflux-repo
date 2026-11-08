@@ -263,17 +263,37 @@ export function defaultTruthTableVprInf8AdvancedTask6(task, examContext) {
  * @param {{ level?: string; subject?: string } | null | undefined} [examContext]
  * @returns {null | { expression: string; mode: "answer-column"|"full-table"; variables: string[] | null; steps: string[] | null }}
  */
+const truthConfigCache = new Map();
+
 export function getTruthTableConfig(task, examContext) {
   if (!isTruthTableFlagOn(task)) return null;
 
   const prompt = task?.text || task?.task_template || "";
-  const built = buildTruthTableConfigFromPrompt(prompt, { requirePhrase: false });
-  if (built) return built;
-  if (promptHasLogicFormula(prompt)) return null;
+  const key = [
+    prompt,
+    task?.number ?? "",
+    task?.vpr_class ?? "",
+    task?.vpr_advanced ? 1 : 0,
+    examContext?.level ?? "",
+    examContext?.subject ?? "",
+  ].join("\0");
+  if (truthConfigCache.has(key)) return truthConfigCache.get(key);
 
-  const specific = defaultTruthTableVprInf8AdvancedTask6(task, examContext);
-  const raw = specific || DEFAULT_LOGIC_TRUTH_TABLE;
-  return normalizeTruthTableObject(raw);
+  const built = buildTruthTableConfigFromPrompt(prompt, { requirePhrase: false });
+  let result = built;
+  if (!result) {
+    if (promptHasLogicFormula(prompt)) result = null;
+    else {
+      const specific = defaultTruthTableVprInf8AdvancedTask6(task, examContext);
+      result = normalizeTruthTableObject(specific || DEFAULT_LOGIC_TRUTH_TABLE);
+    }
+  }
+  truthConfigCache.set(key, result);
+  if (truthConfigCache.size > 80) {
+    const oldest = truthConfigCache.keys().next().value;
+    truthConfigCache.delete(oldest);
+  }
+  return result;
 }
 
 const FILL_TRUTH_TABLE_RE = /заполните\s+таблиц[а-яё]*\s+истинност/i;

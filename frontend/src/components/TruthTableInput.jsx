@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   extractVariables,
   formatTruthTableAnswerFromGrid,
@@ -25,7 +25,7 @@ const TRUTH_NOTE =
 /**
  * Ответ для проверки: «01 00 01 00» — каждая группа = строка таблицы (все вычислимые столбцы слева направо).
  */
-export default function TruthTableInput({
+function TruthTableInput({
   variables: variablesProp,
   expression,
   steps,
@@ -55,9 +55,19 @@ export default function TruthTableInput({
   const numRows = rowsComb.length;
   const numComputed = computedColumns.length;
 
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  const [draft, setDraft] = useState(value ?? "");
+  const [seenProp, setSeenProp] = useState(value ?? "");
+  if ((value ?? "") !== seenProp) {
+    setSeenProp(value ?? "");
+    if ((value ?? "") !== draft) setDraft(value ?? "");
+  }
+
   const cells = useMemo(
-    () => parseTruthTableAnswerToGrid(value, numRows, numComputed),
-    [value, numRows, numComputed]
+    () => parseTruthTableAnswerToGrid(draft, numRows, numComputed),
+    [draft, numRows, numComputed]
   );
 
   const flatInputIndexRef = useRef(new Map());
@@ -112,19 +122,27 @@ export default function TruthTableInput({
     [rcToFlatIndex]
   );
 
+  const publishGrid = useCallback((next, focusIndex) => {
+    const serialized = formatTruthTableAnswerFromGrid(next);
+    setDraft(serialized);
+    if (focusIndex != null) focusRefIndex(focusIndex);
+    startTransition(() => {
+      onChangeRef.current?.(serialized);
+    });
+  }, [focusRefIndex]);
+
   const setCellAndAdvance = useCallback(
     (r, c, raw, advance) => {
       const ch = sanitizeBinaryChar(raw);
       const next = patchCell(cells, r, c, ch);
-      onChange(formatTruthTableAnswerFromGrid(next));
+      let focusIndex = null;
       if (advance && ch) {
         const pos = rcToFlatIndex.get(`${r},${c}`);
-        if (pos != null && pos + 1 < flatOrder.length) {
-          requestAnimationFrame(() => focusRefIndex(pos + 1));
-        }
+        if (pos != null && pos + 1 < flatOrder.length) focusIndex = pos + 1;
       }
+      publishGrid(next, focusIndex);
     },
-    [cells, onChange, rcToFlatIndex, flatOrder.length, focusRefIndex]
+    [cells, rcToFlatIndex, flatOrder.length, publishGrid]
   );
 
   const readCellDisplay = useCallback((r, c) => cells[r]?.[c] ?? "", [cells]);
@@ -142,9 +160,7 @@ export default function TruthTableInput({
         if (current === "") {
           e.preventDefault();
           const pos = rcToFlatIndex.get(`${r},${c}`);
-          if (pos != null && pos > 0) {
-            requestAnimationFrame(() => focusRefIndex(pos - 1));
-          }
+          if (pos != null && pos > 0) focusRefIndex(pos - 1);
         }
       }
     },
@@ -166,23 +182,17 @@ export default function TruthTableInput({
         const { r: rr, c: cc } = flatOrder[start + k];
         next = patchCell(next, rr, cc, digits[k]);
       }
-      onChange(formatTruthTableAnswerFromGrid(next));
-
       const lastFilled = Math.min(start + digits.length - 1, flatOrder.length - 1);
-      requestAnimationFrame(() => focusRefIndex(lastFilled));
+      publishGrid(next, lastFilled);
     },
-    [disabled, cells, rcToFlatIndex, flatOrder, onChange, focusRefIndex]
+    [disabled, cells, rcToFlatIndex, flatOrder, publishGrid]
   );
 
   if (numComputed === 0) return null;
 
   return (
     <div className={`truth-table-block${status === "ok" ? " is-ok" : ""}${status === "bad" ? " is-bad" : ""}`}>
-      <div className="truth-title-row">
-        <h3 className="truth-title">Таблица истинности</h3>
-        <span className="truth-note">{TRUTH_NOTE}</span>
-      </div>
-      {expression ? <p className="truth-formula">{expression}</p> : null}
+      <p className="truth-note">{TRUTH_NOTE}</p>
 
       <div className="truth-table-wrap">
         <table className="truth-table">
@@ -252,3 +262,20 @@ export default function TruthTableInput({
     </div>
   );
 }
+
+function sameList(a, b) {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  return a.every((item, index) => item === b[index]);
+}
+
+export default memo(TruthTableInput, (prev, next) => (
+  prev.value === next.value
+  && prev.disabled === next.disabled
+  && prev.status === next.status
+  && prev.mode === next.mode
+  && prev.expression === next.expression
+  && prev.onTableChange === next.onTableChange
+  && sameList(prev.variables, next.variables)
+  && sameList(prev.steps, next.steps)
+));
