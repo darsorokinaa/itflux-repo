@@ -376,7 +376,7 @@ class ImportAndDownloadTests(TestCase):
         with self.assertRaises(CommandError) as still_blocked:
             call_command("vpr_import_pack", "--rollback-batch", "test-batch")
         self.assertIn("--deactivate-batch", str(still_blocked.exception))
-        self.client.login(username="teacher", password="x")
+        self.client.force_login(self.teacher)
         kept_file = self.client.get("/api/tasks/%s/pack-file/?name=ref14.docx" % doc.pk)
         self.assertEqual(kept_file.status_code, 200)
         self.assertEqual(b"".join(kept_file.streaming_content), b"secret-key")
