@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import LessonVariantResults from "./LessonVariantResults";
 import { lessonVariantsOf, variantScoreLabel } from "./lessonVariantResults";
 
@@ -32,6 +32,9 @@ const checked = {
   attempts: [
     { id: 9, attempt_number: 1, status: "checked", status_label: "Проверено", score: 40, is_final: true },
   ],
+  report_ready: true,
+  report_url: "/api/cabinet/journal/lessons/5/variants/101/report/?student_id=2",
+  report_filename: "report-Анна Иванова.pdf",
 };
 
 const pending = {
@@ -65,7 +68,25 @@ describe("LessonVariantResults", () => {
     expect(screen.getByText("Балл не выставлен")).toBeTruthy();
     expect(screen.getByLabelText("Текст отчёта для родителя").textContent).toMatch(/балл не выставлен/);
     expect(screen.getByRole("button", { name: "Скопировать" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Скачать" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Скачать текст" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Скачать отчёт" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Файл отчёта после проверки" })).toBeTruthy();
+  });
+
+  it("downloads the finish-variant file for this variant only", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      blob: async () => new Blob(["%PDF"], { type: "application/pdf" }),
+      headers: { get: () => 'attachment; filename="report-Анна Иванова.pdf"' },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<LessonVariantResults variants={[checked, pending]} showParentReport={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "Скачать отчёт" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock.mock.calls[0][0]).toBe(checked.report_url);
+    expect(screen.queryAllByRole("button", { name: "Скачать отчёт" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Файл отчёта после проверки" })).toBeTruthy();
+    vi.unstubAllGlobals();
   });
 
   it("opens the existing result table and keeps attempt history", () => {
