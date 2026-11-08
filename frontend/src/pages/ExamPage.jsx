@@ -32,7 +32,9 @@ import { createExamVariantTimerStore } from "../utils/examVariantTimerStore";
 import TruthTableInput from "../components/TruthTableInput";
 import {
   getTruthTableConfig,
+  gradeTruthTableAnswer,
   sanitizeTruthTableAnswerString,
+  stripTruthTableAnswerHint,
   truthTableAnswerMaxChars,
 } from "../utils/truthTable";
 import { checkVariantAnswerOnServer, scoreInformaticsTableTask } from "../utils/examAnswerCheck";
@@ -1758,8 +1760,15 @@ function ExamPage() {
   async function checkTask(taskId, correctAnswer, userValue = null) {
     const raw = userValue !== null ? userValue : userAnswers[taskId] || "";
     const hasLocalAnswer = correctAnswer != null && String(correctAnswer).trim() !== "";
+    const taskForTruth = (variant?.tasks || []).find((t) => String(t.id) === String(taskId));
+    const truthGrade = gradeTruthTableAnswer(raw, {
+      ...(taskForTruth || {}),
+      answer: hasLocalAnswer ? correctAnswer : taskForTruth?.answer,
+    });
     let isCorrect = false;
-    if (hasLocalAnswer) {
+    if (truthGrade != null && hasLocalAnswer) {
+      isCorrect = truthGrade;
+    } else if (hasLocalAnswer) {
       isCorrect = isUserAnswerCorrect(raw, correctAnswer);
     } else if (variant?.id) {
       // Ученику эталон в JSON не отдаётся — сверка только на сервере.
@@ -1782,6 +1791,8 @@ function ExamPage() {
     const userValue = useTable
       ? getTableAnswerForCheck(task.id, INF_TABLE_ROWS, INF_TABLE_COLS)
       : (userAnswers[task.id] || "");
+    const truthGrade = gradeTruthTableAnswer(userValue, task);
+    if (truthGrade != null) return truthGrade;
     return isUserAnswerCorrect(userValue, task.answer || "");
   }
 
@@ -3784,7 +3795,7 @@ function ExamPage() {
                     openBoardForTaskId={eduOpenBoardForTaskId}
                     onConsumedBoardOpenRequest={() => setEduOpenBoardForTaskId(null)}
                   >
-                  <ExamTaskCondition html={task.text} subject={subject} level={level} taskNumber={task.number} />
+                  <ExamTaskCondition html={stripTruthTableAnswerHint(task.text)} subject={subject} level={level} taskNumber={task.number} />
                   <TaskFileAttachments task={task} />
                   {task.author && <div className="task-author">{task.author}</div>}
 
@@ -3902,6 +3913,7 @@ function ExamPage() {
                           steps={truthCfg.steps ?? undefined}
                           mode={truthCfg.mode}
                           value={userAnswers[task.id] || ""}
+                          status={checkedTasks[task.id] === true ? "ok" : checkedTasks[task.id] === false ? "bad" : ""}
                           onChange={(v) => {
                             const max = truthTableAnswerMaxChars(truthCfg);
                             let s = sanitizeTruthTableAnswerString(v);
@@ -3910,22 +3922,12 @@ function ExamPage() {
                           }}
                           disabled={p1FieldDisabled(task)}
                         />
-                        <input
-                          id={`answer-${task.id}`}
-                          type="text"
-                          className="hidden-answer"
-                          readOnly
-                          tabIndex={-1}
-                          aria-hidden="true"
-                          value={userAnswers[task.id] || ""}
-                          autoComplete="off"
-                        />
                         {(showP1HomeworkConfirm(task) || (showP1CheckNormal(task) && !p1Done) || p1ShowHomeworkSave(task)) ? (
                           <div className="task-actions truth-task-actions">
                             {showP1HomeworkConfirm(task) && (
                               <button
                                 type="button"
-                                className="check-btn"
+                                className="exam-edu-btn exam-edu-btn--primary"
                                 onClick={() => confirmHomeworkPart1Answer(task)}
                               >
                                 Подтвердить ответ
@@ -3934,7 +3936,7 @@ function ExamPage() {
                             {showP1CheckNormal(task) && !p1Done && (
                               <button
                                 type="button"
-                                className="check-btn"
+                                className="exam-edu-btn exam-edu-btn--primary"
                                 onClick={() => checkTask(task.id, task.answer)}
                               >
                                 Проверить
@@ -3943,7 +3945,7 @@ function ExamPage() {
                             {p1ShowHomeworkSave(task) && (
                               <button
                                 type="button"
-                                className="check-btn check-btn--outline"
+                                className="exam-edu-btn exam-edu-btn--outline"
                                 disabled={hwActionBusy || hwLoading}
                                 onClick={() => runHomeworkSave()}
                               >
@@ -4200,7 +4202,7 @@ function ExamPage() {
                             openBoardForTaskId={eduOpenBoardForTaskId}
                             onConsumedBoardOpenRequest={() => setEduOpenBoardForTaskId(null)}
                           >
-                          <ExamTaskCondition html={task.text} subject={subject} level={level} taskNumber={task.number} />
+                          <ExamTaskCondition html={stripTruthTableAnswerHint(task.text)} subject={subject} level={level} taskNumber={task.number} />
                           <TaskFileAttachments task={task} />
                           {task.author && <div className="task-author">{task.author}</div>}
 
@@ -4316,7 +4318,7 @@ function ExamPage() {
                         openBoardForTaskId={eduOpenBoardForTaskId}
                         onConsumedBoardOpenRequest={() => setEduOpenBoardForTaskId(null)}
                       >
-                      <ExamTaskCondition html={task.text} subject={subject} level={level} taskNumber={task.number} />
+                      <ExamTaskCondition html={stripTruthTableAnswerHint(task.text)} subject={subject} level={level} taskNumber={task.number} />
                       <TaskFileAttachments task={task} />
                       {task.author && <div className="task-author">{task.author}</div>}
 

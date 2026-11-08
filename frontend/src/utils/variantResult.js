@@ -3,6 +3,7 @@ import {
   isUserAnswerCorrect,
   scoreInformaticsTableTask,
 } from "./examAnswerCheck";
+import { gradeTruthTableAnswer } from "./truthTable";
 import { scoreShortAnswerRule, shortAnswerRule } from "./shortAnswerRules";
 
 /**
@@ -178,7 +179,8 @@ export function scoreVariantAttempt({
       points = clampPoints(rulePoints, max);
       status = statusFromPoints(points, max);
     } else if (expected.trim() && answered) {
-      const ok = isUserAnswerCorrect(text, expected, subject);
+      const truthGrade = gradeTruthTableAnswer(text, task);
+      const ok = truthGrade == null ? isUserAnswerCorrect(text, expected, subject) : truthGrade;
       points = ok ? max : 0;
       status = ok ? "correct" : "incorrect";
     } else if (flag === true) {

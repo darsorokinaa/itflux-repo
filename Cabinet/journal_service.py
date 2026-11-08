@@ -616,6 +616,8 @@ def _resolve_answer_ok(
     saved_ok,
     *,
     subject: str = "",
+    prompt: str = "",
+    truth_table_enabled: bool = False,
 ):
     """
     Вердикт для журнала: при наличии эталона пересчитываем (не доверяем checked ученика).
@@ -626,6 +628,22 @@ def _resolve_answer_ok(
     if not student:
         return None if saved_ok is None else bool(saved_ok)
     if expected:
+        try:
+            from Generator.truth_table_check import match_truth_table_answer
+        except Exception:
+            try:
+                from Generator.Generator.truth_table_check import match_truth_table_answer
+            except Exception:
+                match_truth_table_answer = None
+        if match_truth_table_answer is not None:
+            graded = match_truth_table_answer(
+                student_answer,
+                prompt=prompt,
+                expected=expected_answer,
+                enabled=truth_table_enabled,
+            )
+            if graded is not None:
+                return bool(graded)
         answers_equal = _import_answers_equal()
         if answers_equal is not None:
             return bool(answers_equal(student_answer, expected_answer, subject=subject))
@@ -705,7 +723,13 @@ def build_variant_result_payload(
         elif num_key and by_num.get(num_key) is not None:
             student_answer = str(by_num.get(num_key))
         correct_answer = task.get("answer") or ""
-        ok = _resolve_answer_ok(student_answer, correct_answer, saved_ok)
+        ok = _resolve_answer_ok(
+            student_answer,
+            correct_answer,
+            saved_ok,
+            prompt=str(task.get("text") or task.get("task_template") or ""),
+            truth_table_enabled=bool(task.get("truth_table_enabled")),
+        )
         rows.append(
             {
                 "id": tid,

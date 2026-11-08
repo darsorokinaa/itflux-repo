@@ -21,8 +21,7 @@ from Cabinet.ws_lifecycle import (
 )
 
 from .answer_check import (
-    answers_equal,
-    expected_answer_for_variant_task,
+    answers_equal_for_variant_task,
     normalize_answer,
 )
 
@@ -30,15 +29,6 @@ from Cabinet.loop_log import protect_logger
 
 logger = logging.getLogger(__name__)
 protect_logger(logger.name)
-
-
-def _get_expected_answer_for_variant_task(variant_id: int, task_number_key: str) -> str:
-    """
-    Номер в UI варианта — это TaskList.task_number (банк), а не порядок VariantContent.order.
-    Сначала ищем по task__task__task_number, затем fallback на order 1..N.
-    Ключ ``t<task_id>`` — id строки Task в варианте (см. API варианта), для уникальности при коллизиях номеров.
-    """
-    return expected_answer_for_variant_task(variant_id, task_number_key=task_number_key)
 
 
 def _token_from_scope(scope) -> str:
@@ -378,10 +368,15 @@ class LessonConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
         normalized_student = self._normalize_answer_value(student_answer)
         is_empty = normalized_student == ""
 
-        expected_answer = ""
-        if variant_id > 0 and task_number:
-            expected_answer = _get_expected_answer_for_variant_task(variant_id, task_number)
-        is_correct = answers_equal(student_answer, expected_answer)
+        is_correct = (
+            answers_equal_for_variant_task(
+                student_answer,
+                variant_id,
+                task_number_key=task_number,
+            )
+            if variant_id > 0 and task_number
+            else False
+        )
 
         LessonStudentsAnswer.objects.update_or_create(
             room_id=self.room_id[:200],

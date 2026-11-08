@@ -4,13 +4,13 @@ import { scoreVariantAttempt, taskMaxPoints, tasksForStoredAttempt } from "./var
 
 function task(id, extra = {}) {
   return {
+    number: id,
+    max_score: 1,
+    part: 1,
+    part_title: "",
+    answer: "42",
+    ...extra,
     id,
-    number: extra.number ?? id,
-    max_score: extra.max_score ?? 1,
-    part: extra.part ?? 1,
-    exam_part: extra.exam_part,
-    part_title: extra.part_title || "",
-    answer: extra.answer ?? "42",
   };
 }
 
@@ -191,6 +191,31 @@ describe("scoreVariantAttempt", () => {
     expect(partial.partial_count).toBe(1);
     expect(partial.earned_points).toBe(1);
     expect(partial.correct_count).toBe(0);
+  });
+
+  it("grades a VPR truth table by cells and does not drop a leading zero", () => {
+    const row = task(6, {
+      number: 6,
+      answer: "<p>0001</p>",
+      truth_table_enabled: true,
+      text: "<p>Заполните таблицу истинности выражения.</p><p>&#92;(A &#92;land B&#92;&#41;</p>",
+    });
+    const correct = scoreVariantAttempt({
+      tasks: [row],
+      level: "vpr",
+      subject: "inf",
+      answers: { 6: "0 0 0 1" },
+    });
+    expect(correct.correct_count).toBe(1);
+    expect(correct.earned_points).toBe(1);
+    const lostZero = scoreVariantAttempt({
+      tasks: [row],
+      level: "vpr",
+      subject: "inf",
+      answers: { 6: "1" },
+    });
+    expect(lostZero.correct_count).toBe(0);
+    expect(lostZero.incorrect_count).toBe(1);
   });
 
   it("awards a two-point part 1 task its full value", () => {
