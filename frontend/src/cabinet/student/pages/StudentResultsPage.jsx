@@ -4,6 +4,8 @@ import { fetchStudentResultDetail, fetchStudentResults } from "../../../utils/ca
 import { usePageTitle } from "../../hooks/usePageTitle";
 import { TaskPosition } from "../../../components/taskDocument/TaskNumber";
 import { journalRowKey, startsVariantGroup } from "../../homeworkVariants";
+import LessonVariantResults from "../../components/LessonVariantResults";
+import { lessonVariantsOf } from "../../components/lessonVariantResults";
 import "../../styles/journal.css";
 
 const ATTENDANCE_RU = {
@@ -77,63 +79,6 @@ function DetailBlock({ label, value }) {
     <p>
       <strong>{label}:</strong> {text}
     </p>
-  );
-}
-
-function VariantResultBlock({ result, titleFallback = "Вариант на уроке" }) {
-  const tasks = Array.isArray(result?.tasks) ? result.tasks : [];
-  if (!result || (!tasks.length && result.score_percent == null)) return null;
-  return (
-    <div className="jl-variant-result">
-      <div className="jl-variant-result__head">
-        <strong>{result.title || titleFallback}</strong>
-        {result.score_percent != null ? (
-          <span>
-            {result.correct_count ?? 0}/
-            {result.checked_count ?? tasks.length}
-            {" · "}
-            {formatScore(result.score_percent)}
-          </span>
-        ) : null}
-      </div>
-      {tasks.length ? (
-        <div className="jl-variant-result__table-wrap">
-          <table className="jl-variant-result__table">
-            <thead>
-              <tr>
-                <th>№</th>
-                <th>Ваш ответ</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {tasks.map((task, index) => (
-                <tr key={`${result.title || "v"}-${task.id || task.number}`}>
-                  <td>
-                    <TaskPosition
-                      mode="result"
-                      position={task.display_number ?? task.displayNumber ?? task.position ?? index + 1}
-                      examNumber={task.number}
-                      level={result.level}
-                    />
-                  </td>
-                  <td>{String(task.student_answer || "").trim() || "—"}</td>
-                  <td>
-                    {task.ok === true ? (
-                      <span className="jl-variant-result__ok">верно</span>
-                    ) : task.ok === false ? (
-                      <span className="jl-variant-result__bad">ошибка</span>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
-    </div>
   );
 }
 
@@ -322,7 +267,11 @@ export default function StudentResultsPage() {
               <strong>Домашнее задание (статус):</strong> {prevHwLabel}
             </p>
           ) : null}
-          <VariantResultBlock result={detail.variant_result} />
+          <LessonVariantResults
+            variants={lessonVariantsOf(detail)}
+            showParentReport={false}
+            showCorrectAnswer={false}
+          />
           <HomeworkResultBlock result={detail.homework_result} />
           {(detail.tags || []).length ? (
             <p>
