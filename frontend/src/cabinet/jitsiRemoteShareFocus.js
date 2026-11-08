@@ -1,24 +1,35 @@
 /**
- * r94: у ПОЛУЧАТЕЛЯ демонстрации экрана (например, учитель смотрит экран ученика):
- * пока удалённый участник показывает экран — закрепляем его на главной сцене (и в мини-плеере)
- * и запрашиваем 1080p через setVideoQuality, независимо от размера плитки.
- * Иначе JVB пересылает нижний слой VP9 под маленькую плитку (270p, ~100 кбит/с).
+ * У получателя демонстрации экран держим на главной сцене и запрашиваем 1080p,
+ * пока показ развёрнут. Иначе мост оставляет нижний слой VP9, выбранный под
+ * миниатюру (около 180–270p), и после reconnect или смены раскладки не поднимает его.
+ * Свёрнутая полоска звонка высокий слой не требует. Это потолок приёма, не гарантия
+ * при слабом канале: «Слабое соединение» по-прежнему может опустить качество.
  */
-export const SCREENSHARE_RECEIVE_HEIGHT = 1080;
+import { SCREEN_SHARE_RECEIVE_HEIGHT } from "./screenShareQuality";
+
+export { SCREEN_SHARE_RECEIVE_HEIGHT as SCREENSHARE_RECEIVE_HEIGHT };
 const REPIN_MIN_MS = 2000;
+const QUALITY_MIN_MS = 400;
 
 export function parseShareIds(raw) {
   const list = Array.isArray(raw) ? raw : (raw?.participants ?? raw?.data ?? []);
   return (Array.isArray(list) ? list : []).map((x) => String(x?.id ?? x ?? "")).filter(Boolean);
 }
 
-export function attachRemoteShareFocus(api, { now = () => Date.now(), keepAliveMs = 10000 } = {}) {
-  if (!api?.addListener || typeof api.executeCommand !== "function") return { dispose() {}, state: () => ({}) };
+export function attachRemoteShareFocus(api, {
+  now = () => Date.now(),
+  keepAliveMs = 10000,
+  schedule = (fn) => setTimeout(fn, 350),
+} = {}) {
+  if (!api?.addListener || typeof api.executeCommand !== "function") return { dispose() {}, state: () => ({}), noteLayout() {} };
   let localId = "";
   let remoteSharer = "";
   let largeId = "";
+  let viewExpanded = true;
   let lastPin = 0;
+  let lastQuality = 0;
   let timer = null;
+  let laterTimer = null;
   const handlers = [];
   const cmd = (...a) => {
     try {
@@ -35,14 +46,33 @@ export function attachRemoteShareFocus(api, { now = () => Date.now(), keepAliveM
       /* ignore */
     }
   };
+  const clearLater = () => {
+    if (laterTimer != null) {
+      clearTimeout(laterTimer);
+      laterTimer = null;
+    }
+  };
+  const requestQuality = (force = false) => {
+    if (!remoteSharer || !viewExpanded) return false;
+    const t = now();
+    if (!force && t - lastQuality < QUALITY_MIN_MS) return false;
+    lastQuality = t;
+    cmd("setVideoQuality", SCREEN_SHARE_RECEIVE_HEIGHT);
+    return true;
+  };
   const pin = (force = false) => {
-    if (!remoteSharer) return;
+    if (!remoteSharer || !viewExpanded) return;
     const t = now();
     if (!force && t - lastPin < REPIN_MIN_MS) return;
     lastPin = t;
     cmd("setTileView", false);
     cmd("setLargeVideoParticipant", remoteSharer);
-    cmd("setVideoQuality", SCREENSHARE_RECEIVE_HEIGHT);
+    requestQuality(true);
+  };
+  const ensureTimer = () => {
+    if (timer == null && keepAliveMs > 0) {
+      timer = setInterval(() => requestQuality(true), keepAliveMs);
+    }
   };
   const stopTimer = () => {
     if (timer != null) {
@@ -50,20 +80,68 @@ export function attachRemoteShareFocus(api, { now = () => Date.now(), keepAliveM
       timer = null;
     }
   };
-  const update = (ids) => {
+  const update = (ids, { force = false } = {}) => {
     const remote = ids.find((id) => id && id !== localId) || "";
-    if (remote === remoteSharer) return;
+    if (remote === remoteSharer) {
+      if (force && remote) {
+        ensureTimer();
+        pin(true);
+      }
+      return;
+    }
     remoteSharer = remote;
     if (remote) {
       pin(true);
-      if (timer == null && keepAliveMs > 0) timer = setInterval(() => cmd("setVideoQuality", SCREENSHARE_RECEIVE_HEIGHT), keepAliveMs);
+      ensureTimer();
     } else {
       stopTimer();
-      cmd("setLargeVideoParticipant"); // вернуть авто-выбор сцены
+      clearLater();
+      cmd("setLargeVideoParticipant");
+    }
+  };
+  const readSharers = async () => {
+    if (typeof api.getContentSharingParticipants !== "function") return null;
+    try {
+      const raw = await api.getContentSharingParticipants();
+      return parseShareIds(raw);
+    } catch {
+      return null;
+    }
+  };
+  const restoreAfterJoin = async () => {
+    const ids = await readSharers();
+    if (ids && ids.length) {
+      update(ids, { force: true });
+      return;
+    }
+    if (remoteSharer) pin(true);
+  };
+  const noteLayout = ({ expanded = true } = {}) => {
+    const next = expanded !== false;
+    const becameExpanded = next && !viewExpanded;
+    viewExpanded = next;
+    if (!remoteSharer) return;
+    if (!viewExpanded) {
+      clearLater();
+      return;
+    }
+    // Повторный resize не выключает групповой вид. Сцена возвращается на экран
+    // только когда показ снова разворачивают после свёрнутой полоски.
+    if (becameExpanded) pin(true);
+    else requestQuality(false);
+    clearLater();
+    try {
+      laterTimer = schedule(() => {
+        laterTimer = null;
+        if (remoteSharer && viewExpanded) requestQuality(true);
+      });
+    } catch {
+      /* ignore */
     }
   };
   on("videoConferenceJoined", (e) => {
     localId = String(e?.id || "");
+    void restoreAfterJoin();
   });
   on("contentSharingParticipantsChanged", (e) => update(parseShareIds(e)));
   on("largeVideoChanged", (e) => {
@@ -74,9 +152,11 @@ export function attachRemoteShareFocus(api, { now = () => Date.now(), keepAliveM
     if (remoteSharer && e?.enabled) pin(false);
   });
   return {
-    state: () => ({ localId, remoteSharer, largeId }),
+    state: () => ({ localId, remoteSharer, largeId, viewExpanded }),
+    noteLayout,
     dispose() {
       stopTimer();
+      clearLater();
       for (const [n, f] of handlers) {
         try {
           api.removeListener?.(n, f);

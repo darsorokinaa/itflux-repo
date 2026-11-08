@@ -18,6 +18,7 @@ import {
   setMeetingCameraEnabled,
   showCallTilesSideBySide,
   stripNullJitsiLocalStorageContentFromUrl,
+  syncJitsiStageLayout,
 } from "./jitsiMeet";
 
 describe("meeting camera preference", () => {
@@ -57,6 +58,30 @@ describe("meeting camera preference", () => {
     expect(url).toContain("config.resolution=1080");
     expect(url).toContain("config.constraints.video.height.ideal=1080");
     expect(url).toContain("config.constraints.video.height.max=1080");
+  });
+
+  it("caps screen share for text without a hard capture minimum or a higher camera bitrate", () => {
+    const cfg = buildJitsiConfigOverwrite();
+    expect(cfg.desktopSharingFrameRate).toEqual({ max: 15 });
+    expect(cfg.desktopSharingFrameRate).not.toHaveProperty("min");
+    expect(cfg.videoQuality.screenshareCodec).toBe("VP9");
+    expect(cfg.videoQuality.mobileScreenshareCodec).toBe("VP8");
+    expect(cfg.videoQuality.vp9.maxBitratesVideo.ssHigh).toBeGreaterThanOrEqual(4_000_000);
+    expect(cfg.videoQuality.vp8.maxBitratesVideo.ssHigh).toBeGreaterThanOrEqual(4_500_000);
+    expect(cfg.videoQuality.h264.maxBitratesVideo.ssHigh).toBe(cfg.videoQuality.vp8.maxBitratesVideo.ssHigh);
+    expect(cfg.videoQuality.vp9.maxBitratesVideo.fullHd).toBe(1_500_000);
+    expect(cfg.videoQuality.vp8.maxBitratesVideo.fullHd).toBe(1_500_000);
+    expect(cfg.startBitrate).toBe(1000);
+    const notes = [];
+    syncJitsiStageLayout({
+      getIFrame: () => null,
+      screenShareFocus: { noteLayout: (opts) => notes.push(opts) },
+    }, { expanded: true });
+    syncJitsiStageLayout({
+      getIFrame: () => null,
+      screenShareFocus: { noteLayout: (opts) => notes.push(opts) },
+    }, { expanded: false });
+    expect(notes).toEqual([{ expanded: true }, { expanded: false }]);
   });
 
   it("keeps lobby off and forces JVB (no P2P) for school NAT", () => {

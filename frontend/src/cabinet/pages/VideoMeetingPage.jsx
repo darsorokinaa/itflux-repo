@@ -31,7 +31,7 @@ import {
   createJitsiMeetSession,
   getMeetingCameraEnabled,
   getMeetingMicEnabled,
-  notifyJitsiContainerResize,
+  syncJitsiStageLayout,
   resolveJitsiDisplayName,
   setMeetingCameraEnabled,
   setMeetingMicEnabled,
@@ -664,7 +664,13 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
   const boardSrcCacheRef = useRef({ url: "", src: "" });
   const boardChromeActionsRef = useRef({});
   const [callView, setCallView] = useState("normal");
+  const callViewRef = useRef("normal");
+  callViewRef.current = callView;
   const floatingCallRef = useRef(false);
+  const syncStage = (session = apiRef.current) => {
+    const minimized = Boolean(floatingCallRef.current && callViewRef.current === "minimized");
+    syncJitsiStageLayout(session, { expanded: !minimized });
+  };
   const [focusCall, setFocusCall] = useState(false);
   const [shareMiniDismissed, setShareMiniDismissed] = useState(false);
   const [localMicOn, setLocalMicOn] = useState(false);
@@ -1408,7 +1414,7 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
         }
       });
       applyConferenceHint();
-      notifyJitsiContainerResize(wrapped);
+      syncStage(wrapped);
       claimMeetingCall(meetingUuid, callOwnerIdRef.current);
       setJoinState(wrapped.mode === "external-api" ? "joined" : "embedded");
       setVideoServiceUnreachable(false);
@@ -2277,7 +2283,7 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
   useEffect(() => {
     if (presentation !== "full") return;
     // Возврат из мини-плеера: Jitsi пересчитывает раскладку под новый размер.
-    window.requestAnimationFrame(() => notifyJitsiContainerResize(apiRef.current));
+    window.requestAnimationFrame(() => syncStage());
   }, [presentation]);
 
   useEffect(() => {
@@ -4172,7 +4178,7 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
 
   useEffect(() => {
     // Сообщаем Jitsi о смене размеров контейнера без пересоздания сессии.
-    notifyJitsiContainerResize(apiRef.current);
+    syncStage();
   }, [asideOpen, workspaceOpen, mobilePane, callView, roomFullscreen, callFullscreenFallback]);
 
   useEffect(() => {
@@ -4182,11 +4188,11 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
     const observer = new ResizeObserver(() => {
       window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
-        notifyJitsiContainerResize(apiRef.current);
+        syncStage();
       });
     });
     observer.observe(node);
-    const onOrientation = () => notifyJitsiContainerResize(apiRef.current);
+    const onOrientation = () => syncStage();
     window.addEventListener("orientationchange", onOrientation);
     return () => {
       window.cancelAnimationFrame(frame);
@@ -4206,7 +4212,7 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
     const frame = callFrameRef.current;
     const active = currentFullscreenElement();
     const syncLayout = () => {
-      window.requestAnimationFrame(() => notifyJitsiContainerResize(apiRef.current));
+      window.requestAnimationFrame(() => syncStage());
     };
     if (active) {
       try {
@@ -4255,7 +4261,7 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
         setCallFullscreenFallback(false);
         setRoomFullscreen(true);
       }
-      notifyJitsiContainerResize(apiRef.current);
+      syncStage();
     };
     document.addEventListener("fullscreenchange", onFs);
     document.addEventListener("webkitfullscreenchange", onFs);
@@ -4273,7 +4279,7 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
       setCallFullscreenFallback(false);
       document.body.classList.remove("vl-room-fullscreen");
       setRoomFullscreen(false);
-      notifyJitsiContainerResize(apiRef.current);
+      syncStage();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
