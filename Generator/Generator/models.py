@@ -151,6 +151,13 @@ class TaskList(models.Model):
         verbose_name="Подраздел",
         help_text="Только для математики: Алгебра / Геометрия",
     )
+    vpr_class = models.PositiveSmallIntegerField(
+        "Класс ВПР",
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Пусто — список для всех классов этого уровня. 7 и 8 не делят один список: максимум и критерии у них разные.",
+    )
 
     class Meta:
         indexes = [
@@ -242,6 +249,34 @@ class Task(models.Model):
         default=False,
         db_index=True,
         help_text="Если включено, на странице варианта для этого задания показывается виджет таблицы истинности; ответ по-прежнему вводится строкой из 0 и 1 без подстановки правильных значений.",
+    )
+    source_key = models.CharField(
+        "Ключ источника",
+        max_length=64,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Внешний id пакета, например ma7-b-01-01. Пусто у старых задач. По нему дедуп и откат будущего импорта.",
+    )
+    import_batch = models.CharField(
+        "Партия импорта",
+        max_length=64,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Метка партии. Контент ВПР-2026 этой миграцией не загружается.",
+    )
+    solution = models.TextField(
+        "Решение",
+        blank=True,
+        default="",
+        help_text="Разбор и графический эталон. Короткий ответ остаётся в поле answer.",
+    )
+    answer_spec = models.JSONField(
+        "Спецификация ответа",
+        null=True,
+        blank=True,
+        help_text="Формат, answer_data, критерии, verification и SVG эталона как в пакете. Без этого поля проверка остаётся прежней.",
     )
 
     tag_options = models.ManyToManyField(
@@ -335,7 +370,19 @@ class Task(models.Model):
                 condition=Q(ai_candidate_id__isnull=False),
                 name="task_ai_candidate_uniq",
             ),
+            models.UniqueConstraint(
+                fields=["source_key"],
+                condition=Q(source_key__isnull=False),
+                name="task_source_key_uniq",
+            ),
         ]
+
+    def save(self, *args, **kwargs):
+        if self.source_key is not None and not str(self.source_key).strip():
+            self.source_key = None
+        if self.import_batch is not None and not str(self.import_batch).strip():
+            self.import_batch = None
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f'{self.id}: {self.task_template[:100]}'

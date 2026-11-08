@@ -20,9 +20,9 @@ export function normalize(str) {
  * @param {{ taskId?: number|string, taskNumber?: number|string, answer: string, apiBase?: string }} opts
  * @returns {Promise<boolean>}
  */
-export async function checkVariantAnswerOnServer(variantId, opts = {}) {
+export async function checkVariantAnswerDetail(variantId, opts = {}) {
   const vid = Number(variantId);
-  if (!Number.isFinite(vid) || vid <= 0) return false;
+  if (!Number.isFinite(vid) || vid <= 0) return { correct: false, status: "incorrect" };
   const apiBase = String(opts.apiBase || "").replace(/\/$/, "");
   const url = `${apiBase}/api/variant/${encodeURIComponent(String(vid))}/check-answer/`;
   const body = {
@@ -37,14 +37,21 @@ export async function checkVariantAnswerOnServer(variantId, opts = {}) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!res.ok) return false;
+    if (!res.ok) return { correct: false, status: "incorrect" };
     const data = await res.json().catch(() => ({}));
-    if (typeof data?.correct === "boolean") return data.correct;
-    if (typeof data?.is_correct === "boolean") return data.is_correct;
-    return false;
+    return {
+      correct: data?.correct === true,
+      status: data?.status || (data?.correct === true ? "correct" : data?.correct === false ? "incorrect" : "pending_review"),
+      points: data?.points,
+    };
   } catch {
-    return false;
+    return { correct: false, status: "incorrect" };
   }
+}
+
+export async function checkVariantAnswerOnServer(variantId, opts = {}) {
+  const detail = await checkVariantAnswerDetail(variantId, opts);
+  return detail.status === "correct";
 }
 
 export function getTextFromHtml(html) {

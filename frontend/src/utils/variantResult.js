@@ -5,6 +5,7 @@ import {
 } from "./examAnswerCheck";
 import { gradeTruthTableAnswer } from "./truthTable";
 import { scoreShortAnswerRule, shortAnswerRule } from "./shortAnswerRules";
+import { scoreVprSpec } from "./vprAnswerCheck";
 
 /**
  * Первичный максимум задания.
@@ -110,6 +111,9 @@ export function tasksForStoredAttempt(liveTasks, result, level = "", subject = "
       part_title: row.part_title || current.part_title || "",
       subdivision: row.subdivision || current.subdivision || "",
       answer: frozen.answer != null ? String(frozen.answer) : "",
+      answer_spec: frozen.answer_spec || current.answer_spec || null,
+      answer_check: frozen.answer_check || current.answer_check || null,
+      solution: frozen.solution || current.solution || "",
     };
     const partNumber = Number(examPart);
     const part = partNumber === 1 || partNumber === 2
@@ -151,8 +155,28 @@ export function scoreVariantAttempt({
     const expected = String(task?.answer ?? "");
     let status = "unanswered";
     let points = 0;
+    const spec = task?.answer_spec;
+    const manual = task?.answer_check?.mode === "manual" && !spec?.answer_format;
 
-    if (part === 2) {
+    if (spec?.answer_format || manual) {
+      const graded = scoreVprSpec(
+        spec || { answer_format: task?.answer_check?.format },
+        text || (attached ? "файл" : ""),
+        max,
+      );
+      if (task?.answer_check?.mode === "manual" || graded.mode === "manual" || graded.mode === "mixed") {
+        if (given != null && (graded.mode === "manual" || graded.mode === "mixed" || task?.answer_check?.mode === "manual")) {
+          points = clampPoints(given, max);
+          status = statusFromPoints(points, max);
+        } else {
+          status = graded.status;
+          points = graded.points;
+        }
+      } else {
+        status = graded.status;
+        points = graded.points;
+      }
+    } else if (part === 2) {
       if (given == null) {
         status = "pending_review";
       } else {

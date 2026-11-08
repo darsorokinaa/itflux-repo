@@ -438,10 +438,28 @@ def score_variant_attempt(
         flag, has_flag = _lookup(checked, task.get("id"))
         checked_flag = flag if has_flag and isinstance(flag, bool) else None
         expected = str(task.get("answer") or "")
+        spec = task.get("answer_spec") if isinstance(task.get("answer_spec"), dict) else None
+        if not (spec or {}).get("answer_format"):
+            spec = None
+        check = task.get("answer_check") if isinstance(task.get("answer_check"), dict) else None
+        manual_mode = (check or {}).get("mode") == "manual"
 
         status = "unanswered"
         points = 0
-        if part == 2:
+        if spec or manual_mode:
+            from .vpr_answer_spec import score_vpr_spec
+
+            graded = score_vpr_spec(
+                spec,
+                text,
+                max_score=maximum,
+                explicit=explicit,
+                answered=answered,
+                mode="manual" if manual_mode and not spec else None,
+            )
+            status = graded["status"]
+            points = graded["points"]
+        elif part == 2:
             if explicit is None:
                 status = "pending_review"
             else:
@@ -537,7 +555,7 @@ def score_variant_attempt(
 
 
 def public_task_snapshot(task: dict) -> dict:
-    return {
+    row = {
         "id": task.get("id"),
         "number": task.get("number"),
         "max_score": task_max_points(task),
@@ -547,12 +565,28 @@ def public_task_snapshot(task: dict) -> dict:
         "subdivision": task.get("subdivision") or "",
         "source": "variant_scoring",
     }
+    check = task.get("answer_check")
+    if isinstance(check, dict) and check.get("mode"):
+        row["answer_check"] = {
+            "mode": check.get("mode"),
+            "format": check.get("format") or "",
+        }
+    return row
 
 
 def grading_task_snapshot(task: dict) -> dict:
     """Критерии попытки: состав, максимум и эталон на момент фиксации."""
     row = public_task_snapshot(task)
     row["answer"] = str(task.get("answer") or "")
+    if task.get("solution"):
+        row["solution"] = str(task.get("solution") or "")
+    spec = task.get("answer_spec")
+    if isinstance(spec, dict) and spec.get("answer_format"):
+        from .vpr_answer_spec import scoring_spec
+
+        compact = scoring_spec(spec)
+        if compact:
+            row["answer_spec"] = compact
     if task.get("text") or task.get("task_template"):
         row["text"] = str(task.get("text") or task.get("task_template") or "")
     if task.get("truth_table_enabled"):
@@ -636,7 +670,18 @@ def load_variant_tasks_for_scoring(variant_id: int) -> list[dict]:
             "exam_part": getattr(task, "exam_part", None),
             "subdivision": (getattr(task_list, "subdivision", None) or "") if task_list is not None else "",
             "answer": str(getattr(task, "answer", "") or ""),
+            "solution": str(getattr(task, "solution", "") or ""),
         }
+        spec = getattr(task, "answer_spec", None)
+        if isinstance(spec, dict) and spec.get("answer_format"):
+            from .vpr_answer_spec import describe_check, scoring_spec
+
+            compact = scoring_spec(spec)
+            if compact:
+                row["answer_spec"] = compact
+            described = describe_check(spec, max_score=row["max_score"])
+            if described:
+                row["answer_check"] = described
         if truth_table:
             row["text"] = prompt
             row["truth_table_enabled"] = bool(getattr(task, "truth_table_enabled", False)) or truth_table

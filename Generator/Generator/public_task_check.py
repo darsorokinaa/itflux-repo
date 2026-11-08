@@ -49,7 +49,30 @@ def api_task_check_answer(request, task_id):
         data = {}
     if not isinstance(data, dict):
         data = {}
-    answer = str(data.get("answer") or "")[:500]
+    answer = str(data.get("answer") or "")[:4000]
+    spec = getattr(task, "answer_spec", None)
+    if isinstance(spec, dict) and spec.get("answer_format"):
+        from .vpr_answer_spec import score_vpr_spec
+
+        maximum = task.max_score or 1
+        if task.task_id and getattr(task.task, "max_score", None) is not None:
+            maximum = task.task.max_score
+        graded = score_vpr_spec(spec, answer, max_score=maximum)
+        status = graded["status"]
+        correct = True if status == "correct" else False if status == "incorrect" else None
+        resp = JsonResponse(
+            {
+                "ok": True,
+                "correct": correct,
+                "status": status,
+                "points": graded["points"],
+                "max_points": graded["max_points"],
+                "saved": False,
+                "authenticated": authed,
+            }
+        )
+        resp["Cache-Control"] = "private, no-store"
+        return resp
     expected = (task.answer or "").strip()
     if not expected:
         return JsonResponse({"ok": True, "correct": None, "no_answer": True, "saved": False})
@@ -59,6 +82,7 @@ def api_task_check_answer(request, task_id):
         {
             "ok": True,
             "correct": bool(correct),
+            "status": "correct" if correct else "incorrect",
             "saved": False,
             "authenticated": authed,
         }
