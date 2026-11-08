@@ -190,6 +190,64 @@ class StorageAndScoreTests(TestCase):
     def test_ready_set_is_the_five_basic_packs(self):
         self.assertEqual(APPLY_READY_PACKS, {"ma7", "ma8", "ma10", "inf7", "inf8"})
 
+    def test_truth_column_is_row_major_and_widget_path_stays(self):
+        spec = {
+            "answer_format": "truth_table_column",
+            "answer_data": {
+                "rows": [
+                    {"inputs": [0, 0], "F": 1},
+                    {"inputs": [0, 1], "F": 0},
+                    {"inputs": [1, 0], "F": 1},
+                    {"inputs": [1, 1], "F": 1},
+                ],
+            },
+        }
+        self.assertEqual(score_vpr_spec(spec, "1011", max_score=1)["status"], "correct")
+        self.assertEqual(score_vpr_spec(spec, "01 00 11 01", max_score=1)["status"], "correct")
+        self.assertEqual(score_vpr_spec(spec, "1101", max_score=1)["status"], "incorrect")
+        from Generator.truth_table_check import match_truth_table_answer
+
+        prompt = (
+            "<p>Заполните таблицу истинности выражения.</p>"
+            '<p><span class="math-inline">&#92;(A \\land \\lnot B&#92;&#41;</span></p>'
+        )
+        self.assertTrue(match_truth_table_answer(
+            "10 00 11 00", prompt=prompt, expected="10 00 11 00", enabled=True,
+        ))
+        self.assertFalse(match_truth_table_answer(
+            "1010 0010", prompt=prompt, expected="10 00 11 00", enabled=True,
+        ))
+        summary = score_variant_attempt(
+            tasks=[{
+                "id": 6,
+                "number": 6,
+                "max_score": 1,
+                "part": 1,
+                "answer": "10 00 11 00",
+                "text": prompt,
+                "truth_table_enabled": True,
+            }],
+            answers={6: "10 00 11 00"},
+            level="vpr",
+            subject="inf",
+        )
+        self.assertEqual(summary["tasks"][0]["status"], "correct")
+        wrong = score_variant_attempt(
+            tasks=[{
+                "id": 6,
+                "number": 6,
+                "max_score": 1,
+                "part": 1,
+                "answer": "10 00 11 00",
+                "text": prompt,
+                "truth_table_enabled": True,
+            }],
+            answers={6: "1010 0010"},
+            level="vpr",
+            subject="inf",
+        )
+        self.assertEqual(wrong["tasks"][0]["status"], "incorrect")
+
 
 class ImportAndDownloadTests(TestCase):
     def setUp(self):
@@ -279,6 +337,27 @@ class ImportAndDownloadTests(TestCase):
         self.assertEqual(student_file.status_code, 200)
         leaked = self.client.get("/api/tasks/%s/pack-file/?name=ref14.docx" % doc.pk)
         self.assertEqual(leaked.status_code, 403)
+        other = Task.objects.create(
+            task=TaskList.objects.create(
+                subject=self.subject, level=self.level, task_number=99,
+                task_title="чужая", max_score=1, part=None,
+            ),
+            task_template="чужая",
+            answer="1",
+            is_active=False,
+            source_key="foreign-task",
+            import_batch="other-batch",
+        )
+        call_command("vpr_import_pack", "--activate-batch", "test-batch")
+        doc.refresh_from_db()
+        other.refresh_from_db()
+        self.assertTrue(doc.is_active)
+        self.assertFalse(other.is_active)
+        call_command("vpr_import_pack", math_zip, inf_zip, "--apply", "--batch", "test-batch")
+        self.assertEqual(Task.objects.filter(import_batch="test-batch").count(), 2)
+        call_command("vpr_import_pack", "--rollback-batch", "test-batch")
+        self.assertFalse(Task.objects.filter(import_batch="test-batch").exists())
+        self.assertTrue(Task.objects.filter(pk=other.pk, is_active=False).exists())
 
     def test_obsolete_inf8_v1_is_not_apply_ready(self):
         item = _item(id="inf8-b-12-01", subject="информатика", grade=8, number=12, answer_format="program_file", max_score=4)
@@ -337,11 +416,18 @@ class ImportAndDownloadTests(TestCase):
         anon = self.client.get(f"/api/vpr/math/variant/{variant.id}/?role=student")
         self.assertEqual(anon.status_code, 200)
         shown = anon.json()["tasks"][0]
-        self.assertNotIn("ref14.docx", shown["text"])
+        blob = json.dumps(shown, ensure_ascii=False)
+        self.assertNotIn("ref14.docx", blob)
+        self.assertNotIn("answer_spec", shown)
+        self.assertNotIn("teacher_files", shown)
         self.assertEqual(shown["answer"], "")
         self.assertEqual(shown["solution"], "")
-        self.assertNotIn("teacher_files", shown)
         self.assertEqual(shown["answer_check"]["mode"], "manual")
+        public = self.client.get(f"/api/vpr/math/variant/{variant.id}/").json()["tasks"][0]
+        public_blob = json.dumps(public, ensure_ascii=False)
+        self.assertNotIn("ref14.docx", public_blob)
+        self.assertNotIn("answer_spec", public)
+        self.assertEqual(public["solution"], "")
         from Cabinet.models import Profile
 
         profile = Profile.objects.get(user=self.teacher)
@@ -352,4 +438,99 @@ class ImportAndDownloadTests(TestCase):
         body = staff.json()["tasks"][0]
         self.assertIn("эталон", body["solution"])
         self.assertEqual(body["teacher_files"][0]["name"], "ref14.docx")
-        self.assertNotIn("storage", json.dumps(body["teacher_files"]))
+        self.assertNotIn("storage", json.dumps(body))
+        self.assertNotIn("vpr_pack/", json.dumps(body))
+        self.assertNotIn("stored_files", body["answer_spec"])
+        self.assertIn("answer_data", body["answer_spec"])
+
+
+PACKS = [
+    ("ma7", "ma7_vpr_base_20261108_v2_e385.zip", 340),
+    ("ma8", "ma8_vpr_base_20261108_v2_e4f7.zip", 360),
+    ("ma10", "ma10_vpr_base_20261108_938b.zip", 340),
+    ("inf7", "inf7_vpr_base_20261108_1309.zip", 300),
+    ("inf8", "inf8_vpr_base_20261108_v2_5e21.zip", 240),
+]
+
+
+def _pack_paths():
+    root = Path("/home/ubuntu/.cursor/projects/agent-repos-itflux-repo/uploads")
+    paths = [root / name for _pack, name, _count in PACKS]
+    if not all(path.is_file() for path in paths):
+        return None
+    return [str(path) for path in paths]
+
+
+class FullPackRoundTripTests(TestCase):
+    def setUp(self):
+        self.paths = _pack_paths()
+        if self.paths is None:
+            self.skipTest("архивы пяти пакетов недоступны в этом окружении")
+        Subject.objects.create(subject_short="math", subject_name="Математика")
+        Subject.objects.create(subject_short="inf", subject_name="Информатика")
+        Level.objects.create(level="vpr", level_rus="ВПР")
+        self.foreign = Task.objects.create(
+            task=TaskList.objects.create(
+                subject=Subject.objects.get(subject_short="math"),
+                level=Level.objects.get(level="vpr"),
+                task_number=50,
+                task_title="не из партии",
+                max_score=1,
+                part=None,
+            ),
+            task_template="чужая",
+            answer="5",
+            is_active=True,
+            author="ФИПИ",
+        )
+
+    def test_dry_run_apply_repeat_activate_and_rollback_all_1580(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        dry = StringIO()
+        call_command("vpr_import_pack", *self.paths, stdout=dry)
+        self.assertEqual(Task.objects.exclude(pk=self.foreign.pk).count(), 0)
+        call_command("vpr_import_pack", *self.paths, "--apply", "--batch", "verified-1580", stdout=StringIO())
+        imported = Task.objects.filter(import_batch="verified-1580")
+        self.assertEqual(imported.count(), 1580)
+        self.assertEqual(set(imported.values_list("is_active", flat=True)), {False})
+        self.assertFalse(imported.filter(truth_table_enabled=True).exists())
+        self.assertTrue(self.foreign.is_active)
+        program = imported.get(source_key="inf8-b-12-01")
+        self.assertEqual(program.max_score, 4)
+        self.assertIn("12.2", program.answer_spec["max_score"])
+        self.assertIn("<svg", program.task_template.lower())
+        self.assertTrue(program.solution)
+        self.assertTrue(Criteria.objects.filter(task_number=program.task, criteria_score=4).exists())
+        call_command("vpr_import_pack", *self.paths, "--apply", "--batch", "verified-1580", stdout=StringIO())
+        self.assertEqual(Task.objects.filter(import_batch="verified-1580").count(), 1580)
+        call_command("vpr_import_pack", "--activate-batch", "verified-1580", stdout=StringIO())
+        self.assertEqual(Task.objects.filter(import_batch="verified-1580", is_active=True).count(), 1580)
+        self.foreign.refresh_from_db()
+        self.assertTrue(self.foreign.is_active)
+        self.assertIsNone(self.foreign.import_batch)
+        call_command("vpr_import_pack", "--rollback-batch", "verified-1580", stdout=StringIO())
+        self.assertFalse(Task.objects.filter(import_batch="verified-1580").exists())
+        self.assertTrue(Task.objects.filter(pk=self.foreign.pk, is_active=True).exists())
+
+
+class Migration0117Tests(TestCase):
+    def test_migration_is_additive_after_truth_table(self):
+        from importlib import import_module
+
+        migration = import_module("Generator.migrations.0117_task_answer_spec").Migration
+        self.assertEqual(
+            migration.dependencies,
+            [("Generator", "0116_vpr_inf8_truth_table_rows")],
+        )
+        kinds = [operation.__class__.__name__ for operation in migration.operations]
+        self.assertIn("AddField", kinds)
+        self.assertIn("AddConstraint", kinds)
+        self.assertNotIn("RemoveField", kinds)
+        self.assertNotIn("RunPython", kinds)
+        self.assertTrue(Task._meta.get_field("answer_spec"))
+        self.assertTrue(Task._meta.get_field("solution"))
+        self.assertTrue(Task._meta.get_field("source_key"))
+        self.assertTrue(TaskList._meta.get_field("vpr_class"))

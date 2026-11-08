@@ -382,6 +382,9 @@ def _truth_column_points(data: dict, text: str, maximum: int) -> int:
         got = "".join(singles)
     elif len("".join(parts)) == width:
         got = "".join(parts)
+    elif len(parts) == width and all(part.endswith(bit) for part, bit in zip(parts, expected)):
+        # Построчная запись, как в r155: последняя цифра каждой строки — столбец F.
+        got = "".join(part[-1] for part in parts)
     else:
         return 0
     wrong = sum(left != right for left, right in zip(got, expected))

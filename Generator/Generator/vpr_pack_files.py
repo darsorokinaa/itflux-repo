@@ -82,28 +82,46 @@ def audit_zip_files(archive, items: list[dict]) -> list[str]:
     return errors
 
 
-def scrub_teacher_links(html: str, files) -> str:
-    """Убирает ссылки на учительские файлы из HTML, который видит ученик. SVG не трогает."""
-    teacher = set()
+def teacher_secret_names(files) -> set[str]:
+    names = set()
     for entry in files or []:
-        if isinstance(entry, dict) and file_role(entry) == "teacher":
-            teacher.add(str(entry.get("name") or ""))
-    if not teacher or not html:
-        return html or ""
+        if not isinstance(entry, dict):
+            continue
+        name = PurePosixPath(str(entry.get("name") or "")).name
+        path = str(entry.get("path") or "")
+        if file_role(entry) == "teacher" or (name and _TEACHER_NAME.match(name)):
+            if name:
+                names.add(name)
+            if path:
+                names.add(path.replace("\\", "/"))
+    return names
+
+
+def scrub_teacher_links(html: str, files) -> str:
+    """Убирает ссылки и имена учительских эталонов из HTML ученика. Сам SVG не вырезает."""
+    teacher = teacher_secret_names(files)
+    if not html:
+        return ""
+    if not teacher and "vpr_pack/" not in html and "ref_" not in html and "field.json" not in html:
+        return html
 
     def replace(match):
         url = match.group(4)
         base = PurePosixPath(url.split("?", 1)[0].split("#", 1)[0]).name
-        if base in teacher or _TEACHER_NAME.match(base):
+        if base in teacher or _TEACHER_NAME.match(base) or "vpr_pack/" in url:
             return ""
         return match.group(0)
 
-    return re.sub(
+    cleaned = re.sub(
         r"(href|src)(\s*=\s*)([\"'])(.*?)\3",
         replace,
         html,
         flags=re.IGNORECASE,
     )
+    for secret in sorted(teacher, key=len, reverse=True):
+        cleaned = cleaned.replace(secret, "")
+    cleaned = re.sub(r"vpr_pack/[A-Za-z0-9_./-]+", "", cleaned)
+    return cleaned
 
 
 def student_file_descriptors(task) -> list[dict]:

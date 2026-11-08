@@ -113,7 +113,7 @@ export function scoreVprSpec(spec, studentAnswer, maxScore = 1) {
   const mode = checkMode(fmt, maximum);
   const data = spec?.answer_data || {};
   if (mode === "mixed") {
-    const numbered = text.split(/2\s*\)/)[0].replace(/^1\s*\)/, "").trim();
+    const numbered = text.split(/2\s*\)/)[0].replace(/^\s*1\s*\)\s*/, "").replace(/[;,\s]+$/g, "").trim();
     const value = data["9.1"]?.value;
     const points = answered && valuesEqual(value, numbered || text) ? Number(data["9.1"]?.score || 1) : 0;
     return {

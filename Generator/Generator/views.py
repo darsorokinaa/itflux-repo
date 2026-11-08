@@ -4149,9 +4149,9 @@ def api_criteria(request, level, subject):
     return JsonResponse(payload)
 
 
-def _variant_task_html(task, *, include_answers: bool) -> str:
+def _variant_task_html(task, *, reveal_pack: bool) -> str:
     html = process_latex(str(getattr(task, "task_template", "") or ""), for_browser=True)
-    if include_answers:
+    if reveal_pack:
         return html
     from .vpr_pack_files import scrub_teacher_links
 
@@ -4204,7 +4204,7 @@ def _variant_detail_payload(request, variant, *, include_answers=True):
             "task_list_id": task_list.id if task_list else None,
             "number": task_list.task_number if task_list else item.order,
             "task_title": task_list.task_title if task_list else "",
-            "text": _variant_task_html(item.task, include_answers=include_answers),
+            "text": _variant_task_html(item.task, reveal_pack=show_teacher_meta),
             "part": task_list.part_id if task_list else None,
             "part_title": (
                 task_list.part.part_title
@@ -4229,16 +4229,18 @@ def _variant_detail_payload(request, variant, *, include_answers=True):
         from .vpr_pack_files import file_role, student_file_descriptors
 
         row["student_files"] = student_file_descriptors(item.task)
-        if include_answers:
+        pack_spec = getattr(item.task, "answer_spec", None)
+        pack_task = isinstance(pack_spec, dict) and bool(pack_spec.get("answer_format"))
+        if show_teacher_meta:
             row["teacher_files"] = [
                 {
                     "name": entry.get("name"),
                     "url": f"/api/tasks/{item.task.pk}/pack-file/?name={entry.get('name')}",
                 }
-                for entry in ((getattr(item.task, "answer_spec", None) or {}).get("files") or [])
+                for entry in (pack_spec or {}).get("files") or []
                 if isinstance(entry, dict) and file_role(entry) == "teacher" and entry.get("name")
             ]
-        if include_answers:
+        if include_answers and (show_teacher_meta or not pack_task):
             raw_answer = str(item.task.answer or "")
             processed = process_latex(raw_answer, for_browser=True)
             row["answer"] = processed if str(processed).strip() else raw_answer

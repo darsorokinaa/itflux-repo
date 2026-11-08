@@ -10,7 +10,7 @@ import zipfile
 
 from django.db import transaction
 
-from .models import Criteria, Level, Subject, Task, TaskList
+from .models import Criteria, Level, Subject, Task, TaskList, private_media_storage
 from .vpr_answer_spec import APPLY_READY_PACKS, dry_run_zip, storage_from_item
 from .vpr_pack_files import store_item_files
 
@@ -122,3 +122,57 @@ def apply_zip(path: str, *, batch: str) -> dict:
     if sum(written[key] for key in ("created", "updated")) != report["count"]:
         raise RuntimeError("число записей не совпало с dry-run, транзакция отменена")
     return written
+
+
+def _batch_tasks(batch: str):
+    label = (batch or "").strip()
+    if not label:
+        raise RuntimeError("нужна метка партии")
+    return Task.objects.filter(import_batch=label).exclude(source_key__isnull=True).exclude(source_key="")
+
+
+@transaction.atomic
+def activate_batch(batch: str) -> dict:
+    """Включает только задачи этой партии. Чужие строки не меняет."""
+    rows = _batch_tasks(batch)
+    total = rows.count()
+    if total == 0:
+        raise RuntimeError(f"партия {batch!r} не найдена")
+    activated = rows.update(is_active=True, status=Task.Status.READY)
+    return {"batch": batch, "matched": total, "activated": activated}
+
+
+@transaction.atomic
+def rollback_batch(batch: str) -> dict:
+    """Удаляет задачи партии, их закрытые файлы и опустевшие списки этого класса."""
+    rows = list(_batch_tasks(batch).only("id", "task_id", "answer_spec", "source_key"))
+    if not rows:
+        raise RuntimeError(f"партия {batch!r} не найдена")
+    list_ids = {row.task_id for row in rows if row.task_id}
+    removed_files = 0
+    for row in rows:
+        for entry in (row.answer_spec or {}).get("stored_files") or []:
+            key = str((entry or {}).get("storage") or "")
+            if not key.startswith(f"vpr_pack/{batch}/") or ".." in key.split("/"):
+                continue
+            if private_media_storage.exists(key):
+                private_media_storage.delete(key)
+                removed_files += 1
+    deleted, _details = Task.objects.filter(pk__in=[row.pk for row in rows]).delete()
+    removed_lists = 0
+    for list_id in list_ids:
+        if Task.objects.filter(task_id=list_id).exists():
+            continue
+        task_list = TaskList.objects.filter(pk=list_id, vpr_class__isnull=False).first()
+        if task_list is None:
+            continue
+        Criteria.objects.filter(task_number=task_list).delete()
+        task_list.delete()
+        removed_lists += 1
+    return {
+        "batch": batch,
+        "deleted_tasks": len(rows),
+        "deleted_rows": deleted,
+        "removed_files": removed_files,
+        "removed_lists": removed_lists,
+    }
