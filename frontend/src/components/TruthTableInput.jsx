@@ -34,6 +34,7 @@ export default function TruthTableInput({
   onChange,
   onTableChange,
   disabled = false,
+  status = "",
 }) {
   const variableList = useMemo(() => {
     if (Array.isArray(variablesProp) && variablesProp.length > 0) {
@@ -176,11 +177,12 @@ export default function TruthTableInput({
   if (numComputed === 0) return null;
 
   return (
-    <div className="truth-table-block">
+    <div className={`truth-table-block${status === "ok" ? " is-ok" : ""}${status === "bad" ? " is-bad" : ""}`}>
       <div className="truth-title-row">
         <h3 className="truth-title">Таблица истинности</h3>
         <span className="truth-note">{TRUTH_NOTE}</span>
       </div>
+      {expression ? <p className="truth-formula">{expression}</p> : null}
 
       <div className="truth-table-wrap">
         <table className="truth-table">

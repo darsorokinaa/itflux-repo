@@ -8,6 +8,8 @@ import { TaskFileAttachments } from "./TaskFileAttachment";
 // @ts-ignore JSX module without d.ts
 import TaskNoAnswerBadge from "./TaskNoAnswerBadge";
 import TaskAnswerCheck from "./TaskAnswerCheck"; // r130
+// @ts-ignore JS module without d.ts
+import { stripTruthTableAnswerHint } from "../utils/truthTable";
 import { AllTasksTaskTagsEditor, type TaskTag } from "./AllTasksTagEditor";
 // @ts-ignore JS module without d.ts
 import { isOgeMathPictureTask } from "../utils/examTaskPart";
@@ -170,6 +172,7 @@ const AllTasksTaskBody = memo(function AllTasksTaskBody({
     [onBoardPersist, task.id]
   );
   const answerHtml = (task.answer || "").trim();
+  const taskHtml = stripTruthTableAnswerHint(task.text || "");
   const hasFiles = Boolean(task.file_url || (task.attachments && task.attachments.length));
 
   return (
@@ -196,7 +199,7 @@ const AllTasksTaskBody = memo(function AllTasksTaskBody({
         >
           <LazyVisible minHeight={120}>
             <MathContent
-              html={task.text || ""}
+              html={taskHtml}
               className="all-tasks-item__html"
               plainHtml
               ogeMathChoiceEnhance={subject === "math"}
@@ -223,7 +226,7 @@ const AllTasksTaskBody = memo(function AllTasksTaskBody({
         />
       ) : null}
       {answerHtml && Number((task as { part_id?: number | string | null }).part_id) !== 2 ? (
-        <TaskAnswerCheck taskId={task.id} prompt={task.text || ""} />
+        <TaskAnswerCheck taskId={task.id} prompt={taskHtml} />
       ) : null}
       {answerHtml ? (
         <div className="all-tasks-item__answer-foot">

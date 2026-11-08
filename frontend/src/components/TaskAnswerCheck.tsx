@@ -67,6 +67,7 @@ export default function TaskAnswerCheck({ taskId, prompt = "" }: { taskId: numbe
           steps={truth.steps ?? undefined}
           mode={truth.mode}
           value={value}
+          status={state === "correct" ? "ok" : state === "wrong" ? "bad" : ""}
           onChange={(next: string) => {
             setValue(next);
             if (state !== "busy") setState("idle");

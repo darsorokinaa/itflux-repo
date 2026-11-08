@@ -322,8 +322,20 @@ def _combinations(variables: list[str]) -> list[list[int]]:
     return rows
 
 
+_HINT_P_RE = re.compile(r"<p\b[^>]*>\s*В ответе запишите[\s\S]*?</p>", re.IGNORECASE)
+_HINT_PLAIN_RE = re.compile(r"(^|[\n\r])\s*В ответе запишите[\s\S]*$", re.IGNORECASE)
+
+
+def strip_truth_table_answer_hint(html: str) -> str:
+    """Убирает «В ответе запишите N цифр…». Формулу и «Заполните таблицу» не трогает."""
+    raw = str(html or "")
+    if not re.search(r"истинност", raw, flags=re.IGNORECASE):
+        return raw
+    return _HINT_PLAIN_RE.sub(r"\1", _HINT_P_RE.sub("", raw))
+
+
 def compile_truth_table(prompt: str):
-    text = _decode(prompt)
+    text = _decode(strip_truth_table_answer_hint(prompt))
     formula = _extract_expression(text)
     if not formula:
         return None
@@ -384,15 +396,6 @@ def _place_rows(groups, num_rows, num_cols):
     return grid
 
 
-def _place_columns(groups, num_rows, num_cols):
-    grid = _empty(num_rows, num_cols)
-    for c in range(num_cols):
-        group = groups[c] if c < len(groups) else ""
-        for r in range(num_rows):
-            grid[r][c] = _bit(group[r] if r < len(group) else "")
-    return grid
-
-
 def _grid_key(grid) -> str:
     return "|".join("".join(cell or "." for cell in row) for row in grid)
 
@@ -413,13 +416,7 @@ def answer_grid_candidates(value, num_rows: int, num_cols: int):
             out.append(grid)
 
     if len(groups) == num_rows:
-        singles = all(len(group) == 1 and group != "." for group in groups)
-        if singles and num_cols > 1:
-            push(_place_column(num_rows, num_cols, num_cols - 1, "".join(groups)))
-        else:
-            push(_place_rows(groups, num_rows, num_cols))
-    if len(groups) == num_cols and all(len(group) == num_rows for group in groups):
-        push(_place_columns(groups, num_rows, num_cols))
+        push(_place_rows(groups, num_rows, num_cols))
     if len(groups) == 1:
         raw = groups[0]
         digits = raw.replace(".", "")
@@ -429,16 +426,23 @@ def answer_grid_candidates(value, num_rows: int, num_cols: int):
                 num_rows,
                 num_cols,
             ))
-            push(_place_columns(
-                [digits[c * num_rows : (c + 1) * num_rows] for c in range(num_cols)],
-                num_rows,
-                num_cols,
-            ))
-        elif "." not in raw and len(digits) == num_rows:
-            push(_place_column(num_rows, num_cols, num_cols - 1, digits))
-        elif len(raw) == num_rows:
-            push(_place_column(num_rows, num_cols, num_cols - 1, raw))
+        elif num_cols == 1 and "." not in raw and len(digits) == num_rows:
+            push(_place_column(num_rows, num_cols, 0, digits))
+        elif num_cols == 1 and len(raw) == num_rows:
+            push(_place_column(num_rows, num_cols, 0, raw))
     return out
+
+
+def canonical_row_answer(spec: dict) -> str:
+    """Построчная запись всей таблицы, как её сохраняет виджет."""
+    lines = []
+    for r in range(spec["rows"]):
+        lines.append("".join(col[r] for col in spec["columns"]))
+    return " ".join(lines)
+
+
+def _columns_from_rows(groups: list[str], steps: int) -> list[str]:
+    return ["".join(group[c] for group in groups) for c in range(steps)]
 
 
 def _official(expected: str, spec: dict):
@@ -447,12 +451,16 @@ def _official(expected: str, spec: dict):
         return None
     rows = spec["rows"]
     steps = len(spec["columns"])
+    if len(groups) == rows and all(len(group) == steps for group in groups):
+        return {"mode": "grid", "columns": _columns_from_rows(groups, steps)}
+    if len(groups) == 1 and len(groups[0]) == rows * steps:
+        digits = groups[0]
+        row_groups = [digits[r * steps : (r + 1) * steps] for r in range(rows)]
+        return {"mode": "grid", "columns": _columns_from_rows(row_groups, steps)}
     if len(groups) == 1 and len(groups[0]) == rows:
         return {"mode": "result", "columns": [groups[0]]}
     if len(groups) == rows and all(len(group) == 1 for group in groups):
         return {"mode": "result", "columns": ["".join(groups)]}
-    if len(groups) == steps and all(len(group) == rows for group in groups):
-        return {"mode": "all", "columns": groups}
     return None
 
 
@@ -461,7 +469,7 @@ def _official_agrees(official, spec) -> bool:
         return False
     if official["mode"] == "result":
         return official["columns"][0] == spec["columns"][-1]
-    if official["mode"] == "all" and len(official["columns"]) == len(spec["columns"]):
+    if official["mode"] == "grid" and len(official["columns"]) == len(spec["columns"]):
         return all(col == spec["columns"][index] for index, col in enumerate(official["columns"]))
     return False
 
@@ -498,10 +506,7 @@ def match_truth_table_answer(student, *, prompt: str = "", expected: str = "", e
     official = _official(expected, spec)
     if not _official_agrees(official, spec):
         return None
-    required = [
-        True if official["mode"] == "all" else index == len(spec["columns"]) - 1
-        for index in range(len(spec["columns"]))
-    ]
+    required = [True for _ in spec["columns"]]
     candidates = answer_grid_candidates(student, spec["rows"], len(spec["columns"]))
     if not candidates:
         return False

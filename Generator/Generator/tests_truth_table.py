@@ -2,7 +2,12 @@
 
 from django.test import SimpleTestCase
 
-from .truth_table_check import compile_truth_table, match_truth_table_answer
+from .truth_table_check import (
+    canonical_row_answer,
+    compile_truth_table,
+    match_truth_table_answer,
+    strip_truth_table_answer_hint,
+)
 
 # Формулы и опубликованные эталоны задания 6 (углублённый уровень).
 BANK = [
@@ -57,6 +62,15 @@ class TruthTableBankTests(SimpleTestCase):
     def test_and_not_b_keeps_intermediate_column(self):
         table = compile_truth_table(_prompt(r"A \land \lnot B"))
         self.assertEqual(table["columns"], ["1010", "0010"])
+        self.assertEqual(canonical_row_answer(table), "10 00 11 00")
+
+    def test_published_results_are_the_last_symbol_of_each_row(self):
+        not_or = compile_truth_table(_prompt(r"\lnot (A \lor \lnot B)"))
+        self.assertEqual(canonical_row_answer(not_or), "110 001 110 010")
+        for formula, result, _steps in BANK:
+            table = compile_truth_table(_prompt(formula))
+            rows = canonical_row_answer(table).split(" ")
+            self.assertEqual("".join(row[-1] for row in rows), result, formula)
 
 
 class TruthTablePrecedenceTests(SimpleTestCase):
@@ -102,22 +116,76 @@ class TruthTableCellGradeTests(SimpleTestCase):
 
     def test_empty_cell_does_not_shift_zero_into_another_column(self):
         prompt = _prompt(r"\lnot A \land B")
-        self.assertTrue(match_truth_table_answer(".0 .1 .0 .0", prompt=prompt, expected="0100", enabled=True))
+        self.assertFalse(match_truth_table_answer(".0 .1 .0 .0", prompt=prompt, expected="0100", enabled=True))
         self.assertFalse(match_truth_table_answer("0. 1. 0. 0.", prompt=prompt, expected="0100", enabled=True))
-        self.assertFalse(match_truth_table_answer(".1 .0 .0 .0", prompt=prompt, expected="0100", enabled=True))
+        self.assertTrue(match_truth_table_answer("10 11 00 00", prompt=prompt, expected="0100", enabled=True))
 
-    def test_two_columns_row_and_column_order(self):
+    def test_two_columns_are_row_major_only(self):
         prompt = _prompt(r"A \land \lnot B")
-        expected = "<p>1010 0010</p>"
+        expected = "10 00 11 00"
         self.assertTrue(match_truth_table_answer("10 00 11 00", prompt=prompt, expected=expected, enabled=True))
-        self.assertTrue(match_truth_table_answer("1010 0010", prompt=prompt, expected=expected, enabled=True))
         self.assertTrue(match_truth_table_answer("10001100", prompt=prompt, expected=expected, enabled=True))
-        self.assertTrue(match_truth_table_answer("10100010", prompt=prompt, expected=expected, enabled=True))
+        self.assertFalse(match_truth_table_answer("1010 0010", prompt=prompt, expected=expected, enabled=True))
+        self.assertFalse(match_truth_table_answer("10100010", prompt=prompt, expected=expected, enabled=True))
         self.assertFalse(match_truth_table_answer("0010", prompt=prompt, expected=expected, enabled=True))
         self.assertFalse(match_truth_table_answer(".0 .0 .1 .0", prompt=prompt, expected=expected, enabled=True))
         self.assertFalse(match_truth_table_answer("00 00 11 00", prompt=prompt, expected=expected, enabled=True))
         self.assertFalse(match_truth_table_answer("0010 1010", prompt=prompt, expected=expected, enabled=True))
         self.assertFalse(match_truth_table_answer("10 00 11 0", prompt=prompt, expected=expected, enabled=True))
+        self.assertIsNone(match_truth_table_answer(
+            "10 00 11 00", prompt=prompt, expected="<p>1010 0010</p>", enabled=True,
+        ))
+
+    def test_hint_paragraph_is_removed_and_formula_stays(self):
+        html = (
+            _prompt(r"\lnot (A \lor \lnot B)")
+            + "<p>В ответе запишите 4 цифры подряд — значения столбца результата.</p>"
+        )
+        stripped = strip_truth_table_answer_hint(html)
+        self.assertIn("Заполните таблицу истинности", stripped)
+        self.assertIn("lnot", stripped)
+        self.assertNotIn("В ответе запишите", stripped)
+        self.assertEqual(strip_truth_table_answer_hint(stripped), stripped)
+
+    def test_plan_rewrites_column_storage_and_strips_the_hint(self):
+        from .vpr_truth_table_tasks import plan_task
+
+        class Level:
+            level = "vpr"
+
+        class Subject:
+            subject_short = "inf"
+
+        class TaskList:
+            level = Level()
+            subject = Subject()
+            task_number = 6
+
+        class Task:
+            pk = 1327
+            task = TaskList()
+            vpr_class = 8
+            vpr_advanced = True
+            truth_table_enabled = True
+            task_template = (
+                "<p>Заполните таблицу истинности выражения.</p>"
+                r"<p>\(A \land \lnot B\)</p>"
+                "<p>В ответе запишите 4 цифры подряд — значения столбца результата.</p>"
+            )
+            answer = "<p>1010 0010</p>"
+
+        change = plan_task(Task())
+        self.assertTrue(change["text_changed"])
+        self.assertTrue(change["answer_changed"])
+        self.assertNotIn("В ответе запишите", change["new_template"])
+        self.assertIn("Заполните таблицу истинности", change["new_template"])
+        self.assertEqual(change["new_answer"], "10 00 11 00")
+
+        task_one = Task()
+        task_one.pk = 1324
+        task_one.task_template = "<p>Заполните таблицу истинности выражения.</p>" + r"<p>\(A \land B\)</p>"
+        task_one.answer = "0001"
+        self.assertIsNone(plan_task(task_one))
 
     def test_unrelated_task_is_not_captured(self):
         graded = match_truth_table_answer(

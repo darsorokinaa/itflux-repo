@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   buildTruthTableConfigFromPrompt,
+  canonicalTruthTableAnswer,
   evaluateTruthTable,
   formatTruthTableAnswerFromGrid,
   gradeTruthTableAnswer,
   matchTruthTableAnswer,
   parseTruthTableAnswerToGrid,
+  stripTruthTableAnswerHint,
 } from "./truthTable";
 
 /** Формулы и эталоны ВПР информатика 8, углублённый, задание 6 (публичный банк). */
@@ -94,7 +96,7 @@ describe("порядок операций, скобки, НЕ/И/ИЛИ и ос�
 
 describe("проверка заполнения по клеткам", () => {
   const and = task("A \\land B", "<p>0001</p>");
-  const conjNot = task("A \\land \\lnot B", "<p>1010 0010</p>");
+  const conjNot = task("A \\land \\lnot B", "10 00 11 00");
 
   it("эталон из 4 цифр совпадает с результатом, ведущий ноль не теряется", () => {
     expect(gradeTruthTableAnswer("0001", and)).toBe(true);
@@ -123,8 +125,7 @@ describe("проверка заполнения по клеткам", () => {
     ]);
   });
 
-  it("пустая клетка слева не переносит 0 в предыдущий столбец", () => {
-    const withStep = task("\\lnot A \\land B", "0100");
+  it("пустая клетка слева не переносит 0 и не заменяет собой столбец", () => {
     const shown = parseTruthTableAnswerToGrid(".0 .1 .0 .0", 4, 2);
     expect(shown).toEqual([
       ["", "0"],
@@ -132,25 +133,65 @@ describe("проверка заполнения по клеткам", () => {
       ["", "0"],
       ["", "0"],
     ]);
-    expect(gradeTruthTableAnswer(".0 .1 .0 .0", withStep)).toBe(true);
-    expect(gradeTruthTableAnswer("0. 1. 0. 0.", withStep)).toBe(false);
-    expect(gradeTruthTableAnswer(".1 .0 .0 .0", withStep)).toBe(false);
+    const shifted = parseTruthTableAnswerToGrid("0. 1. 0. 0.", 4, 2);
+    expect(shifted[0]).toEqual(["0", ""]);
+    expect(shifted[1]).toEqual(["1", ""]);
   });
 
-  it("два столбца: верны и строки, и столбцы; пустой или перепутанный столбец — нет", () => {
+  it("несколько столбцов сверяются только по строкам", () => {
     expect(gradeTruthTableAnswer("10 00 11 00", conjNot)).toBe(true);
-    expect(gradeTruthTableAnswer("1010 0010", conjNot)).toBe(true);
     expect(gradeTruthTableAnswer("10001100", conjNot)).toBe(true);
-    expect(gradeTruthTableAnswer("10100010", conjNot)).toBe(true);
+    expect(gradeTruthTableAnswer("1010 0010", conjNot)).toBe(false);
+    expect(gradeTruthTableAnswer("10100010", conjNot)).toBe(false);
     expect(gradeTruthTableAnswer("0010", conjNot)).toBe(false);
     expect(gradeTruthTableAnswer(".0 .0 .1 .0", conjNot)).toBe(false);
     expect(gradeTruthTableAnswer("00 00 11 00", conjNot)).toBe(false);
     expect(gradeTruthTableAnswer("0010 1010", conjNot)).toBe(false);
+    expect(matchTruthTableAnswer("10 00 11 00", {
+      prompt: conjNot.text,
+      expected: "<p>1010 0010</p>",
+      enabled: true,
+    })).toBe(null);
     expect(matchTruthTableAnswer("10 00 11 0", {
       prompt: conjNot.text,
-      expected: conjNot.answer,
+      expected: "10 00 11 00",
       enabled: true,
     })).toBe(false);
+  });
+
+  it("сохранение таблицы переживает круг по строкам", () => {
+    const grid = [
+      ["1", "0"],
+      ["0", "0"],
+      ["1", "1"],
+      ["0", "0"],
+    ];
+    const saved = formatTruthTableAnswerFromGrid(grid);
+    expect(saved).toBe("10 00 11 00");
+    expect(parseTruthTableAnswerToGrid(saved, 4, 2)).toEqual(grid);
+    expect(formatTruthTableAnswerFromGrid(parseTruthTableAnswerToGrid(saved, 4, 2))).toBe(saved);
+  });
+
+  it("эталон всех 16 формул — построчная таблица, не столбцы", () => {
+    expect(canonicalTruthTableAnswer(prompt("A \\land B"))).toBe("0 0 0 1");
+    expect(canonicalTruthTableAnswer(prompt("A \\land \\lnot B"))).toBe("10 00 11 00");
+    expect(canonicalTruthTableAnswer(prompt("\\lnot (A \\lor \\lnot B)"))).toBe("110 001 110 010");
+    for (const [formula, result] of BANK) {
+      const canonical = canonicalTruthTableAnswer(prompt(formula));
+      const rows = canonical.split(" ");
+      expect(rows).toHaveLength(4);
+      expect(rows.map((row) => row.at(-1)).join("")).toBe(result);
+      expect(canonical.includes("1010 0010")).toBe(false);
+    }
+  });
+
+  it("указание про четыре цифры убирается, формула остаётся", () => {
+    const html = `${prompt("\\lnot (A \\lor \\lnot B)")}<p>В ответе запишите 4 цифры подряд — значения столбца результата для строк (A=0, B=0).</p>`;
+    const stripped = stripTruthTableAnswerHint(html);
+    expect(stripped).toContain("Заполните таблицу истинности");
+    expect(stripped).toContain("lnot");
+    expect(stripped).not.toContain("В ответе запишите");
+    expect(stripTruthTableAnswerHint(stripped)).toBe(stripped);
   });
 
   it("конфиг виджета берётся из формулы, а не из шаблона A ∧ ¬B", () => {

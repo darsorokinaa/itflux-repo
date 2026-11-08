@@ -104,15 +104,6 @@ function placeRowGroups(groups, numRows, numComputed) {
   });
 }
 
-function placeColumnGroups(groups, numRows, numComputed) {
-  const grid = emptyTruthGrid(numRows, numComputed);
-  for (let c = 0; c < numComputed; c++) {
-    const g = groups[c] || "";
-    for (let r = 0; r < numRows; r++) grid[r][c] = bitAt(g[r]);
-  }
-  return grid;
-}
-
 /** Группы 0/1/«.» . Пустые группы от двойного пробела сохраняют номер строки. */
 export function truthTableAnswerGroups(value) {
   const cleaned = sanitizeTruthTableAnswerString(value);
@@ -121,19 +112,19 @@ export function truthTableAnswerGroups(value) {
 }
 
 /**
- * Разбор ответа в сетку.
- * — «10 .0 11 00» и «10 00 11 00»: группа = строка;
- * — «1010 0010»: группа = столбец (длина = числу строк), если групп не столько, сколько строк;
- * — слитно длины numRows*numComputed: построчно;
- * — слитно или по одной цифре на строку длины numRows: только столбец результата.
- * «.» — пустая клетка и не сдвигает 0/1.
+ * Разбор ответа строго по строкам таблицы (так ответы лежат в базе).
+ * — «10 00 11 00» и «10 .0 11 0.»: группа между пробелами = строка слева направо;
+ * — слитно длины numRows*numComputed: те же строки подряд, без перестановки по столбцам;
+ * — одна цифра на строку («0001» или «0 0 0 1») только если вычислимый столбец один.
+ * «.» — пустая клетка и не переносит 0 в другой столбец.
+ * Запись по столбцам («1010 0010») сюда не входит.
  */
 export function parseTruthTableAnswerToGrid(value, numRows, numComputed) {
   const grids = truthTableAnswerGridCandidates(value, numRows, numComputed);
   return grids[0] || emptyTruthGrid(numRows, numComputed);
 }
 
-/** Все допустимые раскладки одной строки ответа (строки / столбцы / только результат). */
+/** Раскладки строки ответа: только построчные. */
 export function truthTableAnswerGridCandidates(value, numRows, numComputed) {
   if (numRows === 0 || numComputed === 0) return [];
   const groups = truthTableAnswerGroups(value).filter((g) => g.length > 0);
@@ -145,13 +136,7 @@ export function truthTableAnswerGridCandidates(value, numRows, numComputed) {
   };
 
   if (groups.length === numRows) {
-    const singles = groups.every((g) => g.length === 1 && g !== ".");
-    if (singles && numComputed > 1) push(placeColumn(numRows, numComputed, numComputed - 1, groups.join("")));
-    else push(placeRowGroups(groups, numRows, numComputed));
-  }
-
-  if (groups.length === numComputed && groups.every((g) => g.length === numRows)) {
-    push(placeColumnGroups(groups, numRows, numComputed));
+    push(placeRowGroups(groups, numRows, numComputed));
   }
 
   if (groups.length === 1) {
@@ -163,15 +148,10 @@ export function truthTableAnswerGridCandidates(value, numRows, numComputed) {
         numRows,
         numComputed
       ));
-      push(placeColumnGroups(
-        Array.from({ length: numComputed }, (_, c) => digits.slice(c * numRows, (c + 1) * numRows)),
-        numRows,
-        numComputed
-      ));
-    } else if (!raw.includes(".") && digits.length === numRows) {
-      push(placeColumn(numRows, numComputed, numComputed - 1, digits));
-    } else if (raw.length === numRows) {
-      push(placeColumn(numRows, numComputed, numComputed - 1, raw));
+    } else if (numComputed === 1 && !raw.includes(".") && digits.length === numRows) {
+      push(placeColumn(numRows, numComputed, 0, digits));
+    } else if (numComputed === 1 && raw.length === numRows) {
+      push(placeColumn(numRows, numComputed, 0, raw));
     }
   }
 
@@ -581,7 +561,7 @@ function evalLogicNode(node, env) {
 }
 
 function compileTruthTable(prompt) {
-  const text = decodeHtmlEntities(prompt);
+  const text = decodeHtmlEntities(stripTruthTableAnswerHint(prompt));
   const formula = extractLogicExpression(text);
   if (!formula) return null;
   const ast = parseLogicFormula(formula);
@@ -632,6 +612,27 @@ export function buildTruthTableConfigFromPrompt(prompt, options = {}) {
  * Значения всех вычислимых столбцов на каждом наборе входов.
  * columns[i] — строка из 0/1 длины 2^n, сверху вниз.
  */
+/** Построчная запись всей таблицы: «10 00 11 00». */
+export function canonicalTruthTableAnswer(prompt) {
+  const spec = compileTruthTable(prompt);
+  if (!spec) return null;
+  const lines = [];
+  for (let r = 0; r < spec.rows; r++) {
+    lines.push(spec.columns.map((col) => col[r]).join(""));
+  }
+  return lines.join(" ");
+}
+
+/** Убирает указание «В ответе запишите N цифр…», формулу и просьбу заполнить таблицу оставляет. */
+export function stripTruthTableAnswerHint(html) {
+  const raw = String(html ?? "");
+  if (!/истинност/i.test(raw)) return raw;
+  return raw
+    .replace(/<p\b[^>]*>\s*В ответе запишите[\s\S]*?<\/p>/gi, "")
+    .replace(/(^|[\n\r])\s*В ответе запишите[\s\S]*$/i, "$1")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
 export function evaluateTruthTable(prompt) {
   const spec = compileTruthTable(prompt);
   if (!spec) return null;
@@ -643,19 +644,28 @@ export function evaluateTruthTable(prompt) {
   };
 }
 
+function columnsFromRowGroups(groups, rows, steps) {
+  return Array.from({ length: steps }, (_, c) => groups.map((group) => group[c] || "").join(""));
+}
+
 function readOfficialColumns(expected, spec) {
   const groups = truthTableAnswerGroups(expected).filter((g) => g.length > 0 && /^[01]+$/.test(g));
   if (!groups.length) return null;
   const rows = spec.rows;
   const steps = spec.columns.length;
+  if (groups.length === rows && groups.every((g) => g.length === steps)) {
+    return { mode: "grid", columns: columnsFromRowGroups(groups, rows, steps) };
+  }
+  if (groups.length === 1 && groups[0].length === rows * steps) {
+    const digits = groups[0];
+    const rowGroups = Array.from({ length: rows }, (_, r) => digits.slice(r * steps, (r + 1) * steps));
+    return { mode: "grid", columns: columnsFromRowGroups(rowGroups, rows, steps) };
+  }
   if (groups.length === 1 && groups[0].length === rows) {
     return { mode: "result", columns: [groups[0]] };
   }
   if (groups.length === rows && groups.every((g) => g.length === 1)) {
     return { mode: "result", columns: [groups.join("")] };
-  }
-  if (groups.length === steps && groups.every((g) => g.length === rows)) {
-    return { mode: "all", columns: groups };
   }
   return null;
 }
@@ -663,7 +673,7 @@ function readOfficialColumns(expected, spec) {
 function officialAgrees(official, spec) {
   if (!official) return false;
   if (official.mode === "result") return official.columns[0] === spec.columns[spec.columns.length - 1];
-  if (official.mode === "all" && official.columns.length === spec.columns.length) {
+  if (official.mode === "grid" && official.columns.length === spec.columns.length) {
     return official.columns.every((col, index) => col === spec.columns[index]);
   }
   return false;
@@ -705,9 +715,7 @@ export function matchTruthTableAnswer(student, spec = {}) {
   if (!compiled) return null;
   const official = readOfficialColumns(expected, compiled);
   if (!officialAgrees(official, compiled)) return null;
-  const required = compiled.columns.map((_, index) =>
-    official.mode === "all" ? true : index === compiled.columns.length - 1
-  );
+  const required = compiled.columns.map(() => true);
   const candidates = truthTableAnswerGridCandidates(student, compiled.rows, compiled.columns.length);
   if (!candidates.length) return false;
   return candidates.some((grid) => gridMatchesExpected(grid, compiled.columns, required));
