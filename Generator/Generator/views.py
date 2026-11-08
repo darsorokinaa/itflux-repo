@@ -1202,8 +1202,14 @@ def _tasklists_visible_for_vpr(tasklists, vpr_vf):
 
 
 def _vpr_task_filters_from_request(request, level_str):
-    """GET: класс (grade) и углублённость (advanced=1) для заданий ВПР. None — не ВПР."""
-    if (level_str or "").lower() != "vpr":
+    """GET: класс и, для ВПР, углублённость. Для авторского МЦКО — только класс, без флага ВПР."""
+    level = (level_str or "").lower()
+    if level == "mcko":
+        grade = (request.GET.get("grade") or "").strip()
+        if grade.isdigit():
+            return {"vpr_class": int(grade)}
+        return None
+    if level != "vpr":
         return None
     flt = {}
     g = (request.GET.get("grade") or "").strip()
@@ -1214,8 +1220,16 @@ def _vpr_task_filters_from_request(request, level_str):
 
 
 def _vpr_task_filters_from_payload(data, level_str):
-    """POST варианта/теста: vpr_grade, vpr_advanced в JSON."""
-    if (level_str or "").lower() != "vpr" or not isinstance(data, dict):
+    """POST варианта/теста: vpr_grade, vpr_advanced в JSON. МЦКО передаёт только класс."""
+    level = (level_str or "").lower()
+    if level == "mcko":
+        if not isinstance(data, dict):
+            return None
+        grade = data.get("grade", data.get("vpr_grade"))
+        if grade is not None and str(grade).strip().isdigit():
+            return {"vpr_class": int(grade)}
+        return None
+    if level != "vpr" or not isinstance(data, dict):
         return None
     flt = {}
     g = data.get("vpr_grade", data.get("grade"))
@@ -1972,6 +1986,7 @@ _LEVEL_CATALOG_SORT = {
     "ege": 1,
     "school": 2,
     "vpr": 3,
+    "mcko": 4,
 }
 
 
@@ -4070,6 +4085,16 @@ def api_task_staff_update(request, task_id):
 
 
 @require_http_methods(["GET"])
+def _catalog_teacher(request) -> bool:
+    user = getattr(request, "user", None)
+    if user is not None and getattr(user, "is_authenticated", False):
+        if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+            return True
+    from .teacher_task_bank import request_teacher
+
+    return request_teacher(request) is not None
+
+
 def api_criteria(request, level, subject):
     """Критерии по task_list_id или по (subject, level, task_number). Criteria привязаны к TaskList (номер задания)."""
     from .criteria_scoring import build_criteria_payload
@@ -4116,6 +4141,15 @@ def api_criteria(request, level, subject):
             tl_ids = [row.id for row in lists]
         except (TypeError, ValueError):
             pass
+
+    if (level or "").lower() == "mcko" and not _catalog_teacher(request):
+        return JsonResponse({
+            "scoring_mode": "single",
+            "criteria": [],
+            "axes": [],
+            "max_score": 1,
+            "teacher_only": True,
+        })
 
     if not tl_ids:
         return JsonResponse({

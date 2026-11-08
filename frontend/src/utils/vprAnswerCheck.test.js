@@ -6,6 +6,18 @@ describe("vpr answer spec on the variant page", () => {
   it("keeps a fraction and does not accept its decimal", () => {
     expect(valuesEqual("8/3", "16/6")).toBe(true);
     expect(valuesEqual("8/3", "2,666")).toBe(false);
+    expect(checkMode("fraction", 1)).toBe("auto");
+    const fraction = scoreVprSpec(
+      { answer_format: "fraction", answer_data: { value: "1/6" } },
+      "0,166",
+      1,
+    );
+    expect(fraction.status).toBe("incorrect");
+    expect(scoreVprSpec(
+      { answer_format: "fraction", answer_data: { value: "1/6" } },
+      "2/12",
+      1,
+    ).status).toBe("correct");
     expect(valuesEqual("0,9375", "0.9375")).toBe(true);
     expect(valuesEqual("4√7 - 2", "4√7-2")).toBe(true);
   });

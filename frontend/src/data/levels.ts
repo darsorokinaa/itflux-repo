@@ -1,4 +1,4 @@
-export type LevelId = "vpr" | "oge" | "ege" | "school";
+export type LevelId = "vpr" | "oge" | "ege" | "school" | "mcko";
 
 export interface LevelDefinition {
   id: LevelId;
@@ -79,6 +79,20 @@ export const LEVELS: LevelDefinition[] = [
     fallbackTaskCount: 184,
     fullTitle: "Всероссийская проверочная работа",
     badgeLabel: "ВПР · 7, 8, 10 класс",
+  },
+  {
+    id: "mcko",
+    title: "Авторские по спецификации МЦКО",
+    description: "Не ВПР и не официальные задания МЦКО или ФИПИ. Год спецификации не указан.",
+    bg: "#7C3AED",
+    accent: "#8B5CF6",
+    stripBg: "#5B21B6",
+    gradientFrom: "#6D28D9",
+    gradientTo: "#7C3AED",
+    stripLabel: "7, 8, 10 класс",
+    fallbackTaskCount: 0,
+    fullTitle: "Авторские задания по спецификации МЦКО",
+    badgeLabel: "Авторские · не официальные",
   },
 ];
 
