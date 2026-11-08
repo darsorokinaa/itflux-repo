@@ -223,7 +223,7 @@ const AllTasksTaskBody = memo(function AllTasksTaskBody({
         />
       ) : null}
       {answerHtml && Number((task as { part_id?: number | string | null }).part_id) !== 2 ? (
-        <TaskAnswerCheck taskId={task.id} />
+        <TaskAnswerCheck taskId={task.id} prompt={task.text || ""} />
       ) : null}
       {answerHtml ? (
         <div className="all-tasks-item__answer-foot">

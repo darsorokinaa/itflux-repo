@@ -1,5 +1,9 @@
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
+// @ts-ignore JSX module without d.ts
+import TruthTableInput from "./TruthTableInput";
+// @ts-ignore JS module without d.ts
+import { buildTruthTableConfigFromPrompt } from "../utils/truthTable";
 
 /** r130: проверка ответа задачи из открытого банка — работает без регистрации, результат не сохраняется. */
 export type CheckState = "idle" | "busy" | "correct" | "wrong" | "limit" | "error";
@@ -35,10 +39,11 @@ export const CHECK_MESSAGES: Record<CheckState, string> = {
   error: "Не удалось проверить ответ.",
 };
 
-export default function TaskAnswerCheck({ taskId }: { taskId: number }) {
+export default function TaskAnswerCheck({ taskId, prompt = "" }: { taskId: number; prompt?: string }) {
   const [value, setValue] = useState("");
   const [authenticated, setAuthenticated] = useState(true);
   const [state, setState] = useState<CheckState>("idle");
+  const truth = useMemo(() => buildTruthTableConfigFromPrompt(prompt), [prompt]);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -55,6 +60,19 @@ export default function TaskAnswerCheck({ taskId }: { taskId: number }) {
 
   return (
     <form className="all-tasks-check" onSubmit={onSubmit}>
+      {truth ? (
+        <TruthTableInput
+          variables={truth.variables ?? undefined}
+          expression={truth.expression}
+          steps={truth.steps ?? undefined}
+          mode={truth.mode}
+          value={value}
+          onChange={(next: string) => {
+            setValue(next);
+            if (state !== "busy") setState("idle");
+          }}
+        />
+      ) : (
       <input
         className="all-tasks-check__input"
         value={value}
@@ -66,6 +84,7 @@ export default function TaskAnswerCheck({ taskId }: { taskId: number }) {
         aria-label="Ваш ответ"
         maxLength={500}
       />
+      )}
       <button type="submit" className="all-tasks-check__btn" disabled={!value.trim() || state === "busy"}>
         Проверить
       </button>

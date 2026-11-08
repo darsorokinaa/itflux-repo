@@ -396,6 +396,8 @@ def score_variant_attempt(
     attachment_ids: set | None = None,
 ) -> dict[str, Any]:
     """Статусы взаимоисключающие и в сумме дают число заданий."""
+    from .truth_table_check import match_truth_table_answer
+
     list_tasks = list(tasks or [])
     answers = answers or {}
     scores = scores or {}
@@ -471,7 +473,13 @@ def score_variant_attempt(
             points = _clamp(rule_points, maximum)
             status = _status_from_points(points, maximum)
         elif expected.strip() and answered:
-            ok = answers_match(text, expected, subject=subject)
+            graded = match_truth_table_answer(
+                text,
+                prompt=str(task.get("text") or task.get("task_template") or ""),
+                expected=expected,
+                enabled=bool(task.get("truth_table_enabled")),
+            )
+            ok = answers_match(text, expected, subject=subject) if graded is None else bool(graded)
             points = maximum if ok else 0
             status = "correct" if ok else "incorrect"
         elif checked_flag is True:
@@ -545,6 +553,10 @@ def grading_task_snapshot(task: dict) -> dict:
     """Критерии попытки: состав, максимум и эталон на момент фиксации."""
     row = public_task_snapshot(task)
     row["answer"] = str(task.get("answer") or "")
+    if task.get("text") or task.get("task_template"):
+        row["text"] = str(task.get("text") or task.get("task_template") or "")
+    if task.get("truth_table_enabled"):
+        row["truth_table_enabled"] = True
     return row
 
 
@@ -612,18 +624,23 @@ def load_variant_tasks_for_scoring(variant_id: int) -> list[dict]:
             max_score = task_list.max_score
         else:
             max_score = getattr(task, "max_score", None)
-        rows.append(
-            {
-                "id": task.pk,
-                "number": task_list.task_number if task_list is not None else item.order,
-                "max_score": 1 if max_score is None else max_score,
-                "part": task_list.part_id if task_list is not None else None,
-                "part_title": getattr(part, "part_title", None) if part is not None else None,
-                "exam_part": getattr(task, "exam_part", None),
-                "subdivision": (getattr(task_list, "subdivision", None) or "") if task_list is not None else "",
-                "answer": str(getattr(task, "answer", "") or ""),
-            }
-        )
+        prompt = str(getattr(task, "task_template", "") or "")
+        fill_truth_table = re.search(r"заполните\s+таблиц\w*\s+истинност", prompt, flags=re.IGNORECASE)
+        truth_table = bool(getattr(task, "truth_table_enabled", False)) or bool(fill_truth_table)
+        row = {
+            "id": task.pk,
+            "number": task_list.task_number if task_list is not None else item.order,
+            "max_score": 1 if max_score is None else max_score,
+            "part": task_list.part_id if task_list is not None else None,
+            "part_title": getattr(part, "part_title", None) if part is not None else None,
+            "exam_part": getattr(task, "exam_part", None),
+            "subdivision": (getattr(task_list, "subdivision", None) or "") if task_list is not None else "",
+            "answer": str(getattr(task, "answer", "") or ""),
+        }
+        if truth_table:
+            row["text"] = prompt
+            row["truth_table_enabled"] = bool(getattr(task, "truth_table_enabled", False)) or truth_table
+        rows.append(row)
     return rows
 
 
