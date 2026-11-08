@@ -17,35 +17,11 @@
   max-width: 100%;
 }
 
-.truth-title-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px 14px;
-  margin-bottom: 8px;
-}
-
-.truth-title {
-  margin: 0;
-  font-size: 15px;
-  line-height: 1.3;
-  font-weight: 800;
-  color: var(--truth-ink);
-}
-
 .truth-note {
+  margin: 0 0 10px;
   font-size: 12px;
   line-height: 1.35;
   color: var(--truth-muted);
-}
-
-.truth-formula {
-  margin: 0 0 12px;
-  font-size: 18px;
-  line-height: 1.35;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  color: var(--truth-purple);
 }
 
 .truth-table-wrap {
@@ -187,16 +163,6 @@ html.variant-theme-mode--dark .truth-input {
 @media (max-width: 720px) {
   .truth-table-block {
     padding: 12px;
-  }
-
-  .truth-title-row {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
-  }
-
-  .truth-formula {
-    font-size: 16px;
   }
 
   .truth-var-cell,
