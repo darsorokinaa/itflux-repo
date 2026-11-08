@@ -50,50 +50,77 @@ def answers_equal(student_answer, expected_answer, *, subject: str = "") -> bool
     return _decimal_key(user_norm) == _decimal_key(expected_norm)
 
 
-def expected_answer_for_variant_task(variant_id: int, task_id: int | None = None, task_number_key: str = "") -> str:
-    """Эталон из VariantContent: по task_id или по номеру банка / order / ключу t<id>."""
+def _variant_task(variant_id: int, task_id: int | None = None, task_number_key: str = ""):
+    """Task из VariantContent: по task_id или по номеру банка / order / ключу t<id>."""
     if not variant_id:
-        return ""
+        return None
     from django.apps import apps
 
     VariantContent = apps.get_model("Generator", "VariantContent")
+
+    def _task_from(vc):
+        return vc.task if vc is not None and getattr(vc, "task", None) is not None else None
+
     if task_id:
-        vc = (
+        found = _task_from(
             VariantContent.objects.select_related("task")
             .filter(variant_id=variant_id, task_id=int(task_id))
             .first()
         )
-        if vc and vc.task:
-            return str(getattr(vc.task, "answer", "") or "")
+        if found is not None:
+            return found
 
     key = str(task_number_key or "").strip()
     if not key:
-        return ""
+        return None
     if len(key) >= 2 and key[0] == "t" and key[1:].isdigit():
-        tid = int(key[1:])
-        vc = (
+        return _task_from(
             VariantContent.objects.select_related("task")
-            .filter(variant_id=variant_id, task_id=tid)
+            .filter(variant_id=variant_id, task_id=int(key[1:]))
             .first()
         )
-        if vc and vc.task:
-            return str(getattr(vc.task, "answer", "") or "")
-        return ""
     if key.isdigit():
         tn = int(key)
-        vc = (
+        found = _task_from(
             VariantContent.objects.select_related("task")
             .filter(variant_id=variant_id, task__task__task_number=tn)
             .first()
         )
-        if vc and vc.task:
-            return str(getattr(vc.task, "answer", "") or "")
+        if found is not None:
+            return found
         if 1 <= tn <= 500:
-            vc2 = (
+            return _task_from(
                 VariantContent.objects.select_related("task")
                 .filter(variant_id=variant_id, order=tn)
                 .first()
             )
-            if vc2 and vc2.task:
-                return str(getattr(vc2.task, "answer", "") or "")
-    return ""
+    return None
+
+
+def expected_answer_for_variant_task(variant_id: int, task_id: int | None = None, task_number_key: str = "") -> str:
+    """Эталон из VariantContent: по task_id или по номеру банка / order / ключу t<id>."""
+    task = _variant_task(variant_id, task_id=task_id, task_number_key=task_number_key)
+    if task is None:
+        return ""
+    return str(getattr(task, "answer", "") or "")
+
+
+def answers_equal_for_variant_task(
+    student_answer,
+    variant_id: int,
+    *,
+    task_id: int | None = None,
+    task_number_key: str = "",
+    subject: str = "",
+) -> bool:
+    """Сравнение с эталоном варианта. Таблица истинности сверяется по клеткам."""
+    task = _variant_task(variant_id, task_id=task_id, task_number_key=task_number_key)
+    if task is not None:
+        from .truth_table_check import answer_matches_model
+
+        return answer_matches_model(student_answer, task, subject=subject)
+    return answers_equal(
+        student_answer,
+        expected_answer_for_variant_task(variant_id, task_id=task_id, task_number_key=task_number_key),
+        subject=subject,
+    )

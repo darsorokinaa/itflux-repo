@@ -7,7 +7,7 @@ from django.views.decorators.http import require_http_methods
 
 from Cabinet.rate_limit import rate_limit_check, rate_limit_json_response
 
-from .answer_check import answers_equal
+from .truth_table_check import answer_matches_model
 from .models import Task
 from .teacher_task_bank import owned_ready_q, public_bank_q, request_teacher
 
@@ -54,7 +54,7 @@ def api_task_check_answer(request, task_id):
     if not expected:
         return JsonResponse({"ok": True, "correct": None, "no_answer": True, "saved": False})
     subject = (getattr(getattr(getattr(task, "task", None), "subject", None), "subject_short", None) or "").lower()
-    correct = answers_equal(answer, expected, subject=subject)
+    correct = answer_matches_model(answer, task, subject=subject)
     resp = JsonResponse(
         {
             "ok": True,

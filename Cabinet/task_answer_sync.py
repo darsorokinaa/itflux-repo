@@ -27,11 +27,25 @@ def propagate_task_content(task) -> None:
         subject = str(getattr(subject_row, "subject_short", "") or "")
     with transaction.atomic():
         _sync_homework_attempts(task_id, answer)
-        _sync_journal_variant_results(task_id, answer, subject=subject)
+        _sync_journal_variant_results(
+            task_id,
+            answer,
+            subject=subject,
+            prompt=str(getattr(task, "task_template", "") or ""),
+            truth_table_enabled=bool(getattr(task, "truth_table_enabled", False)),
+        )
         _sync_lesson_answers(task, answer, subject=subject)
 
 
-def refresh_stored_variant_result(variant_result, task_id, new_answer: str, *, subject: str = ""):
+def refresh_stored_variant_result(
+    variant_result,
+    task_id,
+    new_answer: str,
+    *,
+    subject: str = "",
+    prompt: str = "",
+    truth_table_enabled: bool = False,
+):
     """Обновить correct_answer и автовердикт в сохранённом результате варианта."""
     if not isinstance(variant_result, dict):
         return None
@@ -64,7 +78,19 @@ def refresh_stored_variant_result(variant_result, task_id, new_answer: str, *, s
             changed = True
         student = str(row.get("student_answer") or "")
         if student.strip() and fresh:
-            new_ok = answers_equal(student, new_answer, subject=subject)
+            graded = None
+            if prompt or truth_table_enabled:
+                try:
+                    from Generator.truth_table_check import match_truth_table_answer
+                except Exception:
+                    from Generator.Generator.truth_table_check import match_truth_table_answer
+                graded = match_truth_table_answer(
+                    student,
+                    prompt=prompt,
+                    expected=new_answer,
+                    enabled=truth_table_enabled,
+                )
+            new_ok = answers_equal(student, new_answer, subject=subject) if graded is None else bool(graded)
             if row.get("ok") is None or bool(row.get("ok")) != bool(new_ok):
                 row["ok"] = new_ok
                 verdicts_changed = True
@@ -227,7 +253,14 @@ def _sync_homework_attempts(task_id: int, answer: str) -> None:
         attempt.save(update_fields=["result_payload", "score"])
 
 
-def _sync_journal_variant_results(task_id: int, answer: str, *, subject: str) -> None:
+def _sync_journal_variant_results(
+    task_id: int,
+    answer: str,
+    *,
+    subject: str,
+    prompt: str = "",
+    truth_table_enabled: bool = False,
+) -> None:
     from .journal_models import StudentLessonRecord
 
     needle = [{"id": task_id}]
@@ -241,6 +274,8 @@ def _sync_journal_variant_results(task_id: int, answer: str, *, subject: str) ->
             task_id,
             answer,
             subject=subject,
+            prompt=prompt,
+            truth_table_enabled=truth_table_enabled,
         )
         if updated is None:
             continue
@@ -328,12 +363,12 @@ def _sync_lesson_answers(task, answer: str, *, subject: str) -> None:
     if not keys_by_variant:
         return
     try:
-        from Generator.answer_check import answers_equal
         from Generator.models import LessonStudentResult, LessonStudentsAnswer, VariantContent
+        from Generator.truth_table_check import answer_matches_model
         from Generator.variant_scoring import lesson_result_counts
     except Exception:
-        from Generator.Generator.answer_check import answers_equal
         from Generator.Generator.models import LessonStudentResult, LessonStudentsAnswer, VariantContent
+        from Generator.Generator.truth_table_check import answer_matches_model
         from Generator.Generator.variant_scoring import lesson_result_counts
 
     query = Q()
@@ -344,7 +379,7 @@ def _sync_lesson_answers(task, answer: str, *, subject: str) -> None:
         if row.is_empty or not str(row.answer or "").strip():
             is_correct = False
         else:
-            is_correct = answers_equal(row.answer, answer, subject=subject)
+            is_correct = answer_matches_model(row.answer, task, subject=subject)
         if row.is_correct == is_correct:
             continue
         row.is_correct = is_correct

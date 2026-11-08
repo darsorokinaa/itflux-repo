@@ -1073,10 +1073,10 @@ def recompute_variant_checked(result: dict | None, variant_id, *, subject: str =
     if not isinstance(checked, dict) or not checked:
         return result
     try:
-        from Generator.answer_check import answers_equal, expected_answer_for_variant_task
+        from Generator.answer_check import answers_equal_for_variant_task, expected_answer_for_variant_task
     except Exception:
         try:
-            from Generator.Generator.answer_check import answers_equal, expected_answer_for_variant_task
+            from Generator.Generator.answer_check import answers_equal_for_variant_task, expected_answer_for_variant_task
         except Exception:
             logger.exception("recompute_variant_checked: cannot import answer_check")
             return result
@@ -1121,7 +1121,13 @@ def recompute_variant_checked(result: dict | None, variant_id, *, subject: str =
             )
         if not str(expected or "").strip():
             continue
-        out_checked[key_s] = answers_equal(answer, expected, subject=subject)
+        out_checked[key_s] = answers_equal_for_variant_task(
+            answer,
+            int(variant_id),
+            task_id=task_id,
+            task_number_key=key_s if task_id is None else "",
+            subject=subject,
+        )
 
     updated = dict(result)
     updated["checked"] = out_checked
@@ -1135,10 +1141,10 @@ def _recompute_multi_variant_checked(result, variant_ids: list[int], *, subject:
     if not isinstance(checked, dict) or not checked:
         return result
     try:
-        from Generator.answer_check import answers_equal, expected_answer_for_variant_task
+        from Generator.answer_check import answers_equal_for_variant_task, expected_answer_for_variant_task
     except Exception:
         try:
-            from Generator.Generator.answer_check import answers_equal, expected_answer_for_variant_task
+            from Generator.Generator.answer_check import answers_equal_for_variant_task, expected_answer_for_variant_task
         except Exception:
             logger.exception("recompute_variant_checked: cannot import answer_check")
             return result
@@ -1159,14 +1165,19 @@ def _recompute_multi_variant_checked(result, variant_ids: list[int], *, subject:
             answer = str(answer or "")
         if not answer.strip():
             continue
-        expected = ""
+        matched_variant = 0
         for vid in variant_ids:
-            expected = expected_answer_for_variant_task(int(vid), task_id=task_id, task_number_key="")
-            if str(expected or "").strip():
+            if expected_answer_for_variant_task(int(vid), task_id=task_id, task_number_key=""):
+                matched_variant = int(vid)
                 break
-        if not str(expected or "").strip():
+        if not matched_variant:
             continue
-        out_checked[key_s] = answers_equal(answer, expected, subject=subject)
+        out_checked[key_s] = answers_equal_for_variant_task(
+            answer,
+            matched_variant,
+            task_id=task_id,
+            subject=subject,
+        )
     updated = dict(result)
     updated["checked"] = out_checked
     return updated
