@@ -11,8 +11,8 @@ def forwards(apps, schema_editor):
     # Набор строк и сами правки условия/ответа не меняются.
     from Generator.vpr_truth_table_tasks import affected_tasks, apply_task, plan_changes
 
-    Task = apps.get_model("Generator", "Task")
-    for task, change in plan_changes(affected_tasks(Task)):
+    task_model = apps.get_model("Generator", "Task")
+    for task, change in plan_changes(affected_tasks(task_model)):
         if change.get("skip"):
             continue
         apply_task(task, change)

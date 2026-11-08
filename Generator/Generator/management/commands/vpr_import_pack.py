@@ -38,37 +38,27 @@ class Command(BaseCommand):
             return
         if not options["paths"]:
             raise CommandError("нужен хотя бы один zip либо --activate-batch/--deactivate-batch/--rollback-batch")
-        reports = [dry_run_zip(path) for path in options["paths"]]
-        total = sum(item.get("count") or 0 for item in reports)
-        blocked = []
-        for path, report in zip(options["paths"], reports):
-            for row in report.get("files") or []:
-                pack = row.get("pack")
-                if pack not in APPLY_READY_PACKS or row.get("obsolete") or row.get("hold"):
-                    blocked.append(f"{path}: пакет {pack} не в apply-ready")
-            if not report.get("ok"):
-                blocked.append(f"{path}: {'; '.join(report.get('errors') or ['ошибка dry-run'])}")
-        summary = {
-            "applied": False,
-            "count": total,
-            "reports": reports,
-            "blocked": blocked,
-        }
+        summary = _import_summary(options["paths"])
         if not options["apply"]:
-            self.stdout.write(json.dumps(summary, ensure_ascii=False, indent=2))
-            if blocked:
+            self._emit(summary)
+            if summary["blocked"]:
                 raise CommandError("dry-run не прошёл")
             return
-        if blocked:
-            raise CommandError("запись отклонена:\n" + "\n".join(blocked))
+        self._apply(summary, options)
+
+    def _apply(self, summary, options):
+        if summary["blocked"]:
+            raise CommandError("запись отклонена:\n" + "\n".join(summary["blocked"]))
         batch = (options["batch"] or "").strip()
         if not batch:
             raise CommandError("для --apply нужна метка --batch")
         with transaction.atomic():
-            written = [apply_zip(path, batch=batch) for path in options["paths"]]
+            summary["written"] = [apply_zip(path, batch=batch) for path in options["paths"]]
         summary["applied"] = True
-        summary["written"] = written
         summary["active"] = False
+        self._emit(summary)
+
+    def _emit(self, summary):
         self.stdout.write(json.dumps(summary, ensure_ascii=False, indent=2))
 
     def _run_batch_command(self, options) -> bool:
@@ -88,6 +78,34 @@ class Command(BaseCommand):
             raise CommandError(str(exc)) from exc
         self.stdout.write(json.dumps(result, ensure_ascii=False, indent=2))
         return True
+
+
+def _import_summary(paths) -> dict:
+    reports = [dry_run_zip(path) for path in paths]
+    return {
+        "applied": False,
+        "count": sum(item.get("count") or 0 for item in reports),
+        "reports": reports,
+        "blocked": _blocked_rows(paths, reports),
+    }
+
+
+def _blocked_rows(paths, reports) -> list:
+    blocked = []
+    for path, report in zip(paths, reports):
+        blocked.extend(_blocked_in_report(path, report))
+    return blocked
+
+
+def _blocked_in_report(path, report) -> list:
+    blocked = []
+    for row in report.get("files") or []:
+        pack = row.get("pack")
+        if pack not in APPLY_READY_PACKS or row.get("obsolete") or row.get("hold"):
+            blocked.append(f"{path}: пакет {pack} не в apply-ready")
+    if not report.get("ok"):
+        blocked.append(f"{path}: {'; '.join(report.get('errors') or ['ошибка dry-run'])}")
+    return blocked
 
 
 def _batch_result(activate: str, deactivate: str, rollback: str) -> dict:

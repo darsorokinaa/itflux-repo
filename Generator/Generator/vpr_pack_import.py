@@ -27,7 +27,7 @@ def _level_and_subject(item: dict):
     return subject, level
 
 
-def _task_list(item: dict, stored: dict, subject, level) -> TaskList:
+def _task_list(stored: dict, subject, level) -> TaskList:
     grade = stored["vpr_class"]
     number = stored["task_number"]
     row = TaskList.objects.filter(
@@ -118,7 +118,7 @@ def apply_zip(path: str, *, batch: str) -> dict:
             stored = storage_from_item(item)
             if stored["author"] != "Цифровой поток":
                 raise RuntimeError(f"{stored['source_key']}: автор не «Цифровой поток»")
-            task_list = _task_list(item, stored, subject, level)
+            task_list = _task_list(stored, subject, level)
             files = store_item_files(archive, item, batch=batch)
             kind = _save_task(stored, task_list, batch=batch, stored_files=files)
             written[kind] += 1

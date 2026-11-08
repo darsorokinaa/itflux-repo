@@ -1,16 +1,16 @@
 """Цепочка миграций ВПР на чистой PostgreSQL.
 
-Проверка идёт отдельным процессом: старые data-миграции пишут в подключение
-по умолчанию, поэтому его имя и есть пустая база. Скрипты архивов не запускаются.
+Старые data-миграции пишут в подключение по умолчанию, поэтому на время
+проверки его имя подменяется пустой базой. Скрипты архивов не запускаются.
 """
 
 import os
-import subprocess
 import sys
 from pathlib import Path
 
 import psycopg2
 from django.conf import settings
+from django.db import connections
 from django.test import SimpleTestCase
 from psycopg2 import sql
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
@@ -72,40 +72,37 @@ def _drop_database(name: str) -> None:
         conn.close()
 
 
-def _child_env(name: str) -> dict:
-    cfg = settings.DATABASES["default"]
-    env = os.environ.copy()
-    env["PGDATABASE"] = name
-    env["PGUSER"] = str(cfg.get("USER") or "postgres")
-    env["PGPASSWORD"] = str(cfg.get("PASSWORD") or "")
-    env["PGHOST"] = str(cfg.get("HOST") or "localhost")
-    env["PGPORT"] = str(cfg.get("PORT") or 5432)
-    env.setdefault("DJANGO_SETTINGS_MODULE", "Generator.settings")
-    return env
+class _UsingDatabase:
+    """Подменяет имя базы у подключения по умолчанию и возвращает его обратно."""
+
+    def __init__(self, name: str):
+        self.name = name
+        self.connection = connections["default"]
+        self.saved_name = self.connection.settings_dict.get("NAME")
+
+    def __enter__(self):
+        self.connection.close()
+        self.connection.settings_dict["NAME"] = self.name
+        settings.DATABASES["default"]["NAME"] = self.name
+        connections.settings["default"]["NAME"] = self.name
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.connection.close()
+        self.connection.settings_dict["NAME"] = self.saved_name
+        settings.DATABASES["default"]["NAME"] = self.saved_name
+        connections.settings["default"]["NAME"] = self.saved_name
 
 
 class PostgresMigrationChainTests(SimpleTestCase):
     databases = {"default"}
 
     def test_fresh_forward_and_seeded_0116_do_not_touch_legacy_rows(self):
-        for name, mode in ((FRESH_DB, "fresh"), (CHAIN_DB, "chain")):
+        for name, runner in ((FRESH_DB, run_fresh), (CHAIN_DB, run_chain)):
             _recreate_database(name)
             try:
-                proc = subprocess.run(
-                    [sys.executable, str(Path(__file__).resolve()), mode],
-                    cwd=str(Path(__file__).resolve().parents[2]),
-                    env=_child_env(name),
-                    text=True,
-                    capture_output=True,
-                    timeout=600,
-                    check=False,
-                )
-                self.assertEqual(
-                    proc.returncode,
-                    0,
-                    f"{mode}\n{proc.stdout}\n{proc.stderr}",
-                )
-                self.assertIn(f"OK {mode}", proc.stdout)
+                with _UsingDatabase(name):
+                    runner()
             finally:
                 _drop_database(name)
 
@@ -221,27 +218,27 @@ def _seed() -> dict[str, int]:
     from django.db.migrations.loader import MigrationLoader
 
     apps = MigrationLoader(connection).project_state(("Generator", PRE_0116)).apps
-    Level = apps.get_model("Generator", "Level")
-    Subject = apps.get_model("Generator", "Subject")
-    TaskList = apps.get_model("Generator", "TaskList")
-    Task = apps.get_model("Generator", "Task")
-    level = Level.objects.create(level="vpr", level_rus="ВПР")
-    inf = Subject.objects.create(subject_short="inf", subject_name="Информатика")
-    math = Subject.objects.create(subject_short="math", subject_name="Математика")
-    inf6 = TaskList.objects.create(
+    level_model = apps.get_model("Generator", "Level")
+    subject_model = apps.get_model("Generator", "Subject")
+    task_list_model = apps.get_model("Generator", "TaskList")
+    task_model = apps.get_model("Generator", "Task")
+    level = level_model.objects.create(level="vpr", level_rus="ВПР")
+    inf = subject_model.objects.create(subject_short="inf", subject_name="Информатика")
+    math = subject_model.objects.create(subject_short="math", subject_name="Математика")
+    inf6 = task_list_model.objects.create(
         subject=inf, level=level, task_number=6, task_title="таблица", max_score=1, part=None,
     )
-    inf12 = TaskList.objects.create(
+    inf12 = task_list_model.objects.create(
         subject=inf, level=level, task_number=12, task_title="программа", max_score=1, part=None,
     )
-    math6 = TaskList.objects.create(
+    math6 = task_list_model.objects.create(
         subject=math, level=level, task_number=6, task_title="чужая", max_score=1, part=None,
     )
 
     def make(task_list, text, grade, flags):
         template, answer = text
         advanced, enabled = flags
-        row = Task.objects.create(
+        row = task_model.objects.create(
             task=task_list,
             task_template=template,
             answer=answer,
