@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   bulkJournalLesson,
@@ -16,11 +16,10 @@ import {
   filledRecordsCount,
   journalSaveStatusLabel,
 } from "../journal/journalAutosave";
-import { homeworkJournalStatusLabel, wasHomeworkSubmittedLate } from "../journal/homeworkStatus";
-import LateHomeworkMark from "../journal/LateHomeworkMark";
 import { journalEventPk } from "../journal/openLessonSummary";
-import { TaskPosition } from "../../components/taskDocument/TaskNumber";
-import { journalRowKey, startsVariantGroup } from "../homeworkVariants";
+import HomeworkResultBlock from "./HomeworkResultBlock";
+import LessonVariantResults from "./LessonVariantResults";
+import { lessonVariantsOf } from "./lessonVariantResults";
 import "../styles/journal.css";
 
 const SECTIONS = [
@@ -53,111 +52,6 @@ function formatLessonDate(iso) {
     month: "long",
     year: "numeric",
   });
-}
-
-function formatPercentScore(score) {
-  if (score == null || score === "") return null;
-  const n = Number(score);
-  if (Number.isNaN(n)) return null;
-  return Number.isInteger(n) ? `${n}%` : `${n.toFixed(1)}%`;
-}
-
-function HomeworkResultBlock({ result, showCorrectAnswer = true }) {
-  if (!result) return null;
-  const tasks = Array.isArray(result.tasks) ? result.tasks : [];
-  const scoreLabel = formatPercentScore(result.score_percent);
-  const hasStatus = Boolean(result.status_label || result.status || result.submitted_at || result.is_overdue);
-  const statusText = hasStatus ? homeworkJournalStatusLabel(result) : "";
-  const late = wasHomeworkSubmittedLate(result);
-  const hasBody =
-    tasks.length > 0
-    || Boolean(String(result.answer_text || "").trim())
-    || Boolean(result.has_attached_file)
-    || Boolean(String(result.teacher_comment || "").trim())
-    || result.score_percent != null
-    || Boolean(statusText);
-  if (!hasBody) return null;
-  return (
-    <div className="jl-variant-result">
-      <div className="jl-variant-result__head">
-        <strong>{result.title || "Домашнее задание"}</strong>
-        <span className="jg-status-cell">
-          {statusText}
-          {late ? <LateHomeworkMark /> : null}
-          {scoreLabel ? (
-            <span>
-              {`${statusText || late ? " · " : ""}${
-                result.correct_count != null && result.checked_count != null
-                  ? `${result.correct_count}/${result.checked_count} · `
-                  : ""
-              }${scoreLabel}`}
-            </span>
-          ) : null}
-        </span>
-      </div>
-      {tasks.length ? (
-        <div className="jl-variant-result__table-wrap">
-          <table className="jl-variant-result__table">
-            <thead>
-              <tr>
-                <th>№</th>
-                <th>Ответ ученика</th>
-                {showCorrectAnswer ? <th>Правильный</th> : null}
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {tasks.map((task, index) => (
-                <Fragment key={journalRowKey(`hw-${result.homework_id}`, task)}>
-                {startsVariantGroup(tasks, index) ? (
-                  <tr className="jl-variant-result__group">
-                    <td colSpan={showCorrectAnswer ? 4 : 3}>Вариант №{task.variant_id}</td>
-                  </tr>
-                ) : null}
-                <tr>
-                  <td>
-                    <TaskPosition
-                      mode="result"
-                      position={task.display_number ?? task.displayNumber ?? task.position ?? index + 1}
-                      examNumber={task.number}
-                      level={result.level}
-                    />
-                  </td>
-                  <td>{String(task.student_answer || "").trim() || "—"}</td>
-                  {showCorrectAnswer ? (
-                    <td>{String(task.correct_answer || "").trim() || "—"}</td>
-                  ) : null}
-                  <td>
-                    {task.ok === true ? (
-                      <span className="jl-variant-result__ok">верно</span>
-                    ) : task.ok === false ? (
-                      <span className="jl-variant-result__bad">ошибка</span>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                </tr>
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
-      {String(result.answer_text || "").trim() ? (
-        <p className="jl-hw-result-note">
-          <strong>Ответ:</strong> {result.answer_text}
-        </p>
-      ) : null}
-      {result.has_attached_file ? (
-        <p className="jl-hw-result-note">Прикреплён файл</p>
-      ) : null}
-      {String(result.teacher_comment || "").trim() ? (
-        <p className="jl-hw-result-note">
-          <strong>Комментарий к ДЗ:</strong> {result.teacher_comment}
-        </p>
-      ) : null}
-    </div>
-  );
 }
 
 function formatClock(iso) {
@@ -1324,62 +1218,17 @@ function RecordExpanded({
   scoreBounds = { min: 0, max: 100, step: 1, suffix: "%" },
 }) {
   if (!record) return null;
-  const variantResult = record.variant_result || null;
-  const variantTasks = Array.isArray(variantResult?.tasks) ? variantResult.tasks : [];
+  const parentReport = record.parent_report || {};
   return (
     <div className="jl-expanded">
       <h3 className="jl-student-name jl-student-name--lg">{record.student_name}</h3>
-      {variantTasks.length ? (
-        <div className="jl-variant-result">
-          <div className="jl-variant-result__head">
-            <strong>{variantResult.title || "Вариант на уроке"}</strong>
-            {variantResult.score_percent != null ? (
-              <span>
-                {variantResult.correct_count ?? 0}/{variantResult.checked_count ?? variantTasks.length}
-                {" · "}
-                {formatPercentScore(variantResult.score_percent)}
-              </span>
-            ) : null}
-          </div>
-          <div className="jl-variant-result__table-wrap">
-            <table className="jl-variant-result__table">
-              <thead>
-                <tr>
-                  <th>№</th>
-                  <th>Ответ ученика</th>
-                  <th>Правильный</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {variantTasks.map((task, index) => (
-                  <tr key={`${record.id}-${task.id || task.number}`}>
-                    <td>
-                      <TaskPosition
-                        mode="result"
-                        position={task.display_number ?? task.displayNumber ?? task.position ?? index + 1}
-                        examNumber={task.number}
-                        level={record.level || variantResult.level}
-                      />
-                    </td>
-                    <td>{String(task.student_answer || "").trim() || "—"}</td>
-                    <td>{String(task.correct_answer || "").trim() || "—"}</td>
-                    <td>
-                      {task.ok === true ? (
-                        <span className="jl-variant-result__ok">верно</span>
-                      ) : task.ok === false ? (
-                        <span className="jl-variant-result__bad">ошибка</span>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : null}
+      <LessonVariantResults
+        variants={lessonVariantsOf(record)}
+        parentReport={parentReport.text || ""}
+        reportFilename={parentReport.filename || "otchet-roditelyu.txt"}
+        showParentReport
+        showCorrectAnswer
+      />
       <HomeworkResultBlock result={record.homework_result} />
       <div className="jl-criteria">
         {(record.criterion_scores || []).map((s) => (

@@ -1086,11 +1086,10 @@ def apply_live_variant_results_to_journal(
     presented_payload: dict | None = None,
 ) -> LessonJournal | None:
     """
-    После урока сохраняет подробные ответы live-варианта в журнал ученика:
-    оценка %, таблица заданий с ответами и верно/неверно.
+    После урока сохраняет результаты всех вариантов, выданных на этом занятии.
+    В карточку ученика попадает только его сдача. Незавершённый вариант не
+    записывается как ноль.
     """
-    from .meeting_present import _variant_tasks_answer_key
-
     payload = dict(presented_payload or {})
     homework_id = payload.get("homeworkId") or payload.get("homework_id")
     variant_id = payload.get("variantId") or payload.get("variant_id")
@@ -1117,7 +1116,6 @@ def apply_live_variant_results_to_journal(
             if variant_id:
                 break
 
-    tasks = _variant_tasks_answer_key(variant_id)
     journal = get_or_create_journal(event, teacher)
     update_fields = ["updated_at"]
     # Live-вариант — материал урока; не затираем обычное ДЗ, если оно уже привязано.
@@ -1132,39 +1130,55 @@ def apply_live_variant_results_to_journal(
     update_fields.append("updated_by")
     journal.save(update_fields=list(dict.fromkeys(update_fields)))
 
-    submissions = {
-        row.student_id: row
-        for row in HomeworkSubmission.objects.filter(homework=homework)
-    }
-    for record in journal.student_records.select_related("student"):
-        submission = submissions.get(record.student_id)
-        result_payload = build_variant_result_payload(
-            homework=homework,
-            submission=submission,
-            tasks=tasks,
-            title=title or homework.title,
-            variant_id=variant_id,
-        )
-        if not result_payload.get("tasks") and not submission:
+    from .lesson_variant_results import (
+        countable_score,
+        load_lesson_variant_results,
+        snapshot_variants_for_storage,
+    )
+
+    records = list(journal.student_records.select_related("student"))
+    by_student = load_lesson_variant_results(journal, [record.student for record in records])
+    saved_any = False
+    for record in records:
+        variants = by_student.get(record.student_id) or []
+        stored = snapshot_variants_for_storage(variants)
+        if not stored:
             continue
-        record.variant_result = result_payload
+        saved_any = True
+        record.variant_result = stored
         fields = ["variant_result", "updated_at"]
-        score = result_payload.get("score_percent")
+        score = countable_score(stored)
         if score is not None and (record.overall_score is None or not record.overall_score_manual):
             record.overall_score = Decimal(str(score))
             record.overall_score_manual = True
+            counted = stored.get("correct_count")
+            checked = stored.get("checked_count")
             record.overall_score_explanation = (
-                f"По варианту: {result_payload.get('correct_count', 0)}/"
-                f"{result_payload.get('checked_count', 0)} верно"
+                f"По варианту «{stored.get('title') or 'вариант'}»: "
+                f"{counted if counted is not None else '—'}/"
+                f"{checked if checked is not None else '—'} "
+                "(незавершённые варианты в балл не входят)"
             )
             fields.extend(["overall_score", "overall_score_manual", "overall_score_explanation"])
         record.save(update_fields=fields)
+
+    if not saved_any and homework is None:
+        return None
 
     write_audit(
         actor=teacher,
         action="live_variant_imported",
         journal=journal,
-        meta={"homework_id": homework.id, "variant_id": variant_id},
+        meta={
+            "homework_id": homework.id if homework is not None else None,
+            "variant_id": variant_id,
+            "variant_ids": [
+                item.get("variant_id")
+                for items in by_student.values()
+                for item in items
+                if item.get("variant_id")
+            ],
+        },
     )
     return journal
 
@@ -2729,12 +2743,16 @@ def serialize_criterion(c: AssessmentCriterion) -> dict:
     }
 
 
+_VARIANT_RESULTS_UNSET = object()
+
+
 def serialize_record(
     record: StudentLessonRecord,
     *,
     for_student: bool = False,
     homework_result: dict | None = None,
     include_homework_result: bool = True,
+    variant_results=_VARIANT_RESULTS_UNSET,
 ) -> dict:
     scores = []
     for sc in record.criterion_scores.all():
@@ -2809,6 +2827,16 @@ def serialize_record(
     else:
         data["variant_result"] = variant_result
 
+    if variant_results is _VARIANT_RESULTS_UNSET:
+        from .lesson_variant_results import lesson_variant_results_for_record
+
+        variant_results = lesson_variant_results_for_record(record, for_student=for_student)
+    data["variant_results"] = variant_results or []
+    if not for_student:
+        from .lesson_variant_results import build_lesson_parent_report
+
+        data["parent_report"] = build_lesson_parent_report(record, data["variant_results"])
+
     if include_homework_result:
         if homework_result is None:
             hw = resolve_homework_for_journal_record(record.journal, record.student)
@@ -2832,6 +2860,13 @@ def serialize_journal(journal: LessonJournal, *, for_student: bool = False) -> d
         pass
     shared_prev = prev_hw
     shared_subs = _submissions_by_student(shared_prev, [r.student_id for r in records]) if shared_prev else {}
+    from .lesson_variant_results import load_lesson_variant_results
+
+    variant_map = load_lesson_variant_results(
+        journal,
+        [r.student for r in records],
+        for_student=for_student,
+    )
 
     student_records_data = []
     for r in records:
@@ -2851,6 +2886,7 @@ def serialize_journal(journal: LessonJournal, *, for_student: bool = False) -> d
                 r,
                 for_student=for_student,
                 homework_result=homework_result,
+                variant_results=variant_map.get(r.student_id, []),
             )
         )
 

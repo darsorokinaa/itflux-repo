@@ -4807,6 +4807,174 @@ button.jg-topic-field--view:disabled {
   }
 }
 
+/* Варианты урока и отчёт для родителя — светлая карточка в обеих темах */
+.jl-lesson-variants {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  margin: 0 0 16px;
+  align-items: start;
+}
+
+.jl-lesson-variants:has(.jl-lesson-variants__report) {
+  grid-template-columns: minmax(0, 1.45fr) minmax(220px, 0.85fr);
+}
+
+.jl-lesson-variants__results,
+.jl-lesson-variants__report {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid #e5eaf3;
+  border-radius: 12px;
+  background: #f8faff;
+  color: #122033;
+}
+
+.jl-lesson-variants__title {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+
+.jl-lesson-variants__empty,
+.jl-lesson-variants__hint,
+.jl-lesson-variants__error {
+  margin: 0;
+  color: #5c6b82;
+  font-size: 0.86rem;
+}
+
+.jl-lesson-variants__error {
+  margin-top: 8px;
+  color: #b42318;
+}
+
+.jl-lesson-variants__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.jl-lesson-variants__item {
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e5eaf3;
+}
+
+.jl-lesson-variants__item:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.jl-lesson-variants__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.jl-lesson-variants__name {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.jl-lesson-variants__name strong {
+  overflow-wrap: anywhere;
+}
+
+.jl-lesson-variants__status {
+  color: #5c6b82;
+  font-size: 0.8rem;
+  background: transparent;
+}
+
+.jl-lesson-variants__status--checked {
+  color: #15803d;
+}
+
+.jl-lesson-variants__status--pending_review,
+.jl-lesson-variants__status--in_progress {
+  color: #a65c12;
+}
+
+.jl-lesson-variants__score {
+  justify-self: end;
+  font-size: 0.86rem;
+  color: #3d4a63;
+  text-align: right;
+}
+
+.jl-lesson-variants__row .jl-btn {
+  grid-column: 1 / -1;
+  justify-self: start;
+  min-height: 44px;
+}
+
+.jl-lesson-variants__detail {
+  margin-top: 8px;
+}
+
+.jl-lesson-variants__attempts h5 {
+  margin: 8px 0 4px;
+  font-size: 0.82rem;
+}
+
+.jl-lesson-variants__attempts ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #3d4a63;
+  font-size: 0.84rem;
+}
+
+.jl-lesson-variants__text {
+  width: 100%;
+  max-height: 320px;
+  margin: 8px 0 0;
+  padding: 10px;
+  border: 1px solid #d5dce8;
+  border-radius: 8px;
+  background: #fff;
+  color: #122033;
+  white-space: pre-wrap;
+  overflow: auto;
+  box-sizing: border-box;
+  font: inherit;
+}
+
+.jl-lesson-variants__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.jl-lesson-variants__actions .jl-btn {
+  min-height: 44px;
+}
+
+html.variant-theme-mode--dark .jl-lesson-variants__results,
+html.variant-theme-mode--dark .jl-lesson-variants__report,
+html.variant-theme-mode--dark .jl-lesson-variants__text {
+  background: #f8faff;
+  color: #122033;
+  border-color: #e5eaf3;
+}
+
+@media (max-width: 720px) {
+  .jl-lesson-variants,
+  .jl-lesson-variants:has(.jl-lesson-variants__report) {
+    grid-template-columns: 1fr;
+  }
+
+  .jl-lesson-variants__actions .jl-btn,
+  .jl-lesson-variants__row .jl-btn {
+    width: 100%;
+  }
+}
+
 /* r75: заголовок варианта в таблице ДЗ с несколькими вариантами */
 .jl-variant-result__group td {
   padding-top: 10px;
