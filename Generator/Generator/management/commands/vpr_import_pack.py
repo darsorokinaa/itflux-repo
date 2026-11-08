@@ -34,25 +34,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        activate = (options.get("activate_batch") or "").strip()
-        deactivate = (options.get("deactivate_batch") or "").strip()
-        rollback = (options.get("rollback_batch") or "").strip()
-        chosen = [name for name in (activate, deactivate, rollback) if name]
-        if len(chosen) > 1:
-            raise CommandError("нужна одна операция: активация, деактивация или откат")
-        if chosen:
-            if options["paths"] or options["apply"]:
-                raise CommandError("активация, деактивация и откат не принимают архивы и --apply")
-            try:
-                if activate:
-                    result = activate_batch(activate)
-                elif deactivate:
-                    result = deactivate_batch(deactivate)
-                else:
-                    result = rollback_batch(rollback)
-            except RuntimeError as exc:
-                raise CommandError(str(exc)) from exc
-            self.stdout.write(json.dumps(result, ensure_ascii=False, indent=2))
+        if self._run_batch_command(options):
             return
         if not options["paths"]:
             raise CommandError("нужен хотя бы один zip либо --activate-batch/--deactivate-batch/--rollback-batch")
@@ -88,3 +70,29 @@ class Command(BaseCommand):
         summary["written"] = written
         summary["active"] = False
         self.stdout.write(json.dumps(summary, ensure_ascii=False, indent=2))
+
+    def _run_batch_command(self, options) -> bool:
+        activate = (options.get("activate_batch") or "").strip()
+        deactivate = (options.get("deactivate_batch") or "").strip()
+        rollback = (options.get("rollback_batch") or "").strip()
+        chosen = [name for name in (activate, deactivate, rollback) if name]
+        if not chosen:
+            return False
+        if len(chosen) > 1:
+            raise CommandError("нужна одна операция: активация, деактивация или откат")
+        if options["paths"] or options["apply"]:
+            raise CommandError("активация, деактивация и откат не принимают архивы и --apply")
+        try:
+            result = _batch_result(activate, deactivate, rollback)
+        except RuntimeError as exc:
+            raise CommandError(str(exc)) from exc
+        self.stdout.write(json.dumps(result, ensure_ascii=False, indent=2))
+        return True
+
+
+def _batch_result(activate: str, deactivate: str, rollback: str) -> dict:
+    if activate:
+        return activate_batch(activate)
+    if deactivate:
+        return deactivate_batch(deactivate)
+    return rollback_batch(rollback)

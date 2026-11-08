@@ -238,7 +238,9 @@ def _seed() -> dict[str, int]:
         subject=math, level=level, task_number=6, task_title="чужая", max_score=1, part=None,
     )
 
-    def make(task_list, template, answer, grade, advanced, enabled):
+    def make(task_list, text, grade, flags):
+        template, answer = text
+        advanced, enabled = flags
         row = Task.objects.create(
             task=task_list,
             task_template=template,
@@ -259,11 +261,11 @@ def _seed() -> dict[str, int]:
         return row.pk
 
     return {
-        "target": make(inf6, TARGET_TEMPLATE, TARGET_ANSWER, 8, True, False),
-        "keeper": make(inf6, KEEPER_TEMPLATE, KEEPER_ANSWER, 8, True, False),
-        "class7": make(inf6, TARGET_TEMPLATE, TARGET_ANSWER, 7, True, True),
-        "outsider": make(inf12, TARGET_TEMPLATE, TARGET_ANSWER, 8, True, True),
-        "math": make(math6, TARGET_TEMPLATE, TARGET_ANSWER, 8, True, True),
+        "target": make(inf6, (TARGET_TEMPLATE, TARGET_ANSWER), 8, (True, False)),
+        "keeper": make(inf6, (KEEPER_TEMPLATE, KEEPER_ANSWER), 8, (True, False)),
+        "class7": make(inf6, (TARGET_TEMPLATE, TARGET_ANSWER), 7, (True, True)),
+        "outsider": make(inf12, (TARGET_TEMPLATE, TARGET_ANSWER), 8, (True, True)),
+        "math": make(math6, (TARGET_TEMPLATE, TARGET_ANSWER), 8, (True, True)),
     }
 
 

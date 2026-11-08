@@ -9,25 +9,11 @@ import json
 import zipfile
 
 from django.db import transaction
-from django.db.models import Q
 
-from .models import (
-    Criteria,
-    Level,
-    Subject,
-    Task,
-    TaskAttachment,
-    TaskGroupMember,
-    TaskList,
-    VariantContent,
-    private_media_storage,
-)
+from .models import Criteria, Level, Subject, Task, TaskList, private_media_storage
 from .vpr_answer_spec import APPLY_READY_PACKS, dry_run_zip, storage_from_item
+from .vpr_batch_safety import activated_marker, assert_rollback_allowed, was_activated
 from .vpr_pack_files import store_item_files
-
-# Ставится при первой активации и больше не снимается. После этого партию
-# можно только выключить: удаление срывает варианты и чужие ссылки по id.
-_ACTIVATED_PREFIX = "vpr-activated:"
 
 
 def _level_and_subject(item: dict):
@@ -77,15 +63,7 @@ def _task_list(item: dict, stored: dict, subject, level) -> TaskList:
     return row
 
 
-def _activated_marker(batch: str) -> str:
-    return f"{_ACTIVATED_PREFIX}{batch}"[:100]
-
-
-def _was_activated(row) -> bool:
-    return str(getattr(row, "created_by", "") or "").startswith(_ACTIVATED_PREFIX)
-
-
-def _save_task(item: dict, stored: dict, task_list: TaskList, *, batch: str, stored_files: list) -> str:
+def _save_task(stored: dict, task_list: TaskList, *, batch: str, stored_files: list) -> str:
     spec = dict(stored["answer_spec"])
     spec["stored_files"] = stored_files
     spec["max_score_numeric"] = stored["max_score"]
@@ -111,7 +89,7 @@ def _save_task(item: dict, stored: dict, task_list: TaskList, *, batch: str, sto
     if existing is None:
         Task.objects.create(source_key=stored["source_key"], **defaults)
         return "created"
-    if _was_activated(existing):
+    if was_activated(existing):
         defaults.pop("is_active", None)
         defaults.pop("status", None)
         defaults.pop("created_by", None)
@@ -142,7 +120,7 @@ def apply_zip(path: str, *, batch: str) -> dict:
                 raise RuntimeError(f"{stored['source_key']}: автор не «Цифровой поток»")
             task_list = _task_list(item, stored, subject, level)
             files = store_item_files(archive, item, batch=batch)
-            kind = _save_task(item, stored, task_list, batch=batch, stored_files=files)
+            kind = _save_task(stored, task_list, batch=batch, stored_files=files)
             written[kind] += 1
             written["files"] += len(files)
         written["pack"].append(pack)
@@ -168,7 +146,7 @@ def activate_batch(batch: str) -> dict:
     activated = rows.update(
         is_active=True,
         status=Task.Status.READY,
-        created_by=_activated_marker(batch),
+        created_by=activated_marker(batch),
     )
     return {"batch": batch, "matched": total, "activated": activated}
 
@@ -189,30 +167,6 @@ def deactivate_batch(batch: str) -> dict:
     }
 
 
-def _usage_reasons(ids: list[int]) -> list[str]:
-    if not ids:
-        return []
-    reasons = []
-    if VariantContent.objects.filter(task_id__in=ids).exists():
-        reasons.append("варианты")
-    if TaskGroupMember.objects.filter(task_id__in=ids).exists():
-        reasons.append("группы")
-    if TaskAttachment.objects.filter(task_id__in=ids).exists():
-        reasons.append("вложения")
-    if Task.objects.filter(source_task_id__in=ids).exists():
-        reasons.append("копии")
-    from django.apps import apps
-
-    if apps.is_installed("Cabinet"):
-        homework = apps.get_model("Cabinet", "HomeworkTask")
-        if homework.objects.filter(task_id__in=[str(item) for item in ids]).exists():
-            reasons.append("домашние задания")
-        history = apps.get_model("Cabinet", "StudentTaskHistory")
-        if history.objects.filter(generator_task_id__in=ids).exists():
-            reasons.append("история выдачи")
-    return reasons
-
-
 @transaction.atomic
 def rollback_batch(batch: str) -> dict:
     """Удаляет черновик партии, который ещё не активировали и никуда не включили.
@@ -221,47 +175,11 @@ def rollback_batch(batch: str) -> dict:
     Обратный шаг для такой партии — deactivate_batch.
     """
     rows_qs = _batch_tasks(batch)
-    if not rows_qs.exists():
-        raise RuntimeError(f"партия {batch!r} не найдена")
-    activated = rows_qs.filter(
-        Q(is_active=True)
-        | Q(status=Task.Status.READY)
-        | Q(created_by__startswith=_ACTIVATED_PREFIX)
-    )
-    if activated.exists():
-        raise RuntimeError(
-            f"партия {batch!r} уже активировалась: удаление запрещено, "
-            "доступно только --deactivate-batch"
-        )
-    ids = list(rows_qs.values_list("pk", flat=True))
-    usage = _usage_reasons(ids)
-    if usage:
-        raise RuntimeError(
-            f"партия {batch!r} уже используется ({', '.join(usage)}): "
-            "удаление запрещено, доступно только --deactivate-batch"
-        )
+    assert_rollback_allowed(batch, rows_qs)
     rows = list(rows_qs.only("id", "task_id", "answer_spec", "source_key"))
-    list_ids = {row.task_id for row in rows if row.task_id}
-    removed_files = 0
-    for row in rows:
-        for entry in (row.answer_spec or {}).get("stored_files") or []:
-            key = str((entry or {}).get("storage") or "")
-            if not key.startswith(f"vpr_pack/{batch}/") or ".." in key.split("/"):
-                continue
-            if private_media_storage.exists(key):
-                private_media_storage.delete(key)
-                removed_files += 1
+    removed_files = _delete_stored_files(batch, rows)
     deleted, _details = Task.objects.filter(pk__in=[row.pk for row in rows]).delete()
-    removed_lists = 0
-    for list_id in list_ids:
-        if Task.objects.filter(task_id=list_id).exists():
-            continue
-        task_list = TaskList.objects.filter(pk=list_id, vpr_class__isnull=False).first()
-        if task_list is None:
-            continue
-        Criteria.objects.filter(task_number=task_list).delete()
-        task_list.delete()
-        removed_lists += 1
+    removed_lists = _delete_empty_lists(row.task_id for row in rows)
     return {
         "batch": batch,
         "deleted_tasks": len(rows),
@@ -269,3 +187,41 @@ def rollback_batch(batch: str) -> dict:
         "removed_files": removed_files,
         "removed_lists": removed_lists,
     }
+
+
+def _delete_stored_files(batch: str, rows) -> int:
+    removed = 0
+    prefix = f"vpr_pack/{batch}/"
+    for row in rows:
+        removed += _delete_row_files(prefix, row)
+    return removed
+
+
+def _delete_row_files(prefix: str, row) -> int:
+    removed = 0
+    for entry in (row.answer_spec or {}).get("stored_files") or []:
+        key = str((entry or {}).get("storage") or "")
+        if not key.startswith(prefix) or ".." in key.split("/"):
+            continue
+        if private_media_storage.exists(key):
+            private_media_storage.delete(key)
+            removed += 1
+    return removed
+
+
+def _delete_empty_lists(task_ids) -> int:
+    removed = 0
+    for list_id in {task_id for task_id in task_ids if task_id}:
+        removed += _delete_list_if_empty(list_id)
+    return removed
+
+
+def _delete_list_if_empty(list_id: int) -> int:
+    if Task.objects.filter(task_id=list_id).exists():
+        return 0
+    task_list = TaskList.objects.filter(pk=list_id, vpr_class__isnull=False).first()
+    if task_list is None:
+        return 0
+    Criteria.objects.filter(task_number=task_list).delete()
+    task_list.delete()
+    return 1
