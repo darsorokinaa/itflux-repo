@@ -1186,6 +1186,21 @@ def _fipi_or_owned_teacher_q(request):
     return q
 
 
+def _tasklists_visible_for_vpr(tasklists, vpr_vf):
+    """Чужой класс ВПР не показываем. При выборе класса точный список важнее общего."""
+    grade = (vpr_vf or {}).get("vpr_class")
+    rows = list(tasklists)
+    if grade is None:
+        return rows
+    rows = [row for row in rows if getattr(row, "vpr_class", None) in (None, grade)]
+    chosen = {}
+    for row in rows:
+        prev = chosen.get(row.task_number)
+        if prev is None or (row.vpr_class == grade and prev.vpr_class != grade):
+            chosen[row.task_number] = row
+    return [row for row in rows if chosen.get(row.task_number) is row]
+
+
 def _vpr_task_filters_from_request(request, level_str):
     """GET: класс (grade) и углублённость (advanced=1) для заданий ВПР. None — не ВПР."""
     if (level_str or "").lower() != "vpr":
@@ -2161,6 +2176,7 @@ def api_tasks(request, level, subject):
         .annotate(count_task=Count("task", filter=count_task_filter))
         .order_by('task_number')
     )
+    tasks_qs = _tasklists_visible_for_vpr(tasks_qs, vpr_vf)
     if subtopic_ids:
         _tq = generator_bank_queryset(request, request.GET.get("source")).filter(
             task__subject=subject_instance,
@@ -2651,9 +2667,15 @@ def api_task_bank_filters(request, level, subject):
     vpr_vf = _vpr_task_filters_from_request(request, level)
     bank_qs = generator_bank_queryset(request, request.GET.get("source"))
 
+    visible_lists = _tasklists_visible_for_vpr(
+        TaskList.objects.filter(
+            subject=subject_instance,
+            level=level_instance,
+        ).order_by("task_number"),
+        vpr_vf,
+    )
     task_list_qs = TaskList.objects.filter(
-        subject=subject_instance,
-        level=level_instance,
+        id__in=[row.id for row in visible_lists]
     ).order_by("task_number")
 
     task_list_id = (request.GET.get("task_list_id") or "").strip()
@@ -4058,23 +4080,40 @@ def api_criteria(request, level, subject):
     tl_ids = []
     task_list_id = request.GET.get("task_list_id")
     task_number_param = request.GET.get("task_number")
-
+    # Конкретный список важнее номера: у 7 и 8 класса номер совпадает, критерии нет.
+    specific_list = None
     if task_list_id:
         try:
-            tl_ids.append(int(task_list_id))
+            specific_list = int(task_list_id)
         except (TypeError, ValueError):
-            pass
-    if task_number_param is not None:
+            specific_list = None
+    if specific_list is not None:
+        tl_ids = list(
+            TaskList.objects.filter(
+                pk=specific_list,
+                subject=subject_instance,
+                level=level_instance,
+            ).values_list("id", flat=True)
+        )
+    elif task_number_param is not None:
         try:
             tn = int(task_number_param)
-            ids_by_num = list(
+            lists = list(
                 TaskList.objects.filter(
                     subject=subject_instance,
                     level=level_instance,
                     task_number=tn,
-                ).values_list("id", flat=True)
+                )
             )
-            tl_ids = list(dict.fromkeys(tl_ids + ids_by_num))
+            grade_raw = (request.GET.get("vpr_class") or request.GET.get("grade") or "").strip()
+            if grade_raw.isdigit():
+                grade = int(grade_raw)
+                exact = [row for row in lists if row.vpr_class == grade]
+                if exact:
+                    lists = exact
+                else:
+                    lists = [row for row in lists if row.vpr_class in (None, grade)]
+            tl_ids = [row.id for row in lists]
         except (TypeError, ValueError):
             pass
 
@@ -4110,6 +4149,16 @@ def api_criteria(request, level, subject):
     return JsonResponse(payload)
 
 
+def _variant_task_html(task, *, reveal_pack: bool) -> str:
+    html = process_latex(str(getattr(task, "task_template", "") or ""), for_browser=True)
+    if reveal_pack:
+        return html
+    from .vpr_pack_files import scrub_teacher_links
+
+    files = (getattr(task, "answer_spec", None) or {}).get("files")
+    return scrub_teacher_links(html, files)
+
+
 def _variant_detail_payload(request, variant, *, include_answers=True):
     """Единая сборка JSON варианта для API (по id)."""
     contents = (
@@ -4135,6 +4184,8 @@ def _variant_detail_payload(request, variant, *, include_answers=True):
     elif show_teacher_meta and teacher is not None:
         owner_bank_code = get_or_create_teacher_bank(teacher).public_code
 
+    from .vpr_answer_spec import describe_check, scoring_spec
+
     for item in contents:
         task_list = item.task.task
         attachments = _task_public_attachments(request, item.task)
@@ -4153,7 +4204,7 @@ def _variant_detail_payload(request, variant, *, include_answers=True):
             "task_list_id": task_list.id if task_list else None,
             "number": task_list.task_number if task_list else item.order,
             "task_title": task_list.task_title if task_list else "",
-            "text": process_latex(str(item.task.task_template or ""), for_browser=True),
+            "text": _variant_task_html(item.task, reveal_pack=show_teacher_meta),
             "part": task_list.part_id if task_list else None,
             "part_title": (
                 task_list.part.part_title
@@ -4172,12 +4223,36 @@ def _variant_detail_payload(request, variant, *, include_answers=True):
             "vpr_class": item.task.vpr_class,
             "vpr_advanced": bool(item.task.vpr_advanced),
         }
-        if include_answers:
+        described = describe_check(getattr(item.task, "answer_spec", None), max_score=max_score)
+        if described:
+            row["answer_check"] = described
+        from .vpr_pack_files import file_role, student_file_descriptors
+
+        row["student_files"] = student_file_descriptors(item.task)
+        pack_spec = getattr(item.task, "answer_spec", None)
+        pack_task = isinstance(pack_spec, dict) and bool(pack_spec.get("answer_format"))
+        if show_teacher_meta:
+            row["teacher_files"] = [
+                {
+                    "name": entry.get("name"),
+                    "url": f"/api/tasks/{item.task.pk}/pack-file/?name={entry.get('name')}",
+                }
+                for entry in (pack_spec or {}).get("files") or []
+                if isinstance(entry, dict) and file_role(entry) == "teacher" and entry.get("name")
+            ]
+        if include_answers and (show_teacher_meta or not pack_task):
             raw_answer = str(item.task.answer or "")
             processed = process_latex(raw_answer, for_browser=True)
             row["answer"] = processed if str(processed).strip() else raw_answer
+            raw_solution = str(getattr(item.task, "solution", "") or "")
+            processed_solution = process_latex(raw_solution, for_browser=True)
+            row["solution"] = processed_solution if str(processed_solution).strip() else raw_solution
+            compact = scoring_spec(getattr(item.task, "answer_spec", None))
+            if compact:
+                row["answer_spec"] = compact
         else:
             row["answer"] = ""
+            row["solution"] = ""
         if include_answers and show_teacher_meta:
             row["scope"] = getattr(item.task, "scope", None) or Task.Scope.GLOBAL
             row["local_number"] = item.task.local_number
@@ -4360,16 +4435,22 @@ def api_variant_check_answer(request, variant_id):
         answers={task["id"]: answer},
     )
     row = summary["tasks"][0]
-    is_correct = row["status"] == "correct"
+    status = row["status"]
+    if status == "correct":
+        correct_flag = True
+    elif status == "incorrect":
+        correct_flag = False
+    else:
+        correct_flag = None
     return JsonResponse(
         {
             "ok": True,
-            "correct": bool(is_correct),
-            "is_correct": bool(is_correct),
+            "correct": correct_flag,
+            "is_correct": correct_flag,
             "task_id": task.get("id"),
             "points": row["points"],
             "max_points": row["max_points"],
-            "status": row["status"],
+            "status": status,
         }
     )
 

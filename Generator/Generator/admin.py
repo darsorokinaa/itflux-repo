@@ -315,9 +315,9 @@ class TaskAdmin(SearchByIdMixin, admin.ModelAdmin):
     autocomplete_fields = ("subtopic",)
     readonly_fields = ("created_by",)
     fieldsets = (
-        (None, {"fields": ("task", "subtopic", "is_active", "task_template", "answer", "max_score", "files", "author", "added_at", "created_by")}),
+        (None, {"fields": ("task", "subtopic", "is_active", "task_template", "answer", "solution", "max_score", "files", "author", "added_at", "created_by")}),
         ("Банк учителя", {"fields": ("scope", "owner_teacher", "local_number", "status", "source_task")}),
-        ("ВПР", {"fields": ("vpr_class", "vpr_basic", "vpr_advanced", "truth_table_enabled")}),
+        ("ВПР", {"fields": ("vpr_class", "vpr_basic", "vpr_advanced", "truth_table_enabled", "source_key", "import_batch", "answer_spec")}),
     )
 
     def save_model(self, request, obj, form, change):

@@ -10,6 +10,7 @@ from . import cdn_handoff  # r93
 from . import load_timing  # r105
 from . import seo_tasks  # r36
 from . import public_task_check  # r130
+from .vpr_pack_files import api_task_pack_file
 from . import razbor_api  # r131
 from . import seasonal_theme_api
 from . import variant_theme_api
@@ -348,6 +349,11 @@ urlpatterns = [
     ),
     path("api/<str:level>/<str:subject>/task-bank/", views.api_task_bank, name="api_task_bank"),
     path("api/tasks/<int:task_id>/check-answer/", public_task_check.api_task_check_answer, name="api_task_check_answer"),  # r130
+    path(
+        "api/tasks/<int:task_id>/pack-file/",
+        api_task_pack_file,
+        name="api_task_pack_file",
+    ),
     path("api/task-tags/", views.api_task_tags_catalog, name="api_task_tags_catalog"),
     path(
         "api/task-tags/<int:tag_id>/",

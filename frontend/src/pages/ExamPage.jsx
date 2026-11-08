@@ -7,6 +7,22 @@ import {
   variantLabel,
 } from "../cabinet/homeworkVariants";
 import MathContent from "../components/MathContent";
+
+function PackFileLinks({ task }) {
+  const files = Array.isArray(task?.student_files) ? task.student_files : [];
+  const teacherFiles = Array.isArray(task?.teacher_files) ? task.teacher_files : [];
+  if (!files.length && !teacherFiles.length) return null;
+  return (
+    <div className="exam-pack-files">
+      {files.map((file) => (
+        <a key={file.name} href={file.url}>{file.name}</a>
+      ))}
+      {teacherFiles.map((file) => (
+        <a key={file.name} href={file.url}>{file.name}</a>
+      ))}
+    </div>
+  );
+}
 import EducationalLoading, { LOADING_MESSAGES } from "../components/EducationalLoading";
 import { devApiBase } from "../utils/devApiBase";
 import { requestHardReload } from "../utils/liveSessionGuard";
@@ -37,7 +53,7 @@ import {
   stripTruthTableAnswerHint,
   truthTableAnswerMaxChars,
 } from "../utils/truthTable";
-import { checkVariantAnswerOnServer, scoreInformaticsTableTask } from "../utils/examAnswerCheck";
+import { checkVariantAnswerDetail, scoreInformaticsTableTask } from "../utils/examAnswerCheck";
 import { scoreVariantAttempt, taskMaxPoints } from "../utils/variantResult";
 import {
   axesNeedScoreMatrix,
@@ -797,6 +813,8 @@ function p1TaskStatusPill(
     }
   } else {
     if (checkedTasks[task.id] === true) return { key: "ok", label: "Верно" };
+    if (checkedTasks[task.id] === "partial") return { key: "warn", label: "Частично" };
+    if (checkedTasks[task.id] === "pending") return { key: "warn", label: "На проверке" };
     if (checkedTasks[task.id] === false) return { key: "bad", label: "Ошибка" };
   }
   if (draft) return { key: "warn", label: "Ответ введён" };
@@ -1761,6 +1779,26 @@ function ExamPage() {
     const raw = userValue !== null ? userValue : userAnswers[taskId] || "";
     const hasLocalAnswer = correctAnswer != null && String(correctAnswer).trim() !== "";
     const taskForTruth = (variant?.tasks || []).find((t) => String(t.id) === String(taskId));
+    const mode = taskForTruth?.answer_check?.mode;
+    if (mode === "manual" || mode === "mixed" || taskForTruth?.answer_spec?.answer_format) {
+      const { scoreVprSpec } = await import("../utils/vprAnswerCheck");
+      const graded = scoreVprSpec(
+        taskForTruth.answer_spec || { answer_format: taskForTruth.answer_check?.format },
+        raw,
+        taskForTruth.max_score,
+      );
+      const mark = graded.status === "correct"
+        ? true
+        : graded.status === "incorrect"
+          ? false
+          : graded.status === "partial"
+            ? "partial"
+            : graded.status === "pending_review"
+              ? "pending"
+              : undefined;
+      if (mark !== undefined) setCheckedTasks((prev) => ({ ...prev, [taskId]: mark }));
+      return;
+    }
     const truthGrade = gradeTruthTableAnswer(raw, {
       ...(taskForTruth || {}),
       answer: hasLocalAnswer ? correctAnswer : taskForTruth?.answer,
@@ -1773,12 +1811,21 @@ function ExamPage() {
     } else if (variant?.id) {
       // Ученику эталон в JSON не отдаётся — сверка только на сервере.
       const task = (variant.tasks || []).find((t) => String(t.id) === String(taskId));
-      isCorrect = await checkVariantAnswerOnServer(variant.id, {
+      const detail = await checkVariantAnswerDetail(variant.id, {
         taskId,
         taskNumber: task?.number,
         answer: raw,
         apiBase: devApiBase(),
       });
+      const mark = detail.status === "correct"
+        ? true
+        : detail.status === "partial"
+          ? "partial"
+          : detail.status === "pending_review"
+            ? "pending"
+            : false;
+      setCheckedTasks((prev) => ({ ...prev, [taskId]: mark }));
+      return;
     } else {
       isCorrect = isUserAnswerCorrect(raw, correctAnswer || "");
     }
@@ -1885,8 +1932,8 @@ function ExamPage() {
     setCriteriaOpenForTask(tid);
     if (cacheKey != null && !criteriaByTaskList[cacheKey]?.criteria) {
       const params = new URLSearchParams();
-      if (task.task_list_id != null) params.set("task_list_id", task.task_list_id);
-      if (task.number != null) params.set("task_number", task.number);
+      if (task.task_list_id != null) params.set("task_list_id", String(task.task_list_id));
+      else if (task.number != null) params.set("task_number", String(task.number));
       fetch(`/api/${level}/${subject}/criteria/?${params.toString()}`)
         .then((res) => (res.ok ? res.json() : { criteria: [], max_score: null, axes: [], scoring_mode: "single" }))
         .then((data) => setCriteriaByTaskList((prev) => ({
@@ -2718,7 +2765,7 @@ function ExamPage() {
     const stored = scores[task.id];
     const awarded = stored != null && stored !== ""
       ? Number(stored)
-      : (checkedTasks[task.id] ? max : 0);
+      : (checkedTasks[task.id] === true ? max : 0);
     const s = Number.isFinite(awarded) ? awarded : 0;
     if (s === 0) return "+0 баллов";
     if (s === 1) return "+1 балл";
@@ -3111,10 +3158,12 @@ function ExamPage() {
         {showAnswerFeedback && doneHere && (
           <div
             className={
-              checkedTasks[task.id] ? "exam-result exam-result--ok" : "exam-result exam-result--bad"
+              checkedTasks[task.id] === true ? "exam-result exam-result--ok" : checkedTasks[task.id] === "pending" || checkedTasks[task.id] === "partial" ? "exam-result" : "exam-result exam-result--bad"
             }
           >
-            {checkedTasks[task.id] ? (
+            {checkedTasks[task.id] === "pending" || checkedTasks[task.id] === "partial" ? (
+              <strong>{checkedTasks[task.id] === "partial" ? "Частично" : "На проверке"}</strong>
+            ) : checkedTasks[task.id] === true ? (
               <>
                 <strong>Верно</strong>
                 {!isLiveVariant ? (
@@ -3364,7 +3413,8 @@ function ExamPage() {
   }
 
   function ev2Part2Main(task) {
-    const showSolBtn = (!isHomework || hSol) && task.answer != null && task.answer !== "";
+    const authoredSolution = String(task.solution || "").trim();
+    const showSolBtn = (!isHomework || hSol) && (authoredSolution || (task.answer != null && task.answer !== ""));
     const showCritBtn = !hwScorePart1Only && (task.task_list_id != null || task.number != null);
     return (
       <>
@@ -3395,9 +3445,12 @@ function ExamPage() {
             <div className="ev2-p2-solution__label">Решение</div>
             <div className="ev2-p2-solution__body">
               <MathContent
-                html={task.answer}
+                html={authoredSolution || task.answer}
                 className="ev2-p2-solution__math"
               />
+              {authoredSolution && task.answer ? (
+                <p className="ev2-p2-solution__answer">Ответ: {String(task.answer).replace(/<[^>]+>/g, "")}</p>
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -3796,6 +3849,7 @@ function ExamPage() {
                     onConsumedBoardOpenRequest={() => setEduOpenBoardForTaskId(null)}
                   >
                   <ExamTaskCondition html={stripTruthTableAnswerHint(task.text)} subject={subject} level={level} taskNumber={task.number} />
+                <PackFileLinks task={task} />
                   <TaskFileAttachments task={task} />
                   {task.author && <div className="task-author">{task.author}</div>}
 
@@ -3844,10 +3898,12 @@ function ExamPage() {
                         {showAnswerFeedback && p1Done && (
                           <div
                             className={
-                              checkedTasks[task.id] ? "exam-result exam-result--ok" : "exam-result exam-result--bad"
+                              checkedTasks[task.id] === true ? "exam-result exam-result--ok" : checkedTasks[task.id] === "pending" || checkedTasks[task.id] === "partial" ? "exam-result" : "exam-result exam-result--bad"
                             }
                           >
-                            {checkedTasks[task.id] ? (
+                            {checkedTasks[task.id] === "pending" || checkedTasks[task.id] === "partial" ? (
+              <strong>{checkedTasks[task.id] === "partial" ? "Частично" : "На проверке"}</strong>
+            ) : checkedTasks[task.id] === true ? (
                               <>
                                 <strong>Верно</strong>
                                 {!isLiveVariant ? (
@@ -3957,10 +4013,12 @@ function ExamPage() {
                         {showAnswerFeedback && p1Done && (
                           <div
                             className={
-                              checkedTasks[task.id] ? "exam-result exam-result--ok" : "exam-result exam-result--bad"
+                              checkedTasks[task.id] === true ? "exam-result exam-result--ok" : checkedTasks[task.id] === "pending" || checkedTasks[task.id] === "partial" ? "exam-result" : "exam-result exam-result--bad"
                             }
                           >
-                            {checkedTasks[task.id] ? (
+                            {checkedTasks[task.id] === "pending" || checkedTasks[task.id] === "partial" ? (
+              <strong>{checkedTasks[task.id] === "partial" ? "Частично" : "На проверке"}</strong>
+            ) : checkedTasks[task.id] === true ? (
                               <>
                                 <strong>Верно</strong>
                                 {!isLiveVariant ? (
@@ -4042,10 +4100,12 @@ function ExamPage() {
                         {showAnswerFeedback && p1Done && (
                           <div
                             className={
-                              checkedTasks[task.id] ? "exam-result exam-result--ok" : "exam-result exam-result--bad"
+                              checkedTasks[task.id] === true ? "exam-result exam-result--ok" : checkedTasks[task.id] === "pending" || checkedTasks[task.id] === "partial" ? "exam-result" : "exam-result exam-result--bad"
                             }
                           >
-                            {checkedTasks[task.id] ? (
+                            {checkedTasks[task.id] === "pending" || checkedTasks[task.id] === "partial" ? (
+              <strong>{checkedTasks[task.id] === "partial" ? "Частично" : "На проверке"}</strong>
+            ) : checkedTasks[task.id] === true ? (
                               <>
                                 <strong>Верно</strong>
                                 {!isLiveVariant ? (
@@ -4203,6 +4263,7 @@ function ExamPage() {
                             onConsumedBoardOpenRequest={() => setEduOpenBoardForTaskId(null)}
                           >
                           <ExamTaskCondition html={stripTruthTableAnswerHint(task.text)} subject={subject} level={level} taskNumber={task.number} />
+                <PackFileLinks task={task} />
                           <TaskFileAttachments task={task} />
                           {task.author && <div className="task-author">{task.author}</div>}
 
@@ -4319,6 +4380,7 @@ function ExamPage() {
                         onConsumedBoardOpenRequest={() => setEduOpenBoardForTaskId(null)}
                       >
                       <ExamTaskCondition html={stripTruthTableAnswerHint(task.text)} subject={subject} level={level} taskNumber={task.number} />
+                <PackFileLinks task={task} />
                       <TaskFileAttachments task={task} />
                       {task.author && <div className="task-author">{task.author}</div>}
 

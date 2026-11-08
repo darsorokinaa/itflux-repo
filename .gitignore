@@ -44,6 +44,7 @@ import_tasks_universal.py
 
 # User/media files
 Generator/media/
+Generator/private_media/
 
 # Isolated video E2E stand: runtime secrets, certs, screenshots
 e2e-video/.run/
