@@ -209,6 +209,15 @@ class SeasonalTheme(models.Model):
 
     # Фон страницы
     background_color = models.CharField("Цвет фона", max_length=32, blank=True, default="")
+    dark_background = models.BooleanField(
+        "Тёмный фон",
+        default=False,
+        help_text=(
+            "Включите, если цвет фона тёмный (например #8E2632). "
+            "Текст шапки, меню, заголовков страницы, подвала и ссылок вне карточек станет светлым. "
+            "Текст внутри карточек, таблиц, заданий, формул и кода остаётся тёмным."
+        ),
+    )
     background_pattern = models.ImageField(
         "Паттерн фона",
         upload_to=seasonal_theme_upload_to,

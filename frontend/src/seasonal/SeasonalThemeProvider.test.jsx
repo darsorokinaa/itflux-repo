@@ -95,6 +95,7 @@ describe("SeasonalThemeProvider", () => {
     renderWithProvider();
     await waitFor(() => expect(screen.getByTestId("slug").textContent).toBe("new-year"));
     expect(document.documentElement.classList.contains("seasonal-theme-active")).toBe(true);
+    expect(document.documentElement.classList.contains("seasonal-dark-bg")).toBe(false);
     expect(document.documentElement.getAttribute("data-seasonal-theme")).toBe("new-year");
     expect(document.documentElement.style.getPropertyValue("--seasonal-page-background")).toBe("#EEF6FF");
   });
@@ -116,6 +117,51 @@ describe("SeasonalThemeProvider", () => {
     fetchSeasonalThemeCurrent.mockRejectedValue(new Error("network"));
     renderWithProvider();
     await waitFor(() => expect(screen.getByTestId("slug").textContent).toBe("none"));
+  });
+
+  it("marks a dark background and keeps variant solving free of decor", async () => {
+    fetchSeasonalThemeCurrent.mockResolvedValue({
+      mode: "auto",
+      theme: {
+        id: 8,
+        name: "Рождество",
+        slug: "christmas_2026",
+        dark_background: true,
+        background: { color: "#8E2632", dark: true },
+        cards: {},
+        surfaces: {},
+        animation: { type: "snow", intensity: "minimal", max_elements: 18 },
+        decorations: [{ id: 1, image_url: "/corner.png", zone: "page_background", show_desktop: true, show_tablet: true, show_mobile: true }],
+        include_routes: [],
+        exclude_routes: [],
+      },
+      animations_enabled: true,
+      available_themes: [],
+      preview: { active: false },
+    });
+
+    const { unmount } = render(
+      <MemoryRouter initialEntries={["/cabinet"]}>
+        <SeasonalThemeProvider>
+          <div>cabinet</div>
+        </SeasonalThemeProvider>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(document.documentElement.classList.contains("seasonal-dark-bg")).toBe(true));
+    expect(document.documentElement.classList.contains("seasonal-heavy")).toBe(false);
+    unmount();
+
+    render(
+      <MemoryRouter initialEntries={["/ege/inf/variant/1707"]}>
+        <SeasonalThemeProvider>
+          <div>variant</div>
+        </SeasonalThemeProvider>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(document.documentElement.classList.contains("seasonal-heavy")).toBe(true));
+    expect(document.documentElement.classList.contains("seasonal-dark-bg")).toBe(false);
+    expect(document.querySelector(".seasonal-fx-canvas")).toBeNull();
+    expect(document.querySelector(".seasonal-decor-layer")).toBeNull();
   });
 
   it("keeps theme on board route but marks heavy (effects off)", async () => {

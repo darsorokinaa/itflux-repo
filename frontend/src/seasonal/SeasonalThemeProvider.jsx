@@ -313,26 +313,39 @@ export function SeasonalThemeProvider({ children }) {
 
   useEffect(() => {
     const root = document.documentElement;
+    const darkBg = Boolean(effectiveTheme?.dark_background) && !heavy;
     if (!effectiveTheme) {
-      root.classList.remove("seasonal-theme-active", "seasonal-has-pattern");
+      root.classList.remove(
+        "seasonal-theme-active",
+        "seasonal-has-pattern",
+        "seasonal-dark-bg",
+        "seasonal-heavy",
+      );
       root.removeAttribute("data-seasonal-theme");
       return undefined;
     }
     const vars = buildSeasonalCssVars(effectiveTheme);
-    if (!allowBackgroundPattern) {
+    if (!allowBackgroundPattern || heavy) {
       delete vars["--seasonal-page-pattern"];
       delete vars["--seasonal-page-pattern-mobile"];
     }
     const cleanup = applyCssVars(vars);
     root.classList.add("seasonal-theme-active");
-    root.classList.toggle("seasonal-has-pattern", allowBackgroundPattern);
+    root.classList.toggle("seasonal-has-pattern", allowBackgroundPattern && !heavy);
+    root.classList.toggle("seasonal-dark-bg", darkBg);
+    root.classList.toggle("seasonal-heavy", heavy);
     root.setAttribute("data-seasonal-theme", effectiveTheme.slug || "");
     return () => {
       cleanup();
-      root.classList.remove("seasonal-theme-active", "seasonal-has-pattern");
+      root.classList.remove(
+        "seasonal-theme-active",
+        "seasonal-has-pattern",
+        "seasonal-dark-bg",
+        "seasonal-heavy",
+      );
       root.removeAttribute("data-seasonal-theme");
     };
-  }, [effectiveTheme, allowBackgroundPattern]);
+  }, [effectiveTheme, allowBackgroundPattern, heavy]);
 
   const toggleAppearance = useCallback(async (themeId) => {
     const userCanDisable = payload?.user_can_disable !== false;

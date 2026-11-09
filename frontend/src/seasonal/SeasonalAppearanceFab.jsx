@@ -2,6 +2,24 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useSeasonalTheme } from "./SeasonalThemeProvider";
 
+function FabIcon({ item }) {
+  const [broken, setBroken] = useState(false);
+  const iconUrl = item?.button_icon_url || null;
+  const emoji = (item?.button_emoji || "✦").trim() || "✦";
+  if (iconUrl && !broken) {
+    return (
+      <img
+        src={iconUrl}
+        alt=""
+        className="seasonal-appearance-fab__img"
+        draggable={false}
+        onError={() => setBroken(true)}
+      />
+    );
+  }
+  return <span className="seasonal-appearance-fab__fallback" aria-hidden="true">{emoji}</span>;
+}
+
 /**
  * Плавающие кнопки оформления: свёрнуты в одну кнопку,
  * по клику раскрывается список тем периода (вверх, без перекрытия ряда).
@@ -87,14 +105,7 @@ export default function SeasonalAppearanceFab({ hidden = false }) {
     }
   };
 
-  const renderIcon = (item) => {
-    const iconUrl = item?.button_icon_url || null;
-    const emoji = (item?.button_emoji || "✦").trim() || "✦";
-    if (iconUrl) {
-      return <img src={iconUrl} alt="" className="seasonal-appearance-fab__img" draggable={false} />;
-    }
-    return <span className="seasonal-appearance-fab__fallback" aria-hidden="true">{emoji}</span>;
-  };
+  const renderIcon = (item) => <FabIcon item={item} />;
 
   const dockClass = [
     "seasonal-appearance-fab-dock",
