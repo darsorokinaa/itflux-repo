@@ -55,7 +55,7 @@ export function checkMode(format, maxScore = 1) {
   const justified = new Set([
     "number", "number_or_fraction", "number_or_radical", "number_list",
     "vertex_label", "single_choice", "matching_sequence", "number_pairs",
-    "word", "sequence", "number_in_base", "two_numbers",
+    "word", "sequence", "number_in_base", "two_numbers", "fraction",
   ]);
   if (justified.has(fmt) && Number(maxScore) >= 2) return "manual";
   if (justified.has(fmt)) return "auto";
@@ -135,8 +135,9 @@ export function scoreVprSpec(spec, studentAnswer, maxScore = 1) {
     const points = answered ? choicePoints(data, text, maximum) : 0;
     return { mode: "auto", status: statusOf(points, maximum, { pending: false, answered }), points, max_points: maximum };
   }
-  if (fmt === "number" || fmt === "number_or_fraction" || fmt === "number_or_radical") {
-    const points = answered && valuesEqual(data.value, text) ? maximum : 0;
+  if (fmt === "number" || fmt === "number_or_fraction" || fmt === "number_or_radical" || fmt === "fraction") {
+    const fractionOk = fmt !== "fraction" || /^[-+]?\d+\/[-+]?\d+$/.test(normalize(text));
+    const points = answered && fractionOk && valuesEqual(data.value, text) ? maximum : 0;
     return { mode: "auto", status: statusOf(points, maximum, { pending: false, answered }), points, max_points: maximum };
   }
   if (fmt === "word" || fmt === "number_in_base") {

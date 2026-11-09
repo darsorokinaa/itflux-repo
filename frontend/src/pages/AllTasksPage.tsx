@@ -170,6 +170,7 @@ type TaskNumberOption = {
   task_list_id: number;
   task_number: number;
   task_title: string;
+  vpr_class?: number | null;
   task_count: number;
 };
 
@@ -200,7 +201,7 @@ function buildQuery(
   const p = new URLSearchParams();
   if (level === "vpr") {
     p.set("grade", String(vprGrade));
-    if (vprAdvanced) p.set("advanced", "1");
+    p.set("advanced", vprAdvanced ? "1" : "0");
   }
   if (extra) {
     for (const [k, v] of Object.entries(extra)) {
@@ -1380,6 +1381,7 @@ export default function AllTasksPage() {
                 {(filterOptions?.task_numbers ?? []).map((t) => (
                   <option key={t.task_list_id} value={String(t.task_list_id)}>
                     №{t.task_number}
+                    {t.vpr_class != null ? ` · ${t.vpr_class} класс` : ""}
                     {t.task_title ? ` — ${t.task_title}` : ""}
                     {t.task_count > 0 ? ` (${t.task_count})` : ""}
                   </option>

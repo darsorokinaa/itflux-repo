@@ -11,12 +11,12 @@ import zipfile
 from django.db import transaction
 
 from .models import Criteria, Level, Subject, Task, TaskList, private_media_storage
-from .vpr_answer_spec import APPLY_READY_PACKS, dry_run_zip, storage_from_item
+from .vpr_answer_spec import APPLY_READY_PACKS, MCKO_PACKS, dry_run_zip, storage_from_item
 from .vpr_batch_safety import activated_marker, assert_rollback_allowed, was_activated
 from .vpr_pack_files import store_item_files
 
 
-def _level_and_subject(item: dict):
+def _level_and_subject(item: dict, pack: str = ""):
     short = storage_from_item(item)["subject_short"]
     subject = Subject.objects.filter(subject_short__iexact=short).first()
     level = Level.objects.filter(level__iexact="vpr").first()
@@ -27,7 +27,32 @@ def _level_and_subject(item: dict):
     return subject, level
 
 
-def _task_list(stored: dict, subject, level) -> TaskList:
+def _flags(item: dict, pack: str) -> tuple[bool, bool]:
+    """vpr_basic, vpr_advanced. База — базовый. Математика МЦКО — галочка «Углублённый»."""
+    if pack not in MCKO_PACKS:
+        return True, False
+    raw = str(item.get("level") or "")
+    if raw == "углублённый":
+        return False, True
+    if "авторский набор" in raw:
+        return True, False
+    raise RuntimeError(f"{item.get('id')}: неизвестная категория набора")
+
+
+def _list_title(stored: dict, item: dict, pack: str) -> str:
+    grade = stored["vpr_class"]
+    number = stored["task_number"]
+    if pack not in MCKO_PACKS:
+        return f"ВПР {grade} №{number}"
+    raw = str(item.get("level") or "")
+    if raw == "углублённый":
+        return f"ВПР {grade} №{number}"
+    if "авторский набор" in raw:
+        return f"{grade} класс №{number}, авторский набор, не официальная ВПР"
+    raise RuntimeError(f"{stored['source_key']}: неизвестная категория набора")
+
+
+def _task_list(stored: dict, subject, level, *, title: str, batch: str) -> TaskList:
     grade = stored["vpr_class"]
     number = stored["task_number"]
     row = TaskList.objects.filter(
@@ -36,7 +61,6 @@ def _task_list(stored: dict, subject, level) -> TaskList:
         task_number=number,
         vpr_class=grade,
     ).first()
-    title = f"ВПР {grade} №{number}"
     if row is None:
         row = TaskList.objects.create(
             subject=subject,
@@ -47,7 +71,10 @@ def _task_list(stored: dict, subject, level) -> TaskList:
             vpr_class=grade,
             part=None,
         )
-    else:
+    owned_by_other = Task.objects.filter(task=row).exclude(import_batch=batch).exists()
+    if owned_by_other:
+        return row
+    if row.pk:
         row.max_score = stored["max_score"]
         row.task_title = title
         row.save(update_fields=["max_score", "task_title"])
@@ -63,7 +90,10 @@ def _task_list(stored: dict, subject, level) -> TaskList:
     return row
 
 
-def _save_task(stored: dict, task_list: TaskList, *, batch: str, stored_files: list) -> str:
+def _save_task(
+    stored: dict, task_list: TaskList, *, batch: str, stored_files: list,
+    vpr_basic: bool, vpr_advanced: bool,
+) -> str:
     spec = dict(stored["answer_spec"])
     spec["stored_files"] = stored_files
     spec["max_score_numeric"] = stored["max_score"]
@@ -76,8 +106,8 @@ def _save_task(stored: dict, task_list: TaskList, *, batch: str, stored_files: l
         "author": stored["author"] or "Цифровой поток",
         "max_score": stored["max_score"],
         "vpr_class": stored["vpr_class"],
-        "vpr_basic": True,
-        "vpr_advanced": False,
+        "vpr_basic": vpr_basic,
+        "vpr_advanced": vpr_advanced,
         "truth_table_enabled": False,
         "is_active": False,
         "status": Task.Status.DRAFT,
@@ -113,14 +143,25 @@ def apply_zip(path: str, *, batch: str) -> dict:
         pack = str(payload.get("pack") or "")
         if pack not in APPLY_READY_PACKS:
             raise RuntimeError(f"пакет {pack} не разрешён к записи")
-        subject, level = _level_and_subject(payload["items"][0])
+        subject, level = _level_and_subject(payload["items"][0], pack)
+        mcko = pack in MCKO_PACKS
         for item in payload["items"]:
-            stored = storage_from_item(item)
+            if mcko and item.get("files"):
+                raise RuntimeError(f"{item.get('id')}: у авторского набора не должно быть файлов")
+            stored = storage_from_item(item, pack=pack)
             if stored["author"] != "Цифровой поток":
                 raise RuntimeError(f"{stored['source_key']}: автор не «Цифровой поток»")
-            task_list = _task_list(stored, subject, level)
-            files = store_item_files(archive, item, batch=batch)
-            kind = _save_task(stored, task_list, batch=batch, stored_files=files)
+            if mcko and not str(stored["source_key"] or "").startswith("mcko_adv:"):
+                raise RuntimeError(f"{item.get('id')}: ключ авторского набора не отделён от базового ВПР")
+            basic, advanced = _flags(item, pack)
+            task_list = _task_list(
+                stored, subject, level, title=_list_title(stored, item, pack), batch=batch,
+            )
+            files = [] if mcko else store_item_files(archive, item, batch=batch)
+            kind = _save_task(
+                stored, task_list, batch=batch, stored_files=files,
+                vpr_basic=basic, vpr_advanced=advanced,
+            )
             written[kind] += 1
             written["files"] += len(files)
         written["pack"].append(pack)

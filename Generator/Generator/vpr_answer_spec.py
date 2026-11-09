@@ -20,8 +20,11 @@ _TEXT_ONLY_KEYS = frozenset({"condition"})
 
 # Все пять базовых пакетов (1580). inf8 v1 не входит: у него ложный OK по рисункам.
 # inf8 v2 допущен после независимой сверки 40 SVG №12 с field.json.
-APPLY_READY_PACKS = frozenset({"ma7", "ma8", "ma10", "inf7", "inf8"})
+APPLY_READY_PACKS = frozenset({"ma7", "ma8", "ma10", "inf7", "inf8", "ma7u", "ma8u", "ma10u", "inf7u"})
 HOLD_PACKS = frozenset()
+# Отдельное пространство ключей. Базовые id ma7-b-… сюда не попадают и не переписываются.
+MCKO_PACKS = frozenset({"ma7u", "ma8u", "ma10u", "inf7u"})
+MCKO_SOURCE_PREFIX = "mcko_adv:"
 
 _GRAPHIC_OR_KEY_MANUAL = frozenset({
     "mark_point_on_line",
@@ -49,7 +52,7 @@ _JUSTIFIED_SHORT = frozenset({
     "number_in_base",
     "two_numbers",
 })
-_AUTO_SHORT = _JUSTIFIED_SHORT | frozenset({"multiple_choice_set"})
+_AUTO_SHORT = _JUSTIFIED_SHORT | frozenset({"multiple_choice_set", "fraction"})
 _MANUAL_FORMATS = _GRAPHIC_OR_KEY_MANUAL
 _FRACTION_RE = re.compile(r"^([-+]?\d+)/([-+]?\d+)$")
 _NUMBER_RE = re.compile(r"[-−]?\d+(?:[.,]\d+)?")
@@ -117,11 +120,34 @@ def scoring_spec(spec: dict | None) -> dict | None:
     }
 
 
-def storage_from_item(item: dict) -> dict:
+def _mcko_spec(item: dict) -> dict:
+    """Спека без PDF/TXT третьих сторон. Б/П/В остаётся сложностью задания, не уровнем."""
+    spec = {key: value for key, value in item.items() if key not in _TEXT_ONLY_KEYS}
+    source = spec.get("specification_source")
+    if isinstance(source, dict):
+        kept = {
+            key: source.get(key)
+            for key in ("document", "kes", "kt", "sample_type")
+            if source.get(key)
+        }
+        spec["specification_source"] = kept
+        spec["task_difficulty"] = source.get("level")
+    spec.pop("files", None)
+    spec["bank"] = "mcko_adv"
+    return spec
+
+
+def storage_from_item(item: dict, *, pack: str = "") -> dict:
     """Поля задачи и список, в которые пакет ложится без потерь. В базу не пишет."""
     if not isinstance(item, dict):
         raise TypeError("item must be a dict")
-    spec = {key: value for key, value in item.items() if key not in _TEXT_ONLY_KEYS}
+    raw_key = str(item.get("id") or "").strip() or None
+    if pack in MCKO_PACKS and raw_key:
+        spec = _mcko_spec(item)
+        source_key = f"{MCKO_SOURCE_PREFIX}{raw_key}"
+    else:
+        spec = {key: value for key, value in item.items() if key not in _TEXT_ONLY_KEYS}
+        source_key = raw_key
     condition = str(item.get("condition") or "")
     svg = str(item.get("svg") or "")
     svg_html = str(item.get("svg_html") or "")
@@ -136,7 +162,7 @@ def storage_from_item(item: dict) -> dict:
     if solution_image and solution_image not in solution:
         solution_parts.append(solution_image)
     return {
-        "source_key": str(item.get("id") or "").strip() or None,
+        "source_key": source_key,
         "answer": str(item.get("answer") or ""),
         "solution": "\n".join(part for part in solution_parts if part),
         "task_template": "\n".join(part for part in template_parts if part),
@@ -165,7 +191,10 @@ def storage_losses(item: dict, stored: dict | None = None) -> list[str]:
     stored = stored or storage_from_item(item)
     spec = stored.get("answer_spec") or {}
     losses = []
+    omitted = {"specification_source", "files"} if spec.get("bank") == "mcko_adv" else set()
     for key, value in item.items():
+        if key in omitted:
+            continue
         if key == "condition":
             if str(value or "") not in str(stored.get("task_template") or ""):
                 losses.append("condition")
@@ -396,7 +425,10 @@ def _truth_column_points(data: dict, text: str, maximum: int) -> int:
 
 
 def _auto_match(fmt: str, data: dict, text: str) -> bool:
-    if fmt == "number" or fmt in {"number_or_fraction", "number_or_radical"}:
+    if fmt == "number" or fmt in {"number_or_fraction", "number_or_radical", "fraction"}:
+        # Дробь остаётся дробью: 1/6 совпадает с 2/12, но не с десятичной записью 0,166.
+        if fmt == "fraction" and _fraction(normalize_answer(text)) is None:
+            return False
         return values_equal(data.get("value"), text)
     if fmt == "number_in_base":
         return normalize_answer(data.get("value")) == normalize_answer(text)
@@ -575,7 +607,7 @@ def score_vpr_spec(
     }
 
 
-def dry_run_items(items: list[dict]) -> dict[str, Any]:
+def dry_run_items(items: list[dict], *, pack: str = "") -> dict[str, Any]:
     """Проверка пакета в памяти. Ничего не записывает."""
     errors = []
     ids = []
@@ -589,7 +621,9 @@ def dry_run_items(items: list[dict]) -> dict[str, Any]:
         ids.append(source)
         if not source:
             errors.append(f"{index}: пустой id")
-        stored = storage_from_item(item)
+        if pack in MCKO_PACKS and item.get("files"):
+            errors.append(f"{source}: у авторского набора не должно быть файлов задания")
+        stored = storage_from_item(item, pack=pack)
         losses = storage_losses(item, stored)
         if losses:
             errors.append(f"{source}: потери {', '.join(losses)}")
@@ -664,7 +698,7 @@ def dry_run_zip(path: str) -> dict[str, Any]:
         if not isinstance(items, list):
             reports.append({"file": name, "pack": pack, "ok": False, "errors": ["нет items"], "count": 0})
             continue
-        report = dry_run_items(items)
+        report = dry_run_items(items, pack=pack)
         report["file"] = name
         report["pack"] = pack
         report["declared_count"] = payload.get("count")
