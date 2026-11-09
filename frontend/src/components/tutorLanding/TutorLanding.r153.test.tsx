@@ -5,6 +5,10 @@ import { MemoryRouter } from "react-router-dom";
 import TutorLanding from "./TutorLanding";
 import HomePage from "../../pages/HomePage";
 
+vi.mock("../../seasonal/SeasonalHeroSticker", () => ({
+  default: () => <aside data-testid="seasonal-hero-sticker">Узнать историю Рождества</aside>,
+}));
+
 vi.mock("./useTariffPlans", () => ({
   fmtRub: (n: number | string) => String(n),
   yearDiscountPercent: () => 30,
@@ -51,8 +55,8 @@ describe("TutorLanding / HomePage r153", () => {
     expect(screen.getAllByText("Попробовать бесплатно").length).toBeGreaterThanOrEqual(2);
   });
 
-  it("HomePage: anonymous sees TutorLanding", async () => {
-    fetchCabinetSession.mockResolvedValue({ authenticated: false });
+  function renderHome(session: unknown) {
+    fetchCabinetSession.mockResolvedValue(session);
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -65,64 +69,53 @@ describe("TutorLanding / HomePage r153", () => {
         <HomePage />
       </MemoryRouter>,
     );
-    await waitFor(() => {
-      expect(screen.getByText("Для репетиторов и учителей математики и информатики")).toBeTruthy();
-    });
+  }
+
+  function expectHomeWithoutSales() {
+    expect(screen.getByRole("heading", { name: /Доска, видеозвонки/ })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Что вам нужно сейчас?" })).toBeTruthy();
-  });
-
-  it("HomePage: Start teacher sees TutorLanding", async () => {
-    fetchCabinetSession.mockResolvedValue({
-      authenticated: true,
-      user: { role: "teacher", has_active_paid_subscription: false },
-    });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ total_tasks: 1, subjects_count: 1, generated_variants_count: 0, tasks_by_level: {} }),
-      }),
-    );
-    render(
-      <MemoryRouter>
-        <HomePage />
-      </MemoryRouter>,
-    );
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Тарифы" })).toBeTruthy();
-    });
-  });
-
-  it("HomePage: paid teacher has no TutorLanding from the quote", async () => {
-    fetchCabinetSession.mockResolvedValue({
-      authenticated: true,
-      user: { role: "teacher", has_active_paid_subscription: true },
-    });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ total_tasks: 1, subjects_count: 1, generated_variants_count: 0, tasks_by_level: {} }),
-      }),
-    );
-    render(
-      <MemoryRouter>
-        <HomePage />
-      </MemoryRouter>,
-    );
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Что вам нужно сейчас?" })).toBeTruthy();
-    });
-    expect(screen.queryByText("Для репетиторов и учителей математики и информатики")).toBeNull();
-    expect(screen.queryByRole("heading", { name: /Доска, видеозвонки/ })).toBeNull();
+    expect(screen.getByTestId("seasonal-hero-sticker")).toBeTruthy();
+    expect(document.querySelector("[data-tutor-landing='hero']")).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Всё, что нужно для подготовки" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Всё для подготовки к ОГЭ и ЕГЭ уже внутри" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Домашку проверяет платформа, а не Вы" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Тарифы" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Частые вопросы" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Добавьте первого ученика сегодня" })).toBeNull();
-    expect(screen.queryByText("Попробовать бесплатно")).toBeNull();
-    expect(screen.queryByText("Добавить первого ученика")).toBeNull();
-    expect(document.querySelector("[data-tutor-landing]")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Выберите формат подготовки" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Всё для занятий в одном месте" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Что говорят учителя" })).toBeNull();
+    expect(screen.queryByText(/Тарифы и цены/)).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: /Доска, видеозвонки/ })).toBeTruthy();
+  }
+
+  it("HomePage: anonymous sees hero and value paths, not sales blocks", async () => {
+    renderHome({ authenticated: false });
+    await waitFor(() => {
+      expect(screen.getByText("Для репетиторов и учителей математики и информатики")).toBeTruthy();
+    });
+    expectHomeWithoutSales();
+  });
+
+  it("HomePage: Start teacher sees the same short homepage", async () => {
+    renderHome({
+      authenticated: true,
+      user: { role: "teacher", has_active_paid_subscription: false },
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Что вам нужно сейчас?" })).toBeTruthy();
+    });
+    expectHomeWithoutSales();
+  });
+
+  it("HomePage: paid teacher sees hero and value paths, not sales blocks", async () => {
+    renderHome({
+      authenticated: true,
+      user: { role: "teacher", has_active_paid_subscription: true },
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Что вам нужно сейчас?" })).toBeTruthy();
+    });
+    expectHomeWithoutSales();
   });
 });

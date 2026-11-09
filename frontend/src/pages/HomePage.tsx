@@ -16,6 +16,9 @@ import { formatTasksCount } from "../utils/formatTasksCount";
 import { formatIntRu } from "../utils/formatIntRu";
 import { trackValueGoal } from "../utils/valuePath";
 
+/** Продающие блоки главной выключены. Компоненты остаются в файле. */
+const SHOW_HOME_SALES = false;
+
 type PlatformStats = {
   total_tasks: number;
   subjects_count: number;
@@ -79,7 +82,6 @@ export default function HomePage() {
   // r153: пока /me неизвестен — не монтируем TutorLanding (без вспышки у платных).
   const [landingReady, setLandingReady] = useState(false);
   const [isTeacher, setIsTeacher] = useState(false);
-  const [showTutorLanding, setShowTutorLanding] = useState(false);
   const heroTasksCountLabel =
     stats != null && stats.total_tasks > 0 ? formatIntRu(stats.total_tasks) : "11 667";
   const heroSubjectsCountLabel =
@@ -98,16 +100,12 @@ export default function HomePage() {
         if (cancelled) return;
         const user = data?.authenticated ? data.user : null;
         const teacher = user?.role === "teacher";
-        const paid = Boolean(teacher && user?.has_active_paid_subscription);
         setIsTeacher(Boolean(teacher));
-        // Аноним / Старт / trial / launch promo — полный лендинг; платный учитель — без TutorLanding.
-        setShowTutorLanding(!paid);
         setLandingReady(true);
       })
       .catch(() => {
         if (cancelled) return;
         setIsTeacher(false);
-        setShowTutorLanding(true);
         setLandingReady(true);
       });
     return () => {
@@ -156,25 +154,23 @@ export default function HomePage() {
 
       <div className="digital-flow-page__wrap">
         <main className="home-page__main">
-          {/* r103/r153: весь TutorLanding только для новых/бесплатных; платный учитель — без блока. */}
+          {/* Продающие секции лендинга на главной не показываем никому. Hero и стикер — всем. */}
           {!landingReady ? (
             <div className="tl" aria-busy="true" data-landing-pending="1" />
-          ) : showTutorLanding ? (
-            <>
-              <TutorLanding isTeacher={isTeacher} />
-              <div className="home-section-divider" role="separator" aria-hidden />
-            </>
-          ) : null}
+          ) : (
+            <TutorLanding heroOnly isTeacher={isTeacher} />
+          )}
           <HomeValuePathsBlock />
-          <div className="home-section-divider" role="separator" aria-hidden />
-          <HeroSection
-            tasksCountLabel={heroTasksCountLabel}
-            subjectsCountLabel={heroSubjectsCountLabel}
-            generatedVariantsCountLabel={heroGeneratedVariantsCountLabel}
-            headingLevel={2}
-          />
-
-          <section id="home-levels" className="home-levels">
+          {SHOW_HOME_SALES ? (
+            <>
+              <div className="home-section-divider" role="separator" aria-hidden />
+              <HeroSection
+                tasksCountLabel={heroTasksCountLabel}
+                subjectsCountLabel={heroSubjectsCountLabel}
+                generatedVariantsCountLabel={heroGeneratedVariantsCountLabel}
+                headingLevel={2}
+              />
+              <section id="home-levels" className="home-levels">
           <header className="section-head">
             <h2 className="section-head__title">Выберите формат подготовки</h2>
             <p className="section-head__lead">
@@ -202,9 +198,10 @@ export default function HomePage() {
             })}
           </div>
           </section>
-
-          <TeacherWorkspaceBlock />
-          <TeacherQuotesBlock headingId="home-teacher-quotes-heading" />
+              <TeacherWorkspaceBlock />
+              <TeacherQuotesBlock headingId="home-teacher-quotes-heading" />
+            </>
+          ) : null}
         </main>
       </div>
     </div>
@@ -347,9 +344,11 @@ function HomeValuePathsBlock() {
           </Link>
         ))}
       </div>
-      <p className="home-value-paths__pricing" style={{ margin: "16px 0 0", textAlign: "center", fontWeight: 600 }}>
-        <Link to="/pricing">Тарифы и цены — от 0 ₽ →</Link>
-      </p>
+      {SHOW_HOME_SALES ? (
+        <p className="home-value-paths__pricing" style={{ margin: "16px 0 0", textAlign: "center", fontWeight: 600 }}>
+          <Link to="/pricing">Тарифы и цены — от 0 ₽ →</Link>
+        </p>
+      ) : null}
     </section>
   );
 }

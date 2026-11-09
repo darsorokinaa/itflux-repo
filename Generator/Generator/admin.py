@@ -1114,6 +1114,7 @@ class SeasonalThemeAdmin(admin.ModelAdmin):
                 ),
                 "fields": (
                     "background_color",
+                    "dark_background",
                     "background_pattern",
                     "background_pattern_preview",
                     "background_pattern_mobile",

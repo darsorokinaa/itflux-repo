@@ -94,6 +94,28 @@
   --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.35);
   --border-hairline: var(--border-card);
   --header-gradient: linear-gradient(90deg, var(--blue-dark) 0%, var(--blue-main) 100%);
+
+  /* Текст на фоне страницы и внутри карточек. Сезонная тёмная тема переопределяет on-page-*. */
+  --on-page-text: var(--text-main);
+  --on-page-text-secondary: var(--text-sub);
+  --on-page-text-muted: var(--text-hint);
+  --on-page-link: var(--blue-main);
+  --on-page-link-hover: var(--blue-dark);
+  --on-card-text: var(--text-main);
+  --on-card-text-secondary: var(--text-sub);
+  --on-card-link: #1e3a8a;
+}
+
+/* Тёмный сезонный фон (#8E2632 и темнее): светлый текст проходит WCAG AA 4.5:1. */
+html.seasonal-theme-active.seasonal-dark-bg {
+  --on-page-text: #fff8f3;
+  --on-page-text-secondary: #ffe7da;
+  --on-page-text-muted: #ffd4c4;
+  --on-page-link: #ffe08a;
+  --on-page-link-hover: #fff4c8;
+  --on-card-text: #1c140e;
+  --on-card-text-secondary: #5a4030;
+  --on-card-link: #1e3a8a;
 }
 
 *,

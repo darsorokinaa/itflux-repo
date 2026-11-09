@@ -108,6 +108,15 @@ export default function SeasonalHeroSticker() {
         </button>
         <p className="seasonal-hero-sticker__title">{sticker.title}</p>
         <p className="seasonal-hero-sticker__text">{sticker.text}</p>
+        {canOpenHistory ? (
+          <button
+            type="button"
+            className="seasonal-hero-sticker__history"
+            onClick={openHistory}
+          >
+            {history.link_label || "Узнать историю праздника"}
+          </button>
+        ) : null}
       </aside>
 
       <SeasonalHistoryModal

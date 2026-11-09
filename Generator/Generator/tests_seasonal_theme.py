@@ -200,6 +200,17 @@ class SeasonalThemeApiTests(TestCase):
         self.assertIn("header", data["theme"])
         self.assertIn("meeting_decor_url", data["theme"]["header"])
         self.assertNotIn("force_active_for_testing", data["theme"])
+        self.assertFalse(data["theme"]["dark_background"])
+        self.assertFalse(data["theme"]["background"]["dark"])
+
+    def test_dark_background_is_serialized(self):
+        _make_theme(slug="dark-bg", dark_background=True, background_color="#8E2632")
+        resp = self.client.get("/api/seasonal-theme/current/")
+        self.assertEqual(resp.status_code, 200)
+        theme = resp.json()["theme"]
+        self.assertTrue(theme["dark_background"])
+        self.assertTrue(theme["background"]["dark"])
+        self.assertEqual(theme["background"]["color"], "#8E2632")
 
     def test_manual_preference_saved(self):
         theme = _make_theme(slug="manual-ok")

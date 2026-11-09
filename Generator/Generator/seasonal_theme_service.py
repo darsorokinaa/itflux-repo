@@ -32,6 +32,8 @@ DEFAULT_HEAVY_ROUTE_PREFIXES = (
     "/cabinet/meetings",
     "/lessons/",
     "/cabinet/interactives/",
+    # Решение варианта: не весь /ege/, только /variant-live и пути */variant/ на фронте.
+    "/variant-live",
 )
 
 DEFAULT_SURFACES: dict[str, dict[str, Any]] = {
@@ -298,8 +300,10 @@ def serialize_theme(request, theme: SeasonalTheme) -> dict:
         "description": theme.description or "",
         "allow_user_disable": theme.allow_user_disable,
         "allow_manual_selection": theme.allow_manual_selection,
+        "dark_background": bool(theme.dark_background),
         "background": {
             "color": theme.background_color or None,
+            "dark": bool(theme.dark_background),
             "pattern_url": media_url(request, theme.background_pattern),
             "pattern_mobile_url": media_url(request, theme.background_pattern_mobile),
             "repeat": theme.background_repeat,
