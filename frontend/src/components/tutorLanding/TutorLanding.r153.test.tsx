@@ -71,30 +71,35 @@ describe("TutorLanding / HomePage r153", () => {
     );
   }
 
-  function expectHomeWithoutSales() {
-    expect(screen.getByRole("heading", { name: /Доска, видеозвонки/ })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Что вам нужно сейчас?" })).toBeTruthy();
+  function expectHomeStartsWithNeeds() {
+    const h1 = screen.getByRole("heading", { level: 1, name: "Что вам нужно сейчас?" });
+    expect(h1).toBeTruthy();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     expect(screen.getByTestId("seasonal-hero-sticker")).toBeTruthy();
-    expect(document.querySelector("[data-tutor-landing='hero']")).toBeTruthy();
+    expect(screen.getByText("Мне нужен готовый урок")).toBeTruthy();
+    expect(screen.queryByText("Для репетиторов и учителей математики и информатики")).toBeNull();
+    expect(screen.queryByRole("heading", { name: /Доска, видеозвонки/ })).toBeNull();
+    expect(screen.queryByText("Попробовать бесплатно")).toBeNull();
+    expect(screen.queryByText(/Добавить первого ученика/)).toBeNull();
+    expect(screen.queryByText("ДОСКА")).toBeNull();
+    expect(document.querySelector("[data-tutor-landing]")).toBeNull();
     expect(screen.queryByRole("heading", { name: "Всё, что нужно для подготовки" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Всё для подготовки к ОГЭ и ЕГЭ уже внутри" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Домашку проверяет платформа, а не Вы" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Тарифы" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Частые вопросы" })).toBeNull();
-    expect(screen.queryByRole("heading", { name: "Добавьте первого ученика сегодня" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Выберите формат подготовки" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Всё для занятий в одном месте" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Что говорят учителя" })).toBeNull();
     expect(screen.queryByText(/Тарифы и цены/)).toBeNull();
-    expect(screen.getByRole("heading", { level: 1, name: /Доска, видеозвонки/ })).toBeTruthy();
   }
 
-  it("HomePage: anonymous sees hero and value paths, not sales blocks", async () => {
+  it("HomePage: anonymous starts at «Что вам нужно сейчас?»", async () => {
     renderHome({ authenticated: false });
     await waitFor(() => {
-      expect(screen.getByText("Для репетиторов и учителей математики и информатики")).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "Что вам нужно сейчас?" })).toBeTruthy();
     });
-    expectHomeWithoutSales();
+    expectHomeStartsWithNeeds();
   });
 
   it("HomePage: Start teacher sees the same short homepage", async () => {
@@ -105,10 +110,10 @@ describe("TutorLanding / HomePage r153", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Что вам нужно сейчас?" })).toBeTruthy();
     });
-    expectHomeWithoutSales();
+    expectHomeStartsWithNeeds();
   });
 
-  it("HomePage: paid teacher sees hero and value paths, not sales blocks", async () => {
+  it("HomePage: paid teacher sees the same first block", async () => {
     renderHome({
       authenticated: true,
       user: { role: "teacher", has_active_paid_subscription: true },
@@ -116,6 +121,6 @@ describe("TutorLanding / HomePage r153", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Что вам нужно сейчас?" })).toBeTruthy();
     });
-    expectHomeWithoutSales();
+    expectHomeStartsWithNeeds();
   });
 });

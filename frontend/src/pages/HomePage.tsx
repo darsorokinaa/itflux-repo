@@ -1,6 +1,5 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { fetchCabinetSession } from "../utils/cabinetAuth";
 import {
   BookOpenCheck,
   Target,
@@ -9,8 +8,8 @@ import {
   Users,
 } from "lucide-react";
 import HeroSection from "../components/HeroSection";
-import TutorLanding from "../components/tutorLanding/TutorLanding";
 import TeacherQuotesBlock from "../components/TeacherQuotesBlock";
+import SeasonalHeroSticker from "../seasonal/SeasonalHeroSticker";
 import { type LevelId } from "../data/levels";
 import { formatTasksCount } from "../utils/formatTasksCount";
 import { formatIntRu } from "../utils/formatIntRu";
@@ -79,9 +78,6 @@ export default function HomePage() {
   const { hash } = useLocation();
   const [selected, setSelected] = useState<LevelId | null>(null);
   const [stats, setStats] = useState<PlatformStats | null>(null);
-  // r153: пока /me неизвестен — не монтируем TutorLanding (без вспышки у платных).
-  const [landingReady, setLandingReady] = useState(false);
-  const [isTeacher, setIsTeacher] = useState(false);
   const heroTasksCountLabel =
     stats != null && stats.total_tasks > 0 ? formatIntRu(stats.total_tasks) : "11 667";
   const heroSubjectsCountLabel =
@@ -92,26 +88,6 @@ export default function HomePage() {
     stats != null && stats.generated_variants_count >= 0
       ? formatIntRu(stats.generated_variants_count)
       : "0";
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchCabinetSession()
-      .then((data) => {
-        if (cancelled) return;
-        const user = data?.authenticated ? data.user : null;
-        const teacher = user?.role === "teacher";
-        setIsTeacher(Boolean(teacher));
-        setLandingReady(true);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setIsTeacher(false);
-        setLandingReady(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -154,12 +130,6 @@ export default function HomePage() {
 
       <div className="digital-flow-page__wrap">
         <main className="home-page__main">
-          {/* Продающие секции лендинга на главной не показываем никому. Hero и стикер — всем. */}
-          {!landingReady ? (
-            <div className="tl" aria-busy="true" data-landing-pending="1" />
-          ) : (
-            <TutorLanding heroOnly isTeacher={isTeacher} />
-          )}
           <HomeValuePathsBlock />
           {SHOW_HOME_SALES ? (
             <>
@@ -314,10 +284,13 @@ const HOME_VALUE_PATHS: ReadonlyArray<HomeValuePath> = [
 
 function HomeValuePathsBlock() {
   return (
-    <section className="home-value-paths" aria-labelledby="home-value-paths-heading">
-      <h2 id="home-value-paths-heading" className="home-value-paths__heading">
-        Что вам нужно сейчас?
-      </h2>
+    <section className="home-value-paths home-now" aria-labelledby="home-value-paths-heading">
+      <div className="home-now__top">
+        <SeasonalHeroSticker />
+        <h1 id="home-value-paths-heading" className="home-value-paths__heading">
+          Что вам нужно сейчас?
+        </h1>
+      </div>
       <div className="home-value-paths__grid">
         {HOME_VALUE_PATHS.map((item) => (
           <Link

@@ -415,13 +415,31 @@ html.cb-board-editor-open .seasonal-decor-layer--chrome {
   color: var(--seasonal-sticker-title, #5a3d0c);
 }
 
-/* Стикер внутри белого hero главной — в колонке, не за краем экрана. */
+/* Стикер рядом с блоком «Что вам нужно сейчас?» — в потоке, не за краем. */
+.home-now {
+  padding-top: 28px;
+}
+
+.home-now__top {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  gap: 16px 28px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.home-now .home-value-paths__heading {
+  margin-bottom: 0;
+}
+
+.home-now .seasonal-hero-sticker-cluster,
 .tl-hero .seasonal-hero-sticker-cluster {
   position: relative;
   left: auto;
   bottom: auto;
   width: min(240px, 100%);
-  margin: 18px 0 0;
+  margin: 0;
   z-index: 2;
 }
 
@@ -430,6 +448,7 @@ html.cb-board-editor-open .seasonal-decor-layer--chrome {
     display: none;
   }
 
+  .home-now .seasonal-hero-sticker-cluster,
   .tl-hero .seasonal-hero-sticker-cluster {
     display: block;
   }
