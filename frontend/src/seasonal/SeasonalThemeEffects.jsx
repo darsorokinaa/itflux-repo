@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
+import { resolveAnimationCount } from "./seasonalThemeApi";
 
 const PLAYED_KEY = "seasonal_theme_fx_played_v1";
 
@@ -44,10 +45,7 @@ export default function SeasonalThemeEffects({ theme, intensity, isMobile }) {
       : null;
   const shouldRun = Boolean(motionType) && !done;
 
-  const maxElements = Math.min(
-    Number(theme?.animation?.max_elements) || 20,
-    intensity === "festive" ? 40 : intensity === "normal" ? 28 : 16,
-  );
+  const maxElements = resolveAnimationCount(theme?.animation?.max_elements);
   const fpsLimit = Math.min(Number(theme?.animation?.fps_limit) || 24, isMobile ? 18 : 30);
 
   useEffect(() => {

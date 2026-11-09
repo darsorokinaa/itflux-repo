@@ -221,12 +221,11 @@ html.seasonal-theme-active .seasonal-lesson-card {
 
 /* Фон бокового меню кабинета */
 html.seasonal-theme-active .cabinet-sidebar,
-html.seasonal-theme-active .cabinet-nav,
 html.seasonal-theme-active aside.cabinet-sidebar {
-  background-image: var(--seasonal-menu-background, none);
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
+  background-image: var(--seasonal-menu-background, none) !important;
+  background-size: cover !important;
+  background-position: center !important;
+  background-repeat: no-repeat !important;
 }
 
 html.seasonal-theme-active .cabinet-header {
@@ -391,6 +390,29 @@ html.cb-board-editor-open .seasonal-decor-layer--chrome {
   font-size: 0.7rem;
   line-height: 1.45;
   color: var(--seasonal-sticker-text, #4a3a1a);
+}
+
+.seasonal-hero-sticker__history {
+  display: inline-block;
+  max-width: 100%;
+  margin: 10px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--seasonal-sticker-title, #5a3d0c);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.3;
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.seasonal-hero-sticker__history:hover,
+.seasonal-hero-sticker__history:focus-visible {
+  color: var(--on-page-link-hover, #0b2f9f);
 }
 
 @media (max-width: 1200px) {
@@ -979,6 +1001,155 @@ button.cb-more-card {
 .cb-board-editor .seasonal-fx-canvas,
 .cb-board-editor .app-shell-pattern,
 .video-lesson-page .seasonal-fx-canvas,
-.video-lesson-page .app-shell-pattern {
+.video-lesson-page .app-shell-pattern,
+html.seasonal-heavy .seasonal-fx-canvas,
+html.seasonal-heavy .seasonal-decor-layer:not(.seasonal-decor-layer--chrome),
+html.seasonal-heavy .app-shell-pattern {
   display: none !important;
+}
+
+/* Цветовой слой поверх паттерна, под контентом. */
+html.seasonal-theme-active:not(.seasonal-heavy) .app-shell::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: var(--seasonal-page-overlay, transparent);
+  opacity: var(--seasonal-page-overlay-opacity, 0);
+}
+
+/* Паттерн и рамка реальных карточек, не только неиспользуемого класса seasonal-task-card. */
+html.seasonal-theme-active:not(.seasonal-heavy) :is(.td-panel:not(.td-live):not(.td-alert), .cb-widget, .cb-metric, .cb-hw-card, .cb-group-card, .all-tasks-item__card, .all-tasks-filters, .teacher-workspace-card, .mtb-row, .seasonal-task-card, .seasonal-surface) {
+  position: relative;
+  isolation: isolate;
+  background-color: var(--seasonal-card-background);
+  border-color: var(--seasonal-card-border);
+  box-shadow: inset 3px 0 0 var(--seasonal-accent), var(--shadow-card, 0 8px 24px rgba(15, 23, 42, 0.06));
+}
+
+html.seasonal-theme-active:not(.seasonal-heavy) :is(.td-panel:not(.td-live):not(.td-alert), .cb-widget, .cb-metric, .cb-hw-card, .cb-group-card, .all-tasks-item__card, .all-tasks-filters, .teacher-workspace-card, .mtb-row, .seasonal-task-card, .seasonal-surface)::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background-image: var(--seasonal-card-pattern, none);
+  background-repeat: repeat;
+  background-size: 80px 80px;
+  opacity: var(--seasonal-card-pattern-opacity, 0.12);
+}
+
+/* Дашборд кабинета рисует свой серый холст — иначе паттерн страницы не виден. */
+html.seasonal-theme-active:not(.seasonal-heavy) .td-page,
+html.seasonal-theme-active:not(.seasonal-heavy) .cb-layout:has(.td-page) .cabinet-main,
+html.seasonal-theme-active:not(.seasonal-heavy) .cabinet-layout:has(.td-page) .cabinet-main {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+html.seasonal-theme-active.seasonal-dark-bg :is(.td-panel:not(.td-live):not(.td-alert), .cb-widget, .cb-metric, .cb-hw-card, .cb-group-card, .all-tasks-item__card, .all-tasks-filters, .teacher-workspace-card, .mtb-row, table, pre, .task-text) {
+  background-color: var(--seasonal-card-background, #fff6ea);
+  color: var(--on-card-text);
+}
+
+html.seasonal-theme-active.seasonal-dark-bg :is(.td-panel:not(.td-live):not(.td-alert), .cb-widget, .cb-metric, .cb-hw-card, .all-tasks-item__card, .teacher-workspace-card, table, pre, .task-text) :is(a, .td-text-link) {
+  color: var(--on-card-link);
+}
+
+html.seasonal-theme-active.seasonal-dark-bg :is(code, mjx-container, .katex) {
+  color: var(--on-card-text);
+}
+
+html.seasonal-theme-active.seasonal-dark-bg :is(.flux-header, .flux-secondary, .site-footer, .cabinet-header) {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  color: var(--on-page-text);
+  border-color: color-mix(in srgb, var(--on-page-text) 28%, transparent);
+  box-shadow: none;
+}
+
+html.seasonal-theme-active.seasonal-dark-bg .cabinet-sidebar {
+  background-color: transparent !important;
+  color: var(--on-page-text);
+}
+
+html.seasonal-theme-active.seasonal-dark-bg :is(
+  .flux-wordmark,
+  .flux-brand-caption,
+  .flux-secondary-link,
+  .flux-nav-link,
+  .flux-help,
+  .flux-cabinet__label,
+  .site-footer,
+  .site-footer-copy,
+  .site-footer-sep,
+  .cabinet-header-section,
+  .cabinet-header-greeting,
+  .cabinet-header-role,
+  .section-head__title,
+  .cb-page-title,
+  .cb-dash-section__title,
+  .td-welcome h1,
+  .td-eyebrow,
+  .td-welcome__lead,
+  .mtb-empty h2,
+  .mtb-empty p,
+  .home-value-paths__pricing,
+  .home-value-paths__pricing a
+) {
+  color: var(--on-page-text);
+}
+
+html.seasonal-theme-active.seasonal-dark-bg :is(
+  .flux-brand-caption,
+  .section-head__lead,
+  .cb-page-sub,
+  .td-eyebrow,
+  .td-welcome__lead,
+  .mtb-empty p,
+  .site-footer-copy,
+  .site-footer-sep
+) {
+  color: var(--on-page-text-secondary);
+}
+
+html.seasonal-theme-active.seasonal-dark-bg :is(
+  .site-footer-link,
+  .mtb-empty__link,
+  .home-value-paths__pricing a,
+  .flux-header a.flux-nav-link[aria-current="page"]
+) {
+  color: var(--on-page-link);
+}
+
+html.seasonal-theme-active.seasonal-dark-bg .site-footer-link:hover {
+  color: var(--on-page-link-hover);
+}
+
+html.seasonal-theme-active.seasonal-dark-bg .cabinet-sidebar :is(
+  a.cabinet-nav-item:not(.active),
+  button.cabinet-nav-item:not(.active),
+  .cabinet-nav-group__label,
+  .cabinet-sidebar-bottom__label,
+  .cabinet-sidebar__drawer-title
+) {
+  color: var(--on-page-text);
+}
+
+html.seasonal-theme-active.seasonal-dark-bg :is(
+  .flux-inline-search,
+  .cabinet-header-search,
+  input,
+  textarea,
+  select
+) {
+  color: var(--on-card-text);
+}
+
+html.seasonal-theme-active.seasonal-dark-bg :is(.flux-inline-search, .cabinet-header-search) {
+  background: #fff;
 }

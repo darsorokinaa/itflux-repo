@@ -256,6 +256,9 @@ export const HEAVY_ROUTE_PATTERNS = [
   /^\/cabinet\/interactives\/[^/]+\/play/,
   /^\/cabinet\/student\/interactives\/\d+\/play/,
   /^\/lesson\/join/,
+  // Решение варианта: своя тема варианта, без сезонного декора и снега.
+  /^\/(?:ege|oge|vpr)\/[^/]+\/variant(?:\/|$)/,
+  /^\/variant-live(?:\/|$)/,
 ];
 
 export function isHeavyRoute(pathname) {
@@ -309,6 +312,13 @@ export function themeAppliesToRoute(theme, pathname) {
   if (routeMatchesList(pathname, exclude)) return false;
   if (include.length && !routeMatchesList(pathname, include)) return false;
   return true;
+}
+
+/** Число частиц берётся из темы. Интенсивность только выключает эффект, не срезает max. */
+export function resolveAnimationCount(maxElements) {
+  const configured = Number(maxElements);
+  const count = Number.isFinite(configured) && configured > 0 ? configured : 20;
+  return Math.min(60, Math.max(1, Math.round(count)));
 }
 
 export function resolveDeviceIntensity(themeIntensity, { isMobile, prefersReducedMotion, animationsEnabled }) {
