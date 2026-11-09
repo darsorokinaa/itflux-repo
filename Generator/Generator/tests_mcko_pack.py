@@ -173,6 +173,59 @@ class MckoSeparationTests(TestCase):
         self.assertFalse(task.is_active)
         self.assertTrue(Task.objects.filter(pk=task.pk).exists())
 
+    def test_inf7u_reimport_stays_advanced_and_keeps_label(self):
+        item = {
+            "id": "inf7u-u-01-01",
+            "subject": "информатика",
+            "grade": 7,
+            "number": 1,
+            "level": "авторский набор, по материалам МЦКО",
+            "level_status": "author_set",
+            "author": "Цифровой поток",
+            "condition": "Откройте файл ученика.",
+            "answer": "1",
+            "answer_format": "number",
+            "answer_data": {"value": "1"},
+            "solution": "Разбор не для ученика.",
+            "criteria": [[1, "Дан верный ответ"], [0, "Нет"]],
+            "max_score": 1,
+            "official_task_difficulty": "Б",
+            "specification_source": {"document": "образец, год не указан", "level": "Б"},
+            "verification": {"answer_B": "1"},
+            "files": None,
+        }
+        blob = BytesIO()
+        payload = {"pack": "inf7u", "count": 1, "items": [item], "author": "Цифровой поток"}
+        with zipfile.ZipFile(blob, "w") as archive:
+            archive.writestr("packs/inf7u/inf7u_bank.json", json.dumps(payload, ensure_ascii=False))
+            archive.writestr("packs/inf7u/README.md", "авторский набор, по материалам МЦКО")
+        path = Path(self._tmpdir()) / "inf7u.zip"
+        path.write_bytes(blob.getvalue())
+        call_command("vpr_import_pack", str(path), "--apply", "--batch", "mcko_adv_20261108")
+        task = Task.objects.get(source_key="mcko_adv:inf7u-u-01-01")
+        self.assertTrue(task.vpr_advanced)
+        self.assertFalse(task.vpr_basic)
+        self.assertEqual(task.answer_spec["level"], "авторский набор, по материалам МЦКО")
+        self.assertIn("авторский набор", task.task.task_title)
+        self.assertNotIn("МЦКО-2026", task.task.task_title)
+        self.assertNotIn("2026", task.task.task_title)
+        self.assertNotIn("МЦКО-2026", json.dumps(task.answer_spec, ensure_ascii=False))
+        call_command("vpr_import_pack", str(path), "--apply", "--batch", "mcko_adv_20261108")
+        again = Task.objects.get(source_key="mcko_adv:inf7u-u-01-01")
+        self.assertEqual(again.pk, task.pk)
+        self.assertTrue(again.vpr_advanced)
+        self.assertFalse(again.vpr_basic)
+        self.assertEqual(again.answer_spec["level"], "авторский набор, по материалам МЦКО")
+        again.is_active = True
+        again.status = Task.Status.READY
+        again.save(update_fields=["is_active", "status"])
+        shown = self.client.get(
+            f"/api/vpr/inf/task-bank/?grade=7&advanced=1&task_list_id={again.task_id}&per_page=20"
+        ).json()["tasks"]
+        self.assertEqual(shown[0]["bank_note"], "авторский набор, не официальная ВПР")
+        self.assertNotIn("МЦКО-2026", shown[0]["bank_note"])
+        self.assertNotIn("2026", shown[0]["task_title"])
+
     def _tmpdir(self):
         import tempfile
         if not hasattr(self, "_root"):
@@ -214,7 +267,7 @@ class MckoFullPackTests(TestCase):
         self.assertEqual(imported.count(), 980)
         self.assertEqual(set(imported.values_list("is_active", flat=True)), {False})
         self.assertEqual(imported.filter(source_key__startswith="mcko_adv:ma", vpr_advanced=True, vpr_basic=False).count(), 820)
-        self.assertEqual(imported.filter(source_key__startswith="mcko_adv:inf7u", vpr_advanced=False, vpr_basic=True).count(), 160)
+        self.assertEqual(imported.filter(source_key__startswith="mcko_adv:inf7u", vpr_advanced=True, vpr_basic=False).count(), 160)
         self.assertFalse(imported.exclude(source_key__startswith="mcko_adv:").exists())
         self.assertFalse(imported.filter(source_key__startswith="ma7-b-").exists())
         self.assertEqual(imported.filter(task__level__level="vpr").count(), 980)

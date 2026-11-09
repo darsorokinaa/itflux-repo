@@ -1963,9 +1963,7 @@ function ExamPage() {
     const cacheKey = getCriteriaCacheKey(task);
     const cache = cacheKey != null ? criteriaByTaskList[cacheKey] : null;
     const axes = cache?.axes || [];
-    const maxScore = cache?.max_score != null
-      ? cache.max_score
-      : taskMaxPoints(task);
+    const maxScore = getTaskMaxScore(task);
     setSelectedAxesByTask((prev) => {
       const nextAxes = { ...(prev[tid] || {}), [axisCode]: Number(score) };
       const result = computeAxesTaskScore(axes, nextAxes);
@@ -2388,21 +2386,18 @@ function ExamPage() {
   });
 
   const getTaskMaxScore = (task) => {
+    const own = task?.max_score != null && task.max_score !== "" ? taskMaxPoints(task) : null;
     const key = getCriteriaCacheKey(task);
     const cached = key != null ? criteriaByTaskList[key]?.max_score : null;
-    if (cached != null && cached !== "") return taskMaxPoints({ max_score: cached });
+    const listed = cached != null && cached !== "" ? taskMaxPoints({ max_score: cached }) : null;
+    if (task?.vpr_class != null && own != null) return own;
+    if (listed != null) return listed;
+    if (own != null) return own;
     return taskMaxPoints(task);
   };
   const part2ScoreSum = part2Tasks.reduce((sum, t) => sum + (scores[t.id] || 0), 0);
   /** Не useMemo: эти вычисления ниже ранних return (variant null) — хуки здесь ломали порядок вызовов. */
-  const part2MaxAggregate = part2Tasks.reduce((sum, t) => {
-    const key = getCriteriaCacheKey(t);
-    const cached =
-      key != null && criteriaByTaskList[key]?.max_score != null
-        ? criteriaByTaskList[key].max_score
-        : null;
-    return sum + (cached ?? getTaskMaxScore(t));
-  }, 0);
+  const part2MaxAggregate = part2Tasks.reduce((sum, t) => sum + getTaskMaxScore(t), 0);
   const part2EvaluatedCount = part2Tasks.filter((t) => {
     const key = getCriteriaCacheKey(t);
     const cache = key != null ? criteriaByTaskList[key] : null;
@@ -2850,7 +2845,7 @@ function ExamPage() {
     const cache = criteriaByTaskList[cacheKey] || {};
     const criteriaList = cache.criteria ?? [];
     const axes = cache.axes ?? [];
-    const maxSc = cache.max_score ?? getTaskMaxScore(task);
+    const maxSc = getTaskMaxScore(task);
     const scoringMode = cache.scoring_mode || "single";
 
     if (scoringMode === "axes" && axes.length > 0) {

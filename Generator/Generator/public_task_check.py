@@ -54,9 +54,9 @@ def api_task_check_answer(request, task_id):
     if isinstance(spec, dict) and spec.get("answer_format"):
         from .vpr_answer_spec import score_vpr_spec
 
-        maximum = task.max_score or 1
-        if task.task_id and getattr(task.task, "max_score", None) is not None:
-            maximum = task.task.max_score
+        from .variant_scoring import resolved_task_max_score
+
+        maximum = resolved_task_max_score(task, task.task)
         graded = score_vpr_spec(spec, answer, max_score=maximum)
         status = graded["status"]
         correct = True if status == "correct" else False if status == "incorrect" else None

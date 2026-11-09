@@ -36,6 +36,7 @@ export type BankTask = {
   part_id?: number | null;
   part_title?: string | null;
   author?: string | null;
+  student_files?: Array<{ name: string; url: string }>;
   vpr_class?: number | null;
   vpr_advanced?: boolean;
   vpr_basic?: boolean;
@@ -54,6 +55,20 @@ export const EMPTY_STAFF_TASK_LISTS: StaffTaskListOption[] = [];
 export const EMPTY_STAFF_GROUPS: StaffGroupOption[] = [];
 export const EMPTY_STAFF_SUBTOPICS: StaffSubtopicOption[] = [];
 export const EMPTY_TASK_TAGS: TaskTag[] = [];
+
+function BankStudentFiles({ task }: { task: BankTask }) {
+  const files = Array.isArray(task.student_files) ? task.student_files : [];
+  if (!files.length) return null;
+  return (
+    <div className="exam-pack-files">
+      {files.map((file) => (
+        <a key={`${file.name}:${file.url}`} href={file.url}>
+          {file.name}
+        </a>
+      ))}
+    </div>
+  );
+}
 
 export function isFunctionGraphTask(
   task: Pick<BankTask, "task_title" | "subtopic" | "task_number">
@@ -210,6 +225,7 @@ const AllTasksTaskBody = memo(function AllTasksTaskBody({
               progTaskSheet={useProgTaskSheet}
               taskNumber={taskNumber}
             />
+            <BankStudentFiles task={task} />
             {showAttachmentsFallback || hasFiles ? <TaskFileAttachments task={task} /> : null}
             {task.author ? <div className="task-author">{task.author}</div> : null}
           </LazyVisible>

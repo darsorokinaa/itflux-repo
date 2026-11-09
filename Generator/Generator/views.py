@@ -2895,6 +2895,15 @@ def api_task_bank(request, level, subject):
             )
 
         attachments = _task_public_attachments(request, task)
+        task_html = (
+            task_text_raw
+            if raw_html
+            else process_latex(
+                task_text_raw,
+                for_browser=True,
+                keep_layout_tables=keep_tables,
+            )
+        )
         result.append({
             'id': task.id,
             'task_list_id': task.task_id,
@@ -2902,21 +2911,14 @@ def api_task_bank(request, level, subject):
             'task_title': tl.task_title if tl else '',
             'subtopic': task.subtopic.title if task.subtopic else None,
             'subtopic_id': task.subtopic_id,
-            'max_score': tl.max_score if tl else 1,
+            'max_score': _resolved_bank_max_score(task, tl),
             'part_id': tl.part_id if tl else None,
             'part_title': (tl.part.part_title if tl and tl.part else None),
-            'text': (
-                task_text_raw
-                if raw_html
-                else process_latex(
-                    task_text_raw,
-                    for_browser=True,
-                    keep_layout_tables=keep_tables,
-                )
-            ),
+            'text': _bank_public_html(task_html, task),
             'answer': str(task.answer or ''),
             'file_url': attachments[0]["url"] if attachments else None,
             'attachments': attachments,
+            'student_files': _bank_student_files(task),
             'author': (task.author or '').strip() or None,
             'vpr_class': task.vpr_class,
             'vpr_advanced': bool(task.vpr_advanced),
@@ -3197,6 +3199,31 @@ def _group_ids_for_tasks(task_ids):
     return mapping
 
 
+def _resolved_bank_max_score(task, task_list):
+    from .variant_scoring import resolved_task_max_score
+
+    if task is None:
+        return getattr(task_list, "max_score", None) or 1
+    return resolved_task_max_score(task, task_list)
+
+
+def _bank_student_files(task):
+    """Только файлы ученика. Эталон учителя в банк не попадает."""
+    if task is None:
+        return []
+    from .vpr_pack_files import student_file_descriptors
+
+    return student_file_descriptors(task)
+
+
+def _bank_public_html(html, task):
+    spec = getattr(task, "answer_spec", None) if task is not None else None
+    files = spec.get("files") if isinstance(spec, dict) else None
+    from .vpr_pack_files import scrub_teacher_links
+
+    return scrub_teacher_links(html or "", files)
+
+
 def _bank_task_file_url(request, task):
     """Первый публичный URL вложения (legacy files или TaskAttachment)."""
     items = _task_public_attachments(request, task)
@@ -3263,6 +3290,15 @@ def _serialize_bank_group_member(request, member, *, raw_html=False):
                 "bare innerimg repair skipped for task %s", t.id, exc_info=True
             )
     attachments = _task_public_attachments(request, t) if t else []
+    task_html = (
+        task_text_raw
+        if raw_html
+        else process_latex(
+            task_text_raw,
+            for_browser=True,
+            keep_layout_tables=keep_tables,
+        )
+    ) if t else ""
     return {
         'id': t.id if t else None,
         'task_list_id': tl.id if tl else None,
@@ -3270,21 +3306,14 @@ def _serialize_bank_group_member(request, member, *, raw_html=False):
         'task_title': tl.task_title if tl else '',
         'subtopic': t.subtopic.title if t and t.subtopic else None,
         'subtopic_id': t.subtopic_id if t else None,
-        'max_score': tl.max_score if tl else 1,
+        'max_score': _resolved_bank_max_score(t, tl),
         'part_id': tl.part_id if tl else None,
         'part_title': (part.part_title if part else None),
-        'text': (
-            task_text_raw
-            if raw_html
-            else process_latex(
-                task_text_raw,
-                for_browser=True,
-                keep_layout_tables=keep_tables,
-            )
-        ) if t else '',
+        'text': _bank_public_html(task_html, t),
         'answer': str(t.answer or '') if t else '',
         'file_url': attachments[0]["url"] if attachments else None,
         'attachments': attachments,
+        'student_files': _bank_student_files(t),
         'author': (t.author or '').strip() or None if t else None,
         'added_at': t.added_at.strftime('%d.%m.%Y') if t and t.added_at else None,
         'tags': _serialize_task_tags(t),
@@ -4215,12 +4244,7 @@ def _variant_detail_payload(request, variant, *, include_answers=True):
         attachments = _task_public_attachments(request, item.task)
         file_url = attachments[0]["url"] if attachments else None
 
-        if task_list:
-            max_score = getattr(task_list, "max_score", 1)
-        else:
-            max_score = getattr(item.task, "max_score", None)
-            if max_score is None:
-                max_score = 1
+        max_score = _resolved_bank_max_score(item.task, task_list)
 
         st = getattr(item.task, "subtopic", None)
         row = {
