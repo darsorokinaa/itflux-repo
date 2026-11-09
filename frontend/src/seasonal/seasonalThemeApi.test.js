@@ -128,6 +128,16 @@ describe("seasonalThemeApi", () => {
     expect(contrastRatio(cardLink, onCream)).toBeGreaterThanOrEqual(4.5);
   });
 
+  it("does not paint light seasonal text onto light header controls", () => {
+    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "seasonal-theme.css"), "utf8");
+    const dark = css.split("html.seasonal-theme-active.seasonal-dark-bg").slice(1).join("\n");
+    expect(dark).not.toMatch(/\.flux-help[\s,{][^}]*--on-page-text/);
+    expect(dark).not.toMatch(/input,\s*textarea/);
+    expect(dark).toMatch(/\.flux-nav-link:not\(:hover\):not\(\[aria-current="page"\]\)/);
+    expect(dark).not.toMatch(/\.jg-hero__title/);
+    expect(dark).not.toMatch(/\.seasonal-hero-sticker[^-]/);
+  });
+
   it("detects meeting and board chrome routes", () => {
     expect(isMeetingChromeRoute("/cabinet/meetings/uuid")).toBe(true);
     expect(isMeetingChromeRoute("/cabinet/boards/abc")).toBe(true);

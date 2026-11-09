@@ -16,6 +16,7 @@ import {
   PenLine,
 } from "lucide-react";
 import { fmtRub, useTariffPlans, yearDiscountPercent, type PublicPlan } from "./useTariffPlans";
+import SeasonalHeroSticker from "../../seasonal/SeasonalHeroSticker";
 import "./tutor-landing.css";
 import imgBank from "./img/bank.webp";
 import imgTextbook from "./img/textbook.webp";
@@ -31,9 +32,9 @@ export const CONTACT_EMAIL = "itflux.academy@yandex.com";
 const REGISTER_URL = `/cabinet/login?mode=register&next=${encodeURIComponent("/cabinet")}`;
 const LANDING_SLUGS = ["start", "teacher", "pro"] as const;
 
-type Props = { isTeacher?: boolean };
+type Props = { isTeacher?: boolean; heroOnly?: boolean };
 
-export default function TutorLanding({ isTeacher = false }: Props) {
+export default function TutorLanding({ isTeacher = false, heroOnly = false }: Props) {
   const { plans, failed } = useTariffPlans();
   const byslug = (s: string) => plans?.find((p) => p.slug === s);
   const landingPlans = LANDING_SLUGS.map(byslug).filter(Boolean) as PublicPlan[];
@@ -41,6 +42,18 @@ export default function TutorLanding({ isTeacher = false }: Props) {
   const minPaid = paidPlans.length ? Math.min(...paidPlans.map((p) => Number(p.price_month))) : null;
   const discount = paidPlans.map(yearDiscountPercent).find((x) => x != null) ?? null;
   const startCta = isTeacher ? "/cabinet" : REGISTER_URL;
+
+  if (heroOnly) {
+    return (
+      <div className="tl" data-tutor-landing="hero">
+        <TutorHero ctaTo={startCta} studentsTo={
+          isTeacher
+            ? "/cabinet/students"
+            : `/cabinet/login?mode=register&next=${encodeURIComponent("/cabinet/students")}`
+        } />
+      </div>
+    );
+  }
 
   return (
     <div className="tl" data-tutor-landing="1">
@@ -92,6 +105,7 @@ function TutorHero({ ctaTo, studentsTo }: { ctaTo: string; studentsTo: string })
             <Link className="tl-btn" to={ctaTo}>Попробовать бесплатно</Link>
             <Link className="tl-alt" to={studentsTo}>Добавить первого ученика →</Link>
           </div>
+          <SeasonalHeroSticker />
           <div className="tl-tags">
             <span>ОГЭ</span><span>ЕГЭ</span><span>Математика</span><span>Информатика</span>
           </div>
