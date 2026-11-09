@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import {
   buildSeasonalCssVars,
@@ -105,7 +106,8 @@ describe("seasonalThemeApi", () => {
   });
 
   it("uses light on-page tokens with WCAG AA contrast on #8E2632", () => {
-    const css = readFileSync(join(process.cwd(), "src/styles/tokens.css"), "utf8");
+    const cssPath = join(dirname(fileURLToPath(import.meta.url)), "../styles/tokens.css");
+    const css = readFileSync(cssPath, "utf8");
     const block = css.split("html.seasonal-theme-active.seasonal-dark-bg")[1] || "";
     const pick = (name) => {
       const match = block.match(new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6})`));
@@ -125,25 +127,6 @@ describe("seasonalThemeApi", () => {
     expect(contrastRatio(card, onCream)).toBeGreaterThanOrEqual(4.5);
     expect(contrastRatio(cardLink, onCream)).toBeGreaterThanOrEqual(4.5);
   });
-
-function channel(value) {
-  const c = value / 255;
-  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-}
-
-function luminance(hex) {
-  const h = hex.replace("#", "");
-  const r = channel(parseInt(h.slice(0, 2), 16));
-  const g = channel(parseInt(h.slice(2, 4), 16));
-  const b = channel(parseInt(h.slice(4, 6), 16));
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-function contrastRatio(fg, bg) {
-  const lighter = Math.max(luminance(fg), luminance(bg));
-  const darker = Math.min(luminance(fg), luminance(bg));
-  return (lighter + 0.05) / (darker + 0.05);
-}
 
   it("detects meeting and board chrome routes", () => {
     expect(isMeetingChromeRoute("/cabinet/meetings/uuid")).toBe(true);
@@ -231,3 +214,22 @@ function contrastRatio(fg, bg) {
     expect(readCachedThemePayload()).toBeNull();
   });
 });
+
+function channel(value) {
+  const c = value / 255;
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+
+function luminance(hex) {
+  const h = hex.replace("#", "");
+  const r = channel(parseInt(h.slice(0, 2), 16));
+  const g = channel(parseInt(h.slice(2, 4), 16));
+  const b = channel(parseInt(h.slice(4, 6), 16));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrastRatio(fg, bg) {
+  const lighter = Math.max(luminance(fg), luminance(bg));
+  const darker = Math.min(luminance(fg), luminance(bg));
+  return (lighter + 0.05) / (darker + 0.05);
+}

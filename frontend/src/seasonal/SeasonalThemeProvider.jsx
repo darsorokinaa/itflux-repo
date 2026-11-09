@@ -54,6 +54,18 @@ function detectLowEnd() {
   return false;
 }
 
+const SEASONAL_ROOT_CLASSES = [
+  "seasonal-theme-active",
+  "seasonal-has-pattern",
+  "seasonal-dark-bg",
+  "seasonal-heavy",
+];
+
+function clearSeasonalRoot(root) {
+  root.classList.remove(...SEASONAL_ROOT_CLASSES);
+  root.removeAttribute("data-seasonal-theme");
+}
+
 function applyCssVars(vars) {
   const root = document.documentElement;
   const keys = Object.keys(vars);
@@ -313,37 +325,25 @@ export function SeasonalThemeProvider({ children }) {
 
   useEffect(() => {
     const root = document.documentElement;
-    const darkBg = Boolean(effectiveTheme?.dark_background) && !heavy;
     if (!effectiveTheme) {
-      root.classList.remove(
-        "seasonal-theme-active",
-        "seasonal-has-pattern",
-        "seasonal-dark-bg",
-        "seasonal-heavy",
-      );
-      root.removeAttribute("data-seasonal-theme");
+      clearSeasonalRoot(root);
       return undefined;
     }
+    const showPattern = allowBackgroundPattern && !heavy;
     const vars = buildSeasonalCssVars(effectiveTheme);
-    if (!allowBackgroundPattern || heavy) {
+    if (!showPattern) {
       delete vars["--seasonal-page-pattern"];
       delete vars["--seasonal-page-pattern-mobile"];
     }
     const cleanup = applyCssVars(vars);
     root.classList.add("seasonal-theme-active");
-    root.classList.toggle("seasonal-has-pattern", allowBackgroundPattern && !heavy);
-    root.classList.toggle("seasonal-dark-bg", darkBg);
+    root.classList.toggle("seasonal-has-pattern", showPattern);
+    root.classList.toggle("seasonal-dark-bg", Boolean(effectiveTheme.dark_background) && !heavy);
     root.classList.toggle("seasonal-heavy", heavy);
     root.setAttribute("data-seasonal-theme", effectiveTheme.slug || "");
     return () => {
       cleanup();
-      root.classList.remove(
-        "seasonal-theme-active",
-        "seasonal-has-pattern",
-        "seasonal-dark-bg",
-        "seasonal-heavy",
-      );
-      root.removeAttribute("data-seasonal-theme");
+      clearSeasonalRoot(root);
     };
   }, [effectiveTheme, allowBackgroundPattern, heavy]);
 

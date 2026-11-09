@@ -1020,19 +1020,7 @@ html.seasonal-theme-active:not(.seasonal-heavy) .app-shell::after {
 }
 
 /* Паттерн и рамка реальных карточек, не только неиспользуемого класса seasonal-task-card. */
-html.seasonal-theme-active:not(.seasonal-heavy) :is(
-  .td-panel:not(.td-live):not(.td-alert),
-  .cb-widget,
-  .cb-metric,
-  .cb-hw-card,
-  .cb-group-card,
-  .all-tasks-item__card,
-  .all-tasks-filters,
-  .teacher-workspace-card,
-  .mtb-row,
-  .seasonal-task-card,
-  .seasonal-surface
-) {
+html.seasonal-theme-active:not(.seasonal-heavy) :is(.td-panel:not(.td-live):not(.td-alert), .cb-widget, .cb-metric, .cb-hw-card, .cb-group-card, .all-tasks-item__card, .all-tasks-filters, .teacher-workspace-card, .mtb-row, .seasonal-task-card, .seasonal-surface) {
   position: relative;
   isolation: isolate;
   background-color: var(--seasonal-card-background);
@@ -1040,19 +1028,7 @@ html.seasonal-theme-active:not(.seasonal-heavy) :is(
   box-shadow: inset 3px 0 0 var(--seasonal-accent), var(--shadow-card, 0 8px 24px rgba(15, 23, 42, 0.06));
 }
 
-html.seasonal-theme-active:not(.seasonal-heavy) :is(
-  .td-panel:not(.td-live):not(.td-alert),
-  .cb-widget,
-  .cb-metric,
-  .cb-hw-card,
-  .cb-group-card,
-  .all-tasks-item__card,
-  .all-tasks-filters,
-  .teacher-workspace-card,
-  .mtb-row,
-  .seasonal-task-card,
-  .seasonal-surface
-)::before {
+html.seasonal-theme-active:not(.seasonal-heavy) :is(.td-panel:not(.td-live):not(.td-alert), .cb-widget, .cb-metric, .cb-hw-card, .cb-group-card, .all-tasks-item__card, .all-tasks-filters, .teacher-workspace-card, .mtb-row, .seasonal-task-card, .seasonal-surface)::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -1074,35 +1050,12 @@ html.seasonal-theme-active:not(.seasonal-heavy) .cabinet-layout:has(.td-page) .c
   background-image: none !important;
 }
 
-html.seasonal-theme-active.seasonal-dark-bg :is(
-  .td-panel:not(.td-live):not(.td-alert),
-  .cb-widget,
-  .cb-metric,
-  .cb-hw-card,
-  .cb-group-card,
-  .all-tasks-item__card,
-  .all-tasks-filters,
-  .teacher-workspace-card,
-  .mtb-row,
-  table,
-  pre,
-  .task-text
-) {
+html.seasonal-theme-active.seasonal-dark-bg :is(.td-panel:not(.td-live):not(.td-alert), .cb-widget, .cb-metric, .cb-hw-card, .cb-group-card, .all-tasks-item__card, .all-tasks-filters, .teacher-workspace-card, .mtb-row, table, pre, .task-text) {
   background-color: var(--seasonal-card-background, #fff6ea);
   color: var(--on-card-text);
 }
 
-html.seasonal-theme-active.seasonal-dark-bg :is(
-  .td-panel:not(.td-live):not(.td-alert),
-  .cb-widget,
-  .cb-metric,
-  .cb-hw-card,
-  .all-tasks-item__card,
-  .teacher-workspace-card,
-  table,
-  pre,
-  .task-text
-) :is(a, .td-text-link) {
+html.seasonal-theme-active.seasonal-dark-bg :is(.td-panel:not(.td-live):not(.td-alert), .cb-widget, .cb-metric, .cb-hw-card, .all-tasks-item__card, .teacher-workspace-card, table, pre, .task-text) :is(a, .td-text-link) {
   color: var(--on-card-link);
 }
 
