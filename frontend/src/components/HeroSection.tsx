@@ -9,6 +9,8 @@ type HeroSectionProps = {
   generatedVariantsCountLabel: string;
   /** r103: на главной над блоком стоит новый hero с h1, поэтому здесь h2. */
   headingLevel?: 1 | 2;
+  /** Когда стикер уже в блоке «Что вам нужно сейчас?», не дублировать. */
+  includeSeasonalSticker?: boolean;
 };
 
 export default function HeroSection({
@@ -16,6 +18,7 @@ export default function HeroSection({
   subjectsCountLabel,
   generatedVariantsCountLabel,
   headingLevel = 1,
+  includeSeasonalSticker = true,
 }: HeroSectionProps) {
   const Heading = headingLevel === 2 ? "h2" : "h1";
   return (
@@ -62,7 +65,7 @@ export default function HeroSection({
         </div>
       </div>
 
-      <SeasonalHeroSticker />
+      {includeSeasonalSticker ? <SeasonalHeroSticker /> : null}
     </section>
   );
 }

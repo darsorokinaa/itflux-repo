@@ -15,7 +15,7 @@ import { formatTasksCount } from "../utils/formatTasksCount";
 import { formatIntRu } from "../utils/formatIntRu";
 import { trackValueGoal } from "../utils/valuePath";
 
-/** Продающие блоки главной выключены. Компоненты остаются в файле. */
+/** Продающие куски (ссылка на тарифы в value paths и т.п.). Блоки после value paths снова всегда на главной. */
 const SHOW_HOME_SALES = false;
 
 type PlatformStats = {
@@ -130,17 +130,18 @@ export default function HomePage() {
 
       <div className="digital-flow-page__wrap">
         <main className="home-page__main">
+          {/* До «Что вам нужно сейчас?» продающий TutorLanding/hero не возвращаем. */}
           <HomeValuePathsBlock />
-          {SHOW_HOME_SALES ? (
-            <>
-              <div className="home-section-divider" role="separator" aria-hidden />
-              <HeroSection
-                tasksCountLabel={heroTasksCountLabel}
-                subjectsCountLabel={heroSubjectsCountLabel}
-                generatedVariantsCountLabel={heroGeneratedVariantsCountLabel}
-                headingLevel={2}
-              />
-              <section id="home-levels" className="home-levels">
+          {/* Блоки, которые раньше шли ПОСЛЕ value paths — вернуть (кроме продающих из TutorLanding). */}
+          <div className="home-section-divider" role="separator" aria-hidden />
+          <HeroSection
+            tasksCountLabel={heroTasksCountLabel}
+            subjectsCountLabel={heroSubjectsCountLabel}
+            generatedVariantsCountLabel={heroGeneratedVariantsCountLabel}
+            headingLevel={2}
+            includeSeasonalSticker={false}
+          />
+          <section id="home-levels" className="home-levels">
           <header className="section-head">
             <h2 className="section-head__title">Выберите формат подготовки</h2>
             <p className="section-head__lead">
@@ -168,10 +169,8 @@ export default function HomePage() {
             })}
           </div>
           </section>
-              <TeacherWorkspaceBlock />
-              <TeacherQuotesBlock headingId="home-teacher-quotes-heading" />
-            </>
-          ) : null}
+          <TeacherWorkspaceBlock />
+          <TeacherQuotesBlock headingId="home-teacher-quotes-heading" />
         </main>
       </div>
     </div>
