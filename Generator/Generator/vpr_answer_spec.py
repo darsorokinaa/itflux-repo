@@ -25,7 +25,6 @@ HOLD_PACKS = frozenset()
 # Отдельное пространство ключей. Базовые id ma7-b-… сюда не попадают и не переписываются.
 MCKO_PACKS = frozenset({"ma7u", "ma8u", "ma10u", "inf7u"})
 MCKO_SOURCE_PREFIX = "mcko_adv:"
-MCKO_LEVEL = "mcko"
 
 _GRAPHIC_OR_KEY_MANUAL = frozenset({
     "mark_point_on_line",

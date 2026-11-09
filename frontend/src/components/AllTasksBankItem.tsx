@@ -36,6 +36,10 @@ export type BankTask = {
   part_id?: number | null;
   part_title?: string | null;
   author?: string | null;
+  vpr_class?: number | null;
+  vpr_advanced?: boolean;
+  vpr_basic?: boolean;
+  bank_note?: string | null;
   tags?: TaskTag[];
   group_id?: number | null;
   scope?: string | null;
@@ -338,6 +342,37 @@ export const AllTasksBankItem = memo(function AllTasksBankItem({
                 ·
               </span>
               <span>ID {task.id}</span>
+              {task.vpr_class != null ? (
+                <>
+                  <span className="all-tasks-item__meta-sep" aria-hidden>
+                    ·
+                  </span>
+                  <span>{task.vpr_class} класс</span>
+                </>
+              ) : null}
+              {task.vpr_advanced ? (
+                <>
+                  <span className="all-tasks-item__meta-sep" aria-hidden>
+                    ·
+                  </span>
+                  <span>Углублённый</span>
+                </>
+              ) : task.vpr_basic ? (
+                <>
+                  <span className="all-tasks-item__meta-sep" aria-hidden>
+                    ·
+                  </span>
+                  <span>Базовый</span>
+                </>
+              ) : null}
+              {task.bank_note ? (
+                <>
+                  <span className="all-tasks-item__meta-sep" aria-hidden>
+                    ·
+                  </span>
+                  <span>{task.bank_note}</span>
+                </>
+              ) : null}
               {task.task_title ? (
                 <>
                   <span className="all-tasks-item__meta-sep" aria-hidden>
@@ -429,6 +464,29 @@ const AllTasksGroupPart = memo(function AllTasksGroupPart({
             ·
           </span>
           <span>ID {task.id}</span>
+          {task.vpr_class != null ? (
+            <>
+              <span className="all-tasks-item__meta-sep" aria-hidden>
+                ·
+              </span>
+              <span>{task.vpr_class} класс</span>
+            </>
+          ) : null}
+          {task.vpr_advanced ? (
+            <>
+              <span className="all-tasks-item__meta-sep" aria-hidden>
+                ·
+              </span>
+              <span>Углублённый</span>
+            </>
+          ) : task.vpr_basic ? (
+            <>
+              <span className="all-tasks-item__meta-sep" aria-hidden>
+                ·
+              </span>
+              <span>Базовый</span>
+            </>
+          ) : null}
           {task.task_title ? (
             <>
               <span className="all-tasks-item__meta-sep" aria-hidden>

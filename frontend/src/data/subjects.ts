@@ -191,7 +191,6 @@ export const SUBJECTS_BY_LEVEL: Record<LevelId, SubjectDefinition[]> = {
   oge: [SUBJECT_MATH_OGE, SUBJECT_INF, SUBJECT_PHYS, SUBJECT_CHEM, SUBJECT_RUS, SUBJECT_LIT],
   ege: [SUBJECT_INF, SUBJECT_MATH_EGE_PROF, SUBJECT_MATH_EGE_BASE, SUBJECT_RUS],
   school: [SUBJECT_PROG],
-  mcko: [SUBJECT_MATH, SUBJECT_INF],
 };
 
 export const GRADES_BY_LEVEL: Record<LevelId, number[]> = {
@@ -199,7 +198,6 @@ export const GRADES_BY_LEVEL: Record<LevelId, number[]> = {
   oge: [9],
   ege: [11],
   school: [],
-  mcko: [7, 8, 10],
 };
 
 const SUBJECT_FALLBACK_BY_ID: Record<string, SubjectDefinition> = {

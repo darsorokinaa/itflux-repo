@@ -89,10 +89,10 @@ export default function SubjectPage() {
   }, [level]);
 
   const countsQuery = useMemo(() => {
-    if (selectedClass == null || (level !== "vpr" && level !== "mcko")) return "";
+    if (level !== "vpr" || selectedClass == null) return "";
     const q = new URLSearchParams();
     q.set("grade", String(selectedClass));
-    if (level === "vpr" && advancedLevel) q.set("advanced", "1");
+    if (advancedLevel) q.set("advanced", "1");
     return `?${q.toString()}`;
   }, [level, selectedClass, advancedLevel]);
 
@@ -197,10 +197,10 @@ export default function SubjectPage() {
     if (!subject || isSubjectLocked(subject)) return;
     if (grades.length > 0 && selectedClass == null) return;
     const path = `/${level}/${subjectId}`;
-    if ((level === "vpr" || level === "mcko") && selectedClass != null) {
+    if (level === "vpr" && selectedClass != null) {
       const q = new URLSearchParams();
       q.set("grade", String(selectedClass));
-      if (level === "vpr" && advancedLevel) q.set("advanced", "1");
+      if (advancedLevel) q.set("advanced", "1");
       navigate(`${path}?${q.toString()}`);
       return;
     }
@@ -290,7 +290,7 @@ export default function SubjectPage() {
                   )}
                 </div>
 
-                {(level === "vpr" || level === "mcko") && !singleGrade ? (
+                {level === "vpr" && !singleGrade ? (
                   <div className="subject-dashboard-page__vpr-inline" aria-label="Параметры школьной программы">
                     <span className="subject-dashboard-page__vpr-inline-title">Класс</span>
                     <div className="subject-dashboard-page__grade-list" role="list">
@@ -314,21 +314,14 @@ export default function SubjectPage() {
                         );
                       })}
                     </div>
-                    {level === "vpr" ? (
-                      <label className="subject-dashboard-page__advanced">
-                        <input
-                          type="checkbox"
-                          checked={advancedLevel}
-                          onChange={(e) => setAdvancedLevel(e.target.checked)}
-                        />
-                        Углублённый уровень
-                      </label>
-                    ) : (
-                      <p className="subject-dashboard-page__promo-lead" data-testid="mcko-category-note">
-                        Математика здесь углублённая, информатика 7 класса — отдельный авторский набор.
-                        Это не ВПР и не официальные задания МЦКО или ФИПИ. Год спецификации не указан.
-                      </p>
-                    )}
+                    <label className="subject-dashboard-page__advanced">
+                      <input
+                        type="checkbox"
+                        checked={advancedLevel}
+                        onChange={(e) => setAdvancedLevel(e.target.checked)}
+                      />
+                      Углублённый уровень
+                    </label>
                   </div>
                 ) : null}
               </div>

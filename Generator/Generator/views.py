@@ -1187,57 +1187,50 @@ def _fipi_or_owned_teacher_q(request):
 
 
 def _tasklists_visible_for_vpr(tasklists, vpr_vf):
-    """Чужой класс ВПР не показываем. При выборе класса точный список важнее общего."""
+    """Выбранный класс показывает только списки этого класса.
+
+    Пустой класс остаётся лишь для номера, у которого нет списка с классом.
+    Списки 7, 8 и 10 с одним номером не схлопываются в один.
+    """
     grade = (vpr_vf or {}).get("vpr_class")
     rows = list(tasklists)
     if grade is None:
         return rows
-    rows = [row for row in rows if getattr(row, "vpr_class", None) in (None, grade)]
-    chosen = {}
-    for row in rows:
-        prev = chosen.get(row.task_number)
-        if prev is None or (row.vpr_class == grade and prev.vpr_class != grade):
-            chosen[row.task_number] = row
-    return [row for row in rows if chosen.get(row.task_number) is row]
+    specific = {row.task_number for row in rows if row.vpr_class == grade}
+    return [
+        row for row in rows
+        if row.vpr_class == grade or (row.vpr_class is None and row.task_number not in specific)
+    ]
 
 
 def _vpr_task_filters_from_request(request, level_str):
-    """GET: класс и, для ВПР, углублённость. Для авторского МЦКО — только класс, без флага ВПР."""
-    level = (level_str or "").lower()
-    if level == "mcko":
-        grade = (request.GET.get("grade") or "").strip()
-        if grade.isdigit():
-            return {"vpr_class": int(grade)}
-        return None
-    if level != "vpr":
+    """GET: класс и галочка «Углублённый» по полям Task.vpr_class / vpr_basic / vpr_advanced."""
+    if (level_str or "").lower() != "vpr":
         return None
     flt = {}
-    g = (request.GET.get("grade") or "").strip()
-    if g.isdigit():
-        flt["vpr_class"] = int(g)
-    flt["vpr_advanced"] = (request.GET.get("advanced") or "").strip() == "1"
+    grade = (request.GET.get("grade") or "").strip()
+    if grade.isdigit():
+        flt["vpr_class"] = int(grade)
+    if (request.GET.get("advanced") or "").strip() == "1":
+        flt["vpr_advanced"] = True
+    else:
+        flt["vpr_basic"] = True
+        flt["vpr_advanced"] = False
     return flt
 
 
 def _vpr_task_filters_from_payload(data, level_str):
-    """POST варианта/теста: vpr_grade, vpr_advanced в JSON. МЦКО передаёт только класс."""
-    level = (level_str or "").lower()
-    if level == "mcko":
-        if not isinstance(data, dict):
-            return None
-        grade = data.get("grade", data.get("vpr_grade"))
-        if grade is not None and str(grade).strip().isdigit():
-            return {"vpr_class": int(grade)}
-        return None
-    if level != "vpr" or not isinstance(data, dict):
+    """POST варианта/теста: класс и галочка «Углублённый»."""
+    if (level_str or "").lower() != "vpr" or not isinstance(data, dict):
         return None
     flt = {}
     g = data.get("vpr_grade", data.get("grade"))
     if g is not None and str(g).strip().isdigit():
         flt["vpr_class"] = int(g)
-    if "vpr_advanced" in data:
-        flt["vpr_advanced"] = bool(data.get("vpr_advanced"))
+    if data.get("vpr_advanced"):
+        flt["vpr_advanced"] = True
     else:
+        flt["vpr_basic"] = True
         flt["vpr_advanced"] = False
     return flt
 
@@ -1977,7 +1970,11 @@ def _vpr_counts_filters_from_request(request):
     g = (request.GET.get("grade") or "").strip()
     if g.isdigit():
         flt["vpr_class"] = int(g)
-    flt["vpr_advanced"] = (request.GET.get("advanced") or "").strip() == "1"
+    if (request.GET.get("advanced") or "").strip() == "1":
+        flt["vpr_advanced"] = True
+    else:
+        flt["vpr_basic"] = True
+        flt["vpr_advanced"] = False
     return flt
 
 
@@ -1986,7 +1983,6 @@ _LEVEL_CATALOG_SORT = {
     "ege": 1,
     "school": 2,
     "vpr": 3,
-    "mcko": 4,
 }
 
 
@@ -2703,6 +2699,7 @@ def api_task_bank_filters(request, level, subject):
             "task_list_id": tl.id,
             "task_number": tl.task_number,
             "task_title": tl.task_title or "",
+            "vpr_class": tl.vpr_class,
             "task_count": task_count,
         })
 
@@ -2921,6 +2918,18 @@ def api_task_bank(request, level, subject):
             'file_url': attachments[0]["url"] if attachments else None,
             'attachments': attachments,
             'author': (task.author or '').strip() or None,
+            'vpr_class': task.vpr_class,
+            'vpr_advanced': bool(task.vpr_advanced),
+            'vpr_basic': bool(task.vpr_basic),
+            'bank_note': (
+                (
+                    "авторский набор, не официальная ВПР"
+                    if "авторск" in str((task.answer_spec or {}).get("level") or "").casefold()
+                    else "по материалам МЦКО, не официальная ВПР"
+                )
+                if isinstance(task.answer_spec, dict) and (task.answer_spec or {}).get("bank") == "mcko_adv"
+                else ""
+            ),
             'added_at': task.added_at.strftime('%d.%m.%Y') if task.added_at else None,
             'tags': _serialize_task_tags(task),
             'group_id': group_by_task.get(task.id),
@@ -4085,16 +4094,6 @@ def api_task_staff_update(request, task_id):
 
 
 @require_http_methods(["GET"])
-def _catalog_teacher(request) -> bool:
-    user = getattr(request, "user", None)
-    if user is not None and getattr(user, "is_authenticated", False):
-        if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
-            return True
-    from .teacher_task_bank import request_teacher
-
-    return request_teacher(request) is not None
-
-
 def api_criteria(request, level, subject):
     """Критерии по task_list_id или по (subject, level, task_number). Criteria привязаны к TaskList (номер задания)."""
     from .criteria_scoring import build_criteria_payload
@@ -4141,15 +4140,6 @@ def api_criteria(request, level, subject):
             tl_ids = [row.id for row in lists]
         except (TypeError, ValueError):
             pass
-
-    if (level or "").lower() == "mcko" and not _catalog_teacher(request):
-        return JsonResponse({
-            "scoring_mode": "single",
-            "criteria": [],
-            "axes": [],
-            "max_score": 1,
-            "teacher_only": True,
-        })
 
     if not tl_ids:
         return JsonResponse({

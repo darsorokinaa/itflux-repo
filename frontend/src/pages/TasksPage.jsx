@@ -31,7 +31,6 @@ function formatExamLevelRu(lv) {
   if (k === "oge") return "ОГЭ";
   if (k === "ege") return "ЕГЭ";
   if (k === "vpr") return "ВПР";
-  if (k === "mcko") return "Авторские по спецификации МЦКО";
   return (lv || "").toString().toUpperCase();
 }
 
@@ -103,12 +102,7 @@ function collectAvailableParts(items, getPart) {
 
 /** Query для API ВПР: класс и углублённость (advanced 0/1). */
 function vprApiQueryString(level, searchParams) {
-  const lv = String(level || "").toLowerCase();
-  if (lv === "mcko") {
-    const grade = searchParams.get("grade");
-    return grade ? `?grade=${encodeURIComponent(grade)}` : "";
-  }
-  if (lv !== "vpr") return "";
+  if (String(level || "").toLowerCase() !== "vpr") return "";
   const p = new URLSearchParams();
   const g = searchParams.get("grade");
   if (g) p.set("grade", g);
@@ -199,14 +193,7 @@ function TasksPage() {
   }, []);
 
   const appendVprOptions = (payload) => {
-    const lv = String(level || "").toLowerCase();
-    if (lv === "mcko") {
-      const next = { ...payload };
-      const grade = searchParams.get("grade");
-      if (grade && /^\d+$/.test(String(grade).trim())) next.grade = parseInt(String(grade).trim(), 10);
-      return next;
-    }
-    if (lv !== "vpr") return payload;
+    if (String(level || "").toLowerCase() !== "vpr") return payload;
     const next = { ...payload };
     const g = searchParams.get("grade");
     if (g && /^\d+$/.test(String(g).trim())) next.vpr_grade = parseInt(String(g).trim(), 10);
@@ -1048,7 +1035,6 @@ function TasksPage() {
     String(level || "").toLowerCase() === "vpr"
       ? "Школьная программа"
       : formatExamLevelRu(level);
-  const mckoLevel = String(level || "").toLowerCase() === "mcko";
   const selectedVprGrade = searchParams.get("grade");
 
   return prepDigitalWrap(
@@ -1067,13 +1053,6 @@ function TasksPage() {
             <span className="tasks-prep-selection-pill">
               <strong>Уровень:</strong> {selectedLevelLabel}
             </span>
-            {mckoLevel ? (
-              <p className="tasks-page-empty-hint" data-testid="mcko-notice" role="note">
-                Авторские задания Цифрового потока по спецификации МЦКО. Это не ВПР и не официальные
-                задания МЦКО или ФИПИ. Год спецификации не указан. Математика — углублённый уровень,
-                информатика 7 класса — отдельный авторский набор.
-              </p>
-            ) : null}
             {String(level || "").toLowerCase() === "vpr" ? (
               <>
                 <span className="tasks-prep-selection-pill">

@@ -69,8 +69,8 @@ class MckoSeparationTests(TestCase):
             truth_table_enabled=True,
             author="ФИПИ",
         )
-        self.teacher = User.objects.create_user("teacher", password="x", is_staff=True)
-        self.pupil = User.objects.create_user("pupil", password="x")
+        self.teacher = User.objects.create_user("teacher", password=None, is_staff=True)
+        self.pupil = User.objects.create_user("pupil", password=None)
 
     def test_fraction_stays_a_fraction(self):
         spec = {"answer_format": "fraction", "answer_data": {"value": "1/6", "numerator": 1, "denominator": 6}}
@@ -110,10 +110,12 @@ class MckoSeparationTests(TestCase):
         task = Task.objects.get(source_key="mcko_adv:ma7u-u-01-01")
         self.assertFalse(task.is_active)
         self.assertFalse(task.vpr_basic)
-        self.assertFalse(task.vpr_advanced)
-        self.assertEqual(task.task.level.level, "mcko")
-        self.assertIn("углублённый", task.task.task_title)
-        self.assertNotIn("ВПР", task.task.task_title)
+        self.assertTrue(task.vpr_advanced)
+        self.assertEqual(task.vpr_class, 7)
+        self.assertEqual(task.task.level.level, "vpr")
+        self.assertEqual(task.task.vpr_class, 7)
+        self.assertIn("ВПР 7 №1", task.task.task_title)
+        self.assertNotIn("2026", task.task.task_title)
         self.assertNotIn("sources/mcko", json.dumps(task.answer_spec, ensure_ascii=False))
         self.assertNotIn("mcko.ru", json.dumps(task.answer_spec, ensure_ascii=False))
         self.assertEqual(task.answer_spec["task_difficulty"], "Б")
@@ -129,18 +131,38 @@ class MckoSeparationTests(TestCase):
         task.save(update_fields=["is_active", "status"])
         variant = Variant.objects.create(var_subject=self.math, level=task.task.level, created_by="test")
         VariantContent.objects.create(variant=variant, task=task, order=1)
-        anon = self.client.get(f"/api/mcko/math/variant/{variant.id}/?role=student").json()["tasks"][0]
+        anon = self.client.get(f"/api/vpr/math/variant/{variant.id}/?role=student").json()["tasks"][0]
         blob = json.dumps(anon, ensure_ascii=False)
         self.assertNotIn("Сложение", blob)
         self.assertNotIn("verification", blob)
         self.assertNotIn("sources/mcko", blob)
         self.assertEqual(anon["answer"], "")
-        denied = self.client.get(f"/api/mcko/math/criteria/?task_list_id={task.task_id}")
-        self.assertEqual(denied.json()["criteria"], [])
-        self.assertTrue(denied.json()["teacher_only"])
-        self.client.login(username="teacher", password="x")
-        allowed = self.client.get(f"/api/mcko/math/criteria/?task_list_id={task.task_id}")
-        self.assertIn("верный ответ", json.dumps(allowed.json(), ensure_ascii=False).lower())
+        basic = self.client.get("/api/vpr/math/task-bank-filters/?grade=7&advanced=0")
+        self.assertFalse(any(row["task_list_id"] == task.task_id and row["task_count"] for row in basic.json()["task_numbers"]))
+        advanced = self.client.get(
+            f"/api/vpr/math/task-bank/?grade=7&advanced=1&task_list_id={task.task_id}&per_page=20"
+        )
+        shown = advanced.json()["tasks"]
+        self.assertTrue(any(
+            row["id"] == task.pk and row["vpr_advanced"] and row["vpr_class"] == 7
+            and row["bank_note"] == "по материалам МЦКО, не официальная ВПР"
+            for row in shown
+        ))
+        self.client.force_login(self.teacher)
+        stray = Task.objects.create(
+            task=self.vpr_list, task_template="сбитый класс", answer="1",
+            source_key="ma7-b-99-99", import_batch="verified-1580",
+            vpr_class=8, vpr_basic=False, vpr_advanced=True, is_active=True,
+        )
+        call_command("vpr_align_batch", "--batch", "verified-1580")
+        stray.refresh_from_db()
+        self.assertEqual(stray.vpr_class, 8)
+        call_command("vpr_align_batch", "--batch", "verified-1580", "--apply")
+        stray.refresh_from_db()
+        self.assertEqual(stray.vpr_class, 7)
+        self.assertTrue(stray.vpr_basic)
+        self.assertFalse(stray.vpr_advanced)
+        self.assertTrue(Task.objects.filter(pk=stray.pk).exists())
 
         with self.assertRaises(CommandError):
             call_command("vpr_import_pack", "--rollback-batch", "mcko-small")
@@ -191,26 +213,28 @@ class MckoFullPackTests(TestCase):
         imported = Task.objects.filter(import_batch="mcko_adv_20261108")
         self.assertEqual(imported.count(), 980)
         self.assertEqual(set(imported.values_list("is_active", flat=True)), {False})
-        self.assertFalse(imported.filter(vpr_advanced=True).exists())
-        self.assertFalse(imported.filter(vpr_basic=True).exists())
+        self.assertEqual(imported.filter(source_key__startswith="mcko_adv:ma", vpr_advanced=True, vpr_basic=False).count(), 820)
+        self.assertEqual(imported.filter(source_key__startswith="mcko_adv:inf7u", vpr_advanced=False, vpr_basic=True).count(), 160)
         self.assertFalse(imported.exclude(source_key__startswith="mcko_adv:").exists())
         self.assertFalse(imported.filter(source_key__startswith="ma7-b-").exists())
-        self.assertEqual(imported.filter(task__level__level="vpr").count(), 0)
-        self.assertEqual(imported.filter(task__level__level="mcko").count(), 980)
+        self.assertEqual(imported.filter(task__level__level="vpr").count(), 980)
+        self.assertFalse(imported.filter(task__vpr_class=7, vpr_class=8).exists())
         fraction = imported.get(source_key="mcko_adv:ma8u-u-14-01")
         self.assertEqual(fraction.answer_spec["answer_format"], "fraction")
         self.assertIn("/", fraction.answer)
         self.assertNotIn("sources/mcko", json.dumps(fraction.answer_spec))
         inf = imported.filter(source_key__startswith="mcko_adv:inf7u-").first()
         self.assertIn("авторский набор", inf.task.task_title)
-        self.assertNotIn("углублённый", inf.task.task_title)
+        self.assertIn("авторск", str(inf.answer_spec.get("level") or ""))
+        self.assertNotIn("2026", inf.task.task_title)
+        self.assertNotIn("2026", json.dumps(inf.answer_spec.get("level_status")))
         math = imported.filter(source_key__startswith="mcko_adv:ma7u-").first()
-        self.assertIn("углублённый", math.task.task_title)
+        self.assertTrue(math.vpr_advanced)
+        self.assertEqual(math.vpr_class, math.task.vpr_class)
         self.assertEqual(
             Criteria.objects.get(task_number=self.vpr_list).criteria_text,
             "критерий базового ВПР",
         )
-        self.assertFalse(imported.filter(task_id=self.vpr_list.id).exists())
         ids = set(imported.values_list("pk", flat=True))
         call_command("vpr_import_pack", *self.paths, "--apply", "--batch", "mcko_adv_20261108", stdout=StringIO())
         again = Task.objects.filter(import_batch="mcko_adv_20261108")
@@ -223,15 +247,36 @@ class MckoFullPackTests(TestCase):
             )
             self.assertEqual(Task.objects.filter(import_batch="verified-1580").count(), 1580)
             self.assertEqual(Task.objects.filter(import_batch="mcko_adv_20261108").count(), 980)
-            shared = set(again.values_list("task_id", flat=True)) & set(
-                Task.objects.filter(import_batch="verified-1580").values_list("task_id", flat=True)
+            base = Task.objects.filter(import_batch="verified-1580")
+            self.assertFalse(base.filter(vpr_advanced=True).exists())
+            self.assertFalse(
+                set(again.values_list("source_key", flat=True)) & set(base.values_list("source_key", flat=True))
             )
-            self.assertEqual(shared, set())
         self.legacy.refresh_from_db()
         self.assertEqual(self.legacy.answer, "0001")
         self.assertIsNone(self.legacy.import_batch)
         call_command("vpr_import_pack", "--activate-batch", "mcko_adv_20261108", stdout=StringIO())
+        if Task.objects.filter(import_batch="verified-1580").exists():
+            call_command("vpr_import_pack", "--activate-batch", "verified-1580", stdout=StringIO())
         self.assertEqual(again.filter(is_active=True).count(), 980)
+        client = Client()
+        grade7 = client.get("/api/vpr/math/task-bank-filters/?grade=7&advanced=0")
+        self.assertTrue(grade7.json()["task_numbers"])
+        self.assertTrue(all(row.get("vpr_class") == 7 for row in grade7.json()["task_numbers"]))
+        grade8 = client.get("/api/vpr/math/task-bank-filters/?grade=8&advanced=1")
+        self.assertTrue(all(row.get("vpr_class") == 8 for row in grade8.json()["task_numbers"]))
+        sample = TaskList.objects.filter(level__level="vpr", subject__subject_short="math", vpr_class=7).first()
+        basic_rows = client.get(
+            f"/api/vpr/math/task-bank/?grade=7&advanced=0&task_list_id={sample.id}&per_page=30"
+        ).json()["tasks"]
+        advanced_rows = client.get(
+            f"/api/vpr/math/task-bank/?grade=7&advanced=1&task_list_id={sample.id}&per_page=30"
+        ).json()["tasks"]
+        self.assertTrue(basic_rows)
+        self.assertTrue(all(row["vpr_basic"] and not row["vpr_advanced"] and row["vpr_class"] == 7 for row in basic_rows))
+        self.assertTrue(advanced_rows)
+        self.assertTrue(all(row["vpr_advanced"] and row["vpr_class"] == 7 for row in advanced_rows))
+        self.assertFalse(set(row["id"] for row in basic_rows) & set(row["id"] for row in advanced_rows))
         self.legacy.refresh_from_db()
         self.assertTrue(self.legacy.is_active)
         with self.assertRaises(CommandError):
