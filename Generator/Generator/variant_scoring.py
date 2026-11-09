@@ -30,6 +30,40 @@ def is_legacy_view(payload) -> bool:
     return isinstance(payload, dict) and bool(payload.get(LEGACY_VIEW_KEY))
 
 
+def resolved_task_max_score(task, task_list=None) -> int:
+    """Балл одной задачи.
+
+    Свой Task.max_score важнее балла номера, когда он задан: импорт ВПР пишет
+    его даже для 1, а список общий у базы и углубления. У задач не-ВПР без
+    своего балла колонка остаётся значением по умолчанию, и балл берётся из номера.
+    """
+    if task_list is None:
+        task_list = getattr(task, "task", None)
+    own = getattr(task, "max_score", None)
+    listed = getattr(task_list, "max_score", None) if task_list is not None else None
+    if _task_max_score_is_set(task, own):
+        return int(own)
+    if listed is not None:
+        return int(listed)
+    if own is not None:
+        return int(own)
+    return 1
+
+
+def _task_max_score_is_set(task, own) -> bool:
+    if own is None:
+        return False
+    spec = getattr(task, "answer_spec", None)
+    if isinstance(spec, dict) and spec.get("max_score_numeric") is not None:
+        return True
+    if getattr(task, "source_key", None):
+        return True
+    try:
+        return int(own) != 1
+    except (TypeError, ValueError):
+        return False
+
+
 def task_max_points(task: dict | None) -> int:
     """Максимум задания. Пустое значение — 1, как в модели TaskList/Task."""
     raw = (task or {}).get("max_score")
@@ -654,10 +688,7 @@ def load_variant_tasks_for_scoring(variant_id: int) -> list[dict]:
             continue
         task_list = getattr(task, "task", None)
         part = getattr(task_list, "part", None) if task_list is not None else None
-        if task_list is not None and getattr(task_list, "max_score", None) is not None:
-            max_score = task_list.max_score
-        else:
-            max_score = getattr(task, "max_score", None)
+        max_score = resolved_task_max_score(task, task_list)
         prompt = str(getattr(task, "task_template", "") or "")
         fill_truth_table = re.search(r"заполните\s+таблиц\w*\s+истинност", prompt, flags=re.IGNORECASE)
         truth_table = bool(getattr(task, "truth_table_enabled", False)) or bool(fill_truth_table)

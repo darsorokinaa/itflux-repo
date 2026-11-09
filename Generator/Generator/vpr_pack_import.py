@@ -28,7 +28,14 @@ def _level_and_subject(item: dict, pack: str = ""):
 
 
 def _flags(item: dict, pack: str) -> tuple[bool, bool]:
-    """vpr_basic, vpr_advanced. База — базовый. Математика МЦКО — галочка «Углублённый»."""
+    """vpr_basic, vpr_advanced.
+
+    База — базовый. Математика МЦКО — галочка «Углублённый».
+    inf7u тоже углублённый: подпись остаётся «авторский набор, по материалам МЦКО»,
+    без «МЦКО-2026».
+    """
+    if pack == "inf7u":
+        return False, True
     if pack not in MCKO_PACKS:
         return True, False
     raw = str(item.get("level") or "")

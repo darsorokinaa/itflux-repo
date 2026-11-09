@@ -187,8 +187,11 @@ class StorageAndScoreTests(TestCase):
         self.assertEqual(summary["correct_count"], 1)
         self.assertEqual(summary["earned_points"], 1)
 
-    def test_ready_set_is_the_five_basic_packs(self):
-        self.assertEqual(APPLY_READY_PACKS, {"ma7", "ma8", "ma10", "inf7", "inf8"})
+    def test_ready_set_keeps_basic_packs_and_mcko(self):
+        self.assertEqual(
+            APPLY_READY_PACKS,
+            {"ma7", "ma8", "ma10", "inf7", "inf8", "ma7u", "ma8u", "ma10u", "inf7u"},
+        )
 
     def test_truth_column_is_row_major_and_widget_path_stays(self):
         spec = {
