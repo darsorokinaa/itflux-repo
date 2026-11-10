@@ -118,7 +118,7 @@ html.seasonal-theme-active #root {
 }
 
 /* Сезонный паттерн через Layout .app-shell-pattern (home.css скрывает его по умолчанию) */
-html.seasonal-theme-active.seasonal-has-pattern .app-shell-pattern {
+html.seasonal-theme-active.seasonal-has-pattern:not(.seasonal-heavy) .app-shell-pattern {
   display: block !important;
   background-image: var(--seasonal-page-pattern, none) !important;
   background-repeat: var(--seasonal-page-pattern-repeat, repeat) !important;
@@ -129,7 +129,7 @@ html.seasonal-theme-active.seasonal-has-pattern .app-shell-pattern {
 }
 
 @media (max-width: 768px) {
-  html.seasonal-theme-active.seasonal-has-pattern .app-shell-pattern {
+  html.seasonal-theme-active.seasonal-has-pattern:not(.seasonal-heavy) .app-shell-pattern {
     background-image: var(
       --seasonal-page-pattern-mobile,
       var(--seasonal-page-pattern, none)
@@ -1150,4 +1150,71 @@ html.seasonal-theme-active.seasonal-dark-bg .cabinet-sidebar :is(
   .cabinet-sidebar__drawer-title
 ) {
   color: var(--on-page-text);
+}
+
+/* Страница варианта: сетка exam-variant-view и фото темы варианта
+   (`:has(#main-wrapper)`, два id) не должны закрывать сезонный фон.
+   Повтор класса поднимает специфичность выше этих правил. */
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy):has(#main-wrapper):has(#main-wrapper.exam-page),
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy):has(#main-wrapper.exam-page--edu),
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy).exam-variant-view,
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy).exam-variant-view--edu,
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy).variant-theme-active:has(#main-wrapper.exam-page--edu),
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy) body:has(#main-wrapper):has(#main-wrapper.exam-page),
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy) body:has(#main-wrapper.exam-page--edu),
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy) body.exam-variant-view,
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy) body.exam-variant-view--edu,
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy) body.variant-theme-active:has(#main-wrapper.exam-page--edu),
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy) #root:has(#main-wrapper):has(#main-wrapper.exam-page),
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy) #root:has(#main-wrapper.exam-page--edu),
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy) #root.exam-variant-view,
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy) #root.exam-variant-view--edu,
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy) #root.variant-theme-active:has(#main-wrapper.exam-page--edu) {
+  background-color: var(--seasonal-page-background, var(--bg-page, #F4F7FB)) !important;
+  background-image:
+    linear-gradient(rgba(43, 82, 245, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(43, 82, 245, 0.04) 1px, transparent 1px) !important;
+  background-repeat: repeat !important;
+  background-size: 32px 32px !important;
+  background-position: 0 0 !important;
+  background-attachment: fixed !important;
+}
+
+/* Снег под оболочкой варианта: карточки и поля ответа непрозрачные и перехватывают клики. */
+html.exam-variant-view .app-shell,
+html:has(#main-wrapper.exam-page) .app-shell {
+  z-index: 2;
+}
+
+html.exam-variant-view .seasonal-fx-canvas,
+html:has(#main-wrapper.exam-page) .seasonal-fx-canvas {
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* Заголовок части лежит на тёмном фоне страницы. */
+html.seasonal-theme-active.seasonal-dark-bg #main-wrapper.exam-page--edu .exam-edu-section-title {
+  color: var(--on-page-text);
+}
+
+/* Карточки, формулы, код и поля ответа остаются тёмным текстом на светлой подложке. */
+html.seasonal-theme-active.seasonal-dark-bg #main-wrapper.exam-page :is(
+  .exam-task-card,
+  .exam-edu-side-card,
+  .exam-task-card__text,
+  .task-text,
+  .answer-section,
+  .answer-input,
+  .answer-table-input,
+  .part2-answer-content,
+  .correct-answer-content,
+  .criteria-text,
+  .inf-code-editor,
+  .inf-code-editor-body,
+  .inf-code-sidebar,
+  .mobile-panel-sheet,
+  .variant-theme-selector,
+  mjx-container
+) {
+  color: var(--on-card-text);
 }

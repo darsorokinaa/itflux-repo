@@ -85,18 +85,21 @@ describe("seasonalThemeApi", () => {
     expect(buildSeasonalCssVars(null)).toEqual({});
   });
 
-  it("detects heavy routes for boards and meetings", () => {
+  it("detects heavy routes for boards, lessons, and meetings", () => {
     expect(isHeavyRoute("/cabinet/boards/abc")).toBe(true);
+    expect(isHeavyRoute("/teacher/boards/abc")).toBe(true);
     expect(isHeavyRoute("/cabinet/meetings/uuid")).toBe(true);
     expect(isHeavyRoute("/lessons/slug/view")).toBe(true);
+    expect(isHeavyRoute("/lesson/join")).toBe(true);
     expect(isHeavyRoute("/interesting/slug/view")).toBe(true);
     expect(isHeavyRoute("/cabinet")).toBe(false);
-    expect(isHeavyRoute("/ege/inf/variant/1707")).toBe(true);
-    expect(isHeavyRoute("/oge/math/variant/8")).toBe(true);
-    expect(isHeavyRoute("/vpr/inf/variant/2096")).toBe(true);
-    expect(isHeavyRoute("/variant-live/abc")).toBe(true);
+    expect(isHeavyRoute("/ege/inf/variant/1707")).toBe(false);
+    expect(isHeavyRoute("/oge/math/variant/8")).toBe(false);
+    expect(isHeavyRoute("/vpr/inf/variant/2096")).toBe(false);
+    expect(isHeavyRoute("/ege/inf/variant/1707/")).toBe(false);
+    expect(isHeavyRoute("/variant-live/abc")).toBe(false);
     expect(isHeavyRoute("/ege/inf")).toBe(false);
-    expect(isHeavyRoute("/variant-live")).toBe(true);
+    expect(isHeavyRoute("/variant-live")).toBe(false);
   });
 
   it("keeps the theme particle cap, including minimal snow at 18", () => {
@@ -136,6 +139,25 @@ describe("seasonalThemeApi", () => {
     expect(dark).toMatch(/\.flux-nav-link:not\(:hover\):not\(\[aria-current="page"\]\)/);
     expect(dark).not.toMatch(/\.jg-hero__title/);
     expect(dark).not.toMatch(/\.seasonal-hero-sticker[^-]/);
+  });
+
+  it("keeps variant task cards and answer inputs dark on a light surface", () => {
+    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "seasonal-theme.css"), "utf8");
+    const dark = css.split("html.seasonal-theme-active.seasonal-dark-bg").slice(1).join("\n");
+    expect(dark).toMatch(/\.exam-task-card__text[\s\S]*?--on-card-text/);
+    expect(dark).toMatch(/\.answer-input[\s\S]*?--on-card-text/);
+    expect(dark).toMatch(/mjx-container[\s\S]*?--on-card-text/);
+    expect(dark).not.toMatch(/\.exam-task-card__text[\s\S]{0,180}--on-page-text/);
+    expect(dark).not.toMatch(/\.answer-input[\s\S]{0,180}--on-page-text/);
+    expect(dark).not.toMatch(/mjx-container[\s\S]{0,180}--on-page-text/);
+  });
+
+  it("keeps snow click-through and behind the variant page shell", () => {
+    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "seasonal-theme.css"), "utf8");
+    const canvas = css.match(/\.seasonal-fx-canvas\s*\{([^}]+)\}/);
+    expect(canvas?.[1]).toMatch(/pointer-events:\s*none/);
+    expect(css).toMatch(/html\.exam-variant-view \.seasonal-fx-canvas,[\s\S]*?\{[^}]*z-index:\s*1;[^}]*pointer-events:\s*none/);
+    expect(css).toMatch(/html\.exam-variant-view \.app-shell,[\s\S]*?\{[^}]*z-index:\s*2/);
   });
 
   it("detects meeting and board chrome routes", () => {

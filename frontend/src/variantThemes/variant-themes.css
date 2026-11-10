@@ -21,10 +21,10 @@
 }
 
 /* Page photo replaces the exam 32px grid. `#root:has(#main-wrapper)` is 2 IDs. */
-html.variant-theme-active:has(#main-wrapper.exam-page--edu),
-html.variant-theme-active.exam-variant-view:has(#main-wrapper.exam-page--edu),
-html.variant-theme-active.exam-variant-view--edu:has(#main-wrapper.exam-page--edu),
-html.variant-theme-active.variant-theme--route:has(#main-wrapper.exam-page--edu),
+html.variant-theme-active:not(.seasonal-theme-active):has(#main-wrapper.exam-page--edu),
+html.variant-theme-active.exam-variant-view:not(.seasonal-theme-active):has(#main-wrapper.exam-page--edu),
+html.variant-theme-active.exam-variant-view--edu:not(.seasonal-theme-active):has(#main-wrapper.exam-page--edu),
+html.variant-theme-active.variant-theme--route:not(.seasonal-theme-active):has(#main-wrapper.exam-page--edu),
 body.variant-theme-active:has(#main-wrapper.exam-page--edu),
 body.variant-theme-active.exam-variant-view:has(#main-wrapper.exam-page--edu),
 body.variant-theme-active.exam-variant-view--edu:has(#main-wrapper.exam-page--edu),
@@ -32,9 +32,7 @@ body.variant-theme-active.variant-theme--route:has(#main-wrapper.exam-page--edu)
 #root.variant-theme-active:has(#main-wrapper.exam-page--edu),
 #root.variant-theme-active.exam-variant-view:has(#main-wrapper.exam-page--edu),
 #root.variant-theme-active.exam-variant-view--edu:has(#main-wrapper.exam-page--edu),
-#root.variant-theme-active.variant-theme--route:has(#main-wrapper.exam-page--edu),
-html.variant-theme-active.seasonal-theme-active,
-html.variant-theme-active.seasonal-theme-active body {
+#root.variant-theme-active.variant-theme--route:has(#main-wrapper.exam-page--edu) {
   background-color: var(--variant-theme-bg-color, #cfe8f6) !important;
   background-image: var(--variant-theme-bg-image, linear-gradient(rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.3)), linear-gradient(180deg, #9fc8e4 0%, #c5e0f2 42%, #e7f3fb 100%)) !important;
   background-repeat: no-repeat !important;
@@ -45,13 +43,14 @@ html.variant-theme-active.seasonal-theme-active body {
 
 html.variant-theme-active .digital-flow-page,
 html.variant-theme-active .exam-edu-shell,
-html.variant-theme-active .app-shell-pattern,
-html.variant-theme-active.seasonal-theme-active .app-shell-pattern {
+html.variant-theme-active:not(.seasonal-theme-active) .app-shell-pattern,
+html.variant-theme-active.seasonal-heavy .app-shell-pattern {
   background: transparent !important;
   background-image: none !important;
 }
 
-html.variant-theme-active .app-shell-pattern {
+html.variant-theme-active:not(.seasonal-theme-active) .app-shell-pattern,
+html.variant-theme-active.seasonal-heavy .app-shell-pattern {
   display: none !important;
 }
 

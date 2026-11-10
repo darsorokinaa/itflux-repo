@@ -34,8 +34,12 @@ export function applyThemeTokens(node, theme) {
     if (tokens[key]) node.style.setProperty(cssVar, tokens[key]);
     else node.style.removeProperty(cssVar);
   });
-  if (theme?.themeMode === "dark") node.classList.add("variant-theme-mode--dark");
-  else node.classList.remove("variant-theme-mode--dark");
+  const dark = theme?.themeMode === "dark";
+  if (dark && !node.classList.contains("variant-theme-mode--dark")) {
+    node.classList.add("variant-theme-mode--dark");
+  } else if (!dark && node.classList.contains("variant-theme-mode--dark")) {
+    node.classList.remove("variant-theme-mode--dark");
+  }
 }
 
 function stripThemeClasses(node) {
@@ -53,6 +57,15 @@ function clearPageBackground(node) {
   node.style.removeProperty("--variant-theme-block-opacity");
   node.style.removeProperty("--variant-theme-bg-color");
   TOKEN_VARS.forEach(([, cssVar]) => node.style.removeProperty(cssVar));
+  PAGE_BG_PROPS.forEach((prop) => node.style.removeProperty(prop));
+}
+
+function seasonalOwnsPageBackground() {
+  const root = document.documentElement;
+  return root.classList.contains("seasonal-theme-active") && !root.classList.contains("seasonal-heavy");
+}
+
+function clearInlinePageBackground(node) {
   PAGE_BG_PROPS.forEach((prop) => node.style.removeProperty(prop));
 }
 
@@ -143,20 +156,32 @@ export function VariantThemeRoot({ payload, children }) {
     }
 
     const painted = pageBackgroundStyle(theme.background, pageImageUrl, theme.themeMode);
-    nodes.forEach((node) => {
-      node.classList.add(...extraClasses);
-      if (blockImage) node.classList.add("variant-theme-has-block-image");
-      if (node.dataset) node.dataset.variantTheme = theme.slug || theme.layoutType;
-      if (painted.backgroundImage) node.style.setProperty("--variant-theme-bg-image", painted.backgroundImage);
-      else node.style.removeProperty("--variant-theme-bg-image");
-      if (blockImage) node.style.setProperty("--variant-theme-block-bg-image", blockImage);
-      else node.style.removeProperty("--variant-theme-block-bg-image");
-      node.style.setProperty("--variant-theme-block-opacity", String(BLOCK_IMAGE_OPACITY));
-      node.style.setProperty("--variant-theme-bg-color", painted.backgroundColor);
-      applyPageBackground(node, { pageImageUrl, background: theme.background, mode: theme.themeMode });
-      applyThemeTokens(node, theme);
-    });
+    const paint = () => {
+      const seasonal = seasonalOwnsPageBackground();
+      nodes.forEach((node) => {
+        extraClasses.forEach((cls) => {
+          if (!node.classList.contains(cls)) node.classList.add(cls);
+        });
+        if (blockImage && !node.classList.contains("variant-theme-has-block-image")) {
+          node.classList.add("variant-theme-has-block-image");
+        }
+        if (node.dataset) node.dataset.variantTheme = theme.slug || theme.layoutType;
+        if (painted.backgroundImage) node.style.setProperty("--variant-theme-bg-image", painted.backgroundImage);
+        else node.style.removeProperty("--variant-theme-bg-image");
+        if (blockImage) node.style.setProperty("--variant-theme-block-bg-image", blockImage);
+        else node.style.removeProperty("--variant-theme-block-bg-image");
+        node.style.setProperty("--variant-theme-block-opacity", String(BLOCK_IMAGE_OPACITY));
+        node.style.setProperty("--variant-theme-bg-color", painted.backgroundColor);
+        if (seasonal) clearInlinePageBackground(node);
+        else applyPageBackground(node, { pageImageUrl, background: theme.background, mode: theme.themeMode });
+        applyThemeTokens(node, theme);
+      });
+    };
+    paint();
+    const observer = new MutationObserver(paint);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
     return () => {
+      observer.disconnect();
       nodes.forEach(clearNode);
     };
   }, [orientation, theme]);

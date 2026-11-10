@@ -256,9 +256,6 @@ export const HEAVY_ROUTE_PATTERNS = [
   /^\/cabinet\/interactives\/[^/]+\/play/,
   /^\/cabinet\/student\/interactives\/\d+\/play/,
   /^\/lesson\/join/,
-  // Решение варианта: своя тема варианта, без сезонного декора и снега.
-  /^\/(?:ege|oge|vpr)\/[^/]+\/variant(?:\/|$)/,
-  /^\/variant-live(?:\/|$)/,
 ];
 
 export function isHeavyRoute(pathname) {
