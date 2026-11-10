@@ -85,6 +85,32 @@ describe("seasonalThemeApi", () => {
     expect(buildSeasonalCssVars(null)).toEqual({});
   });
 
+  it("paints task and cabinet cards pure white with corner decor only", () => {
+    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "seasonal-theme.css"), "utf8");
+    const beforeDark = css.split("html.seasonal-theme-active.seasonal-dark-bg")[0];
+    const plate = beforeDark.split("Карточки заданий и панели кабинета")[1] || "";
+    expect(plate.startsWith(": сплошной белый")).toBe(true);
+    expect(plate).toMatch(/background-color:\s*#FFFFFF;/);
+    expect(plate).toMatch(/color:\s*#1F2328;/);
+    expect(plate).toMatch(/background-image:\s*none;/);
+    expect(plate).toMatch(/\.all-tasks-item__card/);
+    expect(plate).toMatch(/\.exam-task-card/);
+    expect(plate).toMatch(/\.cb-hw-card/);
+    expect(plate).toMatch(/\.td-panel:not\(\.td-live\):not\(\.td-alert\)/);
+    expect(plate).toMatch(/:not\(\.seasonal-heavy\)/);
+    expect(plate).toMatch(/background-position:[\s\S]*right 8px top 8px/);
+    expect(plate).toMatch(/clamp\(0\.14,/);
+    expect(plate).not.toMatch(/background-size:\s*80px 80px/);
+    expect(plate).not.toMatch(/--seasonal-card-background/);
+    expect(plate).not.toMatch(/\.cabinet-sidebar/);
+    expect(plate).not.toMatch(/\.flux-header/);
+    expect(contrastRatio("#1F2328", "#FFFFFF")).toBeGreaterThanOrEqual(7);
+    expect(contrastRatio("#1F56D8", "#FFFFFF")).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio("#1550D8", "#FFFFFF")).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio("#FFFFFF", "#1F56D8")).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio("#FFFFFF", "#1550D8")).toBeGreaterThanOrEqual(4.5);
+  });
+
   it("detects heavy routes for boards, lessons, and meetings", () => {
     expect(isHeavyRoute("/cabinet/boards/abc")).toBe(true);
     expect(isHeavyRoute("/teacher/boards/abc")).toBe(true);
