@@ -141,6 +141,7 @@ class LessonAccessResult:
     message: str = ""
     reason_code: str = ""
     cta: list[dict] = field(default_factory=list)
+    pricing: dict | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload = {
@@ -174,6 +175,7 @@ class LessonAccessResult:
             "message": self.message,
             "reason_code": self.reason_code,
             "cta": self.cta,
+            "pricing": self.pricing,
         }
         return payload
 
@@ -367,6 +369,7 @@ class LessonAccessService:
                     and result.standalone_purchase_available
                 )
                 result.cta = cls._demo_active_cta(result)
+                cls._attach_purchase_pricing(user, lesson, result)
                 return result
 
         result.demo_used = bool(demo)
@@ -384,7 +387,35 @@ class LessonAccessService:
         result.access_type = ACCESS_LOCKED
         result.cta = cls._locked_cta(user, lesson, result)
         result.message, result.reason_code = cls._locked_copy(user, lesson, result)
+        cls._attach_purchase_pricing(user, lesson, result)
         return result
+
+    @classmethod
+    def _attach_purchase_pricing(cls, user, lesson, result: LessonAccessResult) -> None:
+        if not result.can_purchase or result.standalone_price is None:
+            return
+        from .pricing_service import PRODUCT_LESSON, calculate_catalog_price, catalog_price_payload
+
+        try:
+            calc = calculate_catalog_price(
+                user,
+                lesson.standalone_price,
+                PRODUCT_LESSON,
+                promo_code=None,
+                validate_promo=False,
+            )
+        except Exception:
+            logger.exception("lesson_price_failed")
+            return
+        result.pricing = catalog_price_payload(calc)
+        if calc["applied_discount"] <= 0:
+            return
+        final = cls.format_price(calc["final_price"], result.standalone_currency)
+        for action in result.cta:
+            if action.get("type") == "purchase":
+                action["label"] = f"Купить за {final}"
+        if calc.get("message"):
+            result.message = calc["message"]
 
     @classmethod
     def _full(cls, result: LessonAccessResult, access_type: str) -> LessonAccessResult:
@@ -865,11 +896,18 @@ class LessonPurchaseService:
     """Отдельная покупка готового урока. Не смешивается с биллингом учеников и подпиской."""
 
     @classmethod
-    def create_checkout(cls, teacher, lesson, *, idempotency_key: str | None = None) -> dict:
-        from django.conf import settings as django_settings
-
+    def create_checkout(
+        cls,
+        teacher,
+        lesson,
+        *,
+        idempotency_key: str | None = None,
+        promo_code: str | None = None,
+        quote_only: bool = False,
+    ) -> dict:
+        from .catalog_checkout import open_catalog_checkout
         from .models import Payment
-        from .payment_service import get_payment_provider
+        from .pricing_service import PRODUCT_LESSON
 
         access = LessonAccessService.get_access(teacher, lesson)
         if access.is_full:
@@ -887,81 +925,78 @@ class LessonPurchaseService:
                 min_plan=access.required_plan,
             )
 
-        provider_name = (
-            getattr(django_settings, "PAYMENT_PROVIDER", None) or "mock"
-        ).strip().lower()
-        payments_on = bool(getattr(django_settings, "PAYMENTS_ENABLED", False))
-        if not payments_on and provider_name != "mock":
-            raise ValueError("Оплата временно недоступна. Попробуйте позже.")
-        if provider_name == "mock" and not django_settings.DEBUG:
-            raise ValueError("Mock payments are disabled in production")
-
-        amount = Decimal(str(lesson.standalone_price))
-        currency = (lesson.standalone_currency or "RUB").upper()
         key = (idempotency_key or "").strip() or f"les_{teacher.pk}_{lesson.pk}_{timezone.now().strftime('%Y%m%d')}"
-
-        existing = Payment.objects.filter(idempotency_key=key).first()
-        if existing:
-            return cls._payment_payload(existing, lesson, idempotent=True)
-
-        import uuid
-
-        from .tbank_payment import customer_key_for_teacher
-
-        payment = Payment.objects.create(
-            teacher=teacher,
-            subscription=None,
-            plan=None,
+        opened = open_catalog_checkout(
+            user=teacher,
+            product_type=PRODUCT_LESSON,
+            list_price=lesson.standalone_price,
+            currency=lesson.standalone_currency or "RUB",
             purpose=Payment.Purpose.LESSON,
-            amount=amount,
-            discount_amount=Decimal("0"),
-            final_amount=amount,
-            currency=currency,
-            status=Payment.Status.PENDING,
-            provider=provider_name,
-            provider_payment_id=f"mock_{uuid.uuid4().hex[:16]}" if provider_name == "mock" else "",
-            customer_key=customer_key_for_teacher(teacher),
-            idempotency_key=key,
             metadata={
                 "purpose": "lesson",
                 "lesson_id": lesson.pk,
                 "lesson_slug": lesson.slug,
                 "lesson_title": (lesson.title or "")[:120],
             },
+            idempotency_key=key,
+            promo_code=promo_code,
+            quote_only=quote_only,
         )
-        provider = get_payment_provider(provider_name)
-        try:
-            payment_url = provider.create_checkout(payment, None)
-        except Exception:
-            payment.status = Payment.Status.FAILED
-            payment.save(update_fields=["status", "updated_at"])
-            raise
-        if payment_url:
-            meta = dict(payment.metadata or {})
-            meta["payment_url"] = payment_url
-            payment.metadata = meta
-            payment.save(update_fields=["metadata", "updated_at"])
-        LessonAccessService._record(
-            LESSON_PURCHASE_STARTED,
-            teacher,
+        if opened["quote"]:
+            return {
+                "quote": True,
+                "pricing": opened["pricing"],
+                "amount": opened["pricing"].get("final_amount"),
+                "currency": (lesson.standalone_currency or "RUB").upper(),
+                "lesson_id": lesson.pk,
+                "message": (opened["calc"] or {}).get("message"),
+            }
+        if opened["granted"] and opened["payment"] is not None:
+            cls.fulfill_payment(opened["payment"])
+        elif not opened["idempotent"]:
+            LessonAccessService._record(
+                LESSON_PURCHASE_STARTED,
+                teacher,
+                lesson,
+                extra={"access_type": ACCESS_LOCKED},
+            )
+        return cls._payment_payload(
+            opened["payment"],
             lesson,
-            extra={"access_type": ACCESS_LOCKED},
+            idempotent=opened["idempotent"],
+            payment_url=opened.get("payment_url") or "",
+            pricing=opened["pricing"],
+            granted=opened["granted"],
         )
-        return cls._payment_payload(payment, lesson, payment_url=payment_url)
 
     @classmethod
-    def _payment_payload(cls, payment, lesson, *, idempotent: bool = False, payment_url: str = "") -> dict:
+    def _payment_payload(
+        cls,
+        payment,
+        lesson,
+        *,
+        idempotent: bool = False,
+        payment_url: str = "",
+        pricing: dict | None = None,
+        granted: bool = False,
+    ) -> dict:
         meta = payment.metadata if isinstance(payment.metadata, dict) else {}
+        stored_pricing = pricing or (meta.get("pricing") if isinstance(meta.get("pricing"), dict) else None)
         return {
             "payment_id": payment.pk,
             "provider_payment_id": payment.provider_payment_id,
             "provider": payment.provider,
             "status": payment.status,
             "payment_url": payment_url or str(meta.get("payment_url") or ""),
-            "amount": str(payment.final_amount or payment.amount),
+            "amount": str(payment.final_amount if payment.final_amount is not None else payment.amount),
+            "list_price": str(payment.amount),
+            "discount": str(payment.discount_amount or 0),
             "currency": payment.currency,
             "lesson_id": lesson.pk,
             "idempotent": idempotent,
+            "granted": granted or payment.status == "paid" and bool(meta.get("granted")),
+            "pricing": stored_pricing,
+            "message": (stored_pricing or {}).get("message") or meta.get("applied_label") or "",
         }
 
     @classmethod

@@ -12,6 +12,7 @@ import {
   fetchPublicPricingPlans,
   fetchReadyLesson,
   purchaseReadyLesson,
+  quoteReadyLesson,
   startReadyLessonDemo,
   syncSubscriptionPayment,
 } from "../utils/cabinetAuth";
@@ -31,6 +32,7 @@ import {
   subscriptionBreakEven,
 } from "../utils/recentLessons";
 import CatalogEngagementBar from "./CatalogEngagementBar";
+import CatalogPromoBox from "./CatalogPromoBox";
 import PaywallDeclineSurvey from "./PaywallDeclineSurvey";
 
 const DIFFICULTY_LABELS = {
@@ -122,6 +124,7 @@ export default function LessonPreviewModal({
   const [lesson, setLesson] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [promoCode, setPromoCode] = useState("");
   const [warningOpen, setWarningOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [declineOpen, setDeclineOpen] = useState(false);
@@ -292,7 +295,7 @@ export default function LessonPreviewModal({
   const onPurchase = async () => {
     setBusy(true);
     try {
-      const result = await purchaseReadyLesson(lesson.slug, `les-${lesson.id}-${Date.now()}`);
+      const result = await purchaseReadyLesson(lesson.slug, `les-${lesson.id}-${Date.now()}`, promoCode);
       trackGoal("lesson_purchase_started", {
         lesson_id: String(lesson.id),
         access_type: access.access_type || "locked",
@@ -301,6 +304,7 @@ export default function LessonPreviewModal({
         window.location.href = result.payment_url;
         return;
       }
+      if (result?.message) setError("");
       await load();
     } catch (err) {
       setError(err?.message || "Не удалось начать покупку");
@@ -635,6 +639,16 @@ export default function LessonPreviewModal({
                 ) : null}
 
                 {error ? <p className="material-viewer__error" role="alert">{error}</p> : null}
+
+                {authed && access.can_purchase ? (
+                  <CatalogPromoBox
+                    onApplied={setPromoCode}
+                    onQuote={(code) => quoteReadyLesson(lesson.slug, code)}
+                  />
+                ) : null}
+                {access.pricing?.message && !promoCode ? (
+                  <p className="catalog-promo__msg catalog-promo__msg--ok">{access.pricing.message}</p>
+                ) : null}
 
                 <div className="material-paywall__actions">
                   {((access.cta || []).length

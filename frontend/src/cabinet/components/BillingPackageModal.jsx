@@ -28,6 +28,7 @@ export default function BillingPackageModal({
   const [createdPkg, setCreatedPkg] = useState(null);
   const [unpaidLessons, setUnpaidLessons] = useState([]);
   const [coverPast, setCoverPast] = useState("future");
+  const [promoCode, setPromoCode] = useState("");
 
   const unitsNum = Number(totalUnits) || 0;
   const amountNum = Number(amount) || 0;
@@ -64,6 +65,7 @@ export default function BillingPackageModal({
     setCustomDuration(false);
     setAmount("");
     setUnitPrice("");
+    setPromoCode("");
     setStartsAt(new Date().toISOString().slice(0, 10));
     setExpiresAt("");
     setError("");
@@ -154,6 +156,7 @@ export default function BillingPackageModal({
         lesson_duration_minutes: duration ? Number(duration) : null,
         auto_use: true,
         await_payment: true,
+        promo_code: promoCode.trim() || undefined,
       };
       if (coverPast === "past" && studentUnpaid.length > 0) {
         payload.cover_past_unpaid = true;
@@ -270,6 +273,16 @@ export default function BillingPackageModal({
                 }
               }}
               placeholder="8000"
+            />
+          </div>
+          <div className="pay-field">
+            <label>Промокод журнала</label>
+            <input
+              className="pay-input"
+              value={promoCode}
+              onChange={(e) => setPromoCode(e.target.value)}
+              placeholder="Если выдал администратор"
+              aria-label="Промокод журнала"
             />
           </div>
           <div className="pay-field">

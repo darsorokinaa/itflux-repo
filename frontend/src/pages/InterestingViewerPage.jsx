@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import CatalogMaterialViewer from "../components/CatalogMaterialViewer";
 import LessonCollectionNavigation from "../components/collections/LessonCollectionNavigation";
 import RelatedCollectionLessons from "../components/collections/RelatedCollectionLessons";
@@ -52,6 +52,7 @@ export default function InterestingViewerPage() {
   const [item, setItem] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     if (!slug) {
@@ -86,6 +87,36 @@ export default function InterestingViewerPage() {
     };
   }, [slug, searchParams, navigate]);
 
+  const demoActive = Boolean(item?.access?.demo_active);
+  const expiresAt = item?.access?.demo_expires_at;
+  useEffect(() => {
+    if (!demoActive || !expiresAt) return undefined;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [demoActive, expiresAt]);
+  const remaining = expiresAt ? Math.max(0, Math.floor((new Date(expiresAt).getTime() - now) / 1000)) : 0;
+  const demoOver = Boolean(item && (item.access?.demo_expired || (demoActive && remaining <= 0 && expiresAt)));
+
+  if (!loading && demoOver && !item?.access?.is_full) {
+    return (
+      <div className="digital-flow-page">
+        <div className="digital-flow-page__wrap">
+          <main className="lessons-page material-preview">
+            <h1>{item?.title || "Тренажёр"}</h1>
+            <p className="material-paywall__message">Демо закончилось. Материал снова закрыт.</p>
+            <div className="material-paywall__actions">
+              <Link className="material-access-btn material-access-btn--primary" to={previewUrl(slug || "")}>
+                Купить или открыть по тарифу
+              </Link>
+            </div>
+          </main>
+        </div>
+      </div>
+    );
+  }
+
+  const minutesLeft = Math.ceil(remaining / 60);
+
   return (
     <CatalogMaterialViewer
       title={item?.title || ""}
@@ -95,7 +126,14 @@ export default function InterestingViewerPage() {
       loading={loading}
       error={error}
       engagement={item?.slug ? { kind: "interesting", slug: item.slug } : null}
-      banner={item ? <LessonCollectionNavigation lesson={item} /> : null}
+      banner={item ? (
+        <>
+          {demoActive && remaining > 0 ? (
+            <p className="material-paywall__message">Демо: осталось {minutesLeft} мин. После этого тренажёр закроется.</p>
+          ) : null}
+          <LessonCollectionNavigation lesson={item} />
+        </>
+      ) : null}
       footer={item ? <RelatedCollectionLessons lesson={item} /> : null}
     />
   );

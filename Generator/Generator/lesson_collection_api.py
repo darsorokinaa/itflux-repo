@@ -511,16 +511,23 @@ def api_lesson_collection_purchase(request, slug):
     except json.JSONDecodeError:
         payload = {}
     try:
+        from Cabinet.subscription_service import PromoCodeError
+
+        quote = payload.get("quote") is True or str(payload.get("quote") or "").lower() in ("1", "true", "yes")
         result = LessonCollectionPurchaseService.create_checkout(
             request.user,
             collection,
             idempotency_key=(payload.get("idempotency_key") or "").strip() or None,
+            promo_code=(payload.get("promo_code") or "").strip() or None,
+            quote_only=quote,
         )
     except AccessDenied as exc:
         return JsonResponse(exc.to_dict(), status=403)
+    except PromoCodeError as exc:
+        return JsonResponse(exc.to_dict(), status=400)
     except (ValueError, NotImplementedError) as exc:
         return JsonResponse({"detail": str(exc), "code": "PAYMENT_UNAVAILABLE"}, status=503)
-    return JsonResponse(result, status=201)
+    return JsonResponse(result, status=200 if quote else 201)
 
 
 @csrf_exempt

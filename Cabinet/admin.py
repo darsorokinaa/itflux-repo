@@ -1,3 +1,4 @@
+from django import forms
 from django.contrib import admin
 from django.contrib.admin.views.decorators import staff_member_required
 from django.shortcuts import render
@@ -59,6 +60,8 @@ from .models import (
     MatchingPair,
     Material,
     CollectionPurchase,
+    InterestingDemoAccess,
+    InterestingPurchase,
     LessonDemoAccess,
     LessonPurchase,
     Notification,
@@ -73,6 +76,7 @@ from .models import (
     PromoCode,
     PromoCodeUsage,
     Promotion,
+    UserDiscount,
     PromotionRedemption,
     Receipt,
     ReviewItem,
@@ -1147,6 +1151,71 @@ class AIPlatformSettingsAdmin(admin.ModelAdmin):
         return False
 
 
+class PromoCodeAdminForm(forms.ModelForm):
+    product_types = forms.MultipleChoiceField(
+        label="Для каких покупок",
+        choices=[
+            ("subscription", "Подписка"),
+            ("lesson", "Готовый урок"),
+            ("collection", "Набор уроков"),
+            ("interesting", "Тренажёр"),
+            ("teacher_ledger", "Журнал учителя"),
+        ],
+        widget=forms.CheckboxSelectMultiple,
+        required=True,
+        help_text="Старые коды без списка действуют только на подписку.",
+    )
+
+    class Meta:
+        model = PromoCode
+        exclude = ("applicable_product_types",)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        current = list(self.instance.applicable_product_types or []) if self.instance.pk else ["subscription"]
+        if not current:
+            current = ["subscription"]
+        self.fields["product_types"].initial = current
+
+    def save(self, commit=True):
+        obj = super().save(commit=False)
+        obj.applicable_product_types = list(self.cleaned_data.get("product_types") or [])
+        if commit:
+            obj.save()
+            self.save_m2m()
+        return obj
+
+
+class UserDiscountAdminForm(forms.ModelForm):
+    product_types = forms.MultipleChoiceField(
+        label="Для каких покупок",
+        choices=[
+            ("subscription", "Подписка"),
+            ("lesson", "Готовый урок"),
+            ("collection", "Набор уроков"),
+            ("interesting", "Тренажёр"),
+        ],
+        widget=forms.CheckboxSelectMultiple,
+        required=True,
+    )
+
+    class Meta:
+        model = UserDiscount
+        exclude = ("product_types",)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["product_types"].initial = list(self.instance.product_types or [])
+
+    def save(self, commit=True):
+        obj = super().save(commit=False)
+        obj.product_types = list(self.cleaned_data.get("product_types") or [])
+        if commit:
+            obj.save()
+            self.save_m2m()
+        return obj
+
+
 class PromoCodeUsageInline(admin.TabularInline):
     model = PromoCodeUsage
     extra = 0
@@ -1155,6 +1224,7 @@ class PromoCodeUsageInline(admin.TabularInline):
 
 @admin.register(PromoCode)
 class PromoCodeAdmin(admin.ModelAdmin):
+    form = PromoCodeAdminForm
     list_display = (
         "code", "discount_type", "discount_value", "is_active",
         "valid_from", "valid_until", "uses_display", "created_at",
@@ -1168,6 +1238,7 @@ class PromoCodeAdmin(admin.ModelAdmin):
         ("Скидка", {
             "fields": (
                 "discount_type", "discount_value", "bonus_days",
+                "product_types",
                 "first_payment_only", "stackable_with_referral", "applicable_plans",
             ),
         }),
@@ -1180,6 +1251,32 @@ class PromoCodeAdmin(admin.ModelAdmin):
     def uses_display(self, obj):
         limit = obj.max_uses if obj.max_uses is not None else "∞"
         return f"{obj.uses_count} / {limit}"
+
+
+@admin.register(UserDiscount)
+class UserDiscountAdmin(admin.ModelAdmin):
+    form = UserDiscountAdminForm
+    list_display = ("user", "discount_type", "discount_value", "is_active", "valid_from", "valid_until")
+    list_filter = ("discount_type", "is_active")
+    search_fields = ("user__username", "user__email", "note")
+    autocomplete_fields = ("user",)
+    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(InterestingPurchase)
+class InterestingPurchaseAdmin(admin.ModelAdmin):
+    list_display = ("user", "item", "status", "amount", "purchased_at")
+    list_filter = ("status",)
+    search_fields = ("user__username", "item__title")
+    autocomplete_fields = ("user",)
+    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(InterestingDemoAccess)
+class InterestingDemoAccessAdmin(admin.ModelAdmin):
+    list_display = ("user", "item", "opened_at", "expires_at")
+    search_fields = ("user__username", "item__title")
+    autocomplete_fields = ("user",)
 
 
 @admin.register(PromoCodeUsage)
@@ -1543,6 +1640,7 @@ from .billing_models import (  # noqa: E402
     BillingTransaction,
     EventBillingRecord,
     LessonPackage,
+    StudentBillingSettings,
     StudentPayment,
     TeacherBillingSettings,
 )
@@ -1552,6 +1650,44 @@ from .billing_models import (  # noqa: E402
 class TeacherBillingSettingsAdmin(admin.ModelAdmin):
     list_display = ("teacher", "currency", "default_billing_type", "default_lesson_price", "updated_at")
     search_fields = ("teacher__username", "teacher__email")
+
+
+@admin.register(StudentBillingSettings)
+class StudentBillingSettingsAdmin(admin.ModelAdmin):
+    """Скидку платформы меняет только администратор. Учитель видит её в журнале, но не редактирует."""
+
+    list_display = (
+        "billing_account",
+        "billing_type",
+        "default_lesson_price",
+        "platform_discount_active",
+        "platform_discount_type",
+        "platform_discount_value",
+    )
+    list_filter = ("platform_discount_active", "billing_type")
+    search_fields = (
+        "billing_account__student__first_name",
+        "billing_account__student__last_name",
+        "billing_account__teacher__username",
+        "platform_discount_note",
+    )
+    autocomplete_fields = ("ledger_promo_code",)
+    fieldsets = (
+        (None, {"fields": ("billing_account", "billing_type", "default_lesson_price")}),
+        (
+            "Скидка платформы",
+            {
+                "description": "Стоящая скидка на уроки этой пары учитель–ученик. Учитель её видит и не может изменить.",
+                "fields": (
+                    "platform_discount_active",
+                    "platform_discount_type",
+                    "platform_discount_value",
+                    "platform_discount_note",
+                    "ledger_promo_code",
+                ),
+            },
+        ),
+    )
 
 
 @admin.register(BillingAccount)

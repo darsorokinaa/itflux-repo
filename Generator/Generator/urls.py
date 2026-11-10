@@ -285,6 +285,12 @@ urlpatterns = [
     path("api/lessons/<slug:slug>/", views.api_lesson_detail, name="api_lesson_detail"),
     path("api/interesting/", views.api_interesting, name="api_interesting"),
     path("api/interesting/<slug:slug>/view/", views.api_interesting_view, name="api_interesting_view"),
+    path("api/interesting/<slug:slug>/demo/", views.api_interesting_start_demo, name="api_interesting_start_demo"),
+    path(
+        "api/interesting/<slug:slug>/purchase/",
+        views.api_interesting_purchase,
+        name="api_interesting_purchase",
+    ),
     path(
         "api/interesting/<slug:slug>/stats/view/",
         views.api_interesting_stats_view,
