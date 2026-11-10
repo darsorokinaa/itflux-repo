@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
@@ -42,6 +42,8 @@ afterEach(() => {
   mounts.excalidraw = 0;
   mounts.tldraw = 0;
   fetchBoard.mockReset();
+  sessionStorage.clear();
+  vi.unstubAllGlobals();
 });
 
 describe("BoardEditorGate", () => {
@@ -108,6 +110,29 @@ describe("BoardEditorGate", () => {
     expect(await screen.findByTestId("board-provider-error", {}, { timeout: 3000 })).toBeTruthy();
     expect(screen.queryByTestId("tldraw-board")).toBeNull();
     expect(screen.queryByTestId("excalidraw-board")).toBeNull();
+  });
+
+  it("replaces the spinner when WebKit cannot import the board module", async () => {
+    const reload = vi.fn();
+    vi.stubGlobal("location", {
+      href: "https://itflux.test/cabinet/boards/board-1",
+      pathname: "/cabinet/boards/board-1",
+      reload,
+      replace: vi.fn(),
+    });
+    sessionStorage.setItem("itflux.chunk-recover", String(Date.now()));
+    fetchBoard.mockReturnValue(new Promise(() => {}));
+    renderGate();
+    expect(screen.getByText("Подключаем доску…")).toBeTruthy();
+    const event = new Event("vite:preloadError");
+    event.payload = new TypeError("Importing a module script failed.");
+    window.dispatchEvent(event);
+    expect(await screen.findByTestId("board-stale-module")).toBeTruthy();
+    expect(screen.getByText("Доска обновилась — перезагрузите вкладку доски")).toBeTruthy();
+    expect(screen.queryByText("Подключаем доску…")).toBeNull();
+    expect(reload).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Перезагрузить вкладку" }));
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 
   it("treats a missing provider as excalidraw", async () => {

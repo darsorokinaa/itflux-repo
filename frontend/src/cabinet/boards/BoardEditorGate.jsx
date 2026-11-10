@@ -3,10 +3,11 @@ import { useParams } from "react-router-dom";
 
 import { fetchInteractiveBoard } from "../../utils/cabinetAuth";
 import { prefetchTldrawSyncToken, warmBoardEditor } from "./boardSyncPrefetch";
-import { lazyWithRetry } from "../../utils/importWithRetry";
+import { isStaleBoardModuleError, lazyWithRetry } from "../../utils/importWithRetry";
 import { bindBoardDocumentTelemetry } from "./boardDocumentTelemetry";
 import { normalizeBoardProvider } from "./boardProvider";
 import BoardV2ErrorBoundary from "./BoardV2ErrorBoundary";
+import StaleBoardNotice from "./StaleBoardNotice";
 import LessonBoardMessage from "./LessonBoardMessage";
 import "../styles/boards.css";
 import { installBoardErrorCapture, markBoard } from "../lessonLoadTrace";
@@ -21,6 +22,7 @@ installBoardErrorCapture();
 export default function BoardEditorGate() {
   const { boardId = "" } = useParams();
   const [attempt, setAttempt] = useState(0);
+  const [staleModule, setStaleModule] = useState(false);
   const [request, setRequest] = useState({
     boardId: "",
     attempt: -1,
@@ -29,6 +31,15 @@ export default function BoardEditorGate() {
   });
 
   useEffect(() => bindBoardDocumentTelemetry(boardId), [boardId]);
+
+  useEffect(() => {
+    const onPreloadError = (event) => {
+      if (!isStaleBoardModuleError(event?.payload)) return;
+      setStaleModule(true);
+    };
+    window.addEventListener("vite:preloadError", onPreloadError);
+    return () => window.removeEventListener("vite:preloadError", onPreloadError);
+  }, []);
 
   useEffect(() => {
     markBoard("gateMountedAt", new Date().toISOString());
@@ -91,6 +102,16 @@ export default function BoardEditorGate() {
     if (phase !== "ready" || !board) return;
     markBoard("provider", normalizeBoardProvider(board.board_provider));
   }, [board, phase]);
+
+  if (staleModule) {
+    return (
+      <div className="cb-board-editor lesson-board-shell" data-testid="board-stale-module">
+        <div className="lesson-board">
+          <StaleBoardNotice />
+        </div>
+      </div>
+    );
+  }
 
   if (phase === "loading") {
     return (

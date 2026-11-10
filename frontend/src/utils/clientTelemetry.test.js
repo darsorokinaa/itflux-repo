@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { flushClientTelemetry, isChunkLoadError, recoverChunkLoadOnce, reportClientEvent } from "./clientTelemetry";
+import {
+  flushClientTelemetry,
+  isChunkLoadError,
+  preloadChunkConfirmed,
+  preloadTargetUrl,
+  recoverChunkLoadOnce,
+  reportClientEvent,
+  startClientTelemetry,
+} from "./clientTelemetry";
 
 describe("clientTelemetry", () => {
   beforeEach(() => {
@@ -14,6 +22,11 @@ describe("clientTelemetry", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     sessionStorage.clear();
+    try {
+      delete window.top;
+    } catch {
+      /* top stays on the prototype */
+    }
   });
 
   it("ignores unknown events", () => {
@@ -65,6 +78,25 @@ describe("clientTelemetry", () => {
     expect(replace).toHaveBeenCalledTimes(1);
   });
 
+  it("does not hard-reload a board iframe inside a meeting", () => {
+    const reload = vi.fn();
+    const replace = vi.fn();
+    vi.stubGlobal("location", {
+      href: "https://itflux.test/cabinet/boards/board-1",
+      pathname: "/cabinet/boards/board-1",
+      reload,
+      replace,
+    });
+    Object.defineProperty(window, "top", {
+      configurable: true,
+      value: { location: { pathname: "/lesson/join" } },
+    });
+    expect(recoverChunkLoadOnce()).toBe(false);
+    expect(reload).not.toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem("itflux.chunk-recover")).toBeNull();
+  });
+
   it("does not hard-reload a live meeting after a chunk error", async () => {
     const replace = vi.fn();
     const reload = vi.fn();
@@ -88,6 +120,88 @@ describe("clientTelemetry", () => {
   it("treats Safari Load failed as a missing module", () => {
     expect(isChunkLoadError({ name: "TypeError", message: "Load failed" })).toBe(false); // r34: bare Load failed is any fetch
     expect(isChunkLoadError({ name: "Error", message: "Load failed" })).toBe(false);
+    expect(isChunkLoadError({ message: "Importing a module script failed." })).toBe(true);
+    expect(isChunkLoadError({ message: "Unable to preload CSS for https://itflux.test/assets/a.css" })).toBe(true);
+  });
+
+  it("reloads a top-level board tab once and never a lesson join page", () => {
+    const reload = vi.fn();
+    const replace = vi.fn();
+    vi.stubGlobal("location", {
+      href: "https://itflux.test/cabinet/boards/board-1",
+      pathname: "/cabinet/boards/board-1",
+      reload,
+      replace,
+    });
+    expect(recoverChunkLoadOnce()).toBe(true);
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(replace).not.toHaveBeenCalled();
+    expect(recoverChunkLoadOnce()).toBe(false);
+    expect(reload).toHaveBeenCalledTimes(1);
+
+    sessionStorage.clear();
+    reload.mockClear();
+    vi.stubGlobal("location", {
+      href: "https://itflux.test/lesson/join",
+      pathname: "/lesson/join",
+      reload,
+      replace,
+    });
+    expect(recoverChunkLoadOnce()).toBe(false);
+    expect(reload).not.toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem("itflux.chunk-recover")).toBeNull();
+  });
+
+  it("confirms a WebKit preload error with no URL only on a board tab", async () => {
+    const reload = vi.fn();
+    vi.stubGlobal("location", {
+      href: "https://itflux.test/cabinet/boards/board-1",
+      pathname: "/cabinet/boards/board-1",
+      reload,
+      replace: vi.fn(),
+    });
+    const event = { payload: { message: "Importing a module script failed." } };
+    expect(preloadTargetUrl(event)).toBe("");
+    await expect(preloadChunkConfirmed(event)).resolves.toBe(true);
+
+    const withUrl = {
+      payload: {
+        message: "Importing a module script failed.",
+        url: "https://itflux.test/assets/Board-abc.js",
+      },
+    };
+    expect(preloadTargetUrl(withUrl)).toBe("https://itflux.test/assets/Board-abc.js");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      status: 404,
+      headers: { get: () => "text/html" },
+    }));
+    await expect(preloadChunkConfirmed(withUrl)).resolves.toBe(true);
+
+    vi.stubGlobal("location", {
+      href: "https://itflux.test/cabinet",
+      pathname: "/cabinet",
+      reload,
+      replace: vi.fn(),
+    });
+    await expect(preloadChunkConfirmed(event)).resolves.toBe(false);
+  });
+
+  it("recovers a board tab when vite:preloadError has no URL", async () => {
+    const reload = vi.fn();
+    vi.stubGlobal("location", {
+      href: "https://itflux.test/cabinet/boards/board-1",
+      pathname: "/cabinet/boards/board-1",
+      reload,
+      replace: vi.fn(),
+    });
+    const stop = startClientTelemetry();
+    const event = new Event("vite:preloadError", { cancelable: true });
+    event.payload = new TypeError("Importing a module script failed.");
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+    stop();
   });
 
   it("treats Unexpected token '<' as a stale chunk that can recover once", () => {

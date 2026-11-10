@@ -1,7 +1,9 @@
 import { Component } from "react";
 
-import LessonBoardMessage from "./LessonBoardMessage";
 import { markBoard } from "../lessonLoadTrace";
+import { isStaleBoardModuleError } from "../../utils/importWithRetry";
+import LessonBoardMessage from "./LessonBoardMessage";
+import StaleBoardNotice from "./StaleBoardNotice";
 
 /** Ловит падение tldraw, не отдавая его границе всей страницы урока. */
 export default class BoardV2ErrorBoundary extends Component {
@@ -27,6 +29,7 @@ export default class BoardV2ErrorBoundary extends Component {
 
   render() {
     if (!this.state.error) return this.props.children;
+    if (isStaleBoardModuleError(this.state.error)) return <StaleBoardNotice />;
     const detail = this.state.error instanceof Error ? this.state.error.message : String(this.state.error);
     return (
       <LessonBoardMessage
