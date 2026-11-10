@@ -67,6 +67,22 @@ describe("seasonalThemeApi", () => {
     expect(fallback["--seasonal-meeting-header-decor"]).toContain("header.png");
   });
 
+  it("spreads the lesson header pattern across the bar and leaves the board corner", () => {
+    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "seasonal-theme.css"), "utf8");
+    const lesson = css.match(/html\.seasonal-theme-active \.video-lesson-header \{([^}]+)\}/);
+    expect(lesson?.[1]).toMatch(/background-size:\s*100% auto/);
+    expect(lesson?.[1]).toMatch(/background-position:\s*center top/);
+    expect(lesson?.[1]).toMatch(/background-repeat:\s*no-repeat/);
+    expect(lesson?.[1]).not.toMatch(/right center/);
+    const board = css.match(/html\.seasonal-theme-active \.cb-board-editor__top \{([^}]+)\}/);
+    expect(board?.[1]).toMatch(/background-position:\s*right center/);
+    expect(board?.[1]).toMatch(/background-size:\s*auto 100%/);
+    expect(css).toMatch(/html\.seasonal-theme-active \.video-lesson-header__meta,/);
+    expect(css).toMatch(/html\.seasonal-theme-active \.video-lesson-header \.cf-live \{[^}]*background-color:\s*#fff/);
+    expect(css).not.toMatch(/\.video-lesson-body[\s\S]{0,120}--seasonal-meeting-header-decor/);
+    expect(css).not.toMatch(/#jitsi-container[\s\S]{0,80}--seasonal-meeting-header-decor/);
+  });
+
   it("normalizes strip pattern settings to full-page tiling", () => {
     const vars = buildSeasonalCssVars({
       background: {

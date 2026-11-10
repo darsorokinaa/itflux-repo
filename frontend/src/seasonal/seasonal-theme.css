@@ -258,7 +258,36 @@ html.seasonal-theme-active .cabinet-header > * {
   z-index: 1;
 }
 
-html.seasonal-theme-active .video-lesson-header,
+/* Шапка комнаты урока: баннер на всю ширину панели, за текстом.
+   Картинка — широкая полоса с декором у верхнего края. Масштаб по ширине
+   показывает левый, средний и правый край; низ обрезает высота шапки.
+   Без сезонной темы этих правил нет — шапка остаётся белой. */
+html.seasonal-theme-active .video-lesson-header {
+  background-color: #ffffff;
+  background-image: var(--seasonal-meeting-header-decor, var(--seasonal-header-decor, none));
+  background-repeat: no-repeat;
+  background-position: center top;
+  background-size: 100% auto;
+}
+
+html.seasonal-theme-active .video-lesson-header__meta,
+html.seasonal-theme-active .video-lesson-header .cf-live {
+  border-radius: 8px;
+  background-color: #fff;
+  box-shadow:
+    0 0 0 4px #fff,
+    0 0 12px 6px rgba(255, 255, 255, 0.92);
+}
+
+html.seasonal-theme-active .video-lesson-header__meta {
+  flex: 0 1 auto;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Доска, видео и звонок без этого баннера. У шапки редактора доски
+   остаётся прежний декор у правого края, не на всё полотно. */
 html.seasonal-theme-active .cb-board-editor__top {
   background-image: var(--seasonal-meeting-header-decor, var(--seasonal-header-decor, none));
   background-size: auto 100%;
