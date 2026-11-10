@@ -24,6 +24,7 @@ from django.conf import settings as django_settings
 from django.core.signing import BadSignature, Signer
 from django.db import IntegrityError, transaction
 from django.db.models import Case, Count, IntegerField, Min, Prefetch, Q, Value, When
+from django.db.models.functions import Coalesce
 from django.http import (
     FileResponse,
     Http404,
@@ -1187,20 +1188,82 @@ def _fipi_or_owned_teacher_q(request):
     return q
 
 
-def _tasklists_visible_for_vpr(tasklists, vpr_vf):
+def _no_store(response):
+    """Фильтры ВПР не кэшируем: новый активный номер должен появиться сразу."""
+    response["Cache-Control"] = "private, no-store"
+    return response
+
+
+def public_vpr_grades(subject_instance, level_instance):
+    """Классы, в которых есть хотя бы одно активное задание общего банка.
+
+    Класс берётся с задания, а если там пусто — со списка TaskList.
+    Пустой список без заданий класс не создаёт.
+    """
+    grades = (
+        Task.active_objects.filter(
+            task__subject=subject_instance,
+            task__level=level_instance,
+        )
+        .annotate(grade=Coalesce("vpr_class", "task__vpr_class"))
+        .exclude(grade__isnull=True)
+        .values_list("grade", flat=True)
+        .distinct()
+    )
+    return sorted({int(grade) for grade in grades})
+
+
+def _active_public_counts(tasklist_ids):
+    ids = [pk for pk in tasklist_ids if pk]
+    if not ids:
+        return {}
+    rows = (
+        Task.active_objects.filter(task_id__in=ids)
+        .values("task_id")
+        .annotate(c=Count("id"))
+    )
+    return {row["task_id"]: row["c"] for row in rows}
+
+
+def _tasklists_visible_for_vpr(tasklists, vpr_vf, *, public_grades=None):
     """Выбранный класс показывает только списки этого класса.
 
     Пустой класс остаётся лишь для номера, у которого нет списка с классом.
     Списки 7, 8 и 10 с одним номером не схлопываются в один.
+
+    Класс без единого активного публичного задания не подставляет старые списки
+    без класса (информатика, пустые TaskList 17–28). Списки с заполненным классом
+    остаются как раньше, в том числе пустой номер внутри класса, где задания есть.
     """
     grade = (vpr_vf or {}).get("vpr_class")
     rows = list(tasklists)
     if grade is None:
-        return rows
+        if public_grades is None:
+            return rows
+        allowed = {int(item) for item in public_grades}
+        counts = _active_public_counts([row.id for row in rows if row.vpr_class is None])
+        kept = []
+        for row in rows:
+            if row.vpr_class is not None and int(row.vpr_class) in allowed:
+                kept.append(row)
+            elif row.vpr_class is None and counts.get(row.id, 0) > 0:
+                kept.append(row)
+        return kept
+    grade = int(grade)
+    if public_grades is not None and grade not in {int(item) for item in public_grades}:
+        return [row for row in rows if row.vpr_class == grade]
     specific = {row.task_number for row in rows if row.vpr_class == grade}
-    return [
+    visible = [
         row for row in rows
         if row.vpr_class == grade or (row.vpr_class is None and row.task_number not in specific)
+    ]
+    if public_grades is None:
+        return visible
+    # Пустой список без класса не занимает номер: у 7/8/10 класса свои списки с vpr_class.
+    counts = _active_public_counts([row.id for row in visible if row.vpr_class is None])
+    return [
+        row for row in visible
+        if row.vpr_class is not None or counts.get(row.id, 0) > 0
     ]
 
 
@@ -2167,6 +2230,11 @@ def api_tasks(request, level, subject):
     subject_instance = get_subject_for_api(subject)
     level_instance = get_object_or_404(Level, level=level)
     vpr_vf = _vpr_task_filters_from_request(request, level)
+    public_grades = (
+        public_vpr_grades(subject_instance, level_instance)
+        if (level or "").lower() == "vpr"
+        else None
+    )
 
     subtopic_ids = None
     if request.GET.get("subtopic_ids"):
@@ -2188,7 +2256,7 @@ def api_tasks(request, level, subject):
         .annotate(count_task=Count("task", filter=count_task_filter))
         .order_by('task_number')
     )
-    tasks_qs = _tasklists_visible_for_vpr(tasks_qs, vpr_vf)
+    tasks_qs = _tasklists_visible_for_vpr(tasks_qs, vpr_vf, public_grades=public_grades)
     if subtopic_ids:
         _tq = generator_bank_queryset(request, request.GET.get("source")).filter(
             task__subject=subject_instance,
@@ -2404,6 +2472,8 @@ def api_tasks(request, level, subject):
         "subject_name": subject_instance.subject_name,
         "tasks": result,
     }
+    if public_grades is not None:
+        resp["grades"] = public_grades
     resp.update(_subject_background_payload(subject_instance, request))
     # Диагностика: при ?debug=1 показывать, почему linked_group может не отображаться
     if request.GET.get("debug") == "1":
@@ -2437,7 +2507,7 @@ def api_tasks(request, level, subject):
                 ),
             })
         resp["_debug_linked"] = debug_linked
-    return JsonResponse(resp)
+    return _no_store(JsonResponse(resp))
 
 
 def api_subtopics(request, level, subject):
@@ -2457,6 +2527,15 @@ def api_subtopics(request, level, subject):
         .distinct()
         .order_by("task_number")
     )
+    if (level or "").lower() == "vpr":
+        public_grades = public_vpr_grades(subject_instance, level_instance)
+        grade = (vpr_vf or {}).get("vpr_class")
+        if grade is not None and int(grade) not in public_grades:
+            task_lists = [row for row in task_lists if row.vpr_class == int(grade)]
+        elif grade is None:
+            task_lists = _tasklists_visible_for_vpr(
+                task_lists, vpr_vf, public_grades=public_grades
+            )
  
     fipi_q = _get_fipi_q()
     out = []
@@ -2515,9 +2594,9 @@ def api_subtopics(request, level, subject):
             "subtopics": subtopics,
         })
 
-    return JsonResponse({
+    return _no_store(JsonResponse({
         "subtopics_by_task": out,
-    })
+    }))
 
 @csrf_exempt
 @require_http_methods(["POST"])
@@ -2678,6 +2757,11 @@ def api_task_bank_filters(request, level, subject):
     level_instance = get_object_or_404(Level, level=level)
     vpr_vf = _vpr_task_filters_from_request(request, level)
     bank_qs = generator_bank_queryset(request, request.GET.get("source"))
+    public_grades = (
+        public_vpr_grades(subject_instance, level_instance)
+        if (level or "").lower() == "vpr"
+        else None
+    )
 
     visible_lists = _tasklists_visible_for_vpr(
         TaskList.objects.filter(
@@ -2685,6 +2769,7 @@ def api_task_bank_filters(request, level, subject):
             level=level_instance,
         ).order_by("task_number"),
         vpr_vf,
+        public_grades=public_grades,
     )
     task_list_qs = TaskList.objects.filter(
         id__in=[row.id for row in visible_lists]
@@ -2792,11 +2877,14 @@ def api_task_bank_filters(request, level, subject):
         key=lambda s: s.casefold(),
     )
 
-    return JsonResponse({
+    payload = {
         "task_numbers": task_numbers,
         "subtopics": subtopics,
         "authors": authors,
-    })
+    }
+    if public_grades is not None:
+        payload["grades"] = public_grades
+    return _no_store(JsonResponse(payload))
 
 
 @require_http_methods(["GET"])

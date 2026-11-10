@@ -12,6 +12,7 @@ import { rememberValueReached, trackValueGoal } from "../utils/valuePath";
 import { rememberLastVariant } from "../utils/recentLessons";
 import { fetchCabinetSession } from "../utils/cabinetAuth";
 import VariantThemeSelector from "../variantThemes/VariantThemeSelector";
+import { unavailableVprGradeSearch } from "../utils/vprGrades";
 import "../styles/my-task-bank.css";
 
 const SUBJECT_NAMES = {
@@ -294,6 +295,14 @@ function TasksPage() {
       })
       .then((data) => {
         if (cancelled) return;
+        if (String(level || "").toLowerCase() === "vpr") {
+          const nextSearch = unavailableVprGradeSearch(searchParams, data.grades);
+          if (nextSearch) {
+            const qs = nextSearch.toString();
+            navigate(`/${level}/${subject}${qs ? `?${qs}` : ""}`, { replace: true });
+            return;
+          }
+        }
         setTasks(data.tasks || []);
         setSubjectNameFromApi(
           formatSubjectDisplayName(
@@ -311,7 +320,7 @@ function TasksPage() {
         }
       });
     return () => { cancelled = true; };
-  }, [level, subject, isLessonJoinPath, vprQs, isTeacher, taskSource]);
+  }, [level, subject, isLessonJoinPath, vprQs, isTeacher, taskSource, searchParams, navigate]);
 
   // На мобильных прокрутить к блоку подтем при открытии
   useEffect(() => {
