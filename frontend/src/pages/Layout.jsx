@@ -44,6 +44,7 @@ function Layout() {
     pathname === "/repetitor" ||
     pathname === "/lessons" ||
     pathname === "/interesting" ||
+    pathNorm === "/rozhdestvenskiy-sbor" ||
     pathname === "/teachers" ||
     pathname === "/cabinet" ||
     pathname === "/cabinet/login" ||

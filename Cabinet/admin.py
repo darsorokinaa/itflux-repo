@@ -30,6 +30,7 @@ from .models import (
     ReferralLinkRegistration,
     ReferralReward,
     FlashcardItem,
+    Fundraiser,
     Homework,
     HomeworkEditHistory,
     HomeworkSubmission,
@@ -1377,6 +1378,17 @@ class PromotionRedemptionAdmin(admin.ModelAdmin):
 
     def has_change_permission(self, request, obj=None):
         return False
+
+
+@admin.register(Fundraiser)
+class FundraiserAdmin(admin.ModelAdmin):
+    list_display = (
+        "title", "slug", "is_active", "start_date",
+        "include_subscriptions_since", "manual_adjustment_rub", "goal_rub",
+    )
+    list_filter = ("is_active",)
+    search_fields = ("title", "slug")
+    ordering = ("-start_date", "-id")
 
 
 @admin.register(Payment)

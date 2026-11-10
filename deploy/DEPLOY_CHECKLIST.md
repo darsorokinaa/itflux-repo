@@ -121,6 +121,26 @@ sudo systemctl restart itflux
 sudo systemctl status itflux
 ```
 
+## Статика рождественского сбора
+
+Файлы страницы `/rozhdestvenskiy-sbor` в git не входят. Их кладут на сервер отдельно, до перезагрузки nginx:
+
+```bash
+sudo mkdir -p /var/www/itflux-charity
+# в каталоге должны оказаться img/ (qr.png, фото, превью *_sm.jpg) и video/ (mp4 и постеры)
+sudo rsync -a ./img ./video /var/www/itflux-charity/
+```
+
+Фрагмент уже есть в `deploy/nginx.conf`:
+
+```nginx
+location /static-charity/ {
+    alias /var/www/itflux-charity/;
+}
+```
+
+Адрес `/static-charity/img/<имя>` отдаёт файл `/var/www/itflux-charity/img/<имя>`, так же для `video/`.
+
 ## Фоновые задачи (cron)
 
 Устанавливаются автоматически в `deploy/update.sh` через `deploy/install_cron.sh`.

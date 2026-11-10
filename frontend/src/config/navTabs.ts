@@ -1,6 +1,6 @@
 import { WORKSHEETS_CONSTRUCTOR_ENABLED } from "../cabinet/featureFlags";
 
-export type NavTabKey = "tasks" | "my-tasks" | "generator" | "lessons" | "worksheets" | "interesting" | "razbor" | "teachers";
+export type NavTabKey = "tasks" | "my-tasks" | "generator" | "lessons" | "worksheets" | "interesting" | "razbor" | "fundraiser" | "teachers";
 
 export type NavTabDef = {
   key: NavTabKey;
@@ -25,6 +25,7 @@ export const NAV_TABS: ReadonlyArray<NavTabDef> = [
   },
   { key: "interesting", label: "Тренажёры и интерактивы", to: "/interesting" },
   { key: "razbor", label: "Разборы", to: "/razbor" }, // r131
+  { key: "fundraiser", label: "🎄 Рождественский сбор", to: "/rozhdestvenskiy-sbor" },
   { key: "teachers", label: "Сообщество учителей", to: "/teachers" },
 ];
 
@@ -53,6 +54,9 @@ export function getActiveNavTab(
   }
   if (p === "/razbor" || p.startsWith("/razbor/")) {
     return "razbor";
+  }
+  if (p === "/rozhdestvenskiy-sbor") {
+    return "fundraiser";
   }
   if (p === "/teachers") {
     return "teachers";

@@ -160,7 +160,8 @@ const backendProxy = {
     target: apiProxyTarget,
     changeOrigin: true,
   },
-  '/static': {
+  // Слэш в конце: /static-charity/ (фото сбора) не уходит в Django.
+  '/static/': {
     target: apiProxyTarget,
     changeOrigin: true,
   },

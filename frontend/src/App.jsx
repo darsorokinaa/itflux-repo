@@ -19,6 +19,7 @@ const PersonalDataConsentPage = lazy(() => import("./pages/PersonalDataConsentPa
 const ConsentStepGate = lazy(() => import("./r52/ConsentStepGate"));
 const OfferPage = lazy(() => import("./pages/OfferPage"));
 const ContactsPage = lazy(() => import("./pages/ContactsPage"));
+const ChristmasFundraiserPage = lazy(() => import("./pages/ChristmasFundraiserPage"));
 const MessagingAgreementPage = lazy(() => import("./pages/MessagingAgreementPage"));
 const PricingPage = lazy(() => import("./pages/PricingPage"));
 const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
@@ -178,6 +179,9 @@ function getMetaDescriptionForPath(pathname) {
   }
   if (path === "/contacts") {
     return "Контакты и реквизиты «Цифрового потока».";
+  }
+  if (path === "/rozhdestvenskiy-sbor" || path === "/rozhdestvenskiy-sbor/") {
+    return "Рождественский сбор для детей из детских домов и учреждений социальной защиты города Иваново и Ивановской области. Подписки, донаты и переводы идут на праздник и подарки.";
   }
   if (path === "/personal-data-consent") {
     return "Согласие на обработку персональных данных пользователей платформы «Цифровой поток».";
@@ -409,6 +413,8 @@ function App() {
           <Route path="/personal-data-consent" element={<PersonalDataConsentPage />} />
           <Route path="/offer" element={<OfferPage />} />
           <Route path="/contacts" element={<ContactsPage />} />
+          <Route path="/rozhdestvenskiy-sbor" element={<ChristmasFundraiserPage />} />
+          <Route path="/rozhdestvenskiy-sbor/" element={<ChristmasFundraiserPage />} />
           <Route path="/messages-agreement" element={<MessagingAgreementPage />} />
           <Route path="/pricing" element={<PricingPage />} />
           <Route path="/pricing/" element={<PricingPage />} />
