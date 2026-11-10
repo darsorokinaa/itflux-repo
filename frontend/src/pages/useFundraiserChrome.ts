@@ -45,7 +45,10 @@ export function useFundraiserDock() {
       const cookie = document.querySelector(".cookie-banner");
       const tab = document.querySelector(".mobile-tabbar");
       const offset = Math.max(visibleHeight(cookie), visibleHeight(tab));
-      document.documentElement.style.setProperty("--xmas-dock-bottom", `${offset}px`);
+      document.documentElement.style.setProperty(
+        "--xmas-dock-bottom",
+        `${offset}px`,
+      );
     };
     applyDock();
     const observer = new MutationObserver(applyDock);
@@ -69,7 +72,10 @@ export function useFundraiserHeaderOffset() {
     if (!header) return undefined;
     const apply = () => {
       const height = Math.ceil(header.getBoundingClientRect().height);
-      document.documentElement.style.setProperty("--xmas-stick-top", `${height + 8}px`);
+      document.documentElement.style.setProperty(
+        "--xmas-stick-top",
+        `${height + 8}px`,
+      );
     };
     apply();
     const observer = new ResizeObserver(apply);
@@ -82,12 +88,24 @@ export function useFundraiserHeaderOffset() {
   }, []);
 }
 
-export function stepLightIndex(index: number | null, delta: number, count: number): number | null {
+export function stepLightIndex(
+  index: number | null,
+  delta: number,
+  count: number,
+): number | null {
   if (index == null || count <= 0) return index;
   return (index + delta + count) % count;
 }
 
-export function useFundraiserOverlayLock(helpOpen: boolean, lightIndex: number | null, count: number, closeHelp: () => void, setLightIndex: (value: number | null | ((index: number | null) => number | null)) => void) {
+export function useFundraiserOverlayLock(
+  helpOpen: boolean,
+  lightIndex: number | null,
+  count: number,
+  closeHelp: () => void,
+  setLightIndex: (
+    value: number | null | ((index: number | null) => number | null),
+  ) => void,
+) {
   useEffect(() => {
     if (!helpOpen && lightIndex == null) {
       document.body.style.overflow = "";
@@ -101,8 +119,10 @@ export function useFundraiserOverlayLock(helpOpen: boolean, lightIndex: number |
         return;
       }
       if (lightIndex == null) return;
-      if (event.key === "ArrowRight") setLightIndex((index) => stepLightIndex(index, 1, count));
-      if (event.key === "ArrowLeft") setLightIndex((index) => stepLightIndex(index, -1, count));
+      if (event.key === "ArrowRight")
+        setLightIndex((index) => stepLightIndex(index, 1, count));
+      if (event.key === "ArrowLeft")
+        setLightIndex((index) => stepLightIndex(index, -1, count));
     };
     document.addEventListener("keydown", onKey);
     return () => {

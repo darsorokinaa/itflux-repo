@@ -1,4 +1,5 @@
 """Публичная сумма рождественского сбора: подписки T-Bank + ручная поправка, без персональных данных."""
+
 from __future__ import annotations
 
 import json
@@ -26,7 +27,12 @@ INDEX = (
 _TMP = tempfile.mkdtemp()
 (Path(_TMP) / "index.html").write_text(INDEX, encoding="utf-8")
 
-LOC_CACHE = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "fundraiser-tests"}}
+LOC_CACHE = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "fundraiser-tests",
+    }
+}
 
 
 def _pay(teacher, fields):
@@ -71,15 +77,21 @@ class FundraiserCurrentApiTests(TestCase):
         self.assertTrue(self.fundraiser.is_active)
         self.assertIsNone(self.fundraiser.goal_rub)
 
-        _pay(self.teacher, {
-            "final_amount": Decimal("495.00"),
-            "status": Payment.Status.PAID,
-            "purpose": Payment.Purpose.SUBSCRIPTION,
-            "provider": "tbank",
-            "paid_at": CUTOFF,
-            "provider_payment_id": "pay_secret_495",
-            "metadata": {"card": "4111111111111111", "email": "secret-payer@example.com"},
-        })
+        _pay(
+            self.teacher,
+            {
+                "final_amount": Decimal("495.00"),
+                "status": Payment.Status.PAID,
+                "purpose": Payment.Purpose.SUBSCRIPTION,
+                "provider": "tbank",
+                "paid_at": CUTOFF,
+                "provider_payment_id": "pay_secret_495",
+                "metadata": {
+                    "card": "4111111111111111",
+                    "email": "secret-payer@example.com",
+                },
+            },
+        )
         response = self._get()
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -95,25 +107,94 @@ class FundraiserCurrentApiTests(TestCase):
             (Decimal("1000.00"), datetime(2026, 11, 10, 12, 0, tzinfo=MSK)),
         ]
         for amount, paid_at in included:
-            _pay(self.teacher, {
-                "final_amount": amount,
-                "status": Payment.Status.PAID,
-                "purpose": Payment.Purpose.SUBSCRIPTION,
-                "provider": "tbank",
-                "paid_at": paid_at,
-            })
+            _pay(
+                self.teacher,
+                {
+                    "final_amount": amount,
+                    "status": Payment.Status.PAID,
+                    "purpose": Payment.Purpose.SUBSCRIPTION,
+                    "provider": "tbank",
+                    "paid_at": paid_at,
+                },
+            )
         excluded = [
-            dict(final_amount=Decimal("9999.00"), status=Payment.Status.PENDING, purpose=Payment.Purpose.SUBSCRIPTION, provider="tbank", paid_at=CUTOFF),
-            dict(final_amount=Decimal("8888.00"), status=Payment.Status.FAILED, purpose=Payment.Purpose.SUBSCRIPTION, provider="tbank", paid_at=CUTOFF),
-            dict(final_amount=Decimal("7777.00"), status=Payment.Status.REFUNDED, purpose=Payment.Purpose.SUBSCRIPTION, provider="tbank", paid_at=CUTOFF),
-            dict(final_amount=Decimal("6666.00"), status=Payment.Status.CANCELLED, purpose=Payment.Purpose.SUBSCRIPTION, provider="tbank", paid_at=CUTOFF),
-            dict(final_amount=Decimal("5555.00"), status=Payment.Status.PAID, purpose=Payment.Purpose.MATERIAL, provider="tbank", paid_at=CUTOFF),
-            dict(final_amount=Decimal("4444.00"), status=Payment.Status.PAID, purpose=Payment.Purpose.LESSON, provider="tbank", paid_at=CUTOFF),
-            dict(final_amount=Decimal("3333.00"), status=Payment.Status.PAID, purpose=Payment.Purpose.SUBSCRIPTION, provider="mock", paid_at=CUTOFF),
-            dict(final_amount=Decimal("2222.00"), status=Payment.Status.PAID, purpose=Payment.Purpose.SUBSCRIPTION, provider="tinkoff", paid_at=CUTOFF),
-            dict(final_amount=Decimal("1111.00"), status=Payment.Status.PAID, purpose=Payment.Purpose.SUBSCRIPTION, provider="tbank", paid_at=CUTOFF - timedelta(seconds=1)),
-            dict(final_amount=None, status=Payment.Status.PAID, purpose=Payment.Purpose.SUBSCRIPTION, provider="tbank", paid_at=CUTOFF),
-            dict(final_amount=Decimal("1234.00"), status=Payment.Status.PAID, purpose=Payment.Purpose.SUBSCRIPTION, provider="tbank", paid_at=None),
+            dict(
+                final_amount=Decimal("9999.00"),
+                status=Payment.Status.PENDING,
+                purpose=Payment.Purpose.SUBSCRIPTION,
+                provider="tbank",
+                paid_at=CUTOFF,
+            ),
+            dict(
+                final_amount=Decimal("8888.00"),
+                status=Payment.Status.FAILED,
+                purpose=Payment.Purpose.SUBSCRIPTION,
+                provider="tbank",
+                paid_at=CUTOFF,
+            ),
+            dict(
+                final_amount=Decimal("7777.00"),
+                status=Payment.Status.REFUNDED,
+                purpose=Payment.Purpose.SUBSCRIPTION,
+                provider="tbank",
+                paid_at=CUTOFF,
+            ),
+            dict(
+                final_amount=Decimal("6666.00"),
+                status=Payment.Status.CANCELLED,
+                purpose=Payment.Purpose.SUBSCRIPTION,
+                provider="tbank",
+                paid_at=CUTOFF,
+            ),
+            dict(
+                final_amount=Decimal("5555.00"),
+                status=Payment.Status.PAID,
+                purpose=Payment.Purpose.MATERIAL,
+                provider="tbank",
+                paid_at=CUTOFF,
+            ),
+            dict(
+                final_amount=Decimal("4444.00"),
+                status=Payment.Status.PAID,
+                purpose=Payment.Purpose.LESSON,
+                provider="tbank",
+                paid_at=CUTOFF,
+            ),
+            dict(
+                final_amount=Decimal("3333.00"),
+                status=Payment.Status.PAID,
+                purpose=Payment.Purpose.SUBSCRIPTION,
+                provider="mock",
+                paid_at=CUTOFF,
+            ),
+            dict(
+                final_amount=Decimal("2222.00"),
+                status=Payment.Status.PAID,
+                purpose=Payment.Purpose.SUBSCRIPTION,
+                provider="tinkoff",
+                paid_at=CUTOFF,
+            ),
+            dict(
+                final_amount=Decimal("1111.00"),
+                status=Payment.Status.PAID,
+                purpose=Payment.Purpose.SUBSCRIPTION,
+                provider="tbank",
+                paid_at=CUTOFF - timedelta(seconds=1),
+            ),
+            dict(
+                final_amount=None,
+                status=Payment.Status.PAID,
+                purpose=Payment.Purpose.SUBSCRIPTION,
+                provider="tbank",
+                paid_at=CUTOFF,
+            ),
+            dict(
+                final_amount=Decimal("1234.00"),
+                status=Payment.Status.PAID,
+                purpose=Payment.Purpose.SUBSCRIPTION,
+                provider="tbank",
+                paid_at=None,
+            ),
         ]
         for spec in excluded:
             _pay(self.teacher, spec)
@@ -122,17 +203,23 @@ class FundraiserCurrentApiTests(TestCase):
         self.assertEqual(body["amount_rub"], 3220 + 495 + 1000)
 
     def test_response_has_no_personal_data(self):
-        _pay(self.teacher, {
-            "final_amount": Decimal("495.00"),
-            "status": Payment.Status.PAID,
-            "purpose": Payment.Purpose.SUBSCRIPTION,
-            "provider": "tbank",
-            "paid_at": CUTOFF,
-            "provider_payment_id": "pay_secret_123",
-            "order_id": "order_secret_456",
-            "customer_key": "customer_secret_789",
-            "metadata": {"email": "secret-payer@example.com", "name": "Секрет Плательщик"},
-        })
+        _pay(
+            self.teacher,
+            {
+                "final_amount": Decimal("495.00"),
+                "status": Payment.Status.PAID,
+                "purpose": Payment.Purpose.SUBSCRIPTION,
+                "provider": "tbank",
+                "paid_at": CUTOFF,
+                "provider_payment_id": "pay_secret_123",
+                "order_id": "order_secret_456",
+                "customer_key": "customer_secret_789",
+                "metadata": {
+                    "email": "secret-payer@example.com",
+                    "name": "Секрет Плательщик",
+                },
+            },
+        )
         response = self._get()
         raw = response.content.decode()
         self.assertEqual(set(response.json()), {"amount_rub", "updated_at"})
@@ -176,13 +263,16 @@ class FundraiserCurrentApiTests(TestCase):
         self.assertNotEqual(third["updated_at"], first["updated_at"])
 
     def test_kopecks_stay_numeric(self):
-        _pay(self.teacher, {
-            "final_amount": Decimal("10.50"),
-            "status": Payment.Status.PAID,
-            "purpose": Payment.Purpose.SUBSCRIPTION,
-            "provider": "tbank",
-            "paid_at": CUTOFF,
-        })
+        _pay(
+            self.teacher,
+            {
+                "final_amount": Decimal("10.50"),
+                "status": Payment.Status.PAID,
+                "purpose": Payment.Purpose.SUBSCRIPTION,
+                "provider": "tbank",
+                "paid_at": CUTOFF,
+            },
+        )
         body = self._get().json()
         self.assertEqual(body["amount_rub"], 3230.5)
         self.assertIsInstance(body["amount_rub"], float)
@@ -196,14 +286,20 @@ class FundraiserRouteTests(TestCase):
         response = self.client.get("/rozhdestvenskiy-sbor")
         self.assertEqual(response.status_code, 200)
         html = response.content.decode()
-        self.assertIn("<div id=\"root\">", html)
+        self.assertIn('<div id="root">', html)
         self.assertIn("🎄 Рождественский сбор — Цифровой поток", html)
         self.assertIn("детских домов", html)
-        self.assertIn('rel="canonical" href="https://itflux-academy.ru/rozhdestvenskiy-sbor"', html)
+        self.assertIn(
+            'rel="canonical" href="https://itflux-academy.ru/rozhdestvenskiy-sbor"',
+            html,
+        )
 
         trailing = self.client.get("/rozhdestvenskiy-sbor/")
         self.assertEqual(trailing.status_code, 200)
 
         sitemap = self.client.get("/sitemap.xml")
         self.assertEqual(sitemap.status_code, 200)
-        self.assertIn("<loc>https://itflux-academy.ru/rozhdestvenskiy-sbor</loc>", sitemap.content.decode())
+        self.assertIn(
+            "<loc>https://itflux-academy.ru/rozhdestvenskiy-sbor</loc>",
+            sitemap.content.decode(),
+        )

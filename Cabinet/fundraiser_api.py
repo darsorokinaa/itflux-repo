@@ -3,6 +3,7 @@
 Ответ не содержит персональных данных. Сумма кэшируется на 8 минут;
 сохранение записи в админке сбрасывает кэш.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -34,19 +35,19 @@ def _rub_number(value: Decimal):
 
 
 def active_fundraiser():
-    return Fundraiser.objects.filter(is_active=True).order_by("-start_date", "-id").first()
+    return (
+        Fundraiser.objects.filter(is_active=True).order_by("-start_date", "-id").first()
+    )
 
 
 def subscription_total(fundraiser: Fundraiser) -> Decimal:
-    total = (
-        Payment.objects.filter(
-            provider="tbank",
-            purpose=Payment.Purpose.SUBSCRIPTION,
-            status=Payment.Status.PAID,
-            paid_at__gte=fundraiser.include_subscriptions_since,
-            final_amount__isnull=False,
-        ).aggregate(total=Sum("final_amount"))["total"]
-    )
+    total = Payment.objects.filter(
+        provider="tbank",
+        purpose=Payment.Purpose.SUBSCRIPTION,
+        status=Payment.Status.PAID,
+        paid_at__gte=fundraiser.include_subscriptions_since,
+        final_amount__isnull=False,
+    ).aggregate(total=Sum("final_amount"))["total"]
     return total or Decimal("0")
 
 
@@ -54,7 +55,9 @@ def build_public_payload(fundraiser: Fundraiser | None = None) -> dict | None:
     fundraiser = fundraiser if fundraiser is not None else active_fundraiser()
     if fundraiser is None:
         return None
-    amount = subscription_total(fundraiser) + (fundraiser.manual_adjustment_rub or Decimal("0"))
+    amount = subscription_total(fundraiser) + (
+        fundraiser.manual_adjustment_rub or Decimal("0")
+    )
     payload = {
         "amount_rub": _rub_number(amount),
         "updated_at": timezone.now().isoformat(),
@@ -79,6 +82,8 @@ def api_fundraiser_current(request):
     if not cached or cached.get("__missing"):
         response = JsonResponse({"detail": "not found"}, status=404)
     else:
-        response = JsonResponse({key: cached[key] for key in PUBLIC_KEYS if key in cached})
+        response = JsonResponse(
+            {key: cached[key] for key in PUBLIC_KEYS if key in cached}
+        )
     response["Cache-Control"] = "public, max-age=480"
     return response

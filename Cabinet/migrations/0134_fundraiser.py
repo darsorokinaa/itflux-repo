@@ -37,8 +37,19 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="Fundraiser",
             fields=[
-                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
-                ("slug", models.SlugField(max_length=80, unique=True, verbose_name="Адрес")),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                (
+                    "slug",
+                    models.SlugField(max_length=80, unique=True, verbose_name="Адрес"),
+                ),
                 ("title", models.CharField(max_length=200, verbose_name="Название")),
                 (
                     "start_date",

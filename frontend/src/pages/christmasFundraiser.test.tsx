@@ -1,5 +1,11 @@
 /** @vitest-environment jsdom */
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import Nav from "../components/Nav";
@@ -39,7 +45,9 @@ describe("рождественский сбор", () => {
     expect(formatRub(3715)).toBe("3 715 ₽");
     expect(snapshotFromPayload(AMOUNT)?.amountRub).toBe(3715);
     expect(snapshotFromPayload(AMOUNT)?.goalRub).toBeNull();
-    expect(snapshotFromPayload({ amount_rub: 100, goal_rub: 1000 })?.goalRub).toBe(1000);
+    expect(
+      snapshotFromPayload({ amount_rub: 100, goal_rub: 1000 })?.goalRub,
+    ).toBe(1000);
     expect(snapshotFromPayload(null)).toBeNull();
     expect(snapshotFromPayload({ amount_rub: "3715" })).toBeNull();
     expect(snapshotFromPayload({})).toBeNull();
@@ -68,27 +76,54 @@ describe("рождественский сбор", () => {
         <ChristmasFundraiserPage />
       </MemoryRouter>,
     );
-    expect(screen.getByRole("heading", { level: 1, name: /Рождественский сбор/ })).toBeTruthy();
-    expect(screen.getByText(/Эта большая любовь живёт в моём сердце уже восемь лет/)).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { level: 1, name: /Рождественский сбор/ }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/Эта большая любовь живёт в моём сердце уже восемь лет/),
+    ).toBeTruthy();
     expect(screen.getByRole("link", { name: "посте о сборе" })).toBeTruthy();
     const longVideo = screen.getAllByRole("link", { name: "посте о сборе" });
-    expect(longVideo.every((link) => link.getAttribute("href") === "https://t.me/itfluxacademy/615")).toBe(true);
+    expect(
+      longVideo.every(
+        (link) =>
+          link.getAttribute("href") === "https://t.me/itfluxacademy/615",
+      ),
+    ).toBe(true);
 
     const gallery = document.querySelectorAll(".xmas-gallery img");
     expect(gallery).toHaveLength(44);
-    expect(gallery[0].getAttribute("src")).toBe("/static-charity/img/xmas_kin_01_sm.jpg");
-    expect(gallery[1].getAttribute("src")).toBe("/static-charity/img/xmas_kin_02_sm.jpg");
-    expect(gallery[36].getAttribute("src")).toBe("/static-charity/img/xmas_kin_37_sm.jpg");
-    expect(gallery[37].getAttribute("src")).toBe("/static-charity/img/photo8_sm.jpg");
-    expect(gallery[43].getAttribute("src")).toBe("/static-charity/img/photo4_sm.jpg");
+    expect(gallery[0].getAttribute("src")).toBe(
+      "/static-charity/img/xmas_kin_01_sm.jpg",
+    );
+    expect(gallery[1].getAttribute("src")).toBe(
+      "/static-charity/img/xmas_kin_02_sm.jpg",
+    );
+    expect(gallery[36].getAttribute("src")).toBe(
+      "/static-charity/img/xmas_kin_37_sm.jpg",
+    );
+    expect(gallery[37].getAttribute("src")).toBe(
+      "/static-charity/img/photo8_sm.jpg",
+    );
+    expect(gallery[43].getAttribute("src")).toBe(
+      "/static-charity/img/photo4_sm.jpg",
+    );
     expect(gallery[43].getAttribute("alt")).toBe("Пакеты с подарками");
-    expect(document.querySelector(".xmas-gallery figcaption")?.textContent).toBe("Рождество, Кинешма");
+    expect(
+      document.querySelector(".xmas-gallery figcaption")?.textContent,
+    ).toBe("Рождество, Кинешма");
     expect(screen.getByText("Подарки")).toBeTruthy();
 
     const video = document.querySelector("video");
-    expect(video?.getAttribute("src")).toBe("/static-charity/video/IMG_9797.mp4");
-    expect(video?.getAttribute("poster")).toBe("/static-charity/video/IMG_9797.jpg");
-    expect(document.querySelector(".xmas-fund__qr")?.getAttribute("src")).toBe("/static-charity/img/qr.png");
+    expect(video?.getAttribute("src")).toBe(
+      "/static-charity/video/IMG_9797.mp4",
+    );
+    expect(video?.getAttribute("poster")).toBe(
+      "/static-charity/video/IMG_9797.jpg",
+    );
+    expect(document.querySelector(".xmas-fund__qr")?.getAttribute("src")).toBe(
+      "/static-charity/img/qr.png",
+    );
 
     await waitFor(() => {
       expect(screen.getAllByText("3 715 ₽").length).toBeGreaterThan(0);
@@ -98,7 +133,9 @@ describe("рождественский сбор", () => {
     fireEvent.click(gallery[0]);
     const dialog = screen.getByRole("dialog", { name: "Просмотр фото" });
     const full = dialog.querySelector("img");
-    expect(full?.getAttribute("src")).toBe("/static-charity/img/xmas_kin_01.jpg");
+    expect(full?.getAttribute("src")).toBe(
+      "/static-charity/img/xmas_kin_01.jpg",
+    );
     expect(full?.getAttribute("src")).not.toContain("_sm");
     expect(dialog.textContent).toContain("Рождество, Кинешма");
   });
@@ -110,13 +147,17 @@ describe("рождественский сбор", () => {
         <ChristmasFundraiserPage />
       </MemoryRouter>,
     );
-    expect(screen.getByRole("heading", { level: 1, name: /Рождественский сбор/ })).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { level: 1, name: /Рождественский сбор/ }),
+    ).toBeTruthy();
     await waitFor(() => {
       expect(screen.queryByText("Уже собрано")).toBeNull();
     });
     expect(screen.queryByText(/0 ₽/)).toBeNull();
     expect(screen.queryByText("3 715 ₽")).toBeNull();
-    expect(screen.getAllByRole("button", { name: "Помочь" }).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByRole("button", { name: "Помочь" }).length,
+    ).toBeGreaterThan(0);
   });
 
   it("puts the piggy bank on the way to the fundraiser page", async () => {
@@ -132,6 +173,8 @@ describe("рождественский сбор", () => {
       expect(screen.getByText("3 715 ₽")).toBeTruthy();
     });
     expect(screen.getByText("Уже собрано")).toBeTruthy();
-    expect(document.querySelector(".home-piggy__qr")?.getAttribute("src")).toBe("/static-charity/img/qr.png");
+    expect(document.querySelector(".home-piggy__qr")?.getAttribute("src")).toBe(
+      "/static-charity/img/qr.png",
+    );
   });
 });

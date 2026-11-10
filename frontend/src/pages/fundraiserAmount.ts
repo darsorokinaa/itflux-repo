@@ -27,14 +27,28 @@ export function formatFundraiserUpdated(iso: string): string {
 
 export function snapshotFromPayload(data: unknown): FundraiserSnapshot | null {
   if (!data || typeof data !== "object") return null;
-  const record = data as { amount_rub?: unknown; updated_at?: unknown; goal_rub?: unknown };
-  if (typeof record.amount_rub !== "number" || !Number.isFinite(record.amount_rub)) return null;
-  const goal = typeof record.goal_rub === "number" && Number.isFinite(record.goal_rub) && record.goal_rub > 0
-    ? record.goal_rub
-    : null;
+  const record = data as {
+    amount_rub?: unknown;
+    updated_at?: unknown;
+    goal_rub?: unknown;
+  };
+  if (
+    typeof record.amount_rub !== "number" ||
+    !Number.isFinite(record.amount_rub)
+  )
+    return null;
+  const goal =
+    typeof record.goal_rub === "number" &&
+    Number.isFinite(record.goal_rub) &&
+    record.goal_rub > 0
+      ? record.goal_rub
+      : null;
   return {
     amountRub: record.amount_rub,
-    updatedLabel: typeof record.updated_at === "string" ? formatFundraiserUpdated(record.updated_at) : "",
+    updatedLabel:
+      typeof record.updated_at === "string"
+        ? formatFundraiserUpdated(record.updated_at)
+        : "",
     goalRub: goal,
   };
 }

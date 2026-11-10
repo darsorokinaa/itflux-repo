@@ -28,11 +28,30 @@
   color: var(--blue-dark, #0b2f9f);
 }
 
-.xmas-hero { grid-area: hero; margin: 0 0 8px; min-width: 0; }
-.xmas-head { grid-area: head; margin: 0 0 20px; max-width: 680px; min-width: 0; }
-.xmas-tabs { grid-area: tabs; min-width: 0; }
-.xmas-story { grid-area: story; min-width: 0; max-width: 680px; }
-.xmas-fund { grid-area: fund; min-width: 0; }
+.xmas-hero {
+  grid-area: hero;
+  margin: 0 0 8px;
+  min-width: 0;
+}
+.xmas-head {
+  grid-area: head;
+  margin: 0 0 20px;
+  max-width: 680px;
+  min-width: 0;
+}
+.xmas-tabs {
+  grid-area: tabs;
+  min-width: 0;
+}
+.xmas-story {
+  grid-area: story;
+  min-width: 0;
+  max-width: 680px;
+}
+.xmas-fund {
+  grid-area: fund;
+  min-width: 0;
+}
 
 .xmas-hero__main {
   width: auto;
@@ -68,7 +87,9 @@
   height: 72px;
 }
 
-.xmas-hero__thumbs button.is-on { border-color: var(--blue-main, #1550d8); }
+.xmas-hero__thumbs button.is-on {
+  border-color: var(--blue-main, #1550d8);
+}
 
 .xmas-hero__thumbs img {
   width: auto;
@@ -86,7 +107,11 @@
   letter-spacing: -0.02em;
 }
 
-.xmas-subtitle { margin: 0; color: var(--text-sub, #5c5c6e); font-size: 18px; }
+.xmas-subtitle {
+  margin: 0;
+  color: var(--text-sub, #5c5c6e);
+  font-size: 18px;
+}
 
 .xmas-tabs {
   display: flex;
@@ -126,12 +151,26 @@
   scroll-margin-top: calc(var(--xmas-stick-top) + 64px);
 }
 
-.xmas-story h2:first-child { margin-top: 0; }
-.xmas-story h3 { font-size: 20px; margin: 28px 0 10px; font-weight: 800; scroll-margin-top: calc(var(--xmas-stick-top) + 64px); }
-.xmas-story p { margin: 0 0 16px; }
+.xmas-story h2:first-child {
+  margin-top: 0;
+}
+.xmas-story h3 {
+  font-size: 20px;
+  margin: 28px 0 10px;
+  font-weight: 800;
+  scroll-margin-top: calc(var(--xmas-stick-top) + 64px);
+}
+.xmas-story p {
+  margin: 0 0 16px;
+}
 .xmas-story ul,
-.xmas-story ol { margin: 0 0 16px; padding-left: 1.2em; }
-.xmas-story li { margin: 0 0 6px; }
+.xmas-story ol {
+  margin: 0 0 16px;
+  padding-left: 1.2em;
+}
+.xmas-story li {
+  margin: 0 0 6px;
+}
 
 .xmas-flyer,
 .xmas-tl__photo,
@@ -145,9 +184,18 @@
   object-fit: contain;
 }
 
-.xmas-flyer { margin: 8px 0 6px; }
-.xmas-tl__photo { margin: 10px 0 8px; }
-.xmas-cap { font-size: 16px; color: var(--text-sub, #5c5c6e); text-align: center; margin: 0 0 24px; }
+.xmas-flyer {
+  margin: 8px 0 6px;
+}
+.xmas-tl__photo {
+  margin: 10px 0 8px;
+}
+.xmas-cap {
+  font-size: 16px;
+  color: var(--text-sub, #5c5c6e);
+  text-align: center;
+  margin: 0 0 24px;
+}
 
 .xmas-fund {
   position: sticky;
@@ -159,7 +207,12 @@
   box-shadow: var(--shadow-card, 0 8px 28px rgba(20, 20, 40, 0.06));
 }
 
-.xmas-fund-label { margin: 0; font-size: 16px; color: var(--text-sub, #5c5c6e); font-weight: 600; }
+.xmas-fund-label {
+  margin: 0;
+  font-size: 16px;
+  color: var(--text-sub, #5c5c6e);
+  font-weight: 600;
+}
 .xmas-fund-amount {
   margin: 2px 0 10px;
   font-size: 34px;
@@ -180,7 +233,12 @@
   background: var(--blue-main, #1550d8);
   border-radius: inherit;
 }
-.xmas-fund-cap { margin: 0 0 16px; font-size: 16px; color: var(--text-sub, #5c5c6e); line-height: 1.45; }
+.xmas-fund-cap {
+  margin: 0 0 16px;
+  font-size: 16px;
+  color: var(--text-sub, #5c5c6e);
+  line-height: 1.45;
+}
 
 .xmas-btn {
   display: flex;
@@ -199,15 +257,23 @@
   font-family: inherit;
   box-sizing: border-box;
 }
-.xmas-btn--primary { background: var(--blue-main, #1550d8); color: #fff !important; }
-.xmas-btn--primary:hover { background: var(--blue-dark, #0b2f9f); color: #fff !important; }
+.xmas-btn--primary {
+  background: var(--blue-main, #1550d8);
+  color: #fff !important;
+}
+.xmas-btn--primary:hover {
+  background: var(--blue-dark, #0b2f9f);
+  color: #fff !important;
+}
 .xmas-btn--ghost {
   background: #fff;
   color: var(--blue-dark, #0b2f9f) !important;
   border: 1.5px solid var(--blue-main, #1550d8);
   margin-top: 8px;
 }
-.xmas-btn--ghost:hover { color: var(--blue-dark, #0b2f9f) !important; }
+.xmas-btn--ghost:hover {
+  color: var(--blue-dark, #0b2f9f) !important;
+}
 
 .xmas-fund__qr {
   width: 200px;
@@ -217,7 +283,12 @@
   margin: 16px auto 8px;
   border-radius: 12px;
 }
-.xmas-fund__note { margin: 0; font-size: 16px; color: var(--text-sub, #5c5c6e); text-align: center; }
+.xmas-fund__note {
+  margin: 0;
+  font-size: 16px;
+  color: var(--text-sub, #5c5c6e);
+  text-align: center;
+}
 
 .xmas-organizer {
   margin-top: 22px;
@@ -232,15 +303,29 @@
   color: var(--text-sub, #5c5c6e);
   font-weight: 700;
 }
-.xmas-org { display: flex; gap: 12px; align-items: flex-start; }
+.xmas-org {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
 .xmas-org img {
   width: 72px;
   height: auto;
   border-radius: 12px;
   flex: 0 0 72px;
 }
-.xmas-org__name { margin: 0 0 4px; font-weight: 800; font-size: 17px; line-height: 1.3; }
-.xmas-org__bio { margin: 0 0 8px; font-size: 16px; color: var(--text-sub, #5c5c6e); line-height: 1.45; }
+.xmas-org__name {
+  margin: 0 0 4px;
+  font-weight: 800;
+  font-size: 17px;
+  line-height: 1.3;
+}
+.xmas-org__bio {
+  margin: 0 0 8px;
+  font-size: 16px;
+  color: var(--text-sub, #5c5c6e);
+  line-height: 1.45;
+}
 .xmas-rating {
   display: inline-block;
   white-space: nowrap;
@@ -252,10 +337,28 @@
   border-radius: 999px;
   margin-bottom: 8px;
 }
-.xmas-org__link { display: block; font-weight: 700; font-size: 16px; margin: 0 0 12px; }
-.xmas-contacts { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.xmas-contacts li { font-size: 16px; color: var(--text-sub, #5c5c6e); overflow-wrap: anywhere; margin: 0; }
-.xmas-contacts a { font-weight: 600; }
+.xmas-org__link {
+  display: block;
+  font-weight: 700;
+  font-size: 16px;
+  margin: 0 0 12px;
+}
+.xmas-contacts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.xmas-contacts li {
+  font-size: 16px;
+  color: var(--text-sub, #5c5c6e);
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+.xmas-contacts a {
+  font-weight: 600;
+}
 
 .xmas-year {
   font-size: 16px;
@@ -272,7 +375,10 @@
   margin: 0 0 8px 8px;
   padding: 0;
 }
-.xmas-tl__item { padding: 0 0 28px 24px; position: relative; }
+.xmas-tl__item {
+  padding: 0 0 28px 24px;
+  position: relative;
+}
 .xmas-tl__item::before {
   content: "";
   position: absolute;
@@ -283,14 +389,34 @@
   border-radius: 50%;
   background: var(--blue-main, #1550d8);
 }
-.xmas-tl__item h3 { margin: 0 0 8px; font-size: 20px; }
-.xmas-tl__item p { margin: 0 0 10px; }
-.xmas-links { font-size: 17px; font-weight: 600; margin: 0; }
+.xmas-tl__item h3 {
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+.xmas-tl__item p {
+  margin: 0 0 10px;
+}
+.xmas-links {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0;
+}
 
-.xmas-gallery-block { margin: 0 0 32px; }
-.xmas-gallery-block > h3 { margin: 8px 0 12px; }
-.xmas-gallery { columns: 2; column-gap: 12px; margin: 8px 0 28px; }
-.xmas-gallery figure { break-inside: avoid; margin: 0 0 12px; }
+.xmas-gallery-block {
+  margin: 0 0 32px;
+}
+.xmas-gallery-block > h3 {
+  margin: 8px 0 12px;
+}
+.xmas-gallery {
+  columns: 2;
+  column-gap: 12px;
+  margin: 8px 0 28px;
+}
+.xmas-gallery figure {
+  break-inside: avoid;
+  margin: 0 0 12px;
+}
 .xmas-gallery figcaption,
 .xmas-video figcaption {
   font-size: 16px;
@@ -304,7 +430,10 @@
   gap: 16px;
   margin: 8px 0 16px;
 }
-.xmas-video { min-width: 0; margin: 0; }
+.xmas-video {
+  min-width: 0;
+  margin: 0;
+}
 .xmas-video video {
   display: block;
   width: 100%;
@@ -315,10 +444,19 @@
   border-radius: 12px;
   margin: 0 auto;
 }
-.xmas-video-note { font-size: 17px; color: var(--text-sub, #5c5c6e); }
-.xmas-links-block a { display: inline-block; margin: 0 12px 8px 0; font-weight: 600; }
+.xmas-video-note {
+  font-size: 17px;
+  color: var(--text-sub, #5c5c6e);
+}
+.xmas-links-block a {
+  display: inline-block;
+  margin: 0 12px 8px 0;
+  font-weight: 600;
+}
 
-.xmas-sticky-help { display: none; }
+.xmas-sticky-help {
+  display: none;
+}
 
 .xmas-modal {
   position: fixed;
@@ -340,9 +478,21 @@
   overflow: auto;
   position: relative;
 }
-.xmas-modal__card h2 { margin: 0 28px 12px 0; font-size: 22px; }
-.xmas-modal__card img { width: 100%; height: auto; display: block; border-radius: 12px; }
-.xmas-modal__card p { margin: 12px 0 16px; font-size: 17px; color: var(--text-sub, #5c5c6e); }
+.xmas-modal__card h2 {
+  margin: 0 28px 12px 0;
+  font-size: 22px;
+}
+.xmas-modal__card img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 12px;
+}
+.xmas-modal__card p {
+  margin: 12px 0 16px;
+  font-size: 17px;
+  color: var(--text-sub, #5c5c6e);
+}
 .xmas-modal__close {
   position: absolute;
   top: 10px;
@@ -396,10 +546,26 @@
   color: #fff;
   cursor: pointer;
 }
-.xmas-lightbox__btn { top: 50%; transform: translateY(-50%); width: 48px; height: 48px; font-size: 32px; }
-.xmas-lightbox__btn--prev { left: 8px; }
-.xmas-lightbox__btn--next { right: 8px; }
-.xmas-lightbox__close { top: 8px; right: 8px; width: 48px; height: 48px; font-size: 28px; }
+.xmas-lightbox__btn {
+  top: 50%;
+  transform: translateY(-50%);
+  width: 48px;
+  height: 48px;
+  font-size: 32px;
+}
+.xmas-lightbox__btn--prev {
+  left: 8px;
+}
+.xmas-lightbox__btn--next {
+  right: 8px;
+}
+.xmas-lightbox__close {
+  top: 8px;
+  right: 8px;
+  width: 48px;
+  height: 48px;
+  font-size: 28px;
+}
 
 .home-piggy {
   background: var(--bg-card, #fff);
@@ -419,7 +585,9 @@
   font-size: 16px;
   color: var(--text-main, #1b1b28);
 }
-.home-piggy .xmas-fund-bar { max-width: 420px; }
+.home-piggy .xmas-fund-bar {
+  max-width: 420px;
+}
 .home-piggy__btn {
   width: auto;
   min-width: 180px;
@@ -433,7 +601,9 @@
 }
 
 @media (min-width: 901px) {
-  .xmas-gallery { columns: 3; }
+  .xmas-gallery {
+    columns: 3;
+  }
 }
 
 @media (max-width: 900px) {
@@ -452,12 +622,25 @@
       "story";
     column-gap: 0;
   }
-  .xmas-head { max-width: none; }
-  .xmas-story { max-width: none; }
-  .xmas-fund { position: static; }
-  .xmas-tabs { position: static; }
-  .xmas-videos { grid-template-columns: 1fr; }
-  .xmas-org img { width: 64px; flex-basis: 64px; }
+  .xmas-head {
+    max-width: none;
+  }
+  .xmas-story {
+    max-width: none;
+  }
+  .xmas-fund {
+    position: static;
+  }
+  .xmas-tabs {
+    position: static;
+  }
+  .xmas-videos {
+    grid-template-columns: 1fr;
+  }
+  .xmas-org img {
+    width: 64px;
+    flex-basis: 64px;
+  }
   .xmas-sticky-help {
     display: block;
     position: fixed;
@@ -474,6 +657,11 @@
     grid-template-columns: 1fr;
     padding: 20px 16px;
   }
-  .home-piggy__qr { width: min(240px, 100%); margin: 0 auto; }
-  .home-piggy__btn { width: 100%; }
+  .home-piggy__qr {
+    width: min(240px, 100%);
+    margin: 0 auto;
+  }
+  .home-piggy__btn {
+    width: 100%;
+  }
 }

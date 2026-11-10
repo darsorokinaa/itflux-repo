@@ -1,10 +1,19 @@
 import type { FundraiserSnapshot } from "../pages/fundraiserAmount";
 import { formatRub } from "../pages/fundraiserAmount";
 
-export default function FundraiserCollected({ snapshot }: { snapshot: FundraiserSnapshot | null }) {
+export default function FundraiserCollected({
+  snapshot,
+}: {
+  snapshot: FundraiserSnapshot | null;
+}) {
   const goal = snapshot?.goalRub ?? null;
-  const ratio = snapshot && goal ? Math.min(100, Math.max(0, (snapshot.amountRub / goal) * 100)) : 0;
-  const updated = snapshot?.updatedLabel ? ` · обновлено ${snapshot.updatedLabel}` : "";
+  const ratio =
+    snapshot && goal
+      ? Math.min(100, Math.max(0, (snapshot.amountRub / goal) * 100))
+      : 0;
+  const updated = snapshot?.updatedLabel
+    ? ` · обновлено ${snapshot.updatedLabel}`
+    : "";
 
   return (
     <>
@@ -20,11 +29,18 @@ export default function FundraiserCollected({ snapshot }: { snapshot: Fundraiser
             aria-valuemax={goal ? 100 : undefined}
             aria-valuenow={goal ? Math.round(ratio) : undefined}
           >
-            {goal ? <span className="xmas-fund-bar__fill" style={{ width: `${ratio}%` }} /> : null}
+            {goal ? (
+              <span
+                className="xmas-fund-bar__fill"
+                style={{ width: `${ratio}%` }}
+              />
+            ) : null}
           </div>
         </>
       ) : null}
-      <p className="xmas-fund-cap">Подписки на платформе, донаты и переводы{updated}</p>
+      <p className="xmas-fund-cap">
+        Подписки на платформе, донаты и переводы{updated}
+      </p>
     </>
   );
 }
