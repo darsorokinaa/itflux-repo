@@ -129,7 +129,7 @@ class VprGradeFilterTests(TestCase):
         self.assertEqual(before["task_numbers"], [])
 
         _task(self.empty_inf[0], active=False, grade=10)
-        teacher = User.objects.create_user("inf-teacher", password="x")
+        teacher = User.objects.create_user("inf-teacher", password=None)
         _task(
             self.empty_inf[0],
             grade=10,
