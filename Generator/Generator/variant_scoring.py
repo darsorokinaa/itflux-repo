@@ -430,7 +430,7 @@ def score_variant_attempt(
     attachment_ids: set | None = None,
 ) -> dict[str, Any]:
     """Статусы взаимоисключающие и в сумме дают число заданий."""
-    from .truth_table_check import match_truth_table_answer
+    from .truth_table_check import match_truth_table_answer, score_truth_table_submission
 
     list_tasks = list(tasks or [])
     answers = answers or {}
@@ -483,14 +483,24 @@ def score_variant_attempt(
         if spec or manual_mode:
             from .vpr_answer_spec import score_vpr_spec
 
-            graded = score_vpr_spec(
-                spec,
-                text,
-                max_score=maximum,
-                explicit=explicit,
-                answered=answered,
-                mode="manual" if manual_mode and not spec else None,
-            )
+            graded = None
+            if spec and text:
+                graded = score_truth_table_submission(
+                    text,
+                    prompt=str(task.get("text") or task.get("task_template") or ""),
+                    expected=expected,
+                    enabled=bool(task.get("truth_table_enabled")),
+                    max_score=maximum,
+                )
+            if graded is None:
+                graded = score_vpr_spec(
+                    spec,
+                    text,
+                    max_score=maximum,
+                    explicit=explicit,
+                    answered=answered,
+                    mode="manual" if manual_mode and not spec else None,
+                )
             status = graded["status"]
             points = graded["points"]
         elif part == 2:

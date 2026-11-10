@@ -159,22 +159,30 @@ export function scoreVariantAttempt({
     const manual = task?.answer_check?.mode === "manual" && !spec?.answer_format;
 
     if (spec?.answer_format || manual) {
-      const graded = scoreVprSpec(
-        spec || { answer_format: task?.answer_check?.format },
-        text || (attached ? "файл" : ""),
-        max,
-      );
-      if (task?.answer_check?.mode === "manual" || graded.mode === "manual" || graded.mode === "mixed") {
-        if (given != null && (graded.mode === "manual" || graded.mode === "mixed" || task?.answer_check?.mode === "manual")) {
-          points = clampPoints(given, max);
-          status = statusFromPoints(points, max);
+      const truthGrade = spec?.answer_format && text
+        ? gradeTruthTableAnswer(text, task)
+        : null;
+      if (truthGrade != null) {
+        points = truthGrade ? max : 0;
+        status = truthGrade ? "correct" : "incorrect";
+      } else {
+        const graded = scoreVprSpec(
+          spec || { answer_format: task?.answer_check?.format },
+          text || (attached ? "файл" : ""),
+          max,
+        );
+        if (task?.answer_check?.mode === "manual" || graded.mode === "manual" || graded.mode === "mixed") {
+          if (given != null && (graded.mode === "manual" || graded.mode === "mixed" || task?.answer_check?.mode === "manual")) {
+            points = clampPoints(given, max);
+            status = statusFromPoints(points, max);
+          } else {
+            status = graded.status;
+            points = graded.points;
+          }
         } else {
           status = graded.status;
           points = graded.points;
         }
-      } else {
-        status = graded.status;
-        points = graded.points;
       }
     } else if (part === 2) {
       if (given == null) {

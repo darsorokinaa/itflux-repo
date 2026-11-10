@@ -98,6 +98,7 @@ class BankScoreAndStudentFileTests(TestCase):
         row = bank.json()["tasks"][0]
         self.assertEqual(row["id"], self.advanced.pk)
         self.assertEqual(row["max_score"], 1)
+        self.assertFalse(row["truth_table_enabled"])
         self.assertEqual(row["student_files"], [{
             "name": "14.TXT",
             "url": f"/api/tasks/{self.advanced.pk}/pack-file/?name=14.TXT",

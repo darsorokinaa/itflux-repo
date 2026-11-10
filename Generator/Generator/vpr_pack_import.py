@@ -97,6 +97,18 @@ def _task_list(stored: dict, subject, level, *, title: str, batch: str) -> TaskL
     return row
 
 
+def _pack_truth_table_enabled(stored: dict):
+    """Флаг из пакета. None — пакет его не задаёт, при обновлении поле не трогаем."""
+    spec = stored.get("answer_spec")
+    sources = [stored]
+    if isinstance(spec, dict):
+        sources.append(spec)
+    for source in sources:
+        if "truth_table_enabled" in source:
+            return bool(source["truth_table_enabled"])
+    return None
+
+
 def _save_task(
     stored: dict, task_list: TaskList, *, batch: str, stored_files: list,
     vpr_basic: bool, vpr_advanced: bool,
@@ -115,17 +127,20 @@ def _save_task(
         "vpr_class": stored["vpr_class"],
         "vpr_basic": vpr_basic,
         "vpr_advanced": vpr_advanced,
-        "truth_table_enabled": False,
         "is_active": False,
         "status": Task.Status.DRAFT,
         "scope": Task.Scope.GLOBAL,
         "import_batch": batch,
         "created_by": f"vpr-import:{batch}"[:100],
     }
+    packed_flag = _pack_truth_table_enabled(stored)
     existing = Task.objects.filter(source_key=stored["source_key"]).first()
     if existing is None:
+        defaults["truth_table_enabled"] = False if packed_flag is None else packed_flag
         Task.objects.create(source_key=stored["source_key"], **defaults)
         return "created"
+    if packed_flag is not None:
+        defaults["truth_table_enabled"] = packed_flag
     if was_activated(existing):
         defaults.pop("is_active", None)
         defaults.pop("status", None)

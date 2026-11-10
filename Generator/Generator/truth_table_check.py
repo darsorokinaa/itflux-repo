@@ -513,6 +513,40 @@ def match_truth_table_answer(student, *, prompt: str = "", expected: str = "", e
     return any(_grid_matches(grid, spec["columns"], required) for grid in candidates)
 
 
+def score_truth_table_submission(
+    student,
+    *,
+    prompt: str = "",
+    expected: str = "",
+    enabled: bool = False,
+    max_score: int = 1,
+):
+    """Балл виджета либо None.
+
+    Сверяются все столбцы в порядке первого вхождения переменных.
+    None — пустой ответ или обычное задание: балл остаётся у score_vpr_spec,
+    вместе с частичным баллом и максимумом.
+    """
+    if not str(student or "").strip():
+        return None
+    graded = match_truth_table_answer(
+        student,
+        prompt=prompt,
+        expected=expected,
+        enabled=enabled,
+    )
+    if graded is None:
+        return None
+    maximum = max(0, int(max_score or 0))
+    points = maximum if graded else 0
+    return {
+        "mode": "auto",
+        "status": "correct" if graded else "incorrect",
+        "points": points,
+        "max_points": maximum,
+    }
+
+
 def answer_matches_model(student, task, *, subject: str = "") -> bool:
     from .answer_check import answers_equal
 

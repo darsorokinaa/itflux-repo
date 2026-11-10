@@ -76,4 +76,77 @@ describe("vpr answer spec on the variant page", () => {
     expect(summary.incorrect_count).toBe(0);
     expect(summary.correct_count).toBe(0);
   });
+
+  it("accepts a widget table when variables are not alphabetical", () => {
+    const prompt = (
+      "<p>Заполните таблицу истинности выражения.</p>"
+      + '<p><span class="math-inline">&#92;(\\lnot A \\land B&#92;&#41;</span></p>'
+      + "<p>строк &#92;((B&#123;=&#125;0,A&#123;=&#125;0)&#92;&#41;</p>"
+    );
+    const spec = {
+      answer_format: "truth_table_column",
+      answer_data: {
+        rows: [
+          { inputs: [0, 0], F: 0 },
+          { inputs: [0, 1], F: 1 },
+          { inputs: [1, 0], F: 0 },
+          { inputs: [1, 1], F: 0 },
+        ],
+      },
+    };
+    const widget = {
+      id: 6,
+      number: 6,
+      max_score: 2,
+      part: 1,
+      answer: "0010",
+      text: prompt,
+      truth_table_enabled: true,
+      answer_spec: spec,
+    };
+    const accepted = scoreVariantAttempt({
+      tasks: [widget, {
+        id: 1,
+        number: 1,
+        max_score: 1,
+        part: 1,
+        answer: "15",
+        answer_spec: { answer_format: "number", answer_data: { value: "15" } },
+      }],
+      answers: { 6: "10 00 11 00", 1: "15" },
+      level: "vpr",
+      subject: "inf",
+    });
+    expect(accepted.tasks[0].status).toBe("correct");
+    expect(accepted.tasks[0].points).toBe(2);
+    expect(accepted.tasks[0].max_points).toBe(2);
+    expect(accepted.tasks[1].status).toBe("correct");
+    expect(accepted.earned_points).toBe(3);
+    const rejected = scoreVariantAttempt({
+      tasks: [widget],
+      answers: { 6: "11 00 11 00" },
+      level: "vpr",
+      subject: "inf",
+    });
+    expect(rejected.tasks[0].status).toBe("incorrect");
+    expect(rejected.tasks[0].points).toBe(0);
+    expect(rejected.max_points).toBe(2);
+    const columnOnly = scoreVariantAttempt({
+      tasks: [{
+        id: 7,
+        number: 7,
+        max_score: 1,
+        answer: "0100",
+        text: "Запишите столбец F.",
+        truth_table_enabled: false,
+        answer_spec: spec,
+      }],
+      answers: { 7: "0100" },
+      level: "vpr",
+      subject: "inf",
+    });
+    expect(columnOnly.tasks[0].status).toBe("correct");
+    expect(scoreVprSpec(spec, "0100", 1).status).toBe("correct");
+    expect(scoreVprSpec(spec, "10 00 11 00", 1).status).toBe("incorrect");
+  });
 });

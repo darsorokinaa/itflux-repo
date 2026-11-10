@@ -7,7 +7,7 @@ from django.views.decorators.http import require_http_methods
 
 from Cabinet.rate_limit import rate_limit_check, rate_limit_json_response
 
-from .truth_table_check import answer_matches_model
+from .truth_table_check import answer_matches_model, score_truth_table_submission
 from .models import Task
 from .teacher_task_bank import owned_ready_q, public_bank_q, request_teacher
 
@@ -57,7 +57,15 @@ def api_task_check_answer(request, task_id):
         from .variant_scoring import resolved_task_max_score
 
         maximum = resolved_task_max_score(task, task.task)
-        graded = score_vpr_spec(spec, answer, max_score=maximum)
+        graded = score_truth_table_submission(
+            answer,
+            prompt=str(getattr(task, "task_template", "") or ""),
+            expected=str(getattr(task, "answer", "") or ""),
+            enabled=bool(getattr(task, "truth_table_enabled", False)),
+            max_score=maximum,
+        )
+        if graded is None:
+            graded = score_vpr_spec(spec, answer, max_score=maximum)
         status = graded["status"]
         correct = True if status == "correct" else False if status == "incorrect" else None
         resp = JsonResponse(
