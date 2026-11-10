@@ -127,14 +127,6 @@ function TabIcon({ tabKey }: { tabKey: string }) {
       </FluxIcon>
     );
   }
-  if (tabKey === "fundraiser") {
-    return (
-      <FluxIcon>
-        <path d="M12 3c-1.4 1.6-3.2 2.2-4.6 1.6 1.2 1.2 1.2 2.6.2 3.6H4.5A1.5 1.5 0 0 0 3 9.7V11h18V9.7A1.5 1.5 0 0 0 19.5 8.2h-3.1c-1-.9-1-2.4.2-3.6C15.2 5.2 13.4 4.6 12 3Z" />
-        <path d="M4 11h16v8.5A1.5 1.5 0 0 1 18.5 21h-13A1.5 1.5 0 0 1 4 19.5ZM12 8.2V21" />
-      </FluxIcon>
-    );
-  }
   return (
     <FluxIcon>
       <circle cx="9" cy="8" r="3" />

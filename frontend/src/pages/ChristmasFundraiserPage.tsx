@@ -97,6 +97,23 @@ function FundraiserHero({
   );
 }
 
+function ReportLinks({
+  links,
+}: {
+  links: ReadonlyArray<{ href: string; label: string }>;
+}) {
+  return (
+    <p className="xmas-links">
+      {links.map((link, index) => (
+        <span key={link.href}>
+          {index > 0 ? " · " : null}
+          <a href={link.href}>{link.label}</a>
+        </span>
+      ))}
+    </p>
+  );
+}
+
 function Photo({ photo, onOpen }: { photo: GalleryPhoto; onOpen: () => void }) {
   return (
     <figure>
@@ -417,9 +434,7 @@ export default function ChristmasFundraiserPage() {
               общались и проводили время на природе, а потом делились
               впечатлениями.
             </p>
-            <p className="xmas-links">
-              <a href="https://t.me/most_k_serdcu/4">Отчёт</a>
-            </p>
+            <ReportLinks links={[{ href: "https://t.me/most_k_serdcu/4", label: "Отчёт" }]} />
           </article>
           <article className="xmas-tl__item">
             <h3>Рождество 2024</h3>

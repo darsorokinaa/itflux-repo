@@ -144,12 +144,23 @@ function LegacyInviteRedirect() {
   return <Navigate to={`/invite/${token}/`} replace />;
 }
 
+const EXACT_META_DESCRIPTIONS = {
+  "/": "Цифровой поток — онлайн-платформа для подготовки к ОГЭ и ЕГЭ: генератор вариантов, банк задач и инструменты для учителя.",
+  "/privacy": "Политика конфиденциальности платформы «Цифровой поток».",
+  "/offer": "Публичная оферта онлайн-сервиса «Цифровой поток» для репетиторов.",
+  "/contacts": "Контакты и реквизиты «Цифрового потока».",
+  "/rozhdestvenskiy-sbor": "Рождественский сбор для детей из детских домов и учреждений социальной защиты города Иваново и Ивановской области. Подписки, донаты и переводы идут на праздник и подарки.",
+  "/personal-data-consent": "Согласие на обработку персональных данных пользователей платформы «Цифровой поток».",
+  "/messages-agreement": "Соглашение об использовании сообщений на платформе «Цифровой поток».",
+};
+
 function getMetaDescriptionForPath(pathname) {
   const path = pathname || "/";
-
-  if (path === "/") {
-    return "Цифровой поток — онлайн-платформа для подготовки к ОГЭ и ЕГЭ: генератор вариантов, банк задач и инструменты для учителя.";
+  const exactPath = path.length > 1 ? path.replace(/\/+$/, "") : path;
+  if (Object.prototype.hasOwnProperty.call(EXACT_META_DESCRIPTIONS, exactPath)) {
+    return EXACT_META_DESCRIPTIONS[exactPath];
   }
+
   if (path.startsWith("/tasks")) {
     return "Банк заданий ОГЭ, ЕГЭ и ВПР: фильтры по предмету, номеру и подтеме, создание варианта и рабочей тетради.";
   }
@@ -162,34 +173,16 @@ function getMetaDescriptionForPath(pathname) {
   if (path === "/lessons" || /^\/lessons\/collections\/[^/]+\/?$/.test(path) || /^\/lessons\/[^/]+\/view\/?$/.test(path)) {
     return "Готовые уроки и материалы: откройте занятие, просмотрите файл и используйте контент в учебном процессе.";
   }
-  if (path === "/worksheets" || path.startsWith("/worksheets/")) {
+  if (/^\/worksheets(\/|$)/.test(path)) {
     return "Конструктор материалов: сборка заданий, правки блоков и выгрузка в PDF.";
   }
-  if (path === "/interesting" || path.startsWith("/interesting/")) {
+  if (/^\/interesting(\/|$)/.test(path)) {
     return "Тренажёры и интерактивы: материалы и факты об информатике на платформе «Цифровой поток».";
   }
-  if (path === "/teachers" || path === "/for-teachers") {
+  if (/^\/(teachers|for-teachers)$/.test(path)) {
     return "Решения для учителей: управление классами, планами, домашними заданиями и интерактивными материалами.";
   }
-  if (path === "/privacy") {
-    return "Политика конфиденциальности платформы «Цифровой поток».";
-  }
-  if (path === "/offer") {
-    return "Публичная оферта онлайн-сервиса «Цифровой поток» для репетиторов.";
-  }
-  if (path === "/contacts") {
-    return "Контакты и реквизиты «Цифрового потока».";
-  }
-  if (path === "/rozhdestvenskiy-sbor" || path === "/rozhdestvenskiy-sbor/") {
-    return "Рождественский сбор для детей из детских домов и учреждений социальной защиты города Иваново и Ивановской области. Подписки, донаты и переводы идут на праздник и подарки.";
-  }
-  if (path === "/personal-data-consent") {
-    return "Согласие на обработку персональных данных пользователей платформы «Цифровой поток».";
-  }
-  if (path === "/messages-agreement") {
-    return "Соглашение об использовании сообщений на платформе «Цифровой поток».";
-  }
-  if (path === "/pricing" || path.startsWith("/pricing/")) {
+  if (/^\/pricing(\/|$)/.test(path)) {
     return "Тарифы для репетиторов «Цифровой поток»: Старт, Репетитор, Профи и Школа. Расписание, журнал, учёт оплат и проверка ДЗ — на всех тарифах.";
   }
   if (path.startsWith("/book/")) {
