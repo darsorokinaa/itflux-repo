@@ -24,7 +24,11 @@ function postSwDiag(type, extra) {
 function isLiveLessonUrl(url) {
   try {
     const path = new URL(url).pathname || "";
-    return path.includes("/cabinet/meetings/") || path.includes("/lesson/join");
+    // An open board is as live as a lesson: skipWaiting/clients.claim reloads the tab,
+    // and WebKit then fails the module script with no URL.
+    return path.includes("/cabinet/meetings/")
+      || path.includes("/lesson/join")
+      || path.includes("/cabinet/boards/");
   } catch {
     return false;
   }
@@ -38,7 +42,7 @@ async function liveLessonIsOpen() {
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
     const live = await liveLessonIsOpen();
-    // A waiting worker must not take the open lesson. The browser reloads that page on claim.
+    // A waiting worker must not take an open lesson or board. The browser reloads that page on claim.
     if (!live) self.skipWaiting();
     await postSwDiag("SW_INSTALL", { version: APP_VERSION, liveLesson: live });
   })());

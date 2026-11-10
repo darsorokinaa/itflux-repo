@@ -3,7 +3,9 @@
  * No names, emails, JWT, scene contents, or file payloads.
  */
 
+import { canAutoReloadBoardTab, isBoardInsideMeetingFrame, isCallSessionPath } from "./boardTabReload";
 import { isLiveSessionPath, requestHardReload } from "./liveSessionGuard";
+import { matchesModuleLoadError } from "./moduleLoadError";
 
 const ENDPOINT = "/api/cabinet/client-telemetry/";
 const MAX_PER_MINUTE = 40;
@@ -175,6 +177,8 @@ function collectContext() {
   };
 }
 
+const ASSET_URL_RE = /https?:\/\/[^\s"'()]+?\.(?:js|css)/i;
+
 export function isChunkLoadError(error) {
   const blob = [
     error?.name,
@@ -185,11 +189,23 @@ export function isChunkLoadError(error) {
   ]
     .filter(Boolean)
     .join(" ");
-  if (/ChunkLoadError|Loading chunk [\d]+ failed|Failed to fetch dynamically imported module|error loading dynamically imported module|Unexpected token '<'/i.test(blob)) {
-    return true;
-  }
+  if (matchesModuleLoadError(blob)) return true;
   // r34: bare Safari "TypeError: Load failed" is ANY failed fetch, not a chunk error.
   return false;
+}
+
+function payloadText(payload) {
+  if (payload == null) return "";
+  if (typeof payload === "string") return payload;
+  return [payload.message, payload.url, payload.filename, payload.href, payload.stack]
+    .filter((part) => typeof part === "string" && part)
+    .join(" ");
+}
+
+/** URL from the Vite preload payload. WebKit's message often has none. */
+export function preloadTargetUrl(event) {
+  const match = payloadText(event?.payload).match(ASSET_URL_RE);
+  return match ? match[0] : "";
 }
 
 const CHUNK_RECOVER_WINDOW_MS = 15 * 60 * 1000;
@@ -239,24 +255,39 @@ function markChunkRecovered() {
   }
 }
 
-/** One-shot cache-bust after a missing hashed chunk. Never loops. Never reloads a live lesson. */
+function automaticChunkReloadBlocked() {
+  const path = window.location.pathname || "";
+  const top = pathOfTop();
+  // liveSessionGuard: a call must never be bounced. A top-level board tab may reload once.
+  if (isCallSessionPath(path) || isCallSessionPath(top) || isBoardInsideMeetingFrame()) return true;
+  if (embeddedInLiveLesson()) return true;
+  if (isLiveSessionPath(top) || isLiveSessionPath(path)) return !canAutoReloadBoardTab();
+  return false;
+}
+
+/** One-shot cache-bust after a missing hashed chunk. Never loops. Never reloads a live call. */
 export function recoverChunkLoadOnce() {
   if (typeof window === "undefined") return false;
-  // r34: never auto-reload a board / board iframe inside a lesson; show the banner instead.
-  if (embeddedInLiveLesson() || isLiveSessionPath(pathOfTop())) {
+  if (automaticChunkReloadBlocked()) {
     reportClientEvent("CHUNK_RECOVERY_BLOCKED_LIVE_SESSION", { path: window.location.pathname });
-    noteChunkRecoveryBlocked();
-    return false;
-  }
-  if (isLiveSessionPath()) {
-    reportClientEvent("CHUNK_RECOVERY_BLOCKED_LIVE_SESSION", {
-      path: window.location.pathname,
-    });
     noteChunkRecoveryBlocked();
     return false;
   }
   if (alreadyRecoveredChunk()) return false;
   markChunkRecovered();
+  if (canAutoReloadBoardTab()) {
+    reportClientEvent("APP_HARD_RELOAD", {
+      reason: "chunk-load",
+      path: window.location.pathname,
+      source: "recoverChunkLoadOnce",
+    });
+    try {
+      window.location.reload();
+    } catch {
+      /* ignore */
+    }
+    return true;
+  }
   return requestHardReload({
     manual: false,
     reason: "chunk-load",
@@ -271,6 +302,20 @@ export function recoverChunkLoadOnce() {
       }
     },
   });
+}
+
+/** WebKit omits the URL. On an open board that is still a missing chunk. */
+export function preloadChunkConfirmed(event) {
+  const url = preloadTargetUrl(event);
+  if (url) return chunkReallyMissing(url);
+  try {
+    if (String(window.location.pathname || "").includes("/cabinet/boards/")) {
+      return Promise.resolve(true);
+    }
+  } catch {
+    /* ignore */
+  }
+  return Promise.resolve(false);
 }
 
 function scheduleFlush(delay) {
@@ -410,9 +455,12 @@ export function startClientTelemetry() {
     if (document.visibilityState === "hidden") void flushClientTelemetry({ beacon: true });
   };
   const onPreloadError = (event) => {
-    const message = String(event?.payload?.message || event?.payload || "preload");
+    const payload = event?.payload;
+    const message = String(
+      payload?.message || (typeof payload === "string" ? payload : "") || "preload",
+    );
     try { event.preventDefault(); } catch { /* ignore */ }
-    void chunkReallyMissing(message).then((missing) => {
+    void preloadChunkConfirmed(event).then((missing) => {
       reportClientEvent("chunk_load_failed", {
         message: message.slice(0, 240),
         recovered: alreadyRecoveredChunk(),
