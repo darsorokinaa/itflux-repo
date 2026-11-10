@@ -22,6 +22,16 @@ def _title_is_part_2(title: str) -> bool:
     return "часть" in t and "2" in t and "12" not in t and "21" not in t
 
 
+def _answers_part_key(part):
+    """Ключ секции ответов в PDF.
+
+    У ЕГЭ ключ — название части («Часть 1»). У ВПР у задания нет Part,
+    part is None: в словарь ответы кладутся не под None, иначе сборка
+    падает с KeyError answers_by_part[None]. Такие задания — одна секция.
+    """
+    return part or "Без части"
+
+
 SUBJECT_GENITIVE = {
     "inf": "информатике",
     "math": "математике",
@@ -542,7 +552,7 @@ def build_pdf_context(request, variant, subject, author_filter=None):
             "is_long": is_part_2 or max_score > 1,
         }
         processed_contents.append(entry)
-        answers_by_part.setdefault(part or "Без части", []).append(entry)
+        answers_by_part.setdefault(_answers_part_key(part), []).append(entry)
 
     # Получаем TaskPreview для subject/level и вставляем перед соответствующими частями
     previews = TaskPreview.objects.filter(
@@ -616,9 +626,9 @@ def build_pdf_context(request, variant, subject, author_filter=None):
         merged_contents.append(entry)
 
     answers_parts = [
-        {"part": p, "items": answers_by_part[p]}
+        {"part": _answers_part_key(p), "items": answers_by_part[_answers_part_key(p)]}
         for p in seen_parts
-        if (p or "Без части") in answers_by_part
+        if _answers_part_key(p) in answers_by_part
     ]
 
     subject_label = {
