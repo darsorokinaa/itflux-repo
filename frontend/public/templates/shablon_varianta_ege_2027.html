@@ -98,6 +98,9 @@ input[type=number]{background:white;color:#3e4554;padding:6px 9px;border:1px sol
 .figure.center{width:54mm;margin:2mm auto}
 .figure img,.figure svg{display:block;width:100%;height:auto;max-height:125mm;object-fit:contain}
 .prompt-text img.illustration{display:block;width:100%;max-width:100%;height:auto;max-height:125mm;margin:2.5mm auto;object-fit:contain}
+.prompt-text .fig{display:block;max-width:100%;margin:2mm auto;background:#fff;color:#111}
+.prompt-text .fig svg{display:block;max-width:100%;width:auto;height:auto;background:transparent;color:#111}
+.prompt-text svg{max-width:100%;height:auto}
 .task img.formula{display:inline-block !important;vertical-align:middle !important;width:auto !important;max-width:100% !important;height:auto !important;max-height:3.2em !important;margin:0 .05em !important;border:0 !important;object-fit:contain}
 .task img.formula.formula-glyph{height:1.15em !important;max-height:1.15em !important}
 .task img.formula-figure{display:block !important;width:auto !important;max-width:100% !important;height:auto !important;max-height:125mm !important;margin:2mm auto !important;object-fit:contain}
@@ -1589,17 +1592,36 @@ function normalize(data){
  const seen=new Set();for(const t of result.tasks){if(seen.has(t.number))throw Error(`Повторяется номер задания ${t.number}.`);seen.add(t.number);}
  return result;
 }
-const allowedTags=new Set(('p div pre span br b strong i em u s sub sup ul ol li table thead tbody tfoot tr th td colgroup col caption figure figcaption img math semantics mrow mi mn mo mtext mfrac msqrt mroot msup msub msubsup mfenced mtable mtr mtd mover munder munderover mspace menclose mpadded mstyle svg g path rect line circle ellipse polyline polygon text tspan defs marker title desc').split(' '));
-const allowedAttrs=new Set(('class colspan rowspan scope width height src alt viewbox d x y x1 x2 y1 y2 cx cy r rx ry points fill stroke stroke-width stroke-dasharray stroke-linecap stroke-linejoin transform text-anchor dominant-baseline font-size font-style font-weight opacity xmlns display mathvariant mathsize linethickness columnalign rowspacing columnspacing start type aria-label role').split(' '));
+const allowedTags=new Set(('p div pre span br b strong i em u s sub sup ul ol li table thead tbody tfoot tr th td colgroup col caption figure figcaption img math semantics mrow mi mn mo mtext mfrac msqrt mroot msup msub msubsup mfenced mtable mtr mtd mover munder munderover mspace menclose mpadded mstyle svg g path rect line circle ellipse polyline polygon text tspan textpath defs marker title desc use symbol image clippath mask lineargradient radialgradient stop pattern filter feblend fecolormatrix fecomponenttransfer fecomposite feconvolvematrix fediffuselighting fedisplacementmap fedistantlight fedropshadow feflood fefunca fefuncb fefuncg fefuncr fegaussianblur feimage femerge femergenode femorphology feoffset fepointlight fespecularlighting fespotlight fetile feturbulence').split(' '));
+const allowedAttrs=new Set(('class colspan rowspan scope width height src alt href xlink:href id viewbox d x y x1 x2 y1 y2 cx cy r rx ry points fill stroke stroke-width stroke-dasharray stroke-linecap stroke-linejoin fill-opacity stroke-opacity fill-rule clip-rule clip-path marker-start marker-end marker-mid offset stop-color stop-opacity preserveaspectratio transform text-anchor dominant-baseline font-size font-style font-weight opacity xmlns display mathvariant mathsize linethickness columnalign rowspacing columnspacing start type aria-label role').split(' '));
+function externalSvgRef(value){
+ const raw=String(value||'').replace(/[\u0000-\u001F\u007F\s]+/g,'');
+ if(!raw||raw.charAt(0)==='#')return false;
+ if(/^(?:javascript|data|vbscript):/i.test(raw)||raw.startsWith('//'))return true;
+ if(!/^[a-z][a-z0-9+.-]*:/i.test(raw))return false;
+ try{
+  const url=new URL(raw,location.href);
+  if(url.protocol==='javascript:'||url.protocol==='data:'||url.protocol==='vbscript:')return true;
+  return !location.origin||location.origin==='null'||url.origin!==location.origin;
+ }catch(e){return true;}
+}
+function hasUnsafeUrl(v){
+ const re=/url\s*\(\s*(['"]?)([\s\S]*?)\1\s*\)/gi;let m;
+ while((m=re.exec(String(v||'')))){if(!(m[2]||'').trim().startsWith('#'))return true;}
+ return false;
+}
 function safeHtml(html){
  const template=document.createElement('template');template.innerHTML=String(html??'');
  for(const el of [...template.content.querySelectorAll('*')]){
-  if(!allowedTags.has(el.localName.toLowerCase())){el.remove();continue;}
+  const tag=el.localName.toLowerCase();
+  if(!allowedTags.has(tag)){el.remove();continue;}
   for(const attr of [...el.attributes]){
    const name=attr.name.toLowerCase(),v=attr.value;
-   if(!allowedAttrs.has(name)||/^on/i.test(name)||/url\s*\(|javascript:|expression\s*\(/i.test(v)){el.removeAttribute(attr.name);continue;}
+   const eventAttr=/^on/i.test(name)&&name!=='opacity';
+   if(!allowedAttrs.has(name)||eventAttr||/javascript:|expression\s*\(/i.test(v)||hasUnsafeUrl(v)){el.removeAttribute(attr.name);continue;}
+   if((tag==='use'||tag==='image'||tag==='feimage')&&(name==='href'||name==='xlink:href')&&externalSvgRef(v)){el.removeAttribute(attr.name);continue;}
    if(name==='src'&&!/^(data:image\/(png|jpeg|jpg|gif|webp|svg\+xml);|https?:\/\/|\/[^/]|\.\.?\/)/i.test(v))el.removeAttribute(attr.name);
-   if(name==='class')el.className=v.split(/\s+/).filter(c=>/^(math|formula|align-center|align-right|frac|numerator|denominator|no-wrap|illustration|match-options|code-block)$/.test(c)).join(' ');
+   if(name==='class')el.className=v.split(/\s+/).filter(c=>/^(math|formula|align-center|align-right|frac|numerator|denominator|no-wrap|illustration|match-options|code-block|fig)$/.test(c)).join(' ');
   }
  }
  return template.content;

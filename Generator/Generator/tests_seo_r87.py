@@ -8,6 +8,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 
 from Generator import seo
 from Generator.models import Level, Subject, Task, TaskList
+from Generator.seo_tasks import clean_task_html
 
 INDEX = ('<!doctype html><html><head><meta name="description" content="x" /><title>x</title></head>'
          '<body><div id="root"></div></body></html>')
@@ -158,3 +159,35 @@ class R100ServiceNoindexTests(SimpleTestCase):
         self.assertTrue(_is_service_path(rf.get("/lessons", {"preview": "1"})))
         for p in ("/", "/lessons", "/interesting", "/zadaniya/oge", "/cabinetry"):
             self.assertFalse(_is_service_path(rf.get(p)), p)
+
+
+class SeoTaskSvgTests(SimpleTestCase):
+    def test_public_task_html_keeps_inline_svg(self):
+        raw = (
+            '<p>На рисунке изображены графики.</p>'
+            '<div class="fig"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40">'
+            '<path d="M0 30 L40 10" fill="none" stroke="#111"/></svg></div>'
+        )
+        out, _imgs, _ext = clean_task_html(raw)
+        self.assertIn("<svg", out)
+        self.assertIn('viewBox="0 0 120 40"', out)
+        self.assertIn("M0 30 L40 10", out)
+        self.assertIn('class="fig"', out)
+
+    def test_public_task_html_neutralises_malicious_svg(self):
+        raw = (
+            '<svg onload="alert(1)"><script>alert(1)</script>'
+            '<foreignObject>секрет<iframe src="javascript:alert(1)"></iframe></foreignObject>'
+            '<use href="https://evil.example/x.svg#a"/>'
+            '<a href="javascript:alert(1)">x</a>'
+            '<path d="M0 0 H10" stroke="#111"/></svg>'
+        )
+        out, _imgs, _ext = clean_task_html(raw)
+        low = out.lower()
+        self.assertNotIn("<script", low)
+        self.assertNotIn("onload", low)
+        self.assertNotIn("foreignobject", low)
+        self.assertNotIn("javascript:", low)
+        self.assertNotIn("evil.example", out)
+        self.assertNotIn("секрет", out)
+        self.assertIn("M0 0 H10", out)

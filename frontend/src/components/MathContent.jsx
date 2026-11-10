@@ -1732,7 +1732,7 @@ function MathContentInner({
       });
   }, [html, onImageClick, ogeInf13Enhance, egeInf22Enhance]);
 
-  return <div ref={ref} className={className} />;
+  return <div ref={ref} className={className ? `task-html ${className}` : "task-html"} />;
 }
 
 /** Банк задач / тетрадь: тот же HTML, что в MathContent plainHtml (без typeset). */
