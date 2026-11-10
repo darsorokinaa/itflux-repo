@@ -118,7 +118,7 @@ html.seasonal-theme-active #root {
 }
 
 /* Сезонный паттерн через Layout .app-shell-pattern (home.css скрывает его по умолчанию) */
-html.seasonal-theme-active.seasonal-has-pattern:not(.seasonal-heavy) .app-shell-pattern {
+html.seasonal-theme-active.seasonal-has-pattern:not(.seasonal-heavy):not(.variant-theme-owns-page) .app-shell-pattern {
   display: block !important;
   background-image: var(--seasonal-page-pattern, none) !important;
   background-repeat: var(--seasonal-page-pattern-repeat, repeat) !important;
@@ -129,7 +129,7 @@ html.seasonal-theme-active.seasonal-has-pattern:not(.seasonal-heavy) .app-shell-
 }
 
 @media (max-width: 768px) {
-  html.seasonal-theme-active.seasonal-has-pattern:not(.seasonal-heavy) .app-shell-pattern {
+  html.seasonal-theme-active.seasonal-has-pattern:not(.seasonal-heavy):not(.variant-theme-owns-page) .app-shell-pattern {
     background-image: var(
       --seasonal-page-pattern-mobile,
       var(--seasonal-page-pattern, none)
@@ -1042,7 +1042,7 @@ html.seasonal-heavy .app-shell-pattern {
 }
 
 /* Цветовой слой поверх паттерна, под контентом. */
-html.seasonal-theme-active:not(.seasonal-heavy) .app-shell::after {
+html.seasonal-theme-active:not(.seasonal-heavy):not(.variant-theme-owns-page) .app-shell::after {
   content: "";
   position: fixed;
   inset: 0;
@@ -1291,24 +1291,24 @@ html.seasonal-theme-active.seasonal-dark-bg :is(
   box-shadow: 0 0 0 3px #FFF6EA, 0 8px 18px rgba(0, 0, 0, 0.28);
 }
 
-/* Страница варианта: сетка exam-variant-view и фото темы варианта
-   (`:has(#main-wrapper)`, два id) не должны закрывать сезонный фон.
-   Повтор класса поднимает специфичность выше этих правил. */
-html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy):has(#main-wrapper):has(#main-wrapper.exam-page),
-html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy):has(#main-wrapper.exam-page--edu),
-html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy).exam-variant-view,
-html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy).exam-variant-view--edu,
-html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy).variant-theme-active:has(#main-wrapper.exam-page--edu),
-html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy) body:has(#main-wrapper):has(#main-wrapper.exam-page),
-html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy) body:has(#main-wrapper.exam-page--edu),
-html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy) body.exam-variant-view,
-html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy) body.exam-variant-view--edu,
-html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy) body.variant-theme-active:has(#main-wrapper.exam-page--edu),
-html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy) #root:has(#main-wrapper):has(#main-wrapper.exam-page),
-html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy) #root:has(#main-wrapper.exam-page--edu),
-html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy) #root.exam-variant-view,
-html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy) #root.exam-variant-view--edu,
-html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy) #root.variant-theme-active:has(#main-wrapper.exam-page--edu) {
+/* Страница варианта без своей темы: сетка exam-variant-view не закрывает сезонный фон.
+   Повтор класса поднимает специфичность выше этих правил.
+   `variant-theme-owns-page` — у варианта есть свой фон, он перекрывает сезон. */
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy):not(.variant-theme-owns-page):has(#main-wrapper):has(#main-wrapper.exam-page),
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy):not(.variant-theme-owns-page):has(#main-wrapper.exam-page--edu),
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy):not(.variant-theme-owns-page).exam-variant-view,
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy):not(.variant-theme-owns-page).exam-variant-view--edu,
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy):not(.variant-theme-owns-page).variant-theme-active:has(#main-wrapper.exam-page--edu),
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy):not(.variant-theme-owns-page) body:has(#main-wrapper):has(#main-wrapper.exam-page),
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy):not(.variant-theme-owns-page) body:has(#main-wrapper.exam-page--edu),
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy):not(.variant-theme-owns-page) body.exam-variant-view,
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy):not(.variant-theme-owns-page) body.exam-variant-view--edu,
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy):not(.variant-theme-owns-page) body.variant-theme-active:has(#main-wrapper.exam-page--edu),
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy):not(.variant-theme-owns-page) #root:has(#main-wrapper):has(#main-wrapper.exam-page),
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy):not(.variant-theme-owns-page) #root:has(#main-wrapper.exam-page--edu),
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy):not(.variant-theme-owns-page) #root.exam-variant-view,
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy):not(.variant-theme-owns-page) #root.exam-variant-view--edu,
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy):not(.variant-theme-owns-page) #root.variant-theme-active:has(#main-wrapper.exam-page--edu) {
   background-color: var(--seasonal-page-background, var(--bg-page, #F4F7FB)) !important;
   background-image:
     linear-gradient(rgba(43, 82, 245, 0.04) 1px, transparent 1px),

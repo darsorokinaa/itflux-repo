@@ -43,7 +43,13 @@ export function applyThemeTokens(node, theme) {
 }
 
 function stripThemeClasses(node) {
-  node.classList.remove("variant-theme-active", "variant-theme-has-block-image", "variant-theme-mode--dark", ...LAYOUT_CLASSES);
+  node.classList.remove(
+    "variant-theme-active",
+    "variant-theme-has-block-image",
+    "variant-theme-mode--dark",
+    "variant-theme-owns-page",
+    ...LAYOUT_CLASSES,
+  );
   [...node.classList].forEach((cls) => {
     if (cls.startsWith(SLUG_PREFIX)) node.classList.remove(cls);
   });
@@ -57,15 +63,6 @@ function clearPageBackground(node) {
   node.style.removeProperty("--variant-theme-block-opacity");
   node.style.removeProperty("--variant-theme-bg-color");
   TOKEN_VARS.forEach(([, cssVar]) => node.style.removeProperty(cssVar));
-  PAGE_BG_PROPS.forEach((prop) => node.style.removeProperty(prop));
-}
-
-function seasonalOwnsPageBackground() {
-  const root = document.documentElement;
-  return root.classList.contains("seasonal-theme-active") && !root.classList.contains("seasonal-heavy");
-}
-
-function clearInlinePageBackground(node) {
   PAGE_BG_PROPS.forEach((prop) => node.style.removeProperty(prop));
 }
 
@@ -157,11 +154,13 @@ export function VariantThemeRoot({ payload, children }) {
 
     const painted = pageBackgroundStyle(theme.background, pageImageUrl, theme.themeMode);
     const paint = () => {
-      const seasonal = seasonalOwnsPageBackground();
       nodes.forEach((node) => {
         extraClasses.forEach((cls) => {
           if (!node.classList.contains(cls)) node.classList.add(cls);
         });
+        if (!node.classList.contains("variant-theme-owns-page")) {
+          node.classList.add("variant-theme-owns-page");
+        }
         if (blockImage && !node.classList.contains("variant-theme-has-block-image")) {
           node.classList.add("variant-theme-has-block-image");
         }
@@ -172,8 +171,8 @@ export function VariantThemeRoot({ payload, children }) {
         else node.style.removeProperty("--variant-theme-block-bg-image");
         node.style.setProperty("--variant-theme-block-opacity", String(BLOCK_IMAGE_OPACITY));
         node.style.setProperty("--variant-theme-bg-color", painted.backgroundColor);
-        if (seasonal) clearInlinePageBackground(node);
-        else applyPageBackground(node, { pageImageUrl, background: theme.background, mode: theme.themeMode });
+        // Фон темы варианта перекрывает сезонный фон платформы, а не уступает ему.
+        applyPageBackground(node, { pageImageUrl, background: theme.background, mode: theme.themeMode });
         applyThemeTokens(node, theme);
       });
     };
