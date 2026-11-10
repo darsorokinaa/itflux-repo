@@ -80,27 +80,27 @@ describe("seasonalThemeApi", () => {
     expect(cream["--seasonal-lesson-card-background"]).toBe("#fff6ea");
   });
 
-  it("keeps seasonal content surfaces solid and leaves heavy routes alone", () => {
+  it("keeps cabinet cards nearly white, readable, and free of the page pattern", () => {
     const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "seasonal-theme.css"), "utf8");
     const beforeDark = css.split("html.seasonal-theme-active.seasonal-dark-bg")[0];
-    expect(beforeDark).not.toMatch(/var\(--seasonal-card-background,\s*transparent\)/);
-    expect(beforeDark).not.toMatch(/background-color:\s*var\(--seasonal-card-background\)\s*;/);
-    expect(beforeDark).toMatch(/background-color:\s*#fff;/);
-    expect(beforeDark).toMatch(/linear-gradient\(\s*var\(--seasonal-card-background,\s*#fff\)/);
+    expect(beforeDark).not.toMatch(/var\(--seasonal-card-background/);
+    expect(beforeDark).not.toMatch(/--seasonal-card-pattern/);
+    expect(beforeDark).toMatch(/background-color:\s*#FCFBF8;/);
+    expect(beforeDark).toMatch(/color:\s*#1F2328;/);
     expect(beforeDark).toMatch(/\.td-panel:not\(\.td-live\):not\(\.td-alert\)/);
-    expect(beforeDark).toMatch(/\.cb-modal/);
-    expect(beforeDark).toMatch(/\.cb-float-menu/);
-    expect(beforeDark).toMatch(/\.st-panel/);
-    expect(beforeDark).toMatch(/\.pricing-card/);
-    expect(beforeDark).toMatch(/\btable\b/);
-    expect(beforeDark).toMatch(/--seasonal-card-pattern/);
-    const plate = beforeDark.split("Сплошная подложка")[1] || "";
-    expect(plate.startsWith(" карточек")).toBe(true);
+    expect(beforeDark).toMatch(/content:\s*none;/);
+    const plate = beforeDark.split("Карточки кабинета")[1] || "";
+    expect(plate.startsWith(" почти белые")).toBe(true);
     expect(plate).toMatch(/:not\(\.seasonal-heavy\)/);
-    expect(plate).toMatch(/\.td-panel:not\(\.td-live\):not\(\.td-alert\)/);
-    expect(plate).toMatch(/\.cb-sch-popover:not\(\.cb-lesson-card\)/);
+    expect(plate).toMatch(/background-image:\s*none;/);
     expect(plate).not.toMatch(/\.cabinet-sidebar/);
     expect(plate).not.toMatch(/\.flux-header/);
+    expect(contrastRatio("#1F2328", "#FCFBF8")).toBeGreaterThanOrEqual(7);
+    expect(contrastRatio("#1F56D8", "#FCFBF8")).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio("#2563EB", "#FCFBF8")).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio("#1E3A8A", "#FCFBF8")).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio("#FFFFFF", "#1F56D8")).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio("#FFFFFF", "#2563EB")).toBeGreaterThanOrEqual(4.5);
   });
 
   it("uses meeting header decor when provided, otherwise cabinet header", () => {

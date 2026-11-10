@@ -194,38 +194,15 @@ html.seasonal-theme-active body.seasonal-body-pattern::before {
 }
 
 html.seasonal-theme-active:not(.seasonal-heavy) .seasonal-task-card,
-html.seasonal-theme-active:not(.seasonal-heavy) .seasonal-surface {
-  background-color: #fff;
-  background-image: linear-gradient(
-    var(--seasonal-card-background, #fff),
-    var(--seasonal-card-background, #fff)
-  );
+html.seasonal-theme-active:not(.seasonal-heavy) .seasonal-surface,
+html.seasonal-theme-active:not(.seasonal-heavy) .seasonal-lesson-card {
+  background-color: #FCFBF8;
+  background-image: none;
+  color: #1F2328;
   border-color: var(--seasonal-card-border, inherit);
   border-width: var(--seasonal-card-border-width, inherit);
   border-radius: var(--seasonal-card-radius, inherit);
   box-shadow: var(--seasonal-card-shadow, inherit);
-}
-
-html.seasonal-theme-active:not(.seasonal-heavy) .seasonal-task-card::after,
-html.seasonal-theme-active:not(.seasonal-heavy) .seasonal-surface::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  border-radius: inherit;
-  background-image: var(--seasonal-card-pattern, none);
-  background-repeat: repeat;
-  opacity: var(--seasonal-card-pattern-opacity, 0);
-}
-
-html.seasonal-theme-active:not(.seasonal-heavy) .seasonal-lesson-card {
-  background-color: #fff;
-  background-image: linear-gradient(
-    var(--seasonal-lesson-card-background, var(--seasonal-card-background, #fff)),
-    var(--seasonal-lesson-card-background, var(--seasonal-card-background, #fff))
-  );
-  border-color: var(--seasonal-lesson-card-border, var(--seasonal-card-border, inherit));
 }
 
 /* Фон бокового меню кабинета */
@@ -1061,9 +1038,8 @@ html.seasonal-theme-active:not(.seasonal-heavy) .app-shell::after {
   opacity: var(--seasonal-page-overlay-opacity, 0);
 }
 
-/* Сплошная подложка карточек, панелей, таблиц, списков, модалок и меню.
-   Белый слой снизу, поверх — непрозрачный цвет карточки темы (или белый).
-   Паттерн страницы остаётся только в промежутках. Урок, доска и звонок
+/* Карточки кабинета почти белые и без узора темы: цвет карточки и card_pattern
+   не используются. Узор страницы остаётся только вокруг. Урок, доска и звонок
    (.seasonal-heavy) это правило не получают. */
 html.seasonal-theme-active:not(.seasonal-heavy) :is(
   .td-panel:not(.td-live):not(.td-alert),
@@ -1091,6 +1067,7 @@ html.seasonal-theme-active:not(.seasonal-heavy) :is(
   .mtb-header--page,
   .seasonal-task-card,
   .seasonal-surface,
+  .seasonal-lesson-card,
   .seasonal-appearance-panel,
   .st-panel,
   .st-metric,
@@ -1108,15 +1085,12 @@ html.seasonal-theme-active:not(.seasonal-heavy) :is(
   .pricing-anon,
   table
 ) {
-  background-color: #fff;
-  background-image: linear-gradient(
-    var(--seasonal-card-background, #fff),
-    var(--seasonal-card-background, #fff)
-  );
+  background-color: #FCFBF8;
+  background-image: none;
+  color: #1F2328;
 }
 
-/* Паттерн и рамка реальных карточек, не только неиспользуемого класса seasonal-task-card.
-   Паттерн карточки рисуется поверх сплошной заливки, это не паттерн страницы. */
+/* Рамка карточек. Паттерн карточки не рисуем: он перекрывал текст. */
 html.seasonal-theme-active:not(.seasonal-heavy) :is(.td-panel:not(.td-live):not(.td-alert), .cb-widget, .cb-metric, .cb-hw-card, .cb-group-card, .all-tasks-item__card, .all-tasks-filters, .teacher-workspace-card, .mtb-row, .seasonal-task-card, .seasonal-surface) {
   position: relative;
   isolation: isolate;
@@ -1124,17 +1098,10 @@ html.seasonal-theme-active:not(.seasonal-heavy) :is(.td-panel:not(.td-live):not(
   box-shadow: inset 3px 0 0 var(--seasonal-accent), var(--shadow-card, 0 8px 24px rgba(15, 23, 42, 0.06));
 }
 
-html.seasonal-theme-active:not(.seasonal-heavy) :is(.td-panel:not(.td-live):not(.td-alert), .cb-widget, .cb-metric, .cb-hw-card, .cb-group-card, .all-tasks-item__card, .all-tasks-filters, .teacher-workspace-card, .mtb-row, .seasonal-task-card, .seasonal-surface)::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  border-radius: inherit;
-  pointer-events: none;
-  background-image: var(--seasonal-card-pattern, none);
-  background-repeat: repeat;
-  background-size: 80px 80px;
-  opacity: var(--seasonal-card-pattern-opacity, 0.12);
+html.seasonal-theme-active:not(.seasonal-heavy) :is(.td-panel:not(.td-live):not(.td-alert), .cb-widget, .cb-metric, .cb-hw-card, .cb-group-card, .all-tasks-item__card, .all-tasks-filters, .teacher-workspace-card, .mtb-row, .seasonal-task-card, .seasonal-surface)::before,
+html.seasonal-theme-active:not(.seasonal-heavy) :is(.seasonal-task-card, .seasonal-surface)::after {
+  content: none;
+  background-image: none;
 }
 
 /* Дашборд кабинета рисует свой серый холст — иначе паттерн страницы не виден. */
@@ -1419,4 +1386,14 @@ html.seasonal-theme-active.seasonal-dark-bg #main-wrapper.exam-page :is(
   mjx-container
 ) {
   color: var(--on-card-text);
+}
+
+/* Задания на странице варианта: та же почти белая подложка, без цвета и узора карточки темы. */
+html.seasonal-theme-active.seasonal-theme-active:not(.seasonal-heavy) #main-wrapper.exam-page :is(
+  .exam-task-card,
+  .exam-edu-side-card
+) {
+  background-color: #FCFBF8;
+  background-image: none;
+  color: #1F2328;
 }
