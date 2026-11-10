@@ -58,4 +58,23 @@ describe("sanitizeTaskHtml", () => {
     expect(out).toContain('href="#local"');
     expect(out).toContain("M0 0 H10");
   });
+
+  it("strips cross-origin and javascript hrefs on image and feImage", () => {
+    const out = sanitizeTaskHtml(
+      '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 10 10">' +
+        '<image href="https://evil.example/a.png" width="10" height="10"/>' +
+        '<image xlink:href="https://evil.example/b.png" width="10" height="10"/>' +
+        '<image href="/media/fig.png" width="10" height="10"/>' +
+        '<image href="#local" width="10" height="10"/>' +
+        '<feImage href="javascript:alert(1)"/>' +
+        '<feImage xlink:href="data:image/svg+xml;base64,PHN2Zy8+"/>' +
+        "</svg>",
+    );
+    const lower = out.toLowerCase();
+    expect(lower).not.toContain("evil.example");
+    expect(lower).not.toContain("javascript:");
+    expect(lower).not.toContain("data:image");
+    expect(out).toContain("/media/fig.png");
+    expect(out).toContain('href="#local"');
+  });
 });

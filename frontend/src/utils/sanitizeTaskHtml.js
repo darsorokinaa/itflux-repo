@@ -15,12 +15,27 @@ export function ensureSanitizer() {
   return purifyLoading;
 }
 
+const SVG_HREF_TAGS = new Set(["use", "image", "feimage"]);
+const XLINK_NS = "http://www.w3.org/1999/xlink";
+
+/** Пробелы и управляющие символы не должны маскировать javascript: или чужой origin. */
+function stripRefNoise(value) {
+  let out = "";
+  for (const ch of String(value || "")) {
+    const code = ch.codePointAt(0);
+    if (code <= 32 || code === 127) continue;
+    if (ch.trim() === "") continue;
+    out += ch;
+  }
+  return out;
+}
+
 /**
- * <use href> на другой origin подгружает чужой SVG. Фрагмент (#id) и
- * относительный адрес остаются: так собираются спрайты внутри условия.
+ * href у <use>, <image> и <feImage> на другой origin подгружает чужой SVG.
+ * Фрагмент (#id) и относительный адрес остаются.
  */
 export function svgRefIsExternal(value) {
-  const raw = String(value || "").replace(/[\u0000-\u001F\u007F\s]+/g, "");
+  const raw = stripRefNoise(value);
   if (!raw || raw.startsWith("#")) return false;
   if (/^(?:javascript|data|vbscript):/i.test(raw) || raw.startsWith("//")) return true;
   if (!/^[a-z][a-z0-9+.-]*:/i.test(raw)) return false;
@@ -44,17 +59,22 @@ export function svgRefIsExternal(value) {
   }
 }
 
+function stripExternalSvgHref(node) {
+  const tag = String(node.localName || node.nodeName || "").toLowerCase();
+  if (!SVG_HREF_TAGS.has(tag)) return;
+  for (const name of ["href", "xlink:href"]) {
+    if (typeof node.hasAttribute !== "function" || !node.hasAttribute(name)) continue;
+    if (svgRefIsExternal(node.getAttribute(name))) node.removeAttribute(name);
+  }
+  if (typeof node.getAttributeNS !== "function") return;
+  const xlink = node.getAttributeNS(XLINK_NS, "href");
+  if (xlink != null && svgRefIsExternal(xlink)) node.removeAttributeNS(XLINK_NS, "href");
+}
+
 function installSvgGuards(instance) {
   if (!instance || svgGuardsInstalled || typeof instance.addHook !== "function") return;
   svgGuardsInstalled = true;
-  instance.addHook("afterSanitizeAttributes", (node) => {
-    const tag = String(node.localName || node.nodeName || "").toLowerCase();
-    if (tag !== "use") return;
-    for (const name of ["href", "xlink:href"]) {
-      if (typeof node.hasAttribute !== "function" || !node.hasAttribute(name)) continue;
-      if (svgRefIsExternal(node.getAttribute(name))) node.removeAttribute(name);
-    }
-  });
+  instance.addHook("afterSanitizeAttributes", stripExternalSvgHref);
 }
 
 function stripUnsafeHtml(raw) {
@@ -93,7 +113,7 @@ const PURIFY_CONFIG = {
   ALLOW_DATA_ATTR: false,
   ADD_ATTR: ["target", "rel", "class", "style", "colspan", "rowspan", "width", "height"],
   ALLOWED_URI_REGEXP:
-    /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|data):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+    /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|data):|[^a-z]|[a-z+.-]+(?:[^a-z+.:-]|$))/i,
 };
 
 function scrubSanitizedSvg(html) {
@@ -101,12 +121,7 @@ function scrubSanitizedSvg(html) {
   const root = document.createElement("div");
   root.innerHTML = html;
   root.querySelectorAll("foreignObject, foreignobject, script").forEach((node) => node.remove());
-  root.querySelectorAll("use").forEach((node) => {
-    for (const name of ["href", "xlink:href"]) {
-      const value = node.getAttribute(name);
-      if (value != null && svgRefIsExternal(value)) node.removeAttribute(name);
-    }
-  });
+  root.querySelectorAll("use, image, feImage, feimage").forEach(stripExternalSvgHref);
   return root.innerHTML;
 }
 
@@ -114,7 +129,7 @@ function scrubSanitizedSvg(html) {
  * Санитизация HTML заданий перед innerHTML.
  * Разрешаем типичную разметку банка и встроенный SVG рисунков (div.fig),
  * блокируем script / foreignObject / обработчики / javascript: URL
- * и <use href> на другой origin.
+ * и href у <use>, <image>, <feImage> на другой origin.
  */
 export function sanitizeTaskHtml(html) {
   if (html == null) return "";
