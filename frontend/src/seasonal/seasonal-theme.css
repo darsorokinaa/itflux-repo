@@ -1094,6 +1094,41 @@ html.seasonal-theme-active.seasonal-dark-bg :is(.flux-header, .flux-secondary, .
 
 html.seasonal-theme-active.seasonal-dark-bg .cabinet-sidebar {
   background-color: transparent !important;
+  border-color: color-mix(in srgb, var(--on-page-text) 32%, transparent) !important;
+  box-shadow: none;
+}
+
+/* Нижняя плашка сайдбара — отдельная белая подложка. На тёмной теме она
+   перекрывает фон и делает светлый текст пунктов нечитаемым. */
+html.seasonal-theme-active.seasonal-dark-bg .cabinet-sidebar-bottom {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border-top-color: color-mix(in srgb, var(--on-page-text) 28%, transparent);
+}
+
+html.seasonal-theme-active.seasonal-dark-bg .cabinet-nav-group + .cabinet-nav-group,
+html.seasonal-theme-active.seasonal-dark-bg .cabinet-sidebar__drawer-head {
+  border-color: color-mix(in srgb, var(--on-page-text) 28%, transparent);
+}
+
+/* Мобильный ящик лежит поверх контента. Прозрачность показала бы карточки
+   сквозь пункты меню, поэтому заливка — непрозрачный цвет темы. */
+@media (max-width: 900px) {
+  html.seasonal-theme-active.seasonal-dark-bg :is(
+    .cabinet-layout .cabinet-sidebar,
+    .cb-layout .cabinet-sidebar,
+    .cb-layout .cb-layout__sidebar,
+    .st-layout .cabinet-sidebar
+  ) {
+    background-color: var(--seasonal-page-background, #8E2632) !important;
+    background-image: var(--seasonal-menu-background, none) !important;
+    background-size: cover !important;
+    background-position: center !important;
+    background-repeat: no-repeat !important;
+    border-color: color-mix(in srgb, var(--on-page-text) 32%, transparent) !important;
+    box-shadow: none !important;
+  }
 }
 
 /* Светлый текст только у узлов без собственной светлой подложки. */
@@ -1108,7 +1143,10 @@ html.seasonal-theme-active.seasonal-dark-bg :is(
   .cabinet-header-role,
   .cb-page-title,
   .cb-page-sub,
+  .cb-section-title,
   .cb-dash-section__title,
+  .st-page-header__title,
+  .st-home-block__title,
   .td-welcome h1,
   .td-eyebrow,
   .td-welcome__lead,
@@ -1122,6 +1160,10 @@ html.seasonal-theme-active.seasonal-dark-bg :is(
 html.seasonal-theme-active.seasonal-dark-bg :is(
   .flux-brand-caption,
   .cb-page-sub,
+  .cb-page-hint,
+  .cb-section-sub,
+  .cb-more-section__title,
+  .st-page-header__sub,
   .td-eyebrow,
   .td-welcome__lead,
   .mtb-empty p,
@@ -1150,6 +1192,103 @@ html.seasonal-theme-active.seasonal-dark-bg .cabinet-sidebar :is(
   .cabinet-sidebar__drawer-title
 ) {
   color: var(--on-page-text);
+}
+
+/* Подписи в ящике задают свой тёмный цвет и перекрывают наследование. */
+html.seasonal-theme-active.seasonal-dark-bg .cabinet-sidebar :is(
+  a.cabinet-nav-item,
+  button.cabinet-nav-item
+):not(.active):not(.cabinet-nav-item--accent):not(.cabinet-nav-item--soon):not(:hover) :is(
+  .cabinet-nav-item__label,
+  .cabinet-nav-item__icon
+) {
+  color: var(--on-page-text);
+}
+
+html.seasonal-theme-active.seasonal-dark-bg .cabinet-sidebar .cabinet-nav-item.active,
+html.seasonal-theme-active.seasonal-dark-bg .cabinet-sidebar .cabinet-nav-item.active :is(
+  .cabinet-nav-item__label,
+  .cabinet-nav-item__icon
+) {
+  color: #ffffff;
+}
+
+html.seasonal-theme-active.seasonal-dark-bg .cabinet-sidebar .cabinet-nav-item--accent,
+html.seasonal-theme-active.seasonal-dark-bg .cabinet-sidebar .cabinet-nav-item--accent :is(
+  .cabinet-nav-item__label,
+  .cabinet-nav-item__icon
+) {
+  color: #ffffff;
+}
+
+html.seasonal-theme-active.seasonal-dark-bg .cabinet-sidebar .cabinet-nav-item--soon:not(:hover):not(.cabinet-nav-item--soon-active),
+html.seasonal-theme-active.seasonal-dark-bg .cabinet-sidebar .cabinet-nav-item--soon:not(:hover):not(.cabinet-nav-item--soon-active) :is(
+  .cabinet-nav-item__label,
+  .cabinet-nav-item__icon
+) {
+  color: var(--on-page-text-secondary);
+}
+
+html.seasonal-theme-active.seasonal-dark-bg .st-home-block__link {
+  color: var(--on-page-link);
+}
+
+html.seasonal-theme-active.seasonal-dark-bg .st-home-block__link:hover {
+  color: var(--on-page-link-hover);
+}
+
+/* «Тариф Профи» остаётся светлой плашкой: тёмный текст на ней проходит AA.
+   Свёрнутый значок на десктопе лежит прямо на теме — он светлый. */
+html.seasonal-theme-active.seasonal-dark-bg .cabinet-plan-chip__label {
+  color: #1E3A8A;
+}
+
+html.seasonal-theme-active.seasonal-dark-bg .cabinet-plan-chip__name {
+  color: #1E40AF;
+}
+
+@media (min-width: 901px) {
+  html.seasonal-theme-active.seasonal-dark-bg .cabinet-sidebar:not(:hover):not(:focus-within) .cabinet-plan-chip:not(:hover) {
+    background: transparent;
+    color: var(--on-page-text);
+  }
+}
+
+html.seasonal-theme-active.seasonal-dark-bg .cabinet-sidebar .cabinet-logout-btn:not(:hover) {
+  background: transparent;
+  color: var(--on-page-text);
+  border-color: color-mix(in srgb, var(--on-page-text) 40%, transparent);
+}
+
+html.seasonal-theme-active.seasonal-dark-bg .cabinet-sidebar .cabinet-logout-btn:hover {
+  background: #FFF6EA;
+  color: #9F1239;
+  border-color: transparent;
+}
+
+/* Нижняя навигация — белая «пилюля». На тёмной теме пилюля берёт цвет страницы. */
+html.seasonal-theme-active.seasonal-dark-bg :is(.cb-mobile-nav, .st-mobile-nav)::before {
+  background: var(--seasonal-page-background, #8E2632);
+  border: 1px solid color-mix(in srgb, var(--on-page-text) 35%, transparent);
+  box-shadow: none;
+}
+
+html.seasonal-theme-active.seasonal-dark-bg :is(.cb-mobile-nav__item, .st-mobile-nav__item):not(.is-featured) {
+  color: var(--on-page-text);
+}
+
+html.seasonal-theme-active.seasonal-dark-bg :is(.cb-mobile-nav__item, .st-mobile-nav__item).is-active:not(.is-featured) {
+  background: #EFF6FF;
+  color: #1E3A8A;
+}
+
+html.seasonal-theme-active.seasonal-dark-bg :is(
+  .cb-mobile-nav__item.is-featured,
+  .st-mobile-nav__item.is-featured,
+  a.cb-mobile-nav__item.is-featured,
+  a.st-mobile-nav__item.is-featured
+) {
+  box-shadow: 0 0 0 3px #FFF6EA, 0 8px 18px rgba(0, 0, 0, 0.28);
 }
 
 /* Страница варианта: сетка exam-variant-view и фото темы варианта
