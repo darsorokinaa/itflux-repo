@@ -16,6 +16,7 @@ import {
   type SubjectId,
 } from "../data/subjects";
 import { fetchExamCatalog, type CatalogLevel } from "../utils/examCatalog";
+import { gradesForVprSubject } from "../utils/vprGrades";
 import { formatGroupsCount, formatTasksCount } from "../utils/formatTasksCount";
 import VariantCreateBar from "../components/VariantCreateBar";
 import WorkbookCreateBar from "../components/WorkbookCreateBar";
@@ -186,6 +187,8 @@ type FiltersResponse = {
   task_numbers: TaskNumberOption[];
   subtopics: SubtopicOption[];
   authors?: string[];
+  /** Классы, в которых у предмета есть активные публичные задания. */
+  grades?: number[];
 };
 
 const PER_PAGE = 5000;
@@ -446,6 +449,7 @@ export default function AllTasksPage() {
   );
 
   const [filterOptions, setFilterOptions] = useState<FiltersResponse | null>(null);
+  const filterScopeRef = useRef("");
   // r131: номера, для которых есть опубликованный разбор
   const [razborNums, setRazborNums] = useState<number[]>([]);
   useEffect(() => {
@@ -819,9 +823,18 @@ export default function AllTasksPage() {
       return;
     }
     if (level === "vpr") {
-      const grades = (GRADES_BY_LEVEL as Record<string, number[]>).vpr || DEFAULT_VPR_GRADES;
-      if (grades.length && !grades.includes(vprGrade)) {
+      const fromApi =
+        filterScopeRef.current === `${level}:${subject}`
+          ? gradesForVprSubject(filterOptions?.grades)
+          : null;
+      const grades = fromApi ?? ((GRADES_BY_LEVEL as Record<string, number[]>).vpr || DEFAULT_VPR_GRADES);
+      if (fromApi && grades.length && !grades.includes(vprGrade)) {
         setVprGrade(grades[0]);
+      } else if (!fromApi) {
+        const fallback = (GRADES_BY_LEVEL as Record<string, number[]>).vpr || DEFAULT_VPR_GRADES;
+        if (fallback.length && !fallback.includes(vprGrade)) {
+          setVprGrade(fallback[0]);
+        }
       }
     }
     const prev = levelSubjectRef.current;
@@ -836,7 +849,7 @@ export default function AllTasksPage() {
       }
     }
     levelSubjectRef.current = { level, subject };
-  }, [catalog, catalogReady, level, subject, vprGrade, searchParams]);
+  }, [catalog, catalogReady, level, subject, vprGrade, searchParams, filterOptions]);
 
   useEffect(() => {
     if (filtersLoading || !filterOptions || !taskListId) return;
@@ -887,14 +900,21 @@ export default function AllTasksPage() {
       source: isTeacher && taskSource !== "global" ? taskSource : undefined,
     });
     const url = `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/task-bank-filters/${qs}`;
+    const scope = `${level}:${subject}`;
 
     fetch(url, { credentials: "same-origin" })
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
       .then((json: FiltersResponse) => {
-        if (!cancelled) setFilterOptions(json);
+        if (!cancelled) {
+          filterScopeRef.current = scope;
+          setFilterOptions(json);
+        }
       })
       .catch(() => {
-        if (!cancelled) setFilterOptions(null);
+        if (!cancelled) {
+          filterScopeRef.current = scope;
+          setFilterOptions(null);
+        }
       })
       .finally(() => {
         if (!cancelled) setFiltersLoading(false);
@@ -1086,11 +1106,26 @@ export default function AllTasksPage() {
     [subject, subjects]
   );
 
+  const vprGradeChoices = (() => {
+    if (level !== "vpr") return null;
+    if (filterScopeRef.current !== `${level}:${subject}`) return null;
+    return (
+      gradesForVprSubject(filterOptions?.grades) ??
+      ((GRADES_BY_LEVEL as Record<string, number[]>).vpr || DEFAULT_VPR_GRADES)
+    );
+  })();
+  const shownVprGrade =
+    vprGradeChoices && vprGradeChoices.length
+      ? vprGradeChoices.includes(vprGrade)
+        ? vprGrade
+        : vprGradeChoices[0]
+      : vprGrade;
+
   const workbookMeta = useMemo(() => {
     const subtitleParts = [levelTitle, subjectTitle];
 
     if (level === "vpr") {
-      subtitleParts.push(`${vprGrade} класс`);
+      subtitleParts.push(`${shownVprGrade} класс`);
       subtitleParts.push(vprAdvanced ? "углублённый" : "базовый");
     }
 
@@ -1120,7 +1155,7 @@ export default function AllTasksPage() {
     subject,
     subjectTitle,
     taskListId,
-    vprGrade,
+    shownVprGrade,
     vprAdvanced,
   ]);
 
@@ -1327,17 +1362,22 @@ export default function AllTasksPage() {
                   <span className="all-tasks-filter__label">Класс</span>
                   <select
                     className="all-tasks-filter__control"
-                    value={vprGrade}
+                    value={shownVprGrade}
+                    disabled={vprGradeChoices == null}
                     onChange={(e) => {
                       setVprGrade(Number(e.target.value));
                       resetPage();
                     }}
                   >
-                    {((GRADES_BY_LEVEL as Record<string, number[]>).vpr || DEFAULT_VPR_GRADES).map((g) => (
-                      <option key={g} value={g}>
-                        {g} класс
-                      </option>
-                    ))}
+                    {vprGradeChoices == null ? (
+                      <option value={shownVprGrade}>Загрузка…</option>
+                    ) : (
+                      vprGradeChoices.map((g) => (
+                        <option key={g} value={g}>
+                          {g} класс
+                        </option>
+                      ))
+                    )}
                   </select>
                 </label>
                 <label className="all-tasks-filter all-tasks-filter--check">
