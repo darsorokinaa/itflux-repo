@@ -119,7 +119,7 @@ describe("SeasonalThemeProvider", () => {
     await waitFor(() => expect(screen.getByTestId("slug").textContent).toBe("none"));
   });
 
-  it("marks a dark background and keeps variant solving free of decor", async () => {
+  it("marks a dark background and shows the theme on variant solving", async () => {
     fetchSeasonalThemeCurrent.mockResolvedValue({
       mode: "auto",
       theme: {
@@ -158,10 +158,11 @@ describe("SeasonalThemeProvider", () => {
         </SeasonalThemeProvider>
       </MemoryRouter>,
     );
-    await waitFor(() => expect(document.documentElement.classList.contains("seasonal-heavy")).toBe(true));
-    expect(document.documentElement.classList.contains("seasonal-dark-bg")).toBe(false);
-    expect(document.querySelector(".seasonal-fx-canvas")).toBeNull();
-    expect(document.querySelector(".seasonal-decor-layer")).toBeNull();
+    await waitFor(() => expect(document.documentElement.classList.contains("seasonal-theme-active")).toBe(true));
+    expect(document.documentElement.classList.contains("seasonal-heavy")).toBe(false);
+    expect(document.documentElement.classList.contains("seasonal-dark-bg")).toBe(true);
+    expect(document.querySelector(".seasonal-fx-canvas")).not.toBeNull();
+    expect(document.querySelector(".seasonal-decor-layer")).not.toBeNull();
   });
 
   it("keeps theme on board route but marks heavy (effects off)", async () => {
