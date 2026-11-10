@@ -8,6 +8,7 @@ import {
   Users,
 } from "lucide-react";
 import HeroSection from "../components/HeroSection";
+import HomePiggyBank from "../components/HomePiggyBank";
 import TeacherQuotesBlock from "../components/TeacherQuotesBlock";
 import SeasonalHeroSticker from "../seasonal/SeasonalHeroSticker";
 import { type LevelId } from "../data/levels";
@@ -132,6 +133,7 @@ export default function HomePage() {
         <main className="home-page__main">
           {/* До «Что вам нужно сейчас?» продающий TutorLanding/hero не возвращаем. */}
           <HomeValuePathsBlock />
+          <HomePiggyBank />
           {/* Блоки, которые раньше шли ПОСЛЕ value paths — вернуть (кроме продающих из TutorLanding). */}
           <div className="home-section-divider" role="separator" aria-hidden />
           <HeroSection

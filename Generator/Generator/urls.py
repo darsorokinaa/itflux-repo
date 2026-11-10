@@ -18,6 +18,7 @@ from Cabinet import homework_api
 from Cabinet import homework_notebooks
 from Cabinet import homework_task_files
 from Cabinet.subscription_api import PaymentWebhookView
+from Cabinet.fundraiser_api import api_fundraiser_current
 from Cabinet.views import api_teacher_application, api_teacher_community_feedback, api_school_request
 
 # MFA для /admin/ (TOTP). Включение: ADMIN_OTP_REQUIRED=true или prod DEBUG=False.
@@ -64,6 +65,7 @@ urlpatterns = [
     path("api/catalog/", views.api_catalog, name="api_catalog"),
     path("api/generator/overview/", views.api_generator_overview, name="api_generator_overview"),
     path("api/platform-stats/", views.api_platform_stats, name="api_platform_stats"),
+    path("api/fundraiser/current/", api_fundraiser_current, name="api_fundraiser_current"),
     path("api/site-config/", views.api_site_config, name="api_site_config"),
     path("api/vpr/subject-task-counts/", views.api_vpr_subject_task_counts, name="api_vpr_subject_task_counts"),
     path("api/<str:level>/subject-task-counts/", views.api_level_subject_task_counts, name="api_level_subject_task_counts"),

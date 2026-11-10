@@ -124,6 +124,7 @@ _SPA_KNOWN_PATH_PATTERNS = (
     re.compile(r"^/offer/?$"),  # r50
     re.compile(r"^/personal-data-consent/?$"),  # r52
     re.compile(r"^/contacts/?$"),  # r50
+    re.compile(r"^/rozhdestvenskiy-sbor/?$"),
     re.compile(r"^/tasks/?$"),
     re.compile(r"^/tasks/my(?:/.*)?$"),  # r49: «Мой банк задач» (прямые ссылки)
     re.compile(r"^/generator/?$"),

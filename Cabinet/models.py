@@ -5504,6 +5504,64 @@ class SocialAccount(models.Model):
     def __str__(self):
         return f"{self.provider}:{self.uid} → {self.user_id}"
 
+
+class Fundraiser(models.Model):
+    """Публичный сбор. Сумма на сайте — подписки T-Bank с даты отсечки плюс ручная поправка."""
+
+    slug = models.SlugField("Адрес", max_length=80, unique=True)
+    title = models.CharField("Название", max_length=200)
+    start_date = models.DateField(
+        "Дата начала сбора",
+        help_text="Публичная дата старта. На сумму подписок не влияет.",
+    )
+    manual_adjustment_rub = models.DecimalField(
+        "Ручная поправка, ₽",
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        help_text="Переводы и донаты, которых нет среди платежей платформы. "
+        "Для рождественского сбора: 3 000 ₽ перевод + 220 ₽ VK Donut.",
+    )
+    include_subscriptions_since = models.DateTimeField(
+        "Учитывать подписки с",
+        help_text="В сумму входят оплаченные подписки T-Bank (paid_at, часовой пояс Europe/Moscow) "
+        "начиная с этого момента. Оплата 6 ноября 2026 включена.",
+    )
+    is_active = models.BooleanField(
+        "Активен",
+        default=True,
+        help_text="Публичная сумма берётся у одной активной записи — с самой поздней датой начала.",
+    )
+    goal_rub = models.DecimalField(
+        "Цель, ₽",
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        verbose_name = "Сбор"
+        verbose_name_plural = "Сборы"
+        ordering = ["-start_date", "-id"]
+
+    def __str__(self):
+        return self.title
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        from .fundraiser_api import invalidate_fundraiser_cache
+
+        invalidate_fundraiser_cache()
+
+    def delete(self, *args, **kwargs):
+        result = super().delete(*args, **kwargs)
+        from .fundraiser_api import invalidate_fundraiser_cache
+
+        invalidate_fundraiser_cache()
+        return result
+
+
 from .r50_models import EmailOptOut, SubscriptionReminderLog, TrialGrant  # noqa: E402, F401
 from .oneshot_models import OneShotPopup  # noqa: E402, F401
 from .cdn_handoff_models import CdnHandoffToken, CdnPreference  # noqa: E402, F401

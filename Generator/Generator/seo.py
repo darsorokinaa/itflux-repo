@@ -70,6 +70,11 @@ STATIC_PAGES = {
         "Контакты и реквизиты — " + BRAND,
         "Контакты и реквизиты «Цифрового потока»: e-mail, телефон, ИП Сорокина Д. В.",
     ),
+    "/rozhdestvenskiy-sbor": (
+        "🎄 Рождественский сбор — " + BRAND,
+        "Рождественский сбор для детей из детских домов и учреждений социальной защиты "
+        "города Иваново и Ивановской области. Подписки, донаты и переводы идут на праздник и подарки.",
+    ),
     "/messages-agreement": (
         "Соглашение об использовании сообщений — " + BRAND,
         "Соглашение об использовании сообщений на платформе «Цифровой поток».",
@@ -104,7 +109,7 @@ FOCUS_SUBJECTS = ("math", "math_base", "inf")
 FOCUS_LESSON_SUBJECT_RE = re.compile(r"^(математик|алгебр|геометр|теория вероятност|информатик)", re.I)
 NON_FOCUS_TITLE_RE = re.compile(r"хими|русск|фразеолог|\bн и нн\b|ударени|граммати|физическ|камертон|струн", re.I)
 
-SITEMAP_STATIC = ("/", "/pricing", "/repetitor", "/lessons", "/interesting", "/tasks", "/subject", "/teachers", "/privacy", "/personal-data-consent", "/offer", "/contacts")
+SITEMAP_STATIC = ("/", "/pricing", "/repetitor", "/lessons", "/interesting", "/tasks", "/subject", "/teachers", "/privacy", "/personal-data-consent", "/offer", "/contacts", "/rozhdestvenskiy-sbor")
 
 
 def _norm(path):
@@ -519,7 +524,7 @@ def sitemap_rows():
 
     rows = []
     prio = {"/": "1.0", "/pricing": "0.9", "/repetitor": "0.9", "/lessons": "0.9", "/interesting": "0.9",
-            "/tasks": "0.8", "/subject": "0.8"}
+            "/tasks": "0.8", "/subject": "0.8", "/rozhdestvenskiy-sbor": "0.6"}
     static_lm = {"/lessons": les_lm, "/interesting": it_lm, "/": content_lm, "/tasks": content_lm, "/subject": content_lm}
     for p in SITEMAP_STATIC:
         rows.append((SITE_ORIGIN + p, _d(static_lm.get(p)), "weekly", prio.get(p, "0.5")))
