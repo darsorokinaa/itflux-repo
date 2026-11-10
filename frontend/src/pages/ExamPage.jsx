@@ -1781,6 +1781,16 @@ function ExamPage() {
     const taskForTruth = (variant?.tasks || []).find((t) => String(t.id) === String(taskId));
     const mode = taskForTruth?.answer_check?.mode;
     if (mode === "manual" || mode === "mixed" || taskForTruth?.answer_spec?.answer_format) {
+      const truthGrade = taskForTruth?.answer_spec?.answer_format && String(raw || "").trim()
+        ? gradeTruthTableAnswer(raw, {
+            ...(taskForTruth || {}),
+            answer: hasLocalAnswer ? correctAnswer : taskForTruth?.answer,
+          })
+        : null;
+      if (truthGrade != null) {
+        setCheckedTasks((prev) => ({ ...prev, [taskId]: truthGrade }));
+        return;
+      }
       const { scoreVprSpec } = await import("../utils/vprAnswerCheck");
       const graded = scoreVprSpec(
         taskForTruth.answer_spec || { answer_format: taskForTruth.answer_check?.format },

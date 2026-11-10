@@ -252,6 +252,249 @@ class StorageAndScoreTests(TestCase):
         self.assertEqual(wrong["tasks"][0]["status"], "incorrect")
 
 
+# ¬A ∧ B, но в условии сначала B, потом A: виджет идёт не по алфавиту A,B.
+# Столбец F в answer_spec (A,B) — «0100», у виджета результат «0010» и промежуточный ¬A.
+_WIDGET_PROMPT = (
+    "<p>Заполните таблицу истинности выражения.</p>"
+    '<p><span class="math-inline">&#92;(\\lnot A \\land B&#92;&#41;</span></p>'
+    "<p>строк &#92;((B&#123;=&#125;0,A&#123;=&#125;0)&#92;&#41;</p>"
+)
+_ALPHA_COLUMN = {
+    "answer_format": "truth_table_column",
+    "answer_data": {
+        "rows": [
+            {"inputs": [0, 0], "F": 0},
+            {"inputs": [0, 1], "F": 1},
+            {"inputs": [1, 0], "F": 0},
+            {"inputs": [1, 1], "F": 0},
+        ],
+    },
+}
+_WIDGET_ANSWER = "10 00 11 00"
+
+
+class WidgetOrderScoreTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        inf = Subject.objects.create(subject_short="inf", subject_name="Информатика")
+        level = Level.objects.create(level="vpr", level_rus="ВПР")
+        task_list = TaskList.objects.create(
+            subject=inf, level=level, task_number=6, task_title="ВПР 8 №6",
+            max_score=2, vpr_class=8, part=None,
+        )
+        self.widget = Task.objects.create(
+            task=task_list,
+            task_template=_WIDGET_PROMPT,
+            answer="0010",
+            max_score=2,
+            vpr_class=8,
+            vpr_basic=True,
+            truth_table_enabled=True,
+            is_active=True,
+            answer_spec=_ALPHA_COLUMN,
+        )
+        self.plain = Task.objects.create(
+            task=task_list,
+            task_template="<p>Найдите число.</p>",
+            answer="15",
+            max_score=1,
+            vpr_class=8,
+            vpr_basic=True,
+            truth_table_enabled=False,
+            is_active=True,
+            answer_spec={
+                "answer_format": "number",
+                "answer_data": {"value": "15"},
+                "max_score_numeric": 1,
+            },
+        )
+
+    def _widget_task(self, **extra):
+        row = {
+            "id": self.widget.pk,
+            "number": 6,
+            "max_score": 2,
+            "part": 1,
+            "answer": "0010",
+            "text": _WIDGET_PROMPT,
+            "truth_table_enabled": True,
+            "answer_spec": _ALPHA_COLUMN,
+        }
+        row.update(extra)
+        return row
+
+    def test_widget_order_beats_alphabetical_column_and_other_tasks_stay(self):
+        self.assertEqual(score_vpr_spec(_ALPHA_COLUMN, "0100", max_score=2)["status"], "correct")
+        self.assertEqual(score_vpr_spec(_ALPHA_COLUMN, _WIDGET_ANSWER, max_score=2)["status"], "incorrect")
+
+        accepted = score_variant_attempt(
+            tasks=[self._widget_task(), {
+                "id": self.plain.pk,
+                "number": 1,
+                "max_score": 1,
+                "part": 1,
+                "answer": "15",
+                "answer_spec": {"answer_format": "number", "answer_data": {"value": "15"}},
+            }],
+            answers={self.widget.pk: _WIDGET_ANSWER, self.plain.pk: "15"},
+            level="vpr",
+            subject="inf",
+        )
+        self.assertEqual(accepted["tasks"][0]["status"], "correct")
+        self.assertEqual(accepted["tasks"][0]["points"], 2)
+        self.assertEqual(accepted["tasks"][0]["max_points"], 2)
+        self.assertEqual(accepted["tasks"][1]["status"], "correct")
+        self.assertEqual(accepted["tasks"][1]["points"], 1)
+        self.assertEqual(accepted["earned_points"], 3)
+        self.assertEqual(accepted["max_points"], 3)
+
+        rejected = score_variant_attempt(
+            tasks=[self._widget_task()],
+            answers={self.widget.pk: "11 00 11 00"},
+            level="vpr",
+            subject="inf",
+        )
+        self.assertEqual(rejected["tasks"][0]["status"], "incorrect")
+        self.assertEqual(rejected["tasks"][0]["points"], 0)
+        self.assertEqual(rejected["tasks"][0]["max_points"], 2)
+        alphabetical = score_variant_attempt(
+            tasks=[self._widget_task()],
+            answers={self.widget.pk: "0100"},
+            level="vpr",
+            subject="inf",
+        )
+        self.assertEqual(alphabetical["tasks"][0]["status"], "incorrect")
+        blank = score_variant_attempt(
+            tasks=[self._widget_task()],
+            answers={self.widget.pk: "   "},
+            level="vpr",
+            subject="inf",
+        )
+        self.assertEqual(blank["tasks"][0]["status"], "unanswered")
+        self.assertEqual(blank["tasks"][0]["points"], 0)
+
+        by_phrase = score_variant_attempt(
+            tasks=[self._widget_task(id=44, truth_table_enabled=False)],
+            answers={44: _WIDGET_ANSWER},
+            level="vpr",
+            subject="inf",
+        )
+        self.assertEqual(by_phrase["tasks"][0]["status"], "correct")
+        self.assertEqual(by_phrase["tasks"][0]["points"], 2)
+
+        column_only = score_variant_attempt(
+            tasks=[{
+                "id": 7,
+                "number": 7,
+                "max_score": 1,
+                "part": 1,
+                "answer": "0100",
+                "text": "Запишите столбец F.",
+                "truth_table_enabled": False,
+                "answer_spec": _ALPHA_COLUMN,
+            }],
+            answers={7: "0100"},
+            level="vpr",
+            subject="inf",
+        )
+        self.assertEqual(column_only["tasks"][0]["status"], "correct")
+        self.assertEqual(column_only["tasks"][0]["points"], 1)
+        self.assertEqual(column_only["max_points"], 1)
+        not_widget = score_variant_attempt(
+            tasks=[{
+                "id": 7,
+                "number": 7,
+                "max_score": 1,
+                "part": 1,
+                "answer": "0100",
+                "text": "Запишите столбец F.",
+                "truth_table_enabled": False,
+                "answer_spec": _ALPHA_COLUMN,
+            }],
+            answers={7: _WIDGET_ANSWER},
+            level="vpr",
+            subject="inf",
+        )
+        self.assertEqual(not_widget["tasks"][0]["status"], "incorrect")
+
+        partial = score_variant_attempt(
+            tasks=[{
+                "id": 8,
+                "number": 8,
+                "max_score": 2,
+                "part": 1,
+                "answer": "18",
+                "answer_spec": {
+                    "answer_format": "multiple_choice_set",
+                    "answer_data": {"choices": ["1", "8"], "order": "ascending, без разделителей"},
+                },
+            }],
+            answers={8: "1"},
+            level="vpr",
+            subject="inf",
+        )
+        self.assertEqual(partial["tasks"][0]["status"], "partial")
+        self.assertEqual(partial["tasks"][0]["points"], 1)
+        self.assertEqual(partial["tasks"][0]["max_points"], 2)
+
+    def test_public_check_and_bank_payload(self):
+        ok = self.client.post(
+            f"/api/tasks/{self.widget.pk}/check-answer/",
+            data=json.dumps({"answer": _WIDGET_ANSWER}),
+            content_type="application/json",
+        )
+        self.assertEqual(ok.status_code, 200)
+        body = ok.json()
+        self.assertTrue(body["correct"])
+        self.assertEqual(body["status"], "correct")
+        self.assertEqual(body["points"], 2)
+        self.assertEqual(body["max_points"], 2)
+
+        bad = self.client.post(
+            f"/api/tasks/{self.widget.pk}/check-answer/",
+            data=json.dumps({"answer": "11 00 11 00"}),
+            content_type="application/json",
+        )
+        self.assertFalse(bad.json()["correct"])
+        self.assertEqual(bad.json()["status"], "incorrect")
+        self.assertEqual(bad.json()["points"], 0)
+        self.assertEqual(bad.json()["max_points"], 2)
+
+        blank = self.client.post(
+            f"/api/tasks/{self.widget.pk}/check-answer/",
+            data=json.dumps({"answer": ""}),
+            content_type="application/json",
+        )
+        self.assertIsNone(blank.json()["correct"])
+        self.assertEqual(blank.json()["status"], "unanswered")
+        self.assertEqual(blank.json()["points"], 0)
+        self.assertEqual(blank.json()["max_points"], 2)
+
+        number = self.client.post(
+            f"/api/tasks/{self.plain.pk}/check-answer/",
+            data=json.dumps({"answer": "15"}),
+            content_type="application/json",
+        )
+        self.assertTrue(number.json()["correct"])
+        self.assertEqual(number.json()["points"], 1)
+        self.assertEqual(number.json()["max_points"], 1)
+        wrong_number = self.client.post(
+            f"/api/tasks/{self.plain.pk}/check-answer/",
+            data=json.dumps({"answer": "16"}),
+            content_type="application/json",
+        )
+        self.assertFalse(wrong_number.json()["correct"])
+        self.assertEqual(wrong_number.json()["status"], "incorrect")
+
+        bank = self.client.get(
+            f"/api/vpr/inf/task-bank/?grade=8&advanced=0&task_list_id={self.widget.task_id}&per_page=20"
+        )
+        self.assertEqual(bank.status_code, 200)
+        rows = {row["id"]: row for row in bank.json()["tasks"]}
+        self.assertTrue(rows[self.widget.pk]["truth_table_enabled"])
+        self.assertFalse(rows[self.plain.pk]["truth_table_enabled"])
+
+
 class ImportAndDownloadTests(TestCase):
     def setUp(self):
         self.client = Client()
@@ -485,6 +728,61 @@ class ImportAndDownloadTests(TestCase):
         self.assertNotIn("vpr_pack/", json.dumps(body))
         self.assertNotIn("stored_files", body["answer_spec"])
         self.assertIn("answer_data", body["answer_spec"])
+
+    def test_reimport_does_not_disable_truth_table(self):
+        item = _item(
+            id="inf8-b-06-77",
+            subject="информатика",
+            grade=8,
+            number=6,
+            condition="Заполните таблицу истинности.",
+            answer="0010",
+            answer_format="truth_table_column",
+            answer_data={"rows": [{"inputs": [0, 0], "F": 0}]},
+            solution="черновик",
+        )
+        path = self._write(_zip([item], pack="inf8"), "tt-keep.zip")
+        call_command("vpr_import_pack", path, "--apply", "--batch", "tt-keep")
+        task = Task.objects.get(source_key="inf8-b-06-77")
+        self.assertFalse(task.truth_table_enabled)
+        task.truth_table_enabled = True
+        task.save(update_fields=["truth_table_enabled"])
+        item["solution"] = "повтор"
+        again = self._write(_zip([item], pack="inf8"), "tt-keep-again.zip")
+        call_command("vpr_import_pack", again, "--apply", "--batch", "tt-keep")
+        task.refresh_from_db()
+        self.assertTrue(task.truth_table_enabled)
+        self.assertEqual(task.solution, "повтор")
+        self.assertEqual(task.pk, Task.objects.get(source_key="inf8-b-06-77").pk)
+
+        item["truth_table_enabled"] = True
+        enabled = self._write(_zip([item], pack="inf8"), "tt-pack-on.zip")
+        call_command("vpr_import_pack", enabled, "--apply", "--batch", "tt-keep")
+        task.refresh_from_db()
+        self.assertTrue(task.truth_table_enabled)
+        item["truth_table_enabled"] = False
+        disabled = self._write(_zip([item], pack="inf8"), "tt-pack-off.zip")
+        call_command("vpr_import_pack", disabled, "--apply", "--batch", "tt-keep")
+        task.refresh_from_db()
+        self.assertFalse(task.truth_table_enabled)
+
+    def test_create_uses_truth_table_flag_from_pack(self):
+        item = _item(
+            id="inf8-b-06-78",
+            subject="информатика",
+            grade=8,
+            number=6,
+            condition="Заполните таблицу истинности.",
+            answer="0010",
+            answer_format="truth_table_column",
+            answer_data={"rows": [{"inputs": [0, 0], "F": 0}]},
+            truth_table_enabled=True,
+        )
+        path = self._write(_zip([item], pack="inf8"), "tt-create.zip")
+        call_command("vpr_import_pack", path, "--apply", "--batch", "tt-create")
+        task = Task.objects.get(source_key="inf8-b-06-78")
+        self.assertTrue(task.truth_table_enabled)
+        self.assertFalse(task.is_active)
 
 
 PACKS = [

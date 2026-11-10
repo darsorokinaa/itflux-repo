@@ -2923,6 +2923,7 @@ def api_task_bank(request, level, subject):
             'vpr_class': task.vpr_class,
             'vpr_advanced': bool(task.vpr_advanced),
             'vpr_basic': bool(task.vpr_basic),
+            'truth_table_enabled': bool(task.truth_table_enabled),
             'bank_note': (
                 (
                     "авторский набор, не официальная ВПР"
