@@ -41,6 +41,27 @@ body.variant-theme-active.variant-theme--route:has(#main-wrapper.exam-page--edu)
   background-position: center, center top !important;
 }
 
+/* Сезонный фон платформы не просвечивает, когда у варианта есть свой фон. */
+html.seasonal-theme-active.variant-theme-owns-page:has(#main-wrapper.exam-page--edu),
+html.seasonal-theme-active.variant-theme-owns-page.exam-variant-view:has(#main-wrapper.exam-page--edu),
+html.seasonal-theme-active.variant-theme-owns-page.exam-variant-view--edu:has(#main-wrapper.exam-page--edu),
+html.seasonal-theme-active.variant-theme-owns-page.variant-theme--route:has(#main-wrapper.exam-page--edu) {
+  background-color: var(--variant-theme-bg-color, #cfe8f6) !important;
+  background-image: var(--variant-theme-bg-image, linear-gradient(rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.3)), linear-gradient(180deg, #9fc8e4 0%, #c5e0f2 42%, #e7f3fb 100%)) !important;
+  background-repeat: no-repeat !important;
+  background-size: cover !important;
+  background-attachment: fixed !important;
+  background-position: center, center top !important;
+}
+
+/* Снег и угловые стикеры сезона лежат поверх рисунка темы и мешают читать заголовки. */
+html.variant-theme-owns-page .seasonal-fx-canvas,
+html.variant-theme-owns-page .seasonal-decor-layer,
+html.seasonal-theme-active.variant-theme-owns-page .app-shell-pattern {
+  display: none !important;
+  background-image: none !important;
+}
+
 html.variant-theme-active .digital-flow-page,
 html.variant-theme-active .exam-edu-shell,
 html.variant-theme-active:not(.seasonal-theme-active) .app-shell-pattern,
@@ -958,6 +979,34 @@ html.variant-theme-active #main-wrapper.exam-page--edu .exam-task-card__status,
 html.variant-theme-active #main-wrapper.exam-page--edu .exam-edu-side-card .text-secondary,
 html.variant-theme-active .variant-theme-card-text--secondary {
   color: var(--variant-theme-card-text-secondary, #4b6174);
+}
+
+/* Пока сезонный фон закрыт темой варианта, текст и шрифт страницы остаются её,
+   а не светлыми цветами тёмного сезона. */
+html.seasonal-theme-active.seasonal-dark-bg.variant-theme-owns-page {
+  --on-page-text: var(--variant-theme-page-text, var(--text-main));
+  --on-page-text-secondary: var(--variant-theme-page-text-secondary, var(--text-sub));
+  --on-page-text-muted: var(--text-hint);
+  --on-page-link: var(--variant-theme-accent, var(--blue-main));
+  --on-page-link-hover: var(--variant-theme-accent-hover, var(--blue-dark));
+  --on-card-text: var(--text-main);
+  --on-card-text-secondary: var(--variant-theme-card-text-secondary, var(--text-sub));
+  --on-card-link: var(--variant-theme-accent, #1e3a8a);
+}
+
+html.seasonal-theme-active.seasonal-dark-bg.variant-theme-owns-page.variant-theme-mode--dark {
+  --on-page-text: var(--variant-theme-page-text, #f2f4ff);
+  --on-page-text-secondary: var(--variant-theme-page-text-secondary, #b8c0e8);
+  --on-card-text: #122033;
+}
+
+html.seasonal-theme-active.seasonal-dark-bg.variant-theme-owns-page #main-wrapper.exam-page--edu .exam-edu-section-title {
+  font-family: var(--font-display);
+  color: var(--variant-theme-page-text, var(--text-main));
+}
+
+html.seasonal-theme-active.seasonal-dark-bg.variant-theme-owns-page.variant-theme-mode--dark #main-wrapper.exam-page--edu .exam-edu-section-title {
+  color: var(--variant-theme-page-text, #f2f4ff);
 }
 
 /* Тёмная тема: светлый текст только прямо на фоне страницы (между карточками).
