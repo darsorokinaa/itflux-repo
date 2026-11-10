@@ -63,7 +63,7 @@ class FundraiserCurrentApiTests(TestCase):
         self.teacher = User.objects.create_user(
             username="secret_payer_login",
             email="secret-payer@example.com",
-            password="StrongPass123!",
+            password=None,
             first_name="Секрет",
             last_name="Плательщик",
         )
