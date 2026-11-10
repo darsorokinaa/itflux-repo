@@ -1,19 +1,21 @@
+:root {
+  --xmas-stick-top: 92px;
+}
+
 .xmas-page {
-  --xmas-stick-top: 148px;
   max-width: 1120px;
   margin: 0 auto;
-  padding: 28px 24px 96px;
+  padding: 8px 24px 96px;
   display: grid;
-  grid-template-columns: minmax(0, 680px) 300px;
+  grid-template-columns: minmax(0, 1fr) 280px;
   grid-template-areas:
-    "hero hero"
     "head fund"
     "tabs fund"
-    "story fund";
-  column-gap: 56px;
-  row-gap: 12px;
+    "main fund";
+  column-gap: 28px;
+  row-gap: 14px;
   align-items: start;
-  justify-content: space-between;
+  justify-content: stretch;
   color: var(--text-main, #1b1b28);
   font-size: 18px;
   line-height: 1.6;
@@ -29,24 +31,36 @@
 }
 
 .xmas-hero {
-  grid-area: hero;
   margin: 0 0 8px;
   min-width: 0;
 }
-.xmas-head {
+header.xmas-head {
   grid-area: head;
-  margin: 0 0 20px;
-  max-width: 680px;
+  margin: 0;
+  max-width: none;
   min-width: 0;
+  width: auto;
+  display: block;
+  position: static;
+  top: auto;
+  z-index: auto;
+  padding: 2px 0 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  font-family: inherit;
 }
 .xmas-tabs {
   grid-area: tabs;
   min-width: 0;
 }
-.xmas-story {
-  grid-area: story;
+.xmas-main {
+  grid-area: main;
   min-width: 0;
-  max-width: 680px;
+}
+.xmas-story {
+  min-width: 0;
+  max-width: none;
 }
 .xmas-fund {
   grid-area: fund;
@@ -100,47 +114,64 @@
 }
 
 .xmas-head h1 {
-  margin: 0 0 10px;
-  font-size: clamp(28px, 5vw, 40px);
-  line-height: 1.2;
+  margin: 0 0 6px;
+  font-size: clamp(28px, 3vw, 36px);
+  line-height: 1.15;
   font-weight: 800;
   letter-spacing: -0.02em;
 }
 
 .xmas-subtitle {
   margin: 0;
+  max-width: 40em;
   color: var(--text-sub, #5c5c6e);
-  font-size: 18px;
+  font-size: 16px;
+  line-height: 1.45;
 }
 
 .xmas-tabs {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
-  gap: 6px 4px;
-  margin: 0 0 28px;
-  border-bottom: 1px solid var(--border-card, #e8e8ee);
-  position: sticky;
-  top: var(--xmas-stick-top);
-  z-index: 25;
-  background: var(--bg-page, #f7f7f9);
-  padding: 0;
+  align-items: center;
+  gap: 2px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+  padding: 4px;
+  position: static;
+  top: auto;
+  z-index: auto;
+  background: var(--bg-card, #fff);
+  border: 1px solid var(--border-card, #e8e8ee);
+  border-radius: 999px;
+  box-shadow: 0 1px 2px rgba(20, 20, 40, 0.04);
 }
 
 .xmas-tabs a {
-  display: inline-block;
-  padding: 12px 14px 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
   color: var(--text-sub, #5c5c6e);
   font-weight: 700;
-  font-size: 16px;
+  font-size: 14px;
+  line-height: 1.2;
   text-decoration: none;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
+  border: 0;
+  border-radius: 999px;
+  margin: 0;
+  white-space: nowrap;
 }
 
-.xmas-tabs a:hover,
+.xmas-tabs a:hover {
+  color: var(--blue-main, #1550d8);
+  border-bottom-color: transparent;
+}
+
 .xmas-tabs a.is-active {
-  color: var(--text-main, #1b1b28);
-  border-bottom-color: var(--blue-main, #1550d8);
+  background: var(--blue-main, #1550d8);
+  color: #fff;
+  border-bottom-color: transparent;
 }
 
 .xmas-story h2 {
@@ -148,7 +179,7 @@
   margin: 48px 0 16px;
   font-weight: 800;
   letter-spacing: -0.02em;
-  scroll-margin-top: calc(var(--xmas-stick-top) + 64px);
+  scroll-margin-top: calc(var(--xmas-stick-top) + 12px);
 }
 
 .xmas-story h2:first-child {
@@ -158,7 +189,7 @@
   font-size: 20px;
   margin: 28px 0 10px;
   font-weight: 800;
-  scroll-margin-top: calc(var(--xmas-stick-top) + 64px);
+  scroll-margin-top: calc(var(--xmas-stick-top) + 12px);
 }
 .xmas-story p {
   margin: 0 0 16px;
@@ -200,11 +231,43 @@
 .xmas-fund {
   position: sticky;
   top: var(--xmas-stick-top);
+  max-height: calc(100vh - var(--xmas-stick-top));
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
   background: var(--bg-card, #fff);
   border: 1px solid var(--border-card, #e8e8ee);
-  border-radius: 20px;
-  padding: 22px 20px 20px;
+  border-radius: 16px;
+  padding: 10px 12px 8px;
   box-shadow: var(--shadow-card, 0 8px 28px rgba(20, 20, 40, 0.06));
+}
+
+.xmas-fund .xmas-fund-label {
+  font-size: 13px;
+}
+.xmas-fund .xmas-fund-amount {
+  margin: 0 0 2px;
+  font-size: 26px;
+}
+.xmas-fund .xmas-fund-bar {
+  margin: 0 0 6px;
+}
+.xmas-fund .xmas-fund-bar:not(:has(.xmas-fund-bar__fill)) {
+  display: none;
+}
+.xmas-fund .xmas-fund-cap {
+  margin: 0 0 6px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.xmas-fund .xmas-btn {
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 15px;
+}
+.xmas-fund .xmas-btn--ghost {
+  margin-top: 4px;
 }
 
 .xmas-fund-label {
@@ -276,28 +339,29 @@
 }
 
 .xmas-fund__qr {
-  width: 200px;
+  width: 96px;
   max-width: 100%;
   height: auto;
   display: block;
-  margin: 16px auto 8px;
-  border-radius: 12px;
+  margin: 6px auto 2px;
+  border-radius: 10px;
 }
 .xmas-fund__note {
   margin: 0;
-  font-size: 16px;
+  font-size: 12px;
+  line-height: 1.35;
   color: var(--text-sub, #5c5c6e);
   text-align: center;
 }
 
 .xmas-organizer {
-  margin-top: 22px;
-  padding-top: 18px;
+  margin-top: 8px;
+  padding-top: 6px;
   border-top: 1px solid var(--border-card, #e8e8ee);
 }
 .xmas-organizer__h {
-  margin: 0 0 12px;
-  font-size: 16px;
+  margin: 0 0 6px;
+  font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-sub, #5c5c6e);
@@ -305,26 +369,26 @@
 }
 .xmas-org {
   display: flex;
-  gap: 12px;
+  gap: 8px;
   align-items: flex-start;
 }
 .xmas-org img {
-  width: 72px;
+  width: 48px;
   height: auto;
-  border-radius: 12px;
-  flex: 0 0 72px;
+  border-radius: 10px;
+  flex: 0 0 48px;
 }
 .xmas-org__name {
-  margin: 0 0 4px;
+  margin: 0 0 2px;
   font-weight: 800;
-  font-size: 17px;
-  line-height: 1.3;
+  font-size: 14px;
+  line-height: 1.25;
 }
 .xmas-org__bio {
-  margin: 0 0 8px;
-  font-size: 16px;
+  margin: 0 0 4px;
+  font-size: 12px;
   color: var(--text-sub, #5c5c6e);
-  line-height: 1.45;
+  line-height: 1.35;
 }
 .xmas-rating {
   display: inline-block;
@@ -332,26 +396,28 @@
   background: #eef2ff;
   color: var(--blue-dark, #0b2f9f);
   font-weight: 700;
-  font-size: 16px;
-  padding: 3px 8px;
+  font-size: 12px;
+  padding: 1px 6px;
   border-radius: 999px;
-  margin-bottom: 8px;
+  margin: 0 6px 4px 0;
 }
 .xmas-org__link {
   display: block;
   font-weight: 700;
-  font-size: 16px;
-  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.3;
+  margin: 2px 0 0;
 }
 .xmas-contacts {
   list-style: none;
-  margin: 0;
+  margin: 6px 0 0;
   padding: 0;
   display: grid;
-  gap: 6px;
+  gap: 2px;
 }
 .xmas-contacts li {
-  font-size: 16px;
+  font-size: 12px;
+  line-height: 1.35;
   color: var(--text-sub, #5c5c6e);
   overflow-wrap: anywhere;
   margin: 0;
@@ -612,27 +678,39 @@
     line-height: 1.2;
   }
   .xmas-page {
-    padding: 16px 16px calc(28px + 76px + var(--xmas-dock-bottom, 0px));
+    padding: 12px 16px calc(28px + 76px + var(--xmas-dock-bottom, 0px));
     grid-template-columns: 1fr;
     grid-template-areas:
-      "hero"
       "head"
       "fund"
       "tabs"
-      "story";
+      "main";
     column-gap: 0;
+    row-gap: 12px;
   }
-  .xmas-head {
+  header.xmas-head {
     max-width: none;
   }
-  .xmas-story {
-    max-width: none;
+  .xmas-tabs {
+    width: 100%;
+    border-radius: 14px;
+    justify-content: stretch;
+  }
+  .xmas-tabs a {
+    flex: 1 1 auto;
+    padding: 8px 8px;
+    font-size: 13px;
   }
   .xmas-fund {
     position: static;
+    max-height: none;
+    overflow: visible;
   }
-  .xmas-tabs {
-    position: static;
+  .xmas-fund__qr {
+    width: 168px;
+  }
+  .xmas-fund .xmas-btn {
+    min-height: 44px;
   }
   .xmas-videos {
     grid-template-columns: 1fr;
