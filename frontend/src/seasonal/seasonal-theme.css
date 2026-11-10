@@ -193,25 +193,20 @@ html.seasonal-theme-active body.seasonal-body-pattern::before {
   position: relative;
 }
 
-html.seasonal-theme-active:not(.seasonal-heavy) .seasonal-task-card,
-html.seasonal-theme-active:not(.seasonal-heavy) .seasonal-surface {
-  background-color: #fff;
-  background-image: linear-gradient(
-    var(--seasonal-card-background, #fff),
-    var(--seasonal-card-background, #fff)
-  );
+html.seasonal-theme-active .seasonal-task-card,
+html.seasonal-theme-active .seasonal-surface {
+  background-color: var(--seasonal-card-background, transparent);
   border-color: var(--seasonal-card-border, inherit);
   border-width: var(--seasonal-card-border-width, inherit);
   border-radius: var(--seasonal-card-radius, inherit);
   box-shadow: var(--seasonal-card-shadow, inherit);
 }
 
-html.seasonal-theme-active:not(.seasonal-heavy) .seasonal-task-card::after,
-html.seasonal-theme-active:not(.seasonal-heavy) .seasonal-surface::after {
+html.seasonal-theme-active .seasonal-task-card::after,
+html.seasonal-theme-active .seasonal-surface::after {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: -1;
   pointer-events: none;
   border-radius: inherit;
   background-image: var(--seasonal-card-pattern, none);
@@ -219,12 +214,8 @@ html.seasonal-theme-active:not(.seasonal-heavy) .seasonal-surface::after {
   opacity: var(--seasonal-card-pattern-opacity, 0);
 }
 
-html.seasonal-theme-active:not(.seasonal-heavy) .seasonal-lesson-card {
-  background-color: #fff;
-  background-image: linear-gradient(
-    var(--seasonal-lesson-card-background, var(--seasonal-card-background, #fff)),
-    var(--seasonal-lesson-card-background, var(--seasonal-card-background, #fff))
-  );
+html.seasonal-theme-active .seasonal-lesson-card {
+  background-color: var(--seasonal-lesson-card-background, var(--seasonal-card-background, transparent));
   border-color: var(--seasonal-lesson-card-border, var(--seasonal-card-border, inherit));
 }
 
@@ -1061,65 +1052,11 @@ html.seasonal-theme-active:not(.seasonal-heavy) .app-shell::after {
   opacity: var(--seasonal-page-overlay-opacity, 0);
 }
 
-/* Сплошная подложка карточек, панелей, таблиц, списков, модалок и меню.
-   Белый слой снизу, поверх — непрозрачный цвет карточки темы (или белый).
-   Паттерн страницы остаётся только в промежутках. Урок, доска и звонок
-   (.seasonal-heavy) это правило не получают. */
-html.seasonal-theme-active:not(.seasonal-heavy) :is(
-  .td-panel:not(.td-live):not(.td-alert),
-  .td-onboarding,
-  .cb-widget,
-  .cb-metric,
-  .cb-card,
-  .cb-hw-card,
-  .cb-group-card,
-  .cb-modal,
-  .cb-sch-modal,
-  .cb-sch-popover:not(.cb-lesson-card),
-  .cb-sch-popover__more-menu,
-  .cb-float-menu,
-  .cabinet-notifications__panel,
-  .cabinet-page-card,
-  .cabinet-auth-card,
-  .all-tasks-item__card,
-  .all-tasks-filters,
-  .teacher-workspace-card,
-  .tasks-prep-workspace,
-  .tasks-prep-mode-card,
-  .search-task-card,
-  .mtb-row,
-  .mtb-header--page,
-  .seasonal-task-card,
-  .seasonal-surface,
-  .seasonal-appearance-panel,
-  .st-panel,
-  .st-metric,
-  .st-hw-card:not(.st-hw-card--result):not(.st-hw-card--variant-info),
-  .st-list-card,
-  .st-dash-material-card,
-  .st-dash-recent-card,
-  .st-more-card,
-  .parent-home__card,
-  .jl-result-card,
-  .home-hero-dashboard,
-  .pricing-card,
-  .pricing-offer,
-  .pricing-promo,
-  .pricing-anon,
-  table
-) {
-  background-color: #fff;
-  background-image: linear-gradient(
-    var(--seasonal-card-background, #fff),
-    var(--seasonal-card-background, #fff)
-  );
-}
-
-/* Паттерн и рамка реальных карточек, не только неиспользуемого класса seasonal-task-card.
-   Паттерн карточки рисуется поверх сплошной заливки, это не паттерн страницы. */
+/* Паттерн и рамка реальных карточек, не только неиспользуемого класса seasonal-task-card. */
 html.seasonal-theme-active:not(.seasonal-heavy) :is(.td-panel:not(.td-live):not(.td-alert), .cb-widget, .cb-metric, .cb-hw-card, .cb-group-card, .all-tasks-item__card, .all-tasks-filters, .teacher-workspace-card, .mtb-row, .seasonal-task-card, .seasonal-surface) {
   position: relative;
   isolation: isolate;
+  background-color: var(--seasonal-card-background);
   border-color: var(--seasonal-card-border);
   box-shadow: inset 3px 0 0 var(--seasonal-accent), var(--shadow-card, 0 8px 24px rgba(15, 23, 42, 0.06));
 }

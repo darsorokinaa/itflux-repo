@@ -349,61 +349,6 @@ export function normalizePatternPosition(position) {
   return position || "0 0";
 }
 
-const OPAQUE_CARD_WHITE = "#ffffff";
-
-function byteChannel(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return null;
-  return Math.max(0, Math.min(255, Math.round(n)));
-}
-
-function opaqueHex(r, g, b) {
-  const parts = [r, g, b].map((channel) => byteChannel(channel));
-  if (parts.some((channel) => channel == null)) return OPAQUE_CARD_WHITE;
-  return `#${parts.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
-}
-
-/**
- * Цвет подложки карточки без альфы. Пустой, «transparent» и полностью
- * прозрачный цвет становятся белым, чтобы паттерн страницы не просвечивал.
- * Если альфа задана, остаётся сам цвет на полной непрозрачности.
- */
-export function opaqueCardColor(input) {
-  const raw = String(input ?? "").trim();
-  if (!raw || raw.toLowerCase() === "transparent") return OPAQUE_CARD_WHITE;
-
-  const hex = raw.match(/^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i);
-  if (hex) {
-    const digits = hex[1];
-    if (digits.length === 3 || digits.length === 6) return raw;
-    const full = digits.length === 4
-      ? digits.split("").map((ch) => ch + ch).join("")
-      : digits;
-    const alpha = parseInt(full.slice(6, 8), 16) / 255;
-    if (alpha <= 0) return OPAQUE_CARD_WHITE;
-    return opaqueHex(
-      parseInt(full.slice(0, 2), 16),
-      parseInt(full.slice(2, 4), 16),
-      parseInt(full.slice(4, 6), 16),
-    );
-  }
-
-  const rgb = raw.match(
-    /^rgba?\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)(?:\s*,\s*([0-9.]+)\s*)?\)$/i,
-  );
-  if (rgb) {
-    const alpha = rgb[4] == null ? 1 : Number(rgb[4]);
-    if (!Number.isFinite(alpha) || alpha <= 0) return OPAQUE_CARD_WHITE;
-    if (rgb[4] == null || alpha >= 1) return raw;
-    return opaqueHex(rgb[1], rgb[2], rgb[3]);
-  }
-
-  if (/(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color-mix|color)\(/i.test(raw) && /[/]/.test(raw)) {
-    return OPAQUE_CARD_WHITE;
-  }
-  return raw;
-}
-
 export function buildSeasonalCssVars(theme) {
   if (!theme) return {};
   const bg = theme.background || {};
@@ -432,7 +377,7 @@ export function buildSeasonalCssVars(theme) {
   const meetingDecor = header.meeting_decor_url || header.decor_url;
   if (meetingDecor) vars["--seasonal-meeting-header-decor"] = `url(${meetingDecor})`;
 
-  vars["--seasonal-card-background"] = opaqueCardColor(task.background_color);
+  if (task.background_color) vars["--seasonal-card-background"] = task.background_color;
   if (task.pattern_url) vars["--seasonal-card-pattern"] = `url(${task.pattern_url})`;
   if (task.pattern_opacity != null) vars["--seasonal-card-pattern-opacity"] = String(task.pattern_opacity);
   if (task.border_color) vars["--seasonal-card-border"] = task.border_color;
@@ -442,9 +387,7 @@ export function buildSeasonalCssVars(theme) {
   if (task.accent_color || accent.accent_color || cards.accent_color) {
     vars["--seasonal-accent"] = task.accent_color || accent.accent_color || cards.accent_color;
   }
-  if (lesson.background_color) {
-    vars["--seasonal-lesson-card-background"] = opaqueCardColor(lesson.background_color);
-  }
+  if (lesson.background_color) vars["--seasonal-lesson-card-background"] = lesson.background_color;
   if (lesson.border_color) vars["--seasonal-lesson-card-border"] = lesson.border_color;
 
   vars["--seasonal-decoration-opacity"] = "1";

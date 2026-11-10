@@ -4,7 +4,6 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import {
   buildSeasonalCssVars,
-  opaqueCardColor,
   isHeavyRoute,
   resolveAnimationCount,
   isMeetingChromeRoute,
@@ -50,57 +49,6 @@ describe("seasonalThemeApi", () => {
     expect(vars["--seasonal-page-pattern-position"]).toBe("0 0");
     expect(vars["--seasonal-card-border"]).toBe("#BBD8F2");
     expect(vars["--seasonal-accent"]).toBe("#4D8FC9");
-    expect(vars["--seasonal-card-background"]).toBe("#ffffff");
-  });
-
-  it("paints seasonal cards with an opaque colour", () => {
-    expect(opaqueCardColor("")).toBe("#ffffff");
-    expect(opaqueCardColor(null)).toBe("#ffffff");
-    expect(opaqueCardColor("transparent")).toBe("#ffffff");
-    expect(opaqueCardColor("#FFF6EA")).toBe("#FFF6EA");
-    expect(opaqueCardColor("#fff")).toBe("#fff");
-    expect(opaqueCardColor("#FFF6EA80")).toBe("#fff6ea");
-    expect(opaqueCardColor("#FFF6EA00")).toBe("#ffffff");
-    expect(opaqueCardColor("rgba(255, 246, 234, 0.4)")).toBe("#fff6ea");
-    expect(opaqueCardColor("rgba(255, 246, 234, 0)")).toBe("#ffffff");
-    expect(opaqueCardColor("rgb(255, 246, 234)")).toBe("rgb(255, 246, 234)");
-
-    const missing = buildSeasonalCssVars({
-      background: { color: "#FFF9F0", opacity: 0.18 },
-      cards: { border_color: "#EADCC7", pattern_opacity: 0.08 },
-    });
-    expect(missing["--seasonal-card-background"]).toBe("#ffffff");
-    expect(missing["--seasonal-card-border"]).toBe("#EADCC7");
-
-    const cream = buildSeasonalCssVars({
-      cards: { background_color: "rgba(255, 246, 234, 0.35)" },
-      surfaces: { lesson_card: { background_color: "#FFF6EACC" } },
-    });
-    expect(cream["--seasonal-card-background"]).toBe("#fff6ea");
-    expect(cream["--seasonal-lesson-card-background"]).toBe("#fff6ea");
-  });
-
-  it("keeps seasonal content surfaces solid and leaves heavy routes alone", () => {
-    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "seasonal-theme.css"), "utf8");
-    const beforeDark = css.split("html.seasonal-theme-active.seasonal-dark-bg")[0];
-    expect(beforeDark).not.toMatch(/var\(--seasonal-card-background,\s*transparent\)/);
-    expect(beforeDark).not.toMatch(/background-color:\s*var\(--seasonal-card-background\)\s*;/);
-    expect(beforeDark).toMatch(/background-color:\s*#fff;/);
-    expect(beforeDark).toMatch(/linear-gradient\(\s*var\(--seasonal-card-background,\s*#fff\)/);
-    expect(beforeDark).toMatch(/\.td-panel:not\(\.td-live\):not\(\.td-alert\)/);
-    expect(beforeDark).toMatch(/\.cb-modal/);
-    expect(beforeDark).toMatch(/\.cb-float-menu/);
-    expect(beforeDark).toMatch(/\.st-panel/);
-    expect(beforeDark).toMatch(/\.pricing-card/);
-    expect(beforeDark).toMatch(/\btable\b/);
-    expect(beforeDark).toMatch(/--seasonal-card-pattern/);
-    const plate = beforeDark.split("Сплошная подложка")[1] || "";
-    expect(plate.startsWith(" карточек")).toBe(true);
-    expect(plate).toMatch(/:not\(\.seasonal-heavy\)/);
-    expect(plate).toMatch(/\.td-panel:not\(\.td-live\):not\(\.td-alert\)/);
-    expect(plate).toMatch(/\.cb-sch-popover:not\(\.cb-lesson-card\)/);
-    expect(plate).not.toMatch(/\.cabinet-sidebar/);
-    expect(plate).not.toMatch(/\.flux-header/);
   });
 
   it("uses meeting header decor when provided, otherwise cabinet header", () => {
