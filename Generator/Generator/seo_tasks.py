@@ -126,12 +126,70 @@ def _excerpt(raw, n=420):
 
 
 # ---------- r44: безопасный рендер HTML задач (whitelist, без JS/стилей) ----------
+_SVG_TAGS = {
+    "svg", "g", "path", "rect", "line", "circle", "ellipse", "polyline", "polygon", "text", "tspan",
+    "textpath", "defs", "marker", "use", "symbol", "image", "clippath", "mask", "lineargradient",
+    "radialgradient", "stop", "pattern", "filter", "feblend", "fecolormatrix", "fecomponenttransfer",
+    "fecomposite", "feconvolvematrix", "fediffuselighting", "fedisplacementmap", "fedistantlight",
+    "fedropshadow", "feflood", "fefunca", "fefuncb", "fefuncg", "fefuncr", "fegaussianblur", "feimage",
+    "femerge", "femergenode", "femorphology", "feoffset", "fepointlight", "fespecularlighting",
+    "fespotlight", "fetile", "feturbulence",
+}
 _OK_TAGS = {"p", "br", "b", "i", "strong", "em", "u", "s", "sub", "sup", "span", "div", "table", "tbody", "thead",
             "tr", "td", "th", "img", "ul", "ol", "li", "code", "pre", "blockquote", "hr", "h3", "h4", "h5", "figure",
-            "figcaption", "caption", "small"}
+            "figcaption", "caption", "small", *_SVG_TAGS}
 _VOID = {"br", "img", "hr"}
-_DROP_CONTENT = {"script", "style", "iframe", "object", "embed", "noscript", "template", "svg", "math", "form",
-                 "input", "button", "textarea", "select", "head", "title"}
+# svg больше не выкидываем: рисунки ВПР лежат прямо в условии. foreignObject — HTML внутри SVG.
+_DROP_CONTENT = {"script", "style", "iframe", "object", "embed", "noscript", "template", "math", "form",
+                 "input", "button", "textarea", "select", "head", "title", "foreignobject"}
+_SVG_ATTRS = {
+    "class", "id", "viewbox", "width", "height", "x", "y", "x1", "y1", "x2", "y2", "cx", "cy", "r", "rx", "ry",
+    "d", "points", "fill", "stroke", "stroke-width", "stroke-dasharray", "stroke-linecap", "stroke-linejoin",
+    "fill-opacity", "stroke-opacity", "opacity", "transform", "text-anchor", "dominant-baseline", "font-size",
+    "font-family", "font-style", "font-weight", "xmlns", "role", "aria-label", "preserveaspectratio",
+    "fill-rule", "clip-rule", "clip-path", "marker-start", "marker-end", "marker-mid", "offset", "stop-color",
+    "stop-opacity", "gradientunits", "gradienttransform", "spreadmethod", "patternunits", "href", "xlink:href",
+}
+_SVG_CAMEL = {
+    "viewbox": "viewBox",
+    "preserveaspectratio": "preserveAspectRatio",
+    "gradientunits": "gradientUnits",
+    "gradienttransform": "gradientTransform",
+    "patternunits": "patternUnits",
+    "clippathunits": "clipPathUnits",
+}
+
+
+def _external_svg_ref(value: str) -> bool:
+    raw = re.sub(r"[\s\u0000-\u001f]+", "", value or "")
+    if not raw or raw.startswith("#"):
+        return False
+    if re.match(r"^(?:javascript|data|vbscript):", raw, re.I) or raw.startswith("//"):
+        return True
+    return bool(re.match(r"^[a-z][a-z0-9+.-]*:", raw, re.I))
+
+
+def _svg_attrs(tag: str, attrs) -> str:
+    parts = []
+    for name, value in attrs:
+        n = (name or "").lower()
+        if n.startswith("on") and n != "opacity":
+            continue
+        if n not in _SVG_ATTRS:
+            continue
+        val = value or ""
+        if re.search(r"javascript:|expression\s*\(", val, re.I):
+            continue
+        if re.search(r"url\s*\(\s*['\"]?\s*(?!#)", val, re.I):
+            continue
+        if n in ("href", "xlink:href") and tag in ("use", "image", "feimage") and _external_svg_ref(val):
+            continue
+        if n == "class":
+            if "fig" in val.split():
+                parts.append(' class="fig"')
+            continue
+        parts.append(f' {_SVG_CAMEL.get(n, n)}="{html.escape(val, quote=True)}"')
+    return "".join(parts)
 
 
 class _Clean(HTMLParser):
@@ -163,6 +221,10 @@ class _Clean(HTMLParser):
                     extra += f' {k}="{a[k]}"'
         elif tag == "table":
             self.out.append('<div class="zt-tbl">')
+        elif tag in _SVG_TAGS:
+            extra = _svg_attrs(tag, attrs)
+        elif tag in ("div", "span", "p", "figure") and "fig" in (a.get("class") or "").split():
+            extra = ' class="fig"'
         self.out.append(f"<{tag}{extra}>")
         if tag not in _VOID:
             self.stack.append(tag)
@@ -285,6 +347,7 @@ box-shadow:0 22px 52px rgba(18,62,173,.3),inset 0 1px 0 rgba(255,255,255,.18);di
 .zt-tag{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--blue);background:#EEF2FF;border-radius:8px;padding:5px 9px}
 .zt-tbody{font-size:16px;line-height:1.6;overflow-wrap:anywhere}
 .zt-tbody p{margin:0 0 .7em}.zt-tbody img{max-width:100%;height:auto;vertical-align:middle;border-radius:6px}
+.zt-tbody .fig,.zt-tbody svg{max-width:100%;height:auto;background:#fff;color:#111}.zt-tbody .fig{display:block;margin:.6em 0}.zt-tbody .fig svg{display:block;background:transparent}
 .zt-tbl{overflow-x:auto;margin:10px 0}.zt-tbody table{border-collapse:collapse}.zt-tbody td,.zt-tbody th{border:1px solid #DDE3F5;padding:6px 10px;vertical-align:top}
 .zt-tbody pre,.zt-tbody code{font-family:"JetBrains Mono",monospace;font-size:14px;background:#F5F7FF;border-radius:8px}.zt-tbody pre{padding:12px;overflow-x:auto}
 .zt-tbody mjx-container{max-width:100%;overflow-x:auto;overflow-y:hidden}

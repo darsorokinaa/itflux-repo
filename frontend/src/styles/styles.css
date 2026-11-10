@@ -5859,6 +5859,41 @@ mjx-container {
     background: #fff;
 }
 
+/* Встроенные SVG банка (обычно div.fig): масштаб по колонке, viewBox не трогаем.
+   На сезонной тёмной теме рисунок остаётся на светлой плашке, штрихи — тёмные
+   (currentColor берёт color, явные stroke/fill не перекрашиваем). */
+.task-html .fig {
+    display: block;
+    max-width: 100%;
+    margin: 0.75rem 0;
+    background: #fff;
+    color: #111;
+}
+
+.task-html .fig svg,
+.task-html svg:not(mjx-container svg):not(.task-img-zoom-hint svg) {
+    max-width: 100%;
+    height: auto;
+    background: #fff;
+    color: #111;
+}
+
+.task-html .fig svg {
+    display: block;
+    background: transparent;
+}
+
+html.seasonal-theme-active.seasonal-dark-bg .task-html .fig,
+html.seasonal-theme-active.seasonal-dark-bg .task-html svg:not(mjx-container svg):not(.task-img-zoom-hint svg) {
+    background: #fff;
+    color: #111;
+}
+
+html.seasonal-theme-active.seasonal-dark-bg .task-html .fig svg {
+    background: transparent;
+    color: #111;
+}
+
 /* Материалы к заданию: карточка-ссылка (как в макете file-attachment) */
 .task-files {
     margin: 0.35rem 0 1rem;

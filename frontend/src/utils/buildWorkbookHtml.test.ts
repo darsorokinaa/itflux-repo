@@ -308,6 +308,33 @@ describe("buildExamTemplateDocument", () => {
     expect(doc.tasks[0]?.html || "").not.toContain("plot.png");
   });
 
+  it("prints an inline svg figure and drops script, foreignObject and external use", () => {
+    const doc = buildExamTemplateDocument(
+      [
+        {
+          id: 45687,
+          task_number: 10,
+          text:
+            '<p>На рисунке изображены графики.</p><div class="fig"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40"><path d="M0 30 L40 10" fill="none" stroke="#111"/></svg></div>' +
+            '<svg onload="alert(1)"><script>alert(1)</script><foreignObject><iframe src="javascript:alert(1)"></iframe>секрет</foreignObject><use href="https://evil.example/x.svg#a"/></svg>',
+        },
+      ],
+      { title: "Вариант", mode: "variant", level: "vpr", subject: "math" }
+    );
+    const html = doc.tasks[0]?.html || "";
+    expect(html).toMatch(/<svg\b/i);
+    expect(html).toMatch(/viewBox="0 0 120 40"/i);
+    expect(html).toContain("M0 30 L40 10");
+    expect(html).toContain('class="fig"');
+    const lower = html.toLowerCase();
+    expect(lower).not.toContain("<script");
+    expect(lower).not.toContain("onload");
+    expect(lower).not.toContain("foreignobject");
+    expect(lower).not.toContain("javascript:");
+    expect(html).not.toContain("evil.example");
+    expect(html).not.toContain("секрет");
+  });
+
   it("keeps every task file as a linked material", () => {
     const tasks = variantTasksToWorkbookTasks([
       {
@@ -498,7 +525,36 @@ describe("ЕГЭ инф. №16: код программ в печати", () => 
   it("template whitelists pre and code-block class", () => {
     const template = readFileSync(templatePath, "utf8");
     expect(template).toMatch(/allowedTags=new Set\(\('p div pre /);
-    expect(template).toContain("|code-block)$/");
+    expect(template).toContain("|code-block|fig)$/");
     expect(template).toMatch(/\.task pre\{[^}]*white-space:pre-wrap;/);
+  });
+
+  it("print template keeps a safe inline svg and drops active content", () => {
+    const template = readFileSync(templatePath, "utf8");
+    const start = template.indexOf("const allowedTags=new Set");
+    const end = template.indexOf("function math(");
+    const safeHtml = new Function(`${template.slice(start, end)}; return safeHtml;`)() as (html: string) => DocumentFragment;
+    const frag = safeHtml(
+      '<div class="fig"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" onload="alert(1)">' +
+        "<script>alert(1)</script>" +
+        "<foreignObject>секрет</foreignObject>" +
+        '<use href="https://evil.example/x.svg#a"/>' +
+        '<path d="M0 0 H10" stroke="#111"/>' +
+        "</svg></div>"
+    );
+    const holder = document.createElement("div");
+    holder.append(frag);
+    const html = holder.innerHTML;
+    const lower = html.toLowerCase();
+    expect(html).toMatch(/class="fig"/);
+    expect(lower).toMatch(/<svg\b/);
+    expect(html).toMatch(/viewBox="0 0 10 10"/i);
+    expect(html).toContain("M0 0 H10");
+    expect(lower).not.toContain("<script");
+    expect(lower).not.toContain("onload");
+    expect(lower).not.toContain("foreignobject");
+    expect(lower).not.toContain("javascript:");
+    expect(html).not.toContain("evil.example");
+    expect(html).not.toContain("секрет");
   });
 });

@@ -22,12 +22,69 @@ const TEMPLATE_YEAR = "2027";
 const TEMPLATE_WATERMARK = "ПРОЕКТ ЕГЭ 2027";
 
 const ALLOWED_TAGS = new Set(
-  "p div pre span br b strong i em u s sub sup ul ol li table thead tbody tfoot tr th td colgroup col caption figure figcaption img math semantics mrow mi mn mo mtext mfrac msqrt mroot msup msub msubsup mfenced mtable mtr mtd mover munder munderover mspace menclose mpadded mstyle svg g path rect line circle ellipse polyline polygon text tspan defs marker title desc".split(
+  "p div pre span br b strong i em u s sub sup ul ol li table thead tbody tfoot tr th td colgroup col caption figure figcaption img math semantics mrow mi mn mo mtext mfrac msqrt mroot msup msub msubsup mfenced mtable mtr mtd mover munder munderover mspace menclose mpadded mstyle svg g path rect line circle ellipse polyline polygon text tspan textpath defs marker title desc use symbol image clippath mask lineargradient radialgradient stop pattern filter feblend fecolormatrix fecomponenttransfer fecomposite feconvolvematrix fediffuselighting fedisplacementmap fedistantlight fedropshadow feflood fefunca fefuncb fefuncg fefuncr fegaussianblur feimage femerge femergenode femorphology feoffset fepointlight fespecularlighting fespotlight fetile feturbulence".split(
     " "
   )
 );
 
-const DROP_TAGS = new Set(["script", "style", "iframe", "object", "embed", "link", "meta"]);
+const DROP_TAGS = new Set([
+  "script",
+  "style",
+  "iframe",
+  "object",
+  "embed",
+  "link",
+  "meta",
+  "foreignobject",
+]);
+
+const SVG_DRAW_TAGS = new Set(
+  [...ALLOWED_TAGS].filter((tag) =>
+    /^(svg|g|path|rect|line|circle|ellipse|polyline|polygon|text|tspan|textpath|defs|marker|title|desc|use|symbol|image|clippath|mask|lineargradient|radialgradient|stop|pattern|filter|fe)/.test(
+      tag
+    )
+  )
+);
+
+function isEventHandlerAttr(name: string): boolean {
+  const n = name.toLowerCase();
+  if (n === "opacity") return false;
+  return /^on[a-z]/i.test(n);
+}
+
+/** Чужой origin и javascript:/data: у <use>/<image>. Фрагмент #id — свой рисунок. */
+function svgRefIsExternal(value: string): boolean {
+  const raw = String(value || "").replace(/[\u0000-\u001F\u007F\s]+/g, "");
+  if (!raw || raw.startsWith("#")) return false;
+  if (/^(?:javascript|data|vbscript):/i.test(raw) || raw.startsWith("//")) return true;
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(raw)) return false;
+  try {
+    const base =
+      typeof location !== "undefined" && location.href && location.href !== "about:blank"
+        ? location.href
+        : "https://itflux.local/";
+    const url = new URL(raw, base);
+    if (url.protocol === "javascript:" || url.protocol === "data:" || url.protocol === "vbscript:") return true;
+    const origin =
+      typeof location !== "undefined" && location.origin && location.origin !== "null"
+        ? location.origin
+        : "";
+    if (!origin) return true;
+    return url.origin !== origin;
+  } catch {
+    return true;
+  }
+}
+
+function svgUrlFnIsUnsafe(value: string): boolean {
+  const refs = value.match(/url\s*\(\s*(['"]?)([\s\S]*?)\1\s*\)/gi);
+  if (!refs) return false;
+  return refs.some((chunk) => {
+    const inner = chunk.replace(/^url\s*\(\s*['"]?/i, "").replace(/['"]?\s*\)$/i, "").trim();
+    if (!inner || inner.startsWith("#")) return false;
+    return true;
+  });
+}
 
 export type WorkbookTask = {
   id: number;
@@ -762,10 +819,37 @@ function sanitizeTaskHtml(
   dedupePrintedListNumbers(root);
   convertDollarMathIn(root);
 
+  for (const el of [...root.querySelectorAll("foreignObject, foreignobject")]) el.remove();
+
   for (const el of [...root.querySelectorAll("*")]) {
+    const tag = el.localName.toLowerCase();
+    const draw = SVG_DRAW_TAGS.has(tag);
     for (const attr of [...el.attributes]) {
       const name = attr.name.toLowerCase();
-      if (name.startsWith("on") || name === "style" || /url\s*\(|javascript:|expression\s*\(/i.test(attr.value)) {
+      const value = attr.value;
+      if (isEventHandlerAttr(name) || /javascript:|expression\s*\(/i.test(value)) {
+        el.removeAttribute(attr.name);
+        continue;
+      }
+      if (name === "style") {
+        if (!draw || /javascript:|expression\s*\(/i.test(value) || svgUrlFnIsUnsafe(value)) {
+          el.removeAttribute(attr.name);
+        }
+        continue;
+      }
+      if (!draw && /url\s*\(/i.test(value)) {
+        el.removeAttribute(attr.name);
+        continue;
+      }
+      if (draw && svgUrlFnIsUnsafe(value)) {
+        el.removeAttribute(attr.name);
+        continue;
+      }
+      if (
+        (tag === "use" || tag === "image" || tag === "feimage") &&
+        (name === "href" || name === "xlink:href") &&
+        svgRefIsExternal(value)
+      ) {
         el.removeAttribute(attr.name);
       }
     }

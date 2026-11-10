@@ -436,6 +436,27 @@ html, body {
   margin: 0 auto;
 }
 
+.task-text .fig {
+  display: block;
+  max-width: 100%;
+  margin: 6px auto;
+  background: #fff;
+  color: #111;
+}
+
+.task-text .fig svg,
+.task-text svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  background: #fff;
+  color: #111;
+}
+
+.task-text .fig svg {
+  background: transparent;
+}
+
 .task-text figcaption {
   margin-top: 3px;
   font-size: 9pt;
@@ -459,6 +480,7 @@ html, body {
   vertical-align: -0.28em !important;
   margin: 0 0.1em !important;
   object-fit: contain !important;
+  background: transparent !important;
 }
 
 .task-text .math-display img,
@@ -471,6 +493,7 @@ html, body {
   display: inline-block !important;
   margin: 0.35em auto !important;
   object-fit: contain !important;
+  background: transparent !important;
 }
 
 .break-before { /* отключено: без принудительных переносов страниц внутри заданий */ }
