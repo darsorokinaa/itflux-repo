@@ -152,6 +152,37 @@ describe("seasonalThemeApi", () => {
     expect(dark).not.toMatch(/mjx-container[\s\S]{0,180}--on-page-text/);
   });
 
+  it("themes cabinet chrome on a dark seasonal background and keeps chips readable", () => {
+    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "seasonal-theme.css"), "utf8");
+    const dark = css.split("html.seasonal-theme-active.seasonal-dark-bg").slice(1).join("\n");
+    const beforeDark = css.split("html.seasonal-theme-active.seasonal-dark-bg")[0];
+
+    expect(beforeDark).not.toMatch(/\.cabinet-sidebar-bottom/);
+    expect(dark).toMatch(/\.cabinet-sidebar-bottom[\s\S]{0,180}background:\s*transparent\s*!important/);
+    expect(dark).toMatch(/\.cb-layout \.cb-layout__sidebar[\s\S]{0,240}--seasonal-page-background/);
+    expect(dark).toMatch(/\.cabinet-logout-btn:not\(:hover\)[\s\S]{0,160}--on-page-text/);
+    expect(dark).toMatch(/\.cabinet-plan-chip__label[\s\S]{0,40}#1E3A8A/);
+    expect(dark).toMatch(/\.cabinet-plan-chip__name[\s\S]{0,40}#1E40AF/);
+    expect(dark).not.toMatch(/\.cabinet-plan-chip__label[\s\S]{0,80}--on-page-text/);
+    expect(dark).toMatch(/\.st-page-header__title/);
+    expect(dark).toMatch(/\.cb-section-title/);
+    expect(dark).toMatch(/\.cb-page-hint[\s\S]{0,200}--on-page-text-secondary/);
+    expect(dark).toMatch(/\.cb-mobile-nav, \.st-mobile-nav\)::before \{[^}]*--seasonal-page-background/);
+    expect(dark).not.toMatch(/\.cb-widget[\s\S]{0,120}--on-page-text/);
+    expect(dark).not.toMatch(/\.td-panel[\s\S]{0,80}--on-page-text/);
+
+    expect(contrastRatio("#1E3A8A", "#EFF6FF")).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio("#1E3A8A", "#F8FAFC")).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio("#1E40AF", "#EFF6FF")).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio("#1E40AF", "#F8FAFC")).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio("#2563EB", "#F8FAFC")).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio("#FFFFFF", "#2563EB")).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio("#FFFFFF", "#0F172A")).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio("#9F1239", "#FFF6EA")).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio("#FFFFFF", "#1550D8")).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio("#1E3A8A", "#EFF6FF")).toBeGreaterThanOrEqual(4.5);
+  });
+
   it("keeps snow click-through and behind the variant page shell", () => {
     const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "seasonal-theme.css"), "utf8");
     const canvas = css.match(/\.seasonal-fx-canvas\s*\{([^}]+)\}/);
