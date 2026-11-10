@@ -29,17 +29,23 @@ _TMP = tempfile.mkdtemp()
 LOC_CACHE = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "fundraiser-tests"}}
 
 
-def _pay(teacher, *, final_amount, status, purpose, provider, paid_at, **extra):
+def _pay(teacher, fields):
+    final_amount = fields["final_amount"]
+    extras = {
+        key: value
+        for key, value in fields.items()
+        if key not in {"final_amount", "status", "purpose", "provider", "paid_at"}
+    }
     return Payment.objects.create(
         teacher=teacher,
         amount=final_amount if final_amount is not None else Decimal("1.00"),
         final_amount=final_amount,
         currency="RUB",
-        status=status,
-        purpose=purpose,
-        provider=provider,
-        paid_at=paid_at,
-        **extra,
+        status=fields["status"],
+        purpose=fields["purpose"],
+        provider=fields["provider"],
+        paid_at=fields["paid_at"],
+        **extras,
     )
 
 
@@ -65,16 +71,15 @@ class FundraiserCurrentApiTests(TestCase):
         self.assertTrue(self.fundraiser.is_active)
         self.assertIsNone(self.fundraiser.goal_rub)
 
-        _pay(
-            self.teacher,
-            final_amount=Decimal("495.00"),
-            status=Payment.Status.PAID,
-            purpose=Payment.Purpose.SUBSCRIPTION,
-            provider="tbank",
-            paid_at=CUTOFF,
-            provider_payment_id="pay_secret_495",
-            metadata={"card": "4111111111111111", "email": "secret-payer@example.com"},
-        )
+        _pay(self.teacher, {
+            "final_amount": Decimal("495.00"),
+            "status": Payment.Status.PAID,
+            "purpose": Payment.Purpose.SUBSCRIPTION,
+            "provider": "tbank",
+            "paid_at": CUTOFF,
+            "provider_payment_id": "pay_secret_495",
+            "metadata": {"card": "4111111111111111", "email": "secret-payer@example.com"},
+        })
         response = self._get()
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -90,14 +95,13 @@ class FundraiserCurrentApiTests(TestCase):
             (Decimal("1000.00"), datetime(2026, 11, 10, 12, 0, tzinfo=MSK)),
         ]
         for amount, paid_at in included:
-            _pay(
-                self.teacher,
-                final_amount=amount,
-                status=Payment.Status.PAID,
-                purpose=Payment.Purpose.SUBSCRIPTION,
-                provider="tbank",
-                paid_at=paid_at,
-            )
+            _pay(self.teacher, {
+                "final_amount": amount,
+                "status": Payment.Status.PAID,
+                "purpose": Payment.Purpose.SUBSCRIPTION,
+                "provider": "tbank",
+                "paid_at": paid_at,
+            })
         excluded = [
             dict(final_amount=Decimal("9999.00"), status=Payment.Status.PENDING, purpose=Payment.Purpose.SUBSCRIPTION, provider="tbank", paid_at=CUTOFF),
             dict(final_amount=Decimal("8888.00"), status=Payment.Status.FAILED, purpose=Payment.Purpose.SUBSCRIPTION, provider="tbank", paid_at=CUTOFF),
@@ -112,24 +116,23 @@ class FundraiserCurrentApiTests(TestCase):
             dict(final_amount=Decimal("1234.00"), status=Payment.Status.PAID, purpose=Payment.Purpose.SUBSCRIPTION, provider="tbank", paid_at=None),
         ]
         for spec in excluded:
-            _pay(self.teacher, **spec)
+            _pay(self.teacher, spec)
 
         body = self._get().json()
         self.assertEqual(body["amount_rub"], 3220 + 495 + 1000)
 
     def test_response_has_no_personal_data(self):
-        _pay(
-            self.teacher,
-            final_amount=Decimal("495.00"),
-            status=Payment.Status.PAID,
-            purpose=Payment.Purpose.SUBSCRIPTION,
-            provider="tbank",
-            paid_at=CUTOFF,
-            provider_payment_id="pay_secret_123",
-            order_id="order_secret_456",
-            customer_key="customer_secret_789",
-            metadata={"email": "secret-payer@example.com", "name": "Секрет Плательщик"},
-        )
+        _pay(self.teacher, {
+            "final_amount": Decimal("495.00"),
+            "status": Payment.Status.PAID,
+            "purpose": Payment.Purpose.SUBSCRIPTION,
+            "provider": "tbank",
+            "paid_at": CUTOFF,
+            "provider_payment_id": "pay_secret_123",
+            "order_id": "order_secret_456",
+            "customer_key": "customer_secret_789",
+            "metadata": {"email": "secret-payer@example.com", "name": "Секрет Плательщик"},
+        })
         response = self._get()
         raw = response.content.decode()
         self.assertEqual(set(response.json()), {"amount_rub", "updated_at"})
@@ -173,14 +176,13 @@ class FundraiserCurrentApiTests(TestCase):
         self.assertNotEqual(third["updated_at"], first["updated_at"])
 
     def test_kopecks_stay_numeric(self):
-        _pay(
-            self.teacher,
-            final_amount=Decimal("10.50"),
-            status=Payment.Status.PAID,
-            purpose=Payment.Purpose.SUBSCRIPTION,
-            provider="tbank",
-            paid_at=CUTOFF,
-        )
+        _pay(self.teacher, {
+            "final_amount": Decimal("10.50"),
+            "status": Payment.Status.PAID,
+            "purpose": Payment.Purpose.SUBSCRIPTION,
+            "provider": "tbank",
+            "paid_at": CUTOFF,
+        })
         body = self._get().json()
         self.assertEqual(body["amount_rub"], 3230.5)
         self.assertIsInstance(body["amount_rub"], float)

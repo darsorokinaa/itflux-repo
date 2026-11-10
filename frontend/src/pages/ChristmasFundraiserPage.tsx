@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import FundraiserCollected from "../components/FundraiserCollected";
 import {
@@ -13,11 +13,69 @@ import {
   type GalleryPhoto,
 } from "./christmasFundraiserData";
 import { useFundraiserSnapshot } from "./fundraiserAmount";
+import {
+  stepLightIndex,
+  useFundraiserDock,
+  useFundraiserHeaderOffset,
+  useFundraiserOverlayLock,
+  useFundraiserTitle,
+  useStickyFundraiserHelp,
+} from "./useFundraiserChrome";
 import "./christmas-fundraiser.css";
 
 type LightItem = { full: string; alt: string; caption: string };
 
-const PAGE_TITLE = "🎄 Рождественский сбор — Цифровой поток";
+function classWhen(active: boolean, className: string) {
+  if (active) return className;
+  return undefined;
+}
+
+function FundraiserTabs({ activeHash }: { activeHash: string }) {
+  return (
+    <nav className="xmas-tabs" aria-label="Разделы страницы">
+      <a href="#sbor" className={classWhen(activeHash === "#sbor", "is-active")}>О сборе</a>
+      <a href="#otchyoty" className={classWhen(activeHash === "#otchyoty", "is-active")}>Отчёты</a>
+      <a href="#foto-video" className={classWhen(activeHash === "#foto-video", "is-active")}>Фото и видео</a>
+    </nav>
+  );
+}
+
+function FundraiserHero({
+  hero,
+  heroIndex,
+  onPick,
+  onOpen,
+}: {
+  hero: (typeof HERO_SLIDES)[number];
+  heroIndex: number;
+  onPick: (index: number) => void;
+  onOpen: () => void;
+}) {
+  return (
+    <div className="xmas-hero">
+      <img
+        className="xmas-hero__main"
+        src={charityImg(hero.file)}
+        alt={hero.alt}
+        width={1600}
+        height={1200}
+        onClick={onOpen}
+      />
+      <div className="xmas-hero__thumbs" aria-label="Другие фото">
+        {HERO_SLIDES.map((slide, index) => (
+          <button
+            key={slide.file}
+            type="button"
+            className={classWhen(index === heroIndex, "is-on")}
+            onClick={() => onPick(index)}
+          >
+            <img src={charityImg(slide.thumb)} alt="" width={slide.width} height={slide.height} />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function Photo({
   photo,
@@ -49,8 +107,9 @@ export default function ChristmasFundraiserPage() {
   const [heroIndex, setHeroIndex] = useState(0);
   const [helpOpen, setHelpOpen] = useState(false);
   const [lightIndex, setLightIndex] = useState<number | null>(null);
-  const [showStickyHelp, setShowStickyHelp] = useState(false);
+  const showStickyHelp = useStickyFundraiserHelp();
   const hero = HERO_SLIDES[heroIndex];
+  const closeHelp = useCallback(() => setHelpOpen(false), []);
 
   const lightItems = useMemo<LightItem[]>(() => {
     const photos: LightItem[] = [
@@ -89,119 +148,25 @@ export default function ChristmasFundraiserPage() {
     return photos;
   }, [hero]);
 
-  useEffect(() => {
-    const previous = document.title;
-    document.title = PAGE_TITLE;
-    return () => {
-      document.title = previous;
-    };
-  }, []);
-
-  useEffect(() => {
-    const card = document.getElementById("sbor-card");
-    if (!card || typeof IntersectionObserver === "undefined") {
-      setShowStickyHelp(true);
-      return undefined;
-    }
-    const observer = new IntersectionObserver(
-      ([entry]) => setShowStickyHelp(!entry.isIntersecting),
-      { threshold: 0.2 },
-    );
-    observer.observe(card);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    const applyDock = () => {
-      const cookie = document.querySelector(".cookie-banner");
-      const tab = document.querySelector(".mobile-tabbar");
-      const heightOf = (node: Element | null) => {
-        if (!node) return 0;
-        const style = window.getComputedStyle(node);
-        if (style.display === "none" || style.visibility === "hidden") return 0;
-        return Math.ceil(node.getBoundingClientRect().height);
-      };
-      const offset = Math.max(heightOf(cookie), heightOf(tab));
-      document.documentElement.style.setProperty("--xmas-dock-bottom", `${offset}px`);
-    };
-    applyDock();
-    const observer = new MutationObserver(applyDock);
-    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style"] });
-    window.addEventListener("resize", applyDock);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", applyDock);
-    };
-  }, []);
-
-  useEffect(() => {
-    const header = document.querySelector(".site-header");
-    if (!header) return undefined;
-    const apply = () => {
-      const height = Math.ceil(header.getBoundingClientRect().height);
-      document.documentElement.style.setProperty("--xmas-stick-top", `${height + 8}px`);
-    };
-    apply();
-    const observer = new ResizeObserver(apply);
-    observer.observe(header);
-    window.addEventListener("resize", apply);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", apply);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!helpOpen && lightIndex == null) {
-      document.body.style.overflow = "";
-      return undefined;
-    }
-    document.body.style.overflow = "hidden";
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setHelpOpen(false);
-        setLightIndex(null);
-      } else if (lightIndex != null && event.key === "ArrowRight") {
-        setLightIndex((index) => (index == null ? index : (index + 1) % lightItems.length));
-      } else if (lightIndex != null && event.key === "ArrowLeft") {
-        setLightIndex((index) => (index == null ? index : (index - 1 + lightItems.length) % lightItems.length));
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
-    };
-  }, [helpOpen, lightIndex, lightItems.length]);
+  useFundraiserTitle();
+  useFundraiserDock();
+  useFundraiserHeaderOffset();
+  useFundraiserOverlayLock(helpOpen, lightIndex, lightItems.length, closeHelp, setLightIndex);
 
   const openAt = (index: number) => setLightIndex(index);
+  const showNext = () => setLightIndex((index) => stepLightIndex(index, 1, lightItems.length));
+  const showPrev = () => setLightIndex((index) => stepLightIndex(index, -1, lightItems.length));
   const current = lightIndex == null ? null : lightItems[lightIndex];
   const touchX = useRef(0);
 
   return (
     <div className="xmas-page">
-      <div className="xmas-hero">
-        <img
-          className="xmas-hero__main"
-          src={charityImg(hero.file)}
-          alt={hero.alt}
-          width={1600}
-          height={1200}
-          onClick={() => openAt(0)}
-        />
-        <div className="xmas-hero__thumbs" aria-label="Другие фото">
-          {HERO_SLIDES.map((slide, index) => (
-            <button
-              key={slide.file}
-              type="button"
-              className={index === heroIndex ? "is-on" : undefined}
-              onClick={() => setHeroIndex(index)}
-            >
-              <img src={charityImg(slide.thumb)} alt="" width={slide.width} height={slide.height} />
-            </button>
-          ))}
-        </div>
-      </div>
+      <FundraiserHero
+        hero={hero}
+        heroIndex={heroIndex}
+        onPick={setHeroIndex}
+        onOpen={() => openAt(0)}
+      />
 
       <header className="xmas-head">
         <h1>🎄&nbsp;Рождественский сбор</h1>
@@ -235,11 +200,7 @@ export default function ChristmasFundraiserPage() {
         </div>
       </aside>
 
-      <nav className="xmas-tabs" aria-label="Разделы страницы">
-        <a href="#sbor" className={activeHash === "#sbor" ? "is-active" : undefined}>О сборе</a>
-        <a href="#otchyoty" className={activeHash === "#otchyoty" ? "is-active" : undefined}>Отчёты</a>
-        <a href="#foto-video" className={activeHash === "#foto-video" ? "is-active" : undefined}>Фото и видео</a>
-      </nav>
+      <FundraiserTabs activeHash={activeHash} />
 
       <article className="xmas-story">
         <h2 id="sbor">О сборе</h2>
@@ -432,14 +393,14 @@ export default function ChristmasFundraiserPage() {
           onTouchStart={(event) => { touchX.current = event.changedTouches[0].screenX; }}
           onTouchEnd={(event) => {
             const dx = event.changedTouches[0].screenX - touchX.current;
-            if (dx > 50) setLightIndex((index) => (index == null ? index : (index - 1 + lightItems.length) % lightItems.length));
-            else if (dx < -50) setLightIndex((index) => (index == null ? index : (index + 1) % lightItems.length));
+            if (dx > 50) showPrev();
+            else if (dx < -50) showNext();
           }}
         >
           <button type="button" className="xmas-lightbox__close" aria-label="Закрыть" onClick={() => setLightIndex(null)}>×</button>
-          <button type="button" className="xmas-lightbox__btn xmas-lightbox__btn--prev" aria-label="Предыдущее фото" onClick={(event) => { event.stopPropagation(); setLightIndex((index) => (index == null ? index : (index - 1 + lightItems.length) % lightItems.length)); }}>‹</button>
+          <button type="button" className="xmas-lightbox__btn xmas-lightbox__btn--prev" aria-label="Предыдущее фото" onClick={(event) => { event.stopPropagation(); showPrev(); }}>‹</button>
           <img src={current.full} alt={current.alt} />
-          <button type="button" className="xmas-lightbox__btn xmas-lightbox__btn--next" aria-label="Следующее фото" onClick={(event) => { event.stopPropagation(); setLightIndex((index) => (index == null ? index : (index + 1) % lightItems.length)); }}>›</button>
+          <button type="button" className="xmas-lightbox__btn xmas-lightbox__btn--next" aria-label="Следующее фото" onClick={(event) => { event.stopPropagation(); showNext(); }}>›</button>
           <div className="xmas-lightbox__cap">{current.caption}</div>
         </div>
       ) : null}
