@@ -21,10 +21,23 @@ from .r50_tariffs import OFFER_CODE_MONTH
 from .subscription_service import PromoCodeError, PromoCodeService
 
 _MONTHS = (
-    "", "января", "февраля", "марта", "апреля", "мая", "июня",
-    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+    "",
+    "января",
+    "февраля",
+    "марта",
+    "апреля",
+    "мая",
+    "июня",
+    "июля",
+    "августа",
+    "сентября",
+    "октября",
+    "ноября",
+    "декабря",
 )
-_PER_PLAN_SKIP = frozenset({"PROMO_NOT_APPLICABLE", "PROMO_PERIOD_MISMATCH", "PROMO_NOT_COMBINABLE"})
+_PER_PLAN_SKIP = frozenset(
+    {"PROMO_NOT_APPLICABLE", "PROMO_PERIOD_MISMATCH", "PROMO_NOT_COMBINABLE"}
+)
 
 
 def ru_date_label(dt) -> str:
@@ -77,7 +90,9 @@ def _load_month_promo(code: str):
         if int(promo.uses_count or 0) + reserved >= promo.max_uses:
             raise PromoCodeError("PROMO_LIMIT", "Промокод уже использован.")
     if not promo_allows_product(promo, "subscription"):
-        raise PromoCodeError("PROMO_NOT_APPLICABLE", "Промокод не действует для подписки.")
+        raise PromoCodeError(
+            "PROMO_NOT_APPLICABLE", "Промокод не действует для подписки."
+        )
     period = (promo.billing_period or "").strip()
     if period == "year":
         raise PromoCodeError(
@@ -108,7 +123,11 @@ def _guest_plan_quote(promo, plan) -> dict:
     breakdown = promo_discount_breakdown(promo, base)
     final = breakdown["final_amount"]
     renewal = base if promo.first_payment_only else final
-    applied = final < base or int(breakdown.get("bonus_days") or 0) or int(breakdown.get("extra_free_months") or 0)
+    applied = (
+        final < base
+        or int(breakdown.get("bonus_days") or 0)
+        or int(breakdown.get("extra_free_months") or 0)
+    )
     return {
         "applies": True,
         "promo_applied": bool(applied),
@@ -145,7 +164,9 @@ def _user_plan_quote(user, promo, plan, code: str) -> dict:
     )
     final = calc["final_price"]
     renewal = base if promo.first_payment_only else final
-    promo_applied = calc.get("applied_discount_source") == "promo" or bool(calc.get("stacked_promo"))
+    promo_applied = calc.get("applied_discount_source") == "promo" or bool(
+        calc.get("stacked_promo")
+    )
     return {
         "applies": True,
         "promo_applied": bool(promo_applied),
@@ -157,56 +178,60 @@ def _user_plan_quote(user, promo, plan, code: str) -> dict:
     }
 
 
-def preview_storefront_promo(code: str | None, *, user=None) -> dict:
-    """Расчёт для витрины. Пустой code — действующий код кампании из настроек, если он ещё жив."""
-    raw = (code or "").strip()
-    suggested = not raw
-    resolved = raw or OFFER_CODE_MONTH
-    try:
-        promo = _load_month_promo(resolved)
-        if user and getattr(user, "is_authenticated", False):
-            PromoCodeService.validate(user, promo.code, plan_slug=None, billing_period="month")
-    except PromoCodeError as exc:
-        return _invalid(resolved, exc.message, suggested=suggested, error_code=exc.code)
+def _signed_in(user) -> bool:
+    return bool(user and getattr(user, "is_authenticated", False))
 
+
+def _public_paid_plans():
     from .models import TariffPlan
     from .subscription_api import _plan_is_free
 
-    plans = [
+    return [
         plan
-        for plan in TariffPlan.objects.filter(is_active=True, is_public=True).order_by("sort_order", "id")
-        if not _plan_is_free(plan) and getattr(plan, "cta_type", "") != TariffPlan.CtaType.CONTACT
-    ]
-    quoted = {}
-    for plan in plans:
-        if user and getattr(user, "is_authenticated", False):
-            try:
-                quoted[plan.slug] = _user_plan_quote(user, promo, plan, promo.code)
-            except PromoCodeError as exc:
-                if exc.code in _PER_PLAN_SKIP:
-                    base = base_plan_price(plan, "month")
-                    quoted[plan.slug] = {
-                        "applies": False,
-                        "promo_applied": False,
-                        "name": plan.name,
-                        "base_price": _money(base),
-                        "final_price": _money(base),
-                        "renewal_price": _money(base),
-                        "message": exc.message,
-                    }
-                    continue
-                return _invalid(promo.code, exc.message, suggested=suggested, error_code=exc.code)
-        else:
-            quoted[plan.slug] = _guest_plan_quote(promo, plan)
-
-    if not any(item.get("applies") for item in quoted.values()):
-        return _invalid(
-            promo.code,
-            "Промокод не действует для помесячной оплаты.",
-            suggested=suggested,
-            error_code="PROMO_NOT_APPLICABLE",
+        for plan in TariffPlan.objects.filter(is_active=True, is_public=True).order_by(
+            "sort_order", "id"
         )
+        if not _plan_is_free(plan)
+        and getattr(plan, "cta_type", "") != TariffPlan.CtaType.CONTACT
+    ]
 
+
+def _skipped_plan_quote(plan, message: str) -> dict:
+    base = base_plan_price(plan, "month")
+    amount = _money(base)
+    return {
+        "applies": False,
+        "promo_applied": False,
+        "name": plan.name,
+        "base_price": amount,
+        "final_price": amount,
+        "renewal_price": amount,
+        "message": message,
+    }
+
+
+def _quote_plan(user, promo, plan):
+    if not _signed_in(user):
+        return _guest_plan_quote(promo, plan)
+    try:
+        return _user_plan_quote(user, promo, plan, promo.code)
+    except PromoCodeError as exc:
+        if exc.code in _PER_PLAN_SKIP:
+            return _skipped_plan_quote(plan, exc.message)
+        raise
+
+
+def _load_checked_promo(code: str, user):
+    promo = _load_month_promo(code)
+    if _signed_in(user):
+        PromoCodeService.validate(
+            user, promo.code, plan_slug=None, billing_period="month"
+        )
+    return promo
+
+
+def _success_payload(promo, quoted: dict, *, suggested: bool) -> dict:
+    period = (promo.billing_period or "").strip() or "month"
     return {
         "valid": True,
         "suggested": suggested,
@@ -216,11 +241,34 @@ def preview_storefront_promo(code: str | None, *, user=None) -> dict:
         "valid_until": promo.valid_until.isoformat() if promo.valid_until else None,
         "valid_until_label": ru_date_label(promo.valid_until),
         "first_payment_only": bool(promo.first_payment_only),
-        "billing_period": (promo.billing_period or "month") or "month",
+        "billing_period": period,
         "discount_type": promo.discount_type,
         "discount_value": str(promo.discount_value),
         "plans": quoted,
     }
+
+
+def preview_storefront_promo(code: str | None, *, user=None) -> dict:
+    """Расчёт для витрины. Пустой code — действующий код кампании из настроек, если он ещё жив."""
+    raw = (code or "").strip()
+    suggested = not raw
+    resolved = raw or OFFER_CODE_MONTH
+    try:
+        promo = _load_checked_promo(resolved, user)
+        quoted = {
+            plan.slug: _quote_plan(user, promo, plan) for plan in _public_paid_plans()
+        }
+    except PromoCodeError as exc:
+        return _invalid(resolved, exc.message, suggested=suggested, error_code=exc.code)
+
+    if any(item.get("applies") for item in quoted.values()):
+        return _success_payload(promo, quoted, suggested=suggested)
+    return _invalid(
+        promo.code,
+        "Промокод не действует для помесячной оплаты.",
+        suggested=suggested,
+        error_code="PROMO_NOT_APPLICABLE",
+    )
 
 
 def teacher_offer_amount(preview: dict) -> Decimal | None:

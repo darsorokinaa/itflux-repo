@@ -709,11 +709,14 @@ export default function CabinetDashboard() {
   };
 
   useEffect(() => {
-    if (searchParams.get("assign") !== "1") return;
+    if (searchParams.get("assign") !== "1") return undefined;
     const next = new URLSearchParams(searchParams);
     next.delete("assign");
-    setSearchParams(next, { replace: true });
-    openHomeworkAssign();
+    const timer = window.setTimeout(() => {
+      setSearchParams(next, { replace: true });
+      openHomeworkAssign();
+    }, 0);
+    return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 

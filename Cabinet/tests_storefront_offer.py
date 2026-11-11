@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta
 from decimal import Decimal
-from unittest.mock import patch
+from types import SimpleNamespace
 
 from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
@@ -14,6 +14,7 @@ from Cabinet.models import Payment, Profile, PromoCode, TariffPlan, TeacherSubsc
 from Cabinet.payment_service import PaymentProviderService
 from Cabinet.storefront_models import StorefrontEvent, TeacherUiDismissal
 from Cabinet.storefront_promo import preview_storefront_promo
+from Cabinet.tbank_payment import extra_payment_data
 from Cabinet.tutor_offer_banner import build_premium_trial_banner
 
 
@@ -97,7 +98,9 @@ class StorefrontPromoTests(TestCase):
         self.assertFalse(expired["valid"])
         self.assertEqual(expired["plans"], {})
 
-        year = _promo(code="potok1110y", billing_period="year", discount_value=Decimal(40))
+        year = _promo(
+            code="potok1110y", billing_period="year", discount_value=Decimal(40)
+        )
         year.applicable_plans.set([self.pro])
         payload = preview_storefront_promo("potok1110y")
         self.assertFalse(payload["valid"])
@@ -114,21 +117,25 @@ class StorefrontPromoTests(TestCase):
             source=TeacherSubscription.Source.SELF,
         )
         self.client.force_authenticate(user=user)
-        preview = self.client.get("/api/cabinet/pricing/promo-preview/?code=potok1110").json()
+        preview = self.client.get(
+            "/api/cabinet/pricing/promo-preview/?code=potok1110"
+        ).json()
         self.assertEqual(preview["plans"]["teacher"]["final_price"], "495.00")
         result = PaymentProviderService.create_payment(
             teacher=user,
             plan=self.teacher_plan,
             billing_period="month",
             promo_code="potok1110",
-            acquisition=acquisition_payload({
-                "utm_source": "vk",
-                "utm_medium": "social",
-                "utm_campaign": "potok1110",
-                "utm_content": "post608",
-                "ref": "608",
-                "email": "hidden@example.com",
-            }),
+            acquisition=acquisition_payload(
+                {
+                    "utm_source": "vk",
+                    "utm_medium": "social",
+                    "utm_campaign": "potok1110",
+                    "utm_content": "post608",
+                    "ref": "608",
+                    "email": "hidden@example.com",
+                }
+            ),
         )
         payment = Payment.objects.get(pk=result["payment_id"])
         self.assertEqual(payment.final_amount, Decimal("495.00"))
@@ -144,50 +151,26 @@ class StorefrontPromoTests(TestCase):
         )
 
 
-@override_settings(
-    PAYMENT_PROVIDER="tbank",
-    TBANK_TERMINAL_KEY="TestKey",
-    TBANK_PASSWORD="TestPass",
-    LK_PUBLIC_URL="https://example.com",
-    DEBUG=True,
-)
 class TBankAcquisitionDataTests(TestCase):
-    def test_init_data_includes_utm(self):
-        user = _teacher("tb_offer")
-        start = _plan("start", "Старт", 0, free=True, cta="register")
-        plan = _plan("teacher", "Репетитор", 990)
-        TeacherSubscription.objects.create(
-            teacher=user,
-            plan=start,
-            status=TeacherSubscription.Status.ACTIVE,
-            source=TeacherSubscription.Source.SELF,
-        )
-        with patch("Cabinet.tbank_payment.requests.post") as mock_post:
-            mock_post.return_value.json.return_value = {
-                "Success": True,
-                "PaymentId": "9100",
-                "PaymentURL": "https://securepay.tinkoff.ru/html/payForm/?id=9100",
-                "Status": "NEW",
-            }
-            PaymentProviderService.create_payment(
-                teacher=user,
-                plan=plan,
-                billing_period="month",
-                acquisition={
+    def test_init_data_includes_utm_and_receipt_email(self):
+        payment = SimpleNamespace(
+            teacher=SimpleNamespace(email="teacher@example.com"),
+            metadata={
+                "acquisition": {
                     "utm_source": "telegram",
                     "utm_medium": "social",
                     "utm_campaign": "potok1110",
                     "utm_content": "608",
                     "ref": "608",
                 },
-            )
-        body = mock_post.call_args.kwargs.get("json") or mock_post.call_args[1]["json"]
-        data = body["DATA"]
+            },
+        )
+        data = extra_payment_data(payment)
         self.assertEqual(data["utm_source"], "telegram")
         self.assertEqual(data["utm_campaign"], "potok1110")
         self.assertEqual(data["utm_content"], "608")
         self.assertEqual(data["ref"], "608")
-        self.assertEqual(data["Email"], user.email)
+        self.assertEqual(data["Email"], "teacher@example.com")
 
 
 class AcquisitionRegistrationTests(TestCase):
@@ -316,7 +299,11 @@ class PremiumTrialBannerTests(TestCase):
         )
         banner = build_premium_trial_banner(self.user)
         self.assertEqual(banner["variant"], "expired")
-        self.assertTrue(banner["text"].startswith("Пробный „Премиум“ закончился, всё созданное сохранилось."))
+        self.assertTrue(
+            banner["text"].startswith(
+                "Пробный „Премиум“ закончился, всё созданное сохранилось."
+            )
+        )
         self.assertIn("первый месяц 495 ₽ по коду potok1110", banner["text"])
 
     def test_hidden_for_paid_tariff_new_teacher_and_after_deadline(self):

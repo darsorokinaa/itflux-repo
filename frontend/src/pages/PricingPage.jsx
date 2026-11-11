@@ -228,7 +228,12 @@ export default function PricingPage() {
   const [apiPlans, setApiPlans] = useState(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
-  const [promoInput, setPromoInput] = useState("");
+  const [promoInput, setPromoInput] = useState(() => {
+    if (typeof window === "undefined") return "";
+    const fromUrl = new URLSearchParams(window.location.search).get("promo");
+    if (fromUrl === "") return "";
+    return (fromUrl || "").trim() || readPromoCode();
+  });
   const [promoPreview, setPromoPreview] = useState(null);
   const [promoError, setPromoError] = useState("");
   const [promoLoading, setPromoLoading] = useState(false);
@@ -279,10 +284,8 @@ export default function PricingPage() {
     const cleared = params.get("promo") === "";
     const stored = cleared ? "" : (fromUrl || readPromoCode());
     if (fromUrl) savePromoCode(fromUrl);
-    setPromoInput(stored);
     let cancelled = false;
     const query = stored ? `?code=${encodeURIComponent(stored)}` : "";
-    setPromoLoading(true);
     fetch(`/api/cabinet/pricing/promo-preview/${query}`, { credentials: "same-origin" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
