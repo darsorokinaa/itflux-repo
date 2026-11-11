@@ -111,7 +111,7 @@ import { meetingUuidFromFrame } from "../cabinet/meetingPresent";
 import { fetchCabinetSession, fetchLiveAnswersFor, isTeacherRole, saveLiveScoreFor } from "../utils/cabinetAuth";
 import LiveSolveModal from "../cabinet/components/LiveSolveModal";
 import LiveTaskStudentFiles from "../cabinet/components/LiveTaskStudentFiles";
-import VariantBoardSplit from "../cabinet/components/VariantBoardSplit";
+import VariantBoardSplitSlot from "../cabinet/components/variantBoardSplitSlot";
 import LiveVariantAnswersTable, { liveStudentAnswer, lockedScoreFor, LiveAttachmentLinks, liveTaskAttachments } from "../cabinet/components/LiveVariantAnswersTable";
 import "../cabinet/styles/live-variant-answers.css";
 import HomeworkReviewResults, {
@@ -3469,17 +3469,13 @@ function ExamPage() {
   return (
     <VariantThemeRoot payload={variant?.theme}>
     <>
-    {/* Учитель открывает «Доску рядом» сам. Ученик на уроке видит тот же сплит, если доска его. */}
-    {isTeacherRole(cabinetUser) && (meetingUuid || liveSessionId || (isLiveVariant && cabinetAssignmentId)) && (
-      <VariantBoardSplit
-        meetingUuid={meetingUuid}
-        liveSessionId={liveSessionId}
-        homeworkId={isLiveVariant ? cabinetAssignmentId : null}
-      />
-    )}
-    {cabinetUser && !isTeacherRole(cabinetUser) && meetingUuid && (
-      <VariantBoardSplit meetingUuid={meetingUuid} readOnly />
-    )}
+    <VariantBoardSplitSlot
+      cabinetUser={cabinetUser}
+      meetingUuid={meetingUuid}
+      liveSessionId={liveSessionId}
+      isLiveVariant={isLiveVariant}
+      cabinetAssignmentId={cabinetAssignmentId}
+    />
     <div className="exam-edu-shell digital-flow-page">
     </div>
     <div
