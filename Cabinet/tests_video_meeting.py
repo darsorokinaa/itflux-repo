@@ -51,20 +51,32 @@ from Cabinet.video_meeting_service import (
 class VideoMeetingApiTests(TestCase):
     def setUp(self):
         self.client = APIClient()
-        self.teacher = User.objects.create_user(username="vm_teacher", password="pass", email="t@test.ru")
+        self.teacher = User.objects.create_user(
+            username="vm_teacher", password="pass", email="t@test.ru"
+        )
         Profile.objects.filter(user=self.teacher).update(
             role=Profile.Role.TEACHER, name="Анна", surname="Учитель"
         )
-        self.other_teacher = User.objects.create_user(username="vm_other_teacher", password="pass")
-        Profile.objects.filter(user=self.other_teacher).update(role=Profile.Role.TEACHER)
+        self.other_teacher = User.objects.create_user(
+            username="vm_other_teacher", password="pass"
+        )
+        Profile.objects.filter(user=self.other_teacher).update(
+            role=Profile.Role.TEACHER
+        )
 
         self.student_user = User.objects.create_user(
-            username="vm_student", password="pass", email="s@test.ru", first_name="Иван", last_name="Ученик"
+            username="vm_student",
+            password="pass",
+            email="s@test.ru",
+            first_name="Иван",
+            last_name="Ученик",
         )
         Profile.objects.filter(user=self.student_user).update(
             role=Profile.Role.STUDENT, name="Иван", surname="Ученик"
         )
-        self.outsider = User.objects.create_user(username="vm_outsider", password="pass")
+        self.outsider = User.objects.create_user(
+            username="vm_outsider", password="pass"
+        )
         Profile.objects.filter(user=self.outsider).update(role=Profile.Role.STUDENT)
 
         self.student = Student.objects.create(
@@ -74,7 +86,9 @@ class VideoMeetingApiTests(TestCase):
             last_name="Ученик",
             status="active",
         )
-        self.group = StudentGroup.objects.create(teacher=self.teacher, title="Группа VM", status="active")
+        self.group = StudentGroup.objects.create(
+            teacher=self.teacher, title="Группа VM", status="active"
+        )
         self.group.students.add(self.student)
 
         now = timezone.now()
@@ -95,7 +109,9 @@ class VideoMeetingApiTests(TestCase):
         )
 
     def _create_meeting(self):
-        meeting, _created = get_or_create_meeting_for_event(event=self.event, created_by=self.teacher)
+        meeting, _created = get_or_create_meeting_for_event(
+            event=self.event, created_by=self.teacher
+        )
         return meeting
 
     def test_teacher_can_create_meeting_as_scheduled(self):
@@ -131,15 +147,21 @@ class VideoMeetingApiTests(TestCase):
         self.assertTrue(first.data["created"])
         self.assertFalse(second.data["created"])
         self.assertEqual(first.data["meeting"]["uuid"], second.data["meeting"]["uuid"])
-        self.assertEqual(first.data["meeting"]["joinUrl"], second.data["meeting"]["joinUrl"])
-        self.assertEqual(VideoMeeting.objects.filter(schedule_event=self.event).count(), 1)
+        self.assertEqual(
+            first.data["meeting"]["joinUrl"], second.data["meeting"]["joinUrl"]
+        )
+        self.assertEqual(
+            VideoMeeting.objects.filter(schedule_event=self.event).count(), 1
+        )
 
     def test_get_does_not_create_room(self):
         self.client.force_login(self.teacher)
         res = self.client.get(f"/api/video-meetings/for-event/{self.event.pk}/")
         self.assertEqual(res.status_code, 200)
         self.assertIsNone(res.data["videoMeeting"])
-        self.assertEqual(VideoMeeting.objects.filter(schedule_event=self.event).count(), 0)
+        self.assertEqual(
+            VideoMeeting.objects.filter(schedule_event=self.event).count(), 0
+        )
 
     def test_other_teacher_cannot_create(self):
         self.client.force_login(self.other_teacher)
@@ -172,7 +194,9 @@ class VideoMeetingApiTests(TestCase):
         self.assertEqual(meeting.status, VideoMeeting.Status.LIVE)
         self.assertIsNotNone(meeting.actual_started_at)
         self.assertEqual(meeting.room_name, room_name)
-        self.assertEqual(res.data["meeting"]["joinUrl"], f"/cabinet/meetings/{meeting.uuid}")
+        self.assertEqual(
+            res.data["meeting"]["joinUrl"], f"/cabinet/meetings/{meeting.uuid}"
+        )
 
     def test_repeat_start_is_idempotent(self):
         meeting = self._create_meeting()
@@ -184,7 +208,9 @@ class VideoMeetingApiTests(TestCase):
         self.assertEqual(again.status, VideoMeeting.Status.LIVE)
         self.assertEqual(again.actual_started_at, started_at)
         self.assertEqual(again.room_name, room_name)
-        self.assertEqual(VideoMeeting.objects.filter(schedule_event=self.event).count(), 1)
+        self.assertEqual(
+            VideoMeeting.objects.filter(schedule_event=self.event).count(), 1
+        )
 
     def test_student_can_join_after_start(self):
         meeting = self._create_meeting()
@@ -314,12 +340,18 @@ class VideoMeetingApiTests(TestCase):
         self.assertIn(res.status_code, (403, 409))
 
     def test_single_room_per_event(self):
-        m1, _ = get_or_create_meeting_for_event(event=self.event, created_by=self.teacher)
-        m2, created = get_or_create_meeting_for_event(event=self.event, created_by=self.teacher)
+        m1, _ = get_or_create_meeting_for_event(
+            event=self.event, created_by=self.teacher
+        )
+        m2, created = get_or_create_meeting_for_event(
+            event=self.event, created_by=self.teacher
+        )
         self.assertFalse(created)
         self.assertEqual(m1.pk, m2.pk)
         self.assertEqual(m1.room_name, m2.room_name)
-        self.assertEqual(VideoMeeting.objects.filter(schedule_event=self.event).count(), 1)
+        self.assertEqual(
+            VideoMeeting.objects.filter(schedule_event=self.event).count(), 1
+        )
 
     def test_room_names_unique_and_unguessable(self):
         names = {generate_room_name() for _ in range(20)}
@@ -406,7 +438,9 @@ class VideoMeetingApiTests(TestCase):
         self.assertEqual(teacher_config["meeting"]["subject"], "Урок · Иван Ученик")
         self.assertEqual(teacher_config["meeting"]["title"], "Урок · Иван Ученик")
         self.assertEqual(teacher_config["meeting"]["audience"], "Иван Ученик")
-        self.assertEqual(student_config["meeting"]["subject"], teacher_config["meeting"]["subject"])
+        self.assertEqual(
+            student_config["meeting"]["subject"], teacher_config["meeting"]["subject"]
+        )
         meeting.refresh_from_db()
         self.assertEqual(meeting.room_name, room_before)
 
@@ -421,8 +455,12 @@ class VideoMeetingApiTests(TestCase):
             teacher_payload["context"]["user"]["id"],
             student_payload["context"]["user"]["id"],
         )
-        self.assertTrue(teacher_payload["context"]["user"]["moderator"] in (True, "true"))
-        self.assertTrue(student_payload["context"]["user"]["moderator"] in (False, "false"))
+        self.assertTrue(
+            teacher_payload["context"]["user"]["moderator"] in (True, "true")
+        )
+        self.assertTrue(
+            student_payload["context"]["user"]["moderator"] in (False, "false")
+        )
         self.assertNotIn("JITSI_APP_SECRET", str(teacher_config))
         self.assertTrue(teacher_config["meeting"]["returnUrl"].startswith("/cabinet/"))
         self.assertTrue(student_config["meeting"]["returnUrl"].startswith("/cabinet/"))
@@ -441,7 +479,9 @@ class VideoMeetingApiTests(TestCase):
         self.assertEqual(second.status_code, 200)
         self.assertEqual(first.data["roomName"], room)
         self.assertEqual(second.data["roomName"], room)
-        self.assertEqual(VideoMeeting.objects.filter(schedule_event=self.event).count(), 1)
+        self.assertEqual(
+            VideoMeeting.objects.filter(schedule_event=self.event).count(), 1
+        )
         meeting.refresh_from_db()
         self.assertEqual(meeting.room_name, room)
 
@@ -497,18 +537,26 @@ class VideoMeetingApiTests(TestCase):
     def test_join_idempotent(self):
         meeting = self._create_meeting()
         start_meeting(meeting=meeting, user=self.teacher)
-        s1 = record_attendance_join(meeting=meeting, user=self.student_user, jitsi_participant_id="p1")
-        s2 = record_attendance_join(meeting=meeting, user=self.student_user, jitsi_participant_id="p1")
+        s1 = record_attendance_join(
+            meeting=meeting, user=self.student_user, jitsi_participant_id="p1"
+        )
+        s2 = record_attendance_join(
+            meeting=meeting, user=self.student_user, jitsi_participant_id="p1"
+        )
         self.assertEqual(s1.pk, s2.pk)
         self.assertEqual(
-            MeetingAttendance.objects.filter(meeting=meeting, user=self.student_user, left_at__isnull=True).count(),
+            MeetingAttendance.objects.filter(
+                meeting=meeting, user=self.student_user, left_at__isnull=True
+            ).count(),
             1,
         )
 
     def test_leave_closes_only_own_session(self):
         meeting = self._create_meeting()
         start_meeting(meeting=meeting, user=self.teacher)
-        student_session = record_attendance_join(meeting=meeting, user=self.student_user)
+        student_session = record_attendance_join(
+            meeting=meeting, user=self.student_user
+        )
         teacher_session = record_attendance_join(meeting=meeting, user=self.teacher)
         closed = record_attendance_leave(meeting=meeting, user=self.student_user)
         self.assertEqual(closed.pk, student_session.pk)
@@ -520,10 +568,14 @@ class VideoMeetingApiTests(TestCase):
         meeting = self._create_meeting()
         start_meeting(meeting=meeting, user=self.teacher)
         joined = timezone.now() - timedelta(minutes=10)
-        with mock.patch("Cabinet.video_meeting_service.timezone.now", return_value=joined):
-            session = record_attendance_join(meeting=meeting, user=self.student_user)
+        with mock.patch(
+            "Cabinet.video_meeting_service.timezone.now", return_value=joined
+        ):
+            record_attendance_join(meeting=meeting, user=self.student_user)
         left_at = joined + timedelta(minutes=7)
-        with mock.patch("Cabinet.video_meeting_service.timezone.now", return_value=left_at):
+        with mock.patch(
+            "Cabinet.video_meeting_service.timezone.now", return_value=left_at
+        ):
             closed = record_attendance_leave(meeting=meeting, user=self.student_user)
         self.assertEqual(closed.duration_seconds, 7 * 60)
 
@@ -543,7 +595,9 @@ class VideoMeetingApiTests(TestCase):
         second.refresh_from_db()
         self.assertIsNone(second.left_at)
         self.assertEqual(
-            MeetingAttendance.objects.filter(meeting=meeting, user=self.student_user).count(),
+            MeetingAttendance.objects.filter(
+                meeting=meeting, user=self.student_user
+            ).count(),
             1,
         )
 
@@ -596,7 +650,9 @@ class VideoMeetingApiTests(TestCase):
         self.assertIsNotNone(first.left_at)
         self.assertEqual(first.pk, second.pk)
         self.assertEqual(
-            MeetingAttendance.objects.filter(meeting=meeting, user=self.student_user).count(),
+            MeetingAttendance.objects.filter(
+                meeting=meeting, user=self.student_user
+            ).count(),
             1,
         )
 
@@ -607,7 +663,9 @@ class VideoMeetingApiTests(TestCase):
             meeting=meeting, user=self.teacher, jitsi_participant_id="teacher-jitsi"
         )
         student_row = record_attendance_join(
-            meeting=meeting, user=self.student_user, jitsi_participant_id="student-jitsi"
+            meeting=meeting,
+            user=self.student_user,
+            jitsi_participant_id="student-jitsi",
         )
         self.assertNotEqual(teacher_row.pk, student_row.pk)
         self.assertEqual(teacher_row.jitsi_participant_id, "teacher-jitsi")
@@ -623,14 +681,18 @@ class VideoMeetingApiTests(TestCase):
         record_attendance_join(meeting=meeting, user=self.teacher)
         finish_meeting(meeting=meeting, user=self.teacher)
         self.assertFalse(
-            MeetingAttendance.objects.filter(meeting=meeting, left_at__isnull=True).exists()
+            MeetingAttendance.objects.filter(
+                meeting=meeting, left_at__isnull=True
+            ).exists()
         )
         meeting.refresh_from_db()
         self.assertEqual(meeting.status, VideoMeeting.Status.FINISHED)
 
     def test_not_found(self):
         self.client.force_login(self.teacher)
-        res = self.client.get("/api/video-meetings/00000000-0000-0000-0000-000000000099/")
+        res = self.client.get(
+            "/api/video-meetings/00000000-0000-0000-0000-000000000099/"
+        )
         self.assertEqual(res.status_code, 404)
 
     def test_parent_no_access(self):
@@ -660,7 +722,12 @@ class VideoMeetingApiTests(TestCase):
         self.assertTrue(res.data["requiresModeratorLogin"])
         self.assertTrue(str(res.data["userInfo"]["displayName"]).strip())
 
-    @override_settings(DEBUG=False, JITSI_DOMAIN="", JITSI_ALLOW_PUBLIC_MEET=False, JITSI_AUTH_MODE="none")
+    @override_settings(
+        DEBUG=False,
+        JITSI_DOMAIN="",
+        JITSI_ALLOW_PUBLIC_MEET=False,
+        JITSI_AUTH_MODE="none",
+    )
     def test_production_without_jitsi_domain_does_not_open_public_room(self):
         meeting = self._create_meeting()
         start_meeting(meeting=meeting, user=self.teacher)
@@ -705,7 +772,9 @@ class VideoMeetingApiTests(TestCase):
 
     def test_join_config_display_name_never_empty(self):
         blank = User.objects.create_user(username="vm_blank_name", password="pass")
-        Profile.objects.filter(user=blank).update(role=Profile.Role.TEACHER, name="", surname="")
+        Profile.objects.filter(user=blank).update(
+            role=Profile.Role.TEACHER, name="", surname=""
+        )
         name = get_jitsi_display_name(blank)
         self.assertTrue(name.strip())
         self.assertNotEqual(name.strip(), "")
@@ -744,9 +813,15 @@ class VideoMeetingApiTests(TestCase):
         event_payload = body["event"]
         self.assertEqual(event_payload.get("meetingProvider"), "jitsi")
         self.assertIsNotNone(event_payload.get("videoMeeting"))
-        self.assertTrue(event_payload["videoMeeting"]["pageUrl"].startswith("/cabinet/meetings/"))
-        self.assertEqual(event_payload.get("link"), event_payload["videoMeeting"]["pageUrl"])
-        self.assertFalse(str(event_payload["videoMeeting"]["pageUrl"]).startswith("http"))
+        self.assertTrue(
+            event_payload["videoMeeting"]["pageUrl"].startswith("/cabinet/meetings/")
+        )
+        self.assertEqual(
+            event_payload.get("link"), event_payload["videoMeeting"]["pageUrl"]
+        )
+        self.assertFalse(
+            str(event_payload["videoMeeting"]["pageUrl"]).startswith("http")
+        )
         self.assertNotIn("lesson.", str(event_payload["videoMeeting"]["pageUrl"]))
         self.assertEqual(event_payload["videoMeeting"]["status"], "scheduled")
 
@@ -797,7 +872,9 @@ class VideoMeetingApiTests(TestCase):
         self.assertEqual(status_res.status_code, 200)
         self.assertEqual(status_res.data["presented"]["kind"], "board")
         self.assertTrue(status_res.data["presented"]["openUrl"])
-        self.assertIn(f"meeting={meeting.uuid}", status_res.data["presented"]["openUrl"])
+        self.assertIn(
+            f"meeting={meeting.uuid}", status_res.data["presented"]["openUrl"]
+        )
 
         self.client.force_login(self.teacher)
         variant_res = self.client.post(
@@ -848,7 +925,9 @@ class VideoMeetingApiTests(TestCase):
         self.assertEqual(len(answers.data.get("students") or []), 1)
         student_row = answers.data["students"][0]
         self.assertEqual(student_row.get("status"), "sent")
-        self.assertEqual((student_row.get("result") or {}).get("by_number", {}).get("1"), "15")
+        self.assertEqual(
+            (student_row.get("result") or {}).get("by_number", {}).get("1"), "15"
+        )
         self.assertTrue((student_row.get("result") or {}).get("checked", {}).get("1"))
 
         # Черновик без «Проверить» тоже виден учителю на live-уроке.
@@ -867,7 +946,7 @@ class VideoMeetingApiTests(TestCase):
         self.assertEqual(draft2.status_code, 200, draft2.content)
         self.client.force_login(self.teacher)
         answers2 = self.client.get(f"/api/video-meetings/{meeting.uuid}/live-answers/")
-        result2 = (answers2.data["students"][0].get("result") or {})
+        result2 = answers2.data["students"][0].get("result") or {}
         self.assertEqual(result2.get("by_number", {}).get("1"), "15")
         self.assertEqual(result2.get("by_number", {}).get("2"), "99")
         self.assertEqual(result2.get("by_task_id", {}).get("2"), "99")
@@ -890,9 +969,13 @@ class VideoMeetingApiTests(TestCase):
         self.assertEqual(submit.status_code, 200, submit.content)
         homework = Homework.objects.get(pk=homework_id)
         self.assertIn("live-meeting:", homework.description or "")
-        submission = HomeworkSubmission.objects.get(homework=homework, student=self.student)
+        submission = HomeworkSubmission.objects.get(
+            homework=homework, student=self.student
+        )
         self.assertFalse(
-            ReviewItem.objects.filter(source_type="homework", source_id=submission.pk).exists()
+            ReviewItem.objects.filter(
+                source_type="homework", source_id=submission.pk
+            ).exists()
         )
         # Даже если ReviewItem создали вручную — список проверки его скрывает.
         orphan = ReviewItem.objects.create(
@@ -936,11 +1019,17 @@ class VideoMeetingApiTests(TestCase):
 
         self.client.force_login(self.student_user)
         status_res = self.client.get(f"/api/video-meetings/{meeting.uuid}/status/")
-        self.assertEqual(status_res.data["presented"]["boardSplit"]["boardId"], board_id)
+        self.assertEqual(
+            status_res.data["presented"]["boardSplit"]["boardId"], board_id
+        )
         late = sync_state_payload(meeting, self.student_user)
         self.assertEqual(late["presented"]["boardSplit"]["boardId"], board_id)
-        forbidden = self.client.post("/api/cabinet/variant-board/", {"meeting": str(meeting.uuid)}, format="json")
-        self.assertEqual((forbidden.status_code, forbidden.data.get("code")), (403, "teacher_only"))
+        forbidden = self.client.post(
+            "/api/cabinet/variant-board/", {"meeting": str(meeting.uuid)}, format="json"
+        )
+        self.assertEqual(
+            (forbidden.status_code, forbidden.data.get("code")), (403, "teacher_only")
+        )
 
         self.client.force_login(self.teacher)
         closed = self.client.post(
@@ -967,10 +1056,19 @@ class VideoMeetingApiTests(TestCase):
         self.assertNotIn("boardSplit", meeting.presented_payload)
 
     def test_domain_with_https_normalized_for_jwt_sub(self):
-        from Cabinet.jitsi_service import get_jitsi_domain, get_jitsi_sub, normalize_jitsi_host
+        from Cabinet.jitsi_service import (
+            get_jitsi_domain,
+            get_jitsi_sub,
+            normalize_jitsi_host,
+        )
 
-        self.assertEqual(normalize_jitsi_host("https://Lesson.Example.test/path"), "lesson.example.test")
-        self.assertEqual(normalize_jitsi_host("lesson.example.test:443"), "lesson.example.test")
+        self.assertEqual(
+            normalize_jitsi_host("https://Lesson.Example.test/path"),
+            "lesson.example.test",
+        )
+        self.assertEqual(
+            normalize_jitsi_host("lesson.example.test:443"), "lesson.example.test"
+        )
         with self.settings(
             JITSI_DOMAIN="https://meet.example.test/",
             JITSI_SUB="https://meet.example.test",
@@ -1010,10 +1108,14 @@ class VideoMeetingApiTests(TestCase):
             self.assertEqual(res.data["diagnostics"]["jwtRoom"], res.data["roomName"])
 
     def test_invite_reuses_existing_conference_room(self):
-        meeting, created = get_or_create_meeting_for_event(event=self.event, created_by=self.teacher)
+        meeting, created = get_or_create_meeting_for_event(
+            event=self.event, created_by=self.teacher
+        )
         self.assertTrue(created)
         room = meeting.room_name
-        again, created_again = get_or_create_meeting_for_event(event=self.event, created_by=self.teacher)
+        again, created_again = get_or_create_meeting_for_event(
+            event=self.event, created_by=self.teacher
+        )
         self.assertFalse(created_again)
         self.assertEqual(again.pk, meeting.pk)
         self.assertEqual(again.room_name, room)
@@ -1024,7 +1126,9 @@ class VideoMeetingApiTests(TestCase):
         student_cfg = build_join_config(meeting=meeting, user=self.student_user)
         self.assertEqual(teacher_cfg["roomName"], student_cfg["roomName"])
         self.assertEqual(teacher_cfg["roomName"], room)
-        self.assertEqual(teacher_cfg["diagnostics"]["jwtRoom"], student_cfg["diagnostics"]["jwtRoom"])
+        self.assertEqual(
+            teacher_cfg["diagnostics"]["jwtRoom"], student_cfg["diagnostics"]["jwtRoom"]
+        )
         self.assertEqual(teacher_cfg["diagnostics"]["jwtRoom"], room)
 
     def test_connection_probe_does_not_create_meeting(self):
@@ -1055,7 +1159,9 @@ class VideoMeetingApiTests(TestCase):
         self.assertFalse(res.data["credentialsIssued"])
         self.assertFalse(res.data["mediaConfirmed"])
         self.assertEqual(res.data["domain"], "meet.example.test")
-        self.assertTrue(str(res.data["scriptUrl"]).startswith("https://meet.example.test/"))
+        self.assertTrue(
+            str(res.data["scriptUrl"]).startswith("https://meet.example.test/")
+        )
 
     def test_connection_probe_does_not_start_existing_meeting(self):
         meeting = self._create_meeting()
@@ -1083,7 +1189,12 @@ class VideoMeetingApiTests(TestCase):
         before = VideoMeeting.objects.count()
         res = self.client.post(
             "/api/video-meetings/connection-probe/",
-            {"stage": "join_timeout", "errorType": "join_timeout", "durationMs": 15000, "online": True},
+            {
+                "stage": "join_timeout",
+                "errorType": "join_timeout",
+                "durationMs": 15000,
+                "online": True,
+            },
             format="json",
         )
         self.assertEqual(res.status_code, 200, res.content)
@@ -1091,7 +1202,9 @@ class VideoMeetingApiTests(TestCase):
         self.assertEqual(VideoMeeting.objects.count(), before)
 
     def test_different_lessons_get_different_rooms(self):
-        m1, _ = get_or_create_meeting_for_event(event=self.event, created_by=self.teacher)
+        m1, _ = get_or_create_meeting_for_event(
+            event=self.event, created_by=self.teacher
+        )
         other = create_single_event(
             teacher=self.teacher,
             data={
@@ -1314,7 +1427,9 @@ class VideoMeetingApiTests(TestCase):
             format="json",
         )
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.data["diagnostics"]["browserTabSessionId"], "tab-teacher-1")
+        self.assertEqual(
+            res.data["diagnostics"]["browserTabSessionId"], "tab-teacher-1"
+        )
         event = MeetingTechnicalEvent.objects.filter(
             meeting=meeting,
             event_type=MeetingTechnicalEvent.EventType.JOIN_CONFIG_ISSUED,
@@ -1353,7 +1468,9 @@ class VideoMeetingApiTests(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.data["eventType"], "room_mismatch")
         event = MeetingTechnicalEvent.objects.get(pk=res.data["id"])
-        self.assertEqual(event.event_type, MeetingTechnicalEvent.EventType.ROOM_MISMATCH)
+        self.assertEqual(
+            event.event_type, MeetingTechnicalEvent.EventType.ROOM_MISMATCH
+        )
         self.assertNotIn("jwt", event.metadata)
         self.assertNotIn("email", event.metadata)
         self.assertEqual(event.metadata.get("configuredRoomName"), meeting.room_name)
@@ -1364,21 +1481,40 @@ class VideoMeetingApiTests(TestCase):
         meeting = self._create_meeting()
         start_meeting(meeting=meeting, user=self.teacher)
         self.client.force_login(self.teacher)
-        for event_type in ("participant_joined", "participant_left", "conference_failed", "connection_failed", "peer_connection_failure"):
+        for event_type in (
+            "participant_joined",
+            "participant_left",
+            "conference_failed",
+            "connection_failed",
+            "peer_connection_failure",
+        ):
             res = self.client.post(
                 f"/api/video-meetings/{meeting.uuid}/technical-events/",
-                {"eventType": event_type, "metadata": {"participantCount": 2 if "participant" in event_type else 1}},
+                {
+                    "eventType": event_type,
+                    "metadata": {
+                        "participantCount": 2 if "participant" in event_type else 1
+                    },
+                },
                 format="json",
             )
             self.assertEqual(res.status_code, 200, event_type)
         self.assertEqual(MeetingAttendance.objects.filter(meeting=meeting).count(), 0)
-        self.assertEqual(MeetingTechnicalEvent.objects.filter(meeting=meeting).exclude(event_type="join_config_issued").count(), 5)
+        self.assertEqual(
+            MeetingTechnicalEvent.objects.filter(meeting=meeting)
+            .exclude(event_type="join_config_issued")
+            .count(),
+            5,
+        )
 
     def test_canonical_room_name_treats_jid_as_same_conference(self):
         from Cabinet.jitsi_service import canonical_jitsi_room_name, jitsi_rooms_match
 
         room = "digitalstreamabc123"
-        self.assertEqual(canonical_jitsi_room_name(f"{room}@conference.lesson.itflux-academy.ru"), room)
+        self.assertEqual(
+            canonical_jitsi_room_name(f"{room}@conference.lesson.itflux-academy.ru"),
+            room,
+        )
         self.assertTrue(jitsi_rooms_match(room, f"{room}@conference.lesson.example"))
         self.assertFalse(jitsi_rooms_match(room, "other@conference.example"))
 
@@ -1405,10 +1541,16 @@ class VideoMeetingApiTests(TestCase):
         meeting = self._create_meeting()
         start_meeting(meeting=meeting, user=self.teacher)
         self.client.force_login(self.teacher)
-        first = self.client.post(f"/api/video-meetings/{meeting.uuid}/join-config/", format="json")
-        refresh = self.client.post(f"/api/video-meetings/{meeting.uuid}/join-config/", format="json")
+        first = self.client.post(
+            f"/api/video-meetings/{meeting.uuid}/join-config/", format="json"
+        )
+        refresh = self.client.post(
+            f"/api/video-meetings/{meeting.uuid}/join-config/", format="json"
+        )
         self.client.force_login(self.student_user)
-        student = self.client.post(f"/api/video-meetings/{meeting.uuid}/join-config/", format="json")
+        student = self.client.post(
+            f"/api/video-meetings/{meeting.uuid}/join-config/", format="json"
+        )
         self.assertEqual(first.data["roomName"], refresh.data["roomName"])
         self.assertEqual(first.data["domain"], student.data["domain"])
         self.assertEqual(first.data["roomName"], student.data["roomName"])
@@ -1416,7 +1558,9 @@ class VideoMeetingApiTests(TestCase):
         s_jwt = decode_jitsi_jwt_unsafe_for_tests(student.data["jwt"])
         self.assertEqual(t_jwt["room"], s_jwt["room"])
         self.assertEqual(t_jwt["sub"], s_jwt["sub"])
-        self.assertNotEqual(t_jwt["context"]["user"]["moderator"], s_jwt["context"]["user"]["moderator"])
+        self.assertNotEqual(
+            t_jwt["context"]["user"]["moderator"], s_jwt["context"]["user"]["moderator"]
+        )
 
 
 class JitsiHealthCommandTests(TestCase):
@@ -1436,7 +1580,13 @@ class JitsiHealthCommandTests(TestCase):
                     "jicofo": {"isActive": True, "active": "active"},
                     "jitsi-videobridge2": {"isActive": True, "active": "active"},
                 },
-                "dockerJitsi": [{"name": "docker-jitsi-meet-jicofo-1", "status": "Up 2 weeks", "ports": "18888"}],
+                "dockerJitsi": [
+                    {
+                        "name": "docker-jitsi-meet-jicofo-1",
+                        "status": "Up 2 weeks",
+                        "ports": "18888",
+                    }
+                ],
                 "jvbDockerInternal": ["172.18.0.1"],
                 "jvbPublic": ["5.42.106.185"],
             },

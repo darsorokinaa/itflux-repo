@@ -3,7 +3,8 @@ export function boardSplitSyncBody(open, pick) {
   const body = { open: Boolean(open) };
   if (!open) return body;
   if (pick === "group" || pick === "mine") body.target = pick;
-  else if (pick !== null && pick !== undefined && pick !== "") body.studentId = pick;
+  else if (pick !== null && pick !== undefined && pick !== "")
+    body.studentId = pick;
   return body;
 }
 

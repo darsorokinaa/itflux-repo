@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createMeetingMaterialCollab } from "../meetingMaterialCollab";
 import { fetchVariantBoard, fetchVideoMeetingStatus, postVariantBoardSplit } from "../../utils/cabinetAuth";
@@ -163,83 +163,57 @@ function StudentSplitChrome({
   );
 }
 
-export default function VariantBoardSplit({
-  meetingUuid, liveSessionId, homeworkId, readOnly = false, presented,
-}) {
-  const request = variantBoardRequest({ meetingUuid, liveSessionId, homeworkId });
-  const [open, setOpen] = useState(false);
-  const [board, setBoard] = useState(null);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [width, setWidth] = useState(readWidth);
-  const [tab, setTab] = useState("board");
-  const [dragging, setDragging] = useState(false);
-  const [students, setStudents] = useState(null);
-  const [studentId, setStudentId] = useState(null);
-  const [group, setGroup] = useState(null);
-  const [hiddenStamp, setHiddenStamp] = useState("");
-  const isMobile = useIsMobile();
-  const followRemote = Boolean(readOnly && presented === undefined);
-  const remotePresented = useRemotePresented(meetingUuid, followRemote);
-  const shownPresented = followRemote ? remotePresented : presented;
-  const split = readOnly ? visibleStudentSplit(shownPresented) : null;
-  const stamp = studentSplitStamp(shownPresented);
-  const collapsed = Boolean(readOnly && stamp && hiddenStamp === stamp);
-  const reqKey = request ? JSON.stringify(request) : "";
-  const [seenKey, setSeenKey] = useState(reqKey);
-  if (seenKey !== reqKey) {
-    setSeenKey(reqKey);
-    setBoard(null);
-    setStudents(null);
-    setStudentId(null);
-    setGroup(null);
-  }
-  const widthRef = useRef(width);
-  widthRef.current = width;
-  const boardRef = useRef(board);
-  boardRef.current = board;
+function teacherBoardTitle(board) {
+  if (board?.kind === "group") return `Доска группы: ${board.group?.title || ""}`;
+  if (board?.studentName) return `Доска ученика: ${board.studentName}`;
+  return board?.title || "Доска";
+}
 
-  const load = useCallback(async (pickId) => {
-    if (!reqKey) return;
-    setLoading(true);
-    setError("");
-    try {
-      const data = await fetchVariantBoard(variantBoardPickBody(JSON.parse(reqKey), pickId));
-      if (!data?.boardId) throw new Error("Доска недоступна");
-      setBoard(data);
-      setStudentId(data.kind === "group" ? "group" : (data.studentId ?? null));
-      if (Array.isArray(data.students)) setStudents(data.students);
-      setGroup(data.group || null);
-      publishSplit(meetingUuid, true, pickFromBoard(data));
-    } catch (e) {
-      if (e?.status === 409 && Array.isArray(e?.data?.students)) {
-        setBoard(null);
-        setStudents(e.data.students);
-        setGroup(e.data.group || null);
-        setStudentId(null);
-        return;
-      }
-      setError(e?.data?.detail || e?.message || "Не удалось открыть доску");
-    } finally {
-      setLoading(false);
-    }
-  }, [reqKey, meetingUuid]);
+function showStudentPicker(board, loading, error, students) {
+  if (board || loading || error) return false;
+  return Boolean(students);
+}
 
-  const toggle = () => {
-    const next = !open;
-    setOpen(next);
-    if (next) {
-      setTab("board");
-      const current = boardRef.current;
-      if (!current) load();
-      else publishSplit(meetingUuid, true, pickFromBoard(current));
+function showStudentSelect(students, group) {
+  if (!students) return false;
+  return students.length > 1 || Boolean(group);
+}
+
+function panelClassName(isMobile, hidden) {
+  const mobile = isMobile ? " vb-panel--mobile" : "";
+  const off = hidden ? " vb-panel--hidden" : "";
+  return `vb-panel${mobile}${off}`;
+}
+
+async function loadTeacherBoard(meetingUuid, reqKey, pickId, api) {
+  if (!reqKey) return;
+  api.setLoading(true);
+  api.setError("");
+  try {
+    const data = await fetchVariantBoard(variantBoardPickBody(JSON.parse(reqKey), pickId));
+    if (!data?.boardId) throw new Error("Доска недоступна");
+    api.acceptBoard(data);
+    publishSplit(meetingUuid, true, pickFromBoard(data));
+  } catch (e) {
+    const students = e?.data?.students;
+    if (e?.status === 409 && Array.isArray(students)) {
+      api.showPicker(students, e.data.group || null);
       return;
     }
-    publishSplit(meetingUuid, false, null);
-  };
+    api.setError(e?.data?.detail || e?.message || "Не удалось открыть доску");
+  } finally {
+    api.setLoading(false);
+  }
+}
 
-  const panelOpen = readOnly ? Boolean(split && !collapsed) : open;
-
+function useSplitWidth(panelOpen) {
+  const [width, setWidth] = useState(readWidth);
+  const [dragging, setDragging] = useState(false);
+  const isMobile = useIsMobile();
+  const widthRef = useRef(width);
+  useEffect(() => {
+    widthRef.current = width;
+  }, [width]);
   useEffect(() => {
     const root = document.documentElement;
     if (panelOpen && !isMobile) {
@@ -253,13 +227,11 @@ export default function VariantBoardSplit({
       root.classList.remove("vb-split-open", "vb-split-mobile");
     };
   }, [panelOpen, isMobile, width]);
-
   useEffect(() => {
     const onResize = () => setWidth((w) => clampBoardWidth(w, window.innerWidth));
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
-
   const startDrag = (e) => {
     e.preventDefault();
     setDragging(true);
@@ -280,57 +252,98 @@ export default function VariantBoardSplit({
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
+  return { width, isMobile, dragging, startDrag };
+}
 
-  if (typeof document === "undefined") return null;
-  if (readOnly) {
-    if (!meetingUuid) return null;
-    return createPortal(
-      <StudentSplitChrome
-        split={split}
-        collapsed={collapsed}
-        onCollapse={() => setHiddenStamp(stamp)}
-        onExpand={() => setHiddenStamp("")}
-        width={width}
-        isMobile={isMobile}
-        dragging={dragging}
-        onDragStart={startDrag}
-      />,
-      document.body,
-    );
+function useTeacherBoard(meetingUuid, reqKey) {
+  const [open, setOpen] = useState(false);
+  const [board, setBoard] = useState(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [tab, setTab] = useState("board");
+  const [students, setStudents] = useState(null);
+  const [studentId, setStudentId] = useState(null);
+  const [group, setGroup] = useState(null);
+  const [seenKey, setSeenKey] = useState(reqKey);
+  if (seenKey !== reqKey) {
+    setSeenKey(reqKey);
+    setBoard(null);
+    setStudents(null);
+    setStudentId(null);
+    setGroup(null);
   }
+  const api = {
+    setLoading,
+    setError,
+    acceptBoard(data) {
+      setBoard(data);
+      setStudentId(data.kind === "group" ? "group" : (data.studentId ?? null));
+      if (Array.isArray(data.students)) setStudents(data.students);
+      setGroup(data.group || null);
+    },
+    showPicker(list, nextGroup) {
+      setBoard(null);
+      setStudents(list);
+      setGroup(nextGroup);
+      setStudentId(null);
+    },
+  };
+  const load = (pickId) => {
+    loadTeacherBoard(meetingUuid, reqKey, pickId, api);
+  };
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (!next) {
+      publishSplit(meetingUuid, false, null);
+      return;
+    }
+    setTab("board");
+    if (!board) load();
+    else publishSplit(meetingUuid, true, pickFromBoard(board));
+  };
+  return { open, board, error, loading, tab, setTab, students, studentId, group, load, toggle };
+}
 
-  if (!request) return null;
+function TeacherSwitch({ board, group, students, load }) {
+  if (!board || !group || students) return null;
+  return (
+    <span className="vb-switch" role="group" aria-label="Какая доска" data-testid="variant-board-switch">
+      <button type="button" aria-pressed={board.kind !== "group"} className={board.kind !== "group" ? "is-active" : ""} onClick={() => load("mine")}>Моя доска</button>
+      <button type="button" aria-pressed={board.kind === "group"} className={board.kind === "group" ? "is-active" : ""} onClick={() => load("group")}>Доска группы</button>
+    </span>
+  );
+}
 
-  const switchEl = board && group && !students ? (
-                <span className="vb-switch" role="group" aria-label="Какая доска" data-testid="variant-board-switch">
-                  <button type="button" aria-pressed={board.kind !== "group"} className={board.kind !== "group" ? "is-active" : ""} onClick={() => load("mine")}>Моя доска</button>
-                  <button type="button" aria-pressed={board.kind === "group"} className={board.kind === "group" ? "is-active" : ""} onClick={() => load("group")}>Доска группы</button>
-                </span>
-                ) : null;
+function TeacherPickList({ group, students, load }) {
+  return (
+    <div className="vb-board-status" data-testid="variant-board-pick">
+      Чью доску открыть?
+      <div className="vb-pick-list">
+        {group && (
+          <button type="button" className="vb-link vb-pick-group" onClick={() => load("group")}>Общая доска группы</button>
+        )}
+        {students.map((s) => (
+          <button key={s.id} type="button" className="vb-link" onClick={() => load(s.id)}>{s.name}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
-  const boardBody = (
+function TeacherBoardBody({ board, loading, error, students, group, isMobile, dragging, load }) {
+  const picker = showStudentPicker(board, loading, error, students);
+  return (
     <div className="vb-board-body">
-      {isMobile && switchEl}
+      {isMobile && <TeacherSwitch board={board} group={group} students={students} load={load} />}
       {loading && <div className="vb-board-status">Открываем доску…</div>}
       {error && !loading && (
         <div className="vb-board-status vb-board-status--error">
           {error}{" "}
-          <button type="button" className="vb-link" onClick={load}>Повторить</button>
+          <button type="button" className="vb-link" onClick={() => load()}>Повторить</button>
         </div>
       )}
-      {!board && !loading && !error && students && (
-        <div className="vb-board-status" data-testid="variant-board-pick">
-          Чью доску открыть?
-          <div className="vb-pick-list">
-            {group && (
-              <button type="button" className="vb-link vb-pick-group" onClick={() => load("group")}>Общая доска группы</button>
-            )}
-            {students.map((s) => (
-              <button key={s.id} type="button" className="vb-link" onClick={() => load(s.id)}>{s.name}</button>
-            ))}
-          </div>
-        </div>
-      )}
+      {picker && <TeacherPickList group={group} students={students} load={load} />}
       {board && !loading && (
         <iframe
           key={board.boardId}
@@ -344,7 +357,29 @@ export default function VariantBoardSplit({
       {dragging && <div className="vb-drag-shield" />}
     </div>
   );
+}
 
+function TeacherStudentSelect({ students, group, studentId, load }) {
+  if (!showStudentSelect(students, group)) return null;
+  return (
+    <select
+      className="vb-student-select"
+      aria-label="Ученик"
+      data-testid="variant-board-student"
+      value={studentId ?? ""}
+      onChange={(e) => e.target.value && load(e.target.value)}
+    >
+      <option value="" disabled>Ученик…</option>
+      {group && <option value="group">Общая доска группы</option>}
+      {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+    </select>
+  );
+}
+
+function TeacherSplitPortal({ model, chrome }) {
+  const { open, board, error, loading, tab, setTab, students, studentId, group, load, toggle } = model;
+  const { width, isMobile, dragging, startDrag } = chrome;
+  const hidden = isMobile && tab !== "board";
   return createPortal(
     <>
       {!open && (
@@ -361,7 +396,7 @@ export default function VariantBoardSplit({
       )}
       {open && (
         <aside
-          className={`vb-panel${isMobile ? " vb-panel--mobile" : ""}${isMobile && tab !== "board" ? " vb-panel--hidden" : ""}`}
+          className={panelClassName(isMobile, hidden)}
           style={isMobile ? undefined : { width: `${width}px` }}
           data-testid="variant-board-panel"
         >
@@ -371,29 +406,61 @@ export default function VariantBoardSplit({
           {!isMobile && (
             <div className="vb-panel-head">
               <button type="button" className="vb-close" onClick={toggle} aria-label="Закрыть доску" title="Закрыть доску">✕ Закрыть</button>
-              <span className="vb-panel-title">
-                {board?.kind === "group" ? `Доска группы: ${board.group?.title || ""}` : board?.studentName ? `Доска ученика: ${board.studentName}` : (board?.title || "Доска")}
-              </span>
-              {switchEl}
-              {students && (students.length > 1 || group) && (
-                <select
-                  className="vb-student-select"
-                  aria-label="Ученик"
-                  data-testid="variant-board-student"
-                  value={studentId ?? ""}
-                  onChange={(e) => e.target.value && load(e.target.value)}
-                >
-                  <option value="" disabled>Ученик…</option>
-                  {group && <option value="group">Общая доска группы</option>}
-                  {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-              )}
+              <span className="vb-panel-title">{teacherBoardTitle(board)}</span>
+              <TeacherSwitch board={board} group={group} students={students} load={load} />
+              <TeacherStudentSelect students={students} group={group} studentId={studentId} load={load} />
             </div>
           )}
-          {boardBody}
+          <TeacherBoardBody
+            board={board}
+            loading={loading}
+            error={error}
+            students={students}
+            group={group}
+            isMobile={isMobile}
+            dragging={dragging}
+            load={load}
+          />
         </aside>
       )}
     </>,
+    document.body,
+  );
+}
+
+function readOnlyPanelOpen(split, collapsed) {
+  return Boolean(split && !collapsed);
+}
+
+export default function VariantBoardSplit({
+  meetingUuid, liveSessionId, homeworkId, readOnly = false, presented,
+}) {
+  const request = variantBoardRequest({ meetingUuid, liveSessionId, homeworkId });
+  const reqKey = request ? JSON.stringify(request) : "";
+  const followRemote = Boolean(readOnly && presented === undefined);
+  const remotePresented = useRemotePresented(meetingUuid, followRemote);
+  const shownPresented = followRemote ? remotePresented : presented;
+  const split = readOnly ? visibleStudentSplit(shownPresented) : null;
+  const stamp = studentSplitStamp(shownPresented);
+  const [hiddenStamp, setHiddenStamp] = useState("");
+  const collapsed = Boolean(readOnly && stamp && hiddenStamp === stamp);
+  const teacher = useTeacherBoard(meetingUuid, reqKey);
+  const panelOpen = readOnly ? readOnlyPanelOpen(split, collapsed) : teacher.open;
+  const chrome = useSplitWidth(panelOpen);
+  if (typeof document === "undefined") return null;
+  if (!readOnly && request) return <TeacherSplitPortal model={teacher} chrome={chrome} />;
+  if (!readOnly || !meetingUuid) return null;
+  return createPortal(
+    <StudentSplitChrome
+      split={split}
+      collapsed={collapsed}
+      onCollapse={() => setHiddenStamp(stamp)}
+      onExpand={() => setHiddenStamp("")}
+      width={chrome.width}
+      isMobile={chrome.isMobile}
+      dragging={chrome.dragging}
+      onDragStart={chrome.startDrag}
+    />,
     document.body,
   );
 }

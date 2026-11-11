@@ -59,26 +59,30 @@ function formatApiError(data, fallback = "Ошибка запроса") {
   if (!data || typeof data !== "object") return fallback;
   if (typeof data.error === "string" && data.error.trim()) return data.error;
   if (typeof data.detail === "string" && data.detail.trim()) return data.detail;
-  if (typeof data.message === "string" && data.message.trim()) return data.message;
+  if (typeof data.message === "string" && data.message.trim())
+    return data.message;
   const fieldMessages = Object.entries(data)
-    .filter(([key]) => ![
-      "error",
-      "detail",
-      "message",
-      "code",
-      "conflicts",
-      "storage_used_bytes",
-      "storage_limit_bytes",
-      "used_bytes",
-      "limit_bytes",
-      "available_bytes",
-      "percent",
-      "warning",
-      "over_limit",
-      "breakdown",
-      "can_upgrade",
-      "actions",
-    ].includes(key))
+    .filter(
+      ([key]) =>
+        ![
+          "error",
+          "detail",
+          "message",
+          "code",
+          "conflicts",
+          "storage_used_bytes",
+          "storage_limit_bytes",
+          "used_bytes",
+          "limit_bytes",
+          "available_bytes",
+          "percent",
+          "warning",
+          "over_limit",
+          "breakdown",
+          "can_upgrade",
+          "actions",
+        ].includes(key),
+    )
     .flatMap(([, value]) => collectApiMessages(value))
     .filter(Boolean);
   if (fieldMessages.length) return fieldMessages.join(" ");
@@ -105,9 +109,12 @@ function shareCabinetRead(key, run) {
   const existing = cabinetReadInflight.get(key);
   if (existing) return existing;
   let pending;
-  pending = Promise.resolve().then(run).finally(() => {
-    if (cabinetReadInflight.get(key) === pending) cabinetReadInflight.delete(key);
-  });
+  pending = Promise.resolve()
+    .then(run)
+    .finally(() => {
+      if (cabinetReadInflight.get(key) === pending)
+        cabinetReadInflight.delete(key);
+    });
   cabinetReadInflight.set(key, pending);
   return pending;
 }
@@ -129,12 +136,14 @@ export function rememberCabinetSnapshot(key, value) {
 
 /** r49: страница не должна ждать ответа дольше 10 с — дальше показываем ошибку и «Повторить». */
 export const CABINET_GET_TIMEOUT_MS = 10000;
-export const CABINET_TIMEOUT_MESSAGE = "Сервер не ответил за 10 секунд. Проверьте соединение и нажмите «Повторить».";
+export const CABINET_TIMEOUT_MESSAGE =
+  "Сервер не ответил за 10 секунд. Проверьте соединение и нажмите «Повторить».";
 
 /** Timeouts by request class. 0 means no timer. Callers may still pass timeoutMs. */
 export function resolveCabinetTimeout(path, options = {}) {
   if (options.timeoutMs === 0) return 0;
-  if (typeof options.timeoutMs === "number" && options.timeoutMs > 0) return options.timeoutMs;
+  if (typeof options.timeoutMs === "number" && options.timeoutMs > 0)
+    return options.timeoutMs;
   const method = String(options.method || "GET").toUpperCase();
   if (options.upload) return 300000;
   const normalized = String(path || "");
@@ -151,7 +160,10 @@ function combineAbortSignal(timeoutMs, external) {
   }
   if (external) {
     if (external.aborted) controller.abort();
-    else external.addEventListener("abort", () => controller.abort(), { once: true });
+    else
+      external.addEventListener("abort", () => controller.abort(), {
+        once: true,
+      });
   }
   return {
     signal: controller.signal,
@@ -171,11 +183,18 @@ async function cabinetFetch(path, options = {}) {
   };
   const csrf = getCsrfToken();
   if (csrf) headers["X-CSRFToken"] = csrf;
-  if (!headers["X-Request-ID"] && typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+  if (
+    !headers["X-Request-ID"] &&
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
     headers["X-Request-ID"] = crypto.randomUUID();
   }
 
-  const timeout = combineAbortSignal(resolveCabinetTimeout(path, options), options.signal);
+  const timeout = combineAbortSignal(
+    resolveCabinetTimeout(path, options),
+    options.signal,
+  );
   let res;
   try {
     res = await fetch(`${apiBase()}${path}`, {
@@ -233,7 +252,11 @@ function filenameFromDisposition(header, fallback) {
   return quoted?.[1] || fallback;
 }
 
-async function cabinetDownload(path, fallbackName, { method = "GET", body, json = false } = {}) {
+async function cabinetDownload(
+  path,
+  fallbackName,
+  { method = "GET", body, json = false } = {},
+) {
   await ensureCsrfCookie();
   const headers = { ...clientVersionHeaders() };
   const csrf = getCsrfToken();
@@ -260,7 +283,10 @@ async function cabinetDownload(path, fallbackName, { method = "GET", body, json 
     throw err;
   }
   const blob = await res.blob();
-  const name = filenameFromDisposition(res.headers.get("Content-Disposition"), fallbackName);
+  const name = filenameFromDisposition(
+    res.headers.get("Content-Disposition"),
+    fallbackName,
+  );
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -285,14 +311,17 @@ export function fetchCabinetSession({ fresh = false } = {}) {
     }
   }
   return shareCabinetRead("me", () =>
-    cabinetFetch("/me/", { method: "GET" }).then((data) => {
-      rememberCabinetSnapshot("me", data);
-      markBootAuthEnd(true);
-      return data;
-    }, (err) => {
-      markBootAuthEnd(false);
-      throw err;
-    }),
+    cabinetFetch("/me/", { method: "GET" }).then(
+      (data) => {
+        rememberCabinetSnapshot("me", data);
+        markBootAuthEnd(true);
+        return data;
+      },
+      (err) => {
+        markBootAuthEnd(false);
+        throw err;
+      },
+    ),
   );
 }
 
@@ -329,7 +358,9 @@ export function confirmPasswordReset(payload) {
 }
 
 export function fetchReferralPreview(code) {
-  return cabinetFetch(`/referral/${encodeURIComponent(code)}/preview/`, { method: "GET" });
+  return cabinetFetch(`/referral/${encodeURIComponent(code)}/preview/`, {
+    method: "GET",
+  });
 }
 
 export function logoutCabinet() {
@@ -345,7 +376,9 @@ export function logoutCabinet() {
 /** Logout and detach Web Push from this device so the next user does not get previous pushes. */
 export async function logoutCabinetAndDetachPush() {
   try {
-    const { unsubscribeCurrentPush } = await import("../cabinet/pwa/pwaHelpers");
+    const { unsubscribeCurrentPush } = await import(
+      "../cabinet/pwa/pwaHelpers"
+    );
     const endpoint = await Promise.race([
       unsubscribeCurrentPush(),
       new Promise((resolve) => {
@@ -393,7 +426,9 @@ export function fetchPushVapidKey() {
 export async function fetchPushDevices() {
   let endpoint = "";
   try {
-    const { getCurrentPushEndpoint } = await import("../cabinet/pwa/pwaHelpers");
+    const { getCurrentPushEndpoint } = await import(
+      "../cabinet/pwa/pwaHelpers"
+    );
     endpoint = (await getCurrentPushEndpoint()) || "";
   } catch {
     endpoint = "";
@@ -406,7 +441,9 @@ export async function sendPushTestNotification({ allDevices = false } = {}) {
   let endpoint = "";
   if (!allDevices) {
     try {
-      const { getCurrentPushEndpoint } = await import("../cabinet/pwa/pwaHelpers");
+      const { getCurrentPushEndpoint } = await import(
+        "../cabinet/pwa/pwaHelpers"
+      );
       endpoint = await getCurrentPushEndpoint();
     } catch {
       endpoint = "";
@@ -421,7 +458,10 @@ export async function sendPushTestNotification({ allDevices = false } = {}) {
   });
 }
 
-export async function subscribeCabinetPush(deviceLabel = "", { mode = "enable" } = {}) {
+export async function subscribeCabinetPush(
+  deviceLabel = "",
+  { mode = "enable" } = {},
+) {
   const vapid = await fetchPushVapidKey();
   if (!vapid?.configured || !vapid.public_key) {
     throw new Error("Web Push не настроен на сервере");
@@ -479,10 +519,15 @@ export async function ensureCabinetPushSubscription() {
   }
 }
 
-export function unsubscribeCabinetPushDevice(deviceIdOrEndpoint, { reason = "user" } = {}) {
-  const body = typeof deviceIdOrEndpoint === "number" || /^\d+$/.test(String(deviceIdOrEndpoint))
-    ? { device_id: Number(deviceIdOrEndpoint), reason }
-    : { endpoint: String(deviceIdOrEndpoint || ""), reason };
+export function unsubscribeCabinetPushDevice(
+  deviceIdOrEndpoint,
+  { reason = "user" } = {},
+) {
+  const body =
+    typeof deviceIdOrEndpoint === "number" ||
+    /^\d+$/.test(String(deviceIdOrEndpoint))
+      ? { device_id: Number(deviceIdOrEndpoint), reason }
+      : { endpoint: String(deviceIdOrEndpoint || ""), reason };
   return cabinetFetch("/push/unsubscribe/", {
     method: "POST",
     body: JSON.stringify(body),
@@ -551,12 +596,18 @@ export function fetchVideoMeetingForEvent(eventId) {
 }
 
 export function ensureVideoMeetingForEvent(eventId) {
-  return videoMeetingFetch(`/for-event/${eventId}/`, { method: "POST", body: "{}" });
+  return videoMeetingFetch(`/for-event/${eventId}/`, {
+    method: "POST",
+    body: "{}",
+  });
 }
 
 /** Ранний вход ученика (окно −15 мин … конец урока): комната без старта урока и без JWT. */
 export function enterLessonRoomEarly(eventId) {
-  return videoMeetingFetch(`/for-event/${eventId}/early-entry/`, { method: "POST", body: "{}" });
+  return videoMeetingFetch(`/for-event/${eventId}/early-entry/`, {
+    method: "POST",
+    body: "{}",
+  });
 }
 
 /** Экран ожидания ученика: напоминания о ДЗ, тема прошлого урока, материалы. */
@@ -581,7 +632,8 @@ export function fetchKonturTalkJoin(meetingUuid) {
 
 export function fetchVideoMeetingJoinConfig(meetingUuid, extra = {}) {
   const body = {
-    browserTabSessionId: extra.browserTabSessionId || extra.browser_tab_session_id || "",
+    browserTabSessionId:
+      extra.browserTabSessionId || extra.browser_tab_session_id || "",
     callSessionId: extra.callSessionId || extra.call_session_id || "",
   };
   return videoMeetingFetch(`/${meetingUuid}/join-config/`, {
@@ -596,7 +648,9 @@ export function fetchVideoMeetingConnectionProbe() {
 
 /** Домен и script URL без JWT и без комнаты. Не открывает конференцию. */
 export function fetchVideoMeetingReachabilityConfig() {
-  return videoMeetingFetch("/connection-probe/?credentials=0", { method: "GET" });
+  return videoMeetingFetch("/connection-probe/?credentials=0", {
+    method: "GET",
+  });
 }
 
 export function reportVideoMeetingConnectionProbe(payload = {}) {
@@ -610,7 +664,11 @@ export function fetchVideoMeetingMediaRoute(meetingUuid) {
   return videoMeetingFetch(`/${meetingUuid}/media-route/`, { method: "GET" });
 }
 
-export function switchVideoMeetingMedia(meetingUuid, payload = {}, options = {}) {
+export function switchVideoMeetingMedia(
+  meetingUuid,
+  payload = {},
+  options = {},
+) {
   return videoMeetingFetch(`/${meetingUuid}/media-route/switch/`, {
     method: "POST",
     body: JSON.stringify(payload),
@@ -641,11 +699,17 @@ export function reportVideoMeetingTechnicalEvent(meetingUuid, payload = {}) {
 }
 
 export function startVideoMeeting(meetingUuid) {
-  return videoMeetingFetch(`/${meetingUuid}/start/`, { method: "POST", body: "{}" });
+  return videoMeetingFetch(`/${meetingUuid}/start/`, {
+    method: "POST",
+    body: "{}",
+  });
 }
 
 export function finishVideoMeeting(meetingUuid) {
-  return videoMeetingFetch(`/${meetingUuid}/finish/`, { method: "POST", body: "{}" });
+  return videoMeetingFetch(`/${meetingUuid}/finish/`, {
+    method: "POST",
+    body: "{}",
+  });
 }
 
 export function recordVideoMeetingJoin(meetingUuid, payload = {}) {
@@ -683,7 +747,10 @@ export function fetchVideoMeetingLiveAnswers(meetingUuid) {
 }
 
 /** r120: балл второй части на уроке — сохраняется один раз (повтор → 409). */
-export function saveVideoMeetingLiveScore(meetingUuid, { studentId, taskId, score }) {
+export function saveVideoMeetingLiveScore(
+  meetingUuid,
+  { studentId, taskId, score },
+) {
   return videoMeetingFetch(`/${meetingUuid}/live-score/`, {
     method: "POST",
     body: JSON.stringify({ studentId, taskId, score }),
@@ -691,7 +758,9 @@ export function saveVideoMeetingLiveScore(meetingUuid, { studentId, taskId, scor
 }
 
 export function fetchMeetingMaterialSession(meetingUuid) {
-  return videoMeetingFetch(`/${meetingUuid}/material-session/`, { method: "GET" });
+  return videoMeetingFetch(`/${meetingUuid}/material-session/`, {
+    method: "GET",
+  });
 }
 
 export function openMeetingMaterialSession(meetingUuid, payload) {
@@ -731,9 +800,12 @@ export function transferMeetingMaterialControl(meetingUuid, payload) {
 
 /** Player-payload интерактива, открытого в материале урока (доступно и ученику). */
 export function fetchMeetingMaterialInteractive(meetingUuid, interactiveId) {
-  return videoMeetingFetch(`/${meetingUuid}/material-session/interactive/${interactiveId}/`, {
-    method: "GET",
-  });
+  return videoMeetingFetch(
+    `/${meetingUuid}/material-session/interactive/${interactiveId}/`,
+    {
+      method: "GET",
+    },
+  );
 }
 
 export function sendMeetingMaterialOperation(meetingUuid, payload) {
@@ -753,13 +825,17 @@ export function fetchCalendarStatus() {
 
 export function fetchCalendarEvents({ from, to }) {
   const params = new URLSearchParams({ from, to });
-  return cabinetFetch(`/calendar/events/?${params.toString()}`, { method: "GET" });
+  return cabinetFetch(`/calendar/events/?${params.toString()}`, {
+    method: "GET",
+  });
 }
 
 export function fetchScheduleEvents({ from, to, includeCancelled = true }) {
   const params = new URLSearchParams({ from, to });
   if (includeCancelled) params.set("include_cancelled", "1");
-  return cabinetFetch(`/schedule/events/?${params.toString()}`, { method: "GET" });
+  return cabinetFetch(`/schedule/events/?${params.toString()}`, {
+    method: "GET",
+  });
 }
 
 export function fetchTeacherAvailability({ from, to } = {}) {
@@ -785,7 +861,9 @@ export function updateTeacherAvailability(id, payload) {
 }
 
 export function deleteTeacherAvailability(id) {
-  return cabinetFetch(`/availability/${encodeURIComponent(id)}/`, { method: "DELETE" });
+  return cabinetFetch(`/availability/${encodeURIComponent(id)}/`, {
+    method: "DELETE",
+  });
 }
 
 export function fetchTeacherBookingLink() {
@@ -800,7 +878,9 @@ export function publishTeacherBookingLink(payload) {
 }
 
 export function fetchPublicBookingPage(token) {
-  return cabinetFetch(`/booking/${encodeURIComponent(token)}/`, { method: "GET" });
+  return cabinetFetch(`/booking/${encodeURIComponent(token)}/`, {
+    method: "GET",
+  });
 }
 
 export function bookPublicSlot(token, payload) {
@@ -822,10 +902,13 @@ export function fetchStudentPermanentSchedule() {
 }
 
 export function cancelStudentPermanentSchedule(bookingId) {
-  return cabinetFetch(`/student/permanent-schedule/${encodeURIComponent(bookingId)}/cancel/`, {
-    method: "POST",
-    body: "{}",
-  });
+  return cabinetFetch(
+    `/student/permanent-schedule/${encodeURIComponent(bookingId)}/cancel/`,
+    {
+      method: "POST",
+      body: "{}",
+    },
+  );
 }
 
 export function createScheduleEvent(payload) {
@@ -844,31 +927,43 @@ export function updateScheduleEvent(eventId, payload) {
 
 /** Создаёт/линкует пункт плана у занятия, чтобы прикреплять материалы и ДЗ. */
 export function ensureScheduleEventPlanItem(eventId) {
-  return cabinetFetch(`/schedule/${encodeURIComponent(eventId)}/ensure-plan-item/`, {
-    method: "POST",
-    body: "{}",
-  });
+  return cabinetFetch(
+    `/schedule/${encodeURIComponent(eventId)}/ensure-plan-item/`,
+    {
+      method: "POST",
+      body: "{}",
+    },
+  );
 }
 
 export function linkScheduleEventPlanItem(eventId, lessonPlanItemId) {
-  return cabinetFetch(`/schedule/${encodeURIComponent(eventId)}/link-plan-item/`, {
-    method: "POST",
-    body: JSON.stringify({ lesson_plan_item_id: lessonPlanItemId }),
-  });
+  return cabinetFetch(
+    `/schedule/${encodeURIComponent(eventId)}/link-plan-item/`,
+    {
+      method: "POST",
+      body: JSON.stringify({ lesson_plan_item_id: lessonPlanItemId }),
+    },
+  );
 }
 
 export function syncScheduleEventToPlan(eventId, payload = {}) {
-  return cabinetFetch(`/schedule/${encodeURIComponent(eventId)}/sync-to-plan/`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  return cabinetFetch(
+    `/schedule/${encodeURIComponent(eventId)}/sync-to-plan/`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 export function syncScheduleEventFromPlan(eventId) {
-  return cabinetFetch(`/schedule/${encodeURIComponent(eventId)}/sync-from-plan/`, {
-    method: "POST",
-    body: "{}",
-  });
+  return cabinetFetch(
+    `/schedule/${encodeURIComponent(eventId)}/sync-from-plan/`,
+    {
+      method: "POST",
+      body: "{}",
+    },
+  );
 }
 
 export function setScheduleEventPlanSync(eventId, enabled) {
@@ -886,23 +981,39 @@ export function updateScheduleEventContent(eventId, payload = {}) {
 }
 
 export function updateScheduleEventMaterials(eventId, payload = {}) {
-  return cabinetFetch(`/schedule/${encodeURIComponent(eventId)}/event-materials/`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  return cabinetFetch(
+    `/schedule/${encodeURIComponent(eventId)}/event-materials/`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
-export function deleteScheduleEvent(eventId, { scope, notifyParticipants = true, expectedUpdatedAt = "", purge = false } = {}) {
+export function deleteScheduleEvent(
+  eventId,
+  {
+    scope,
+    notifyParticipants = true,
+    expectedUpdatedAt = "",
+    purge = false,
+  } = {},
+) {
   if (purge) {
-    return cabinetFetch(`/schedule/events/${encodeURIComponent(eventId)}/delete/`, {
-      method: "DELETE",
-      body: JSON.stringify({
-        purge: true,
-        scope: scope || "single",
-        notify_participants: false,
-        ...(expectedUpdatedAt ? { expected_updated_at: expectedUpdatedAt } : {}),
-      }),
-    });
+    return cabinetFetch(
+      `/schedule/events/${encodeURIComponent(eventId)}/delete/`,
+      {
+        method: "DELETE",
+        body: JSON.stringify({
+          purge: true,
+          scope: scope || "single",
+          notify_participants: false,
+          ...(expectedUpdatedAt
+            ? { expected_updated_at: expectedUpdatedAt }
+            : {}),
+        }),
+      },
+    );
   }
   if (scope) {
     return updateScheduleEvent(eventId, {
@@ -912,10 +1023,13 @@ export function deleteScheduleEvent(eventId, { scope, notifyParticipants = true,
       ...(expectedUpdatedAt ? { expected_updated_at: expectedUpdatedAt } : {}),
     });
   }
-  return cabinetFetch(`/schedule/events/${encodeURIComponent(eventId)}/delete/`, {
-    method: "DELETE",
-    body: JSON.stringify({ notify_participants: notifyParticipants }),
-  });
+  return cabinetFetch(
+    `/schedule/events/${encodeURIComponent(eventId)}/delete/`,
+    {
+      method: "DELETE",
+      body: JSON.stringify({ notify_participants: notifyParticipants }),
+    },
+  );
 }
 
 export function fetchNotifications({ student = false } = {}) {
@@ -932,12 +1046,16 @@ export function markNotificationRead(id, { student = false } = {}) {
 }
 
 export function markAllNotificationsRead({ student = false } = {}) {
-  const path = student ? "/student/notifications/read-all/" : "/notifications/read-all/";
+  const path = student
+    ? "/student/notifications/read-all/"
+    : "/notifications/read-all/";
   return cabinetFetch(path, { method: "POST", body: "{}" });
 }
 
 export function clearNotifications({ student = false } = {}) {
-  const path = student ? "/student/notifications/clear/" : "/notifications/clear/";
+  const path = student
+    ? "/student/notifications/clear/"
+    : "/notifications/clear/";
   return cabinetFetch(path, { method: "POST", body: "{}" });
 }
 
@@ -951,14 +1069,19 @@ export function checkScheduleConflicts(payload) {
 // --- Students & Groups ---
 
 export function fetchInvitationPreview(token) {
-  return cabinetFetch(`/invitations/join/${encodeURIComponent(token)}/`, { method: "GET" });
+  return cabinetFetch(`/invitations/join/${encodeURIComponent(token)}/`, {
+    method: "GET",
+  });
 }
 
 export function acceptInvitation(token) {
-  return cabinetFetch(`/invitations/join/${encodeURIComponent(token)}/accept/`, {
-    method: "POST",
-    body: "{}",
-  });
+  return cabinetFetch(
+    `/invitations/join/${encodeURIComponent(token)}/accept/`,
+    {
+      method: "POST",
+      body: "{}",
+    },
+  );
 }
 
 export function resetStudentAccess(studentId) {
@@ -968,16 +1091,25 @@ export function resetStudentAccess(studentId) {
   });
 }
 
-export function fetchNextPlanItem({ studentId, groupId, studentSubjectId } = {}) {
+export function fetchNextPlanItem({
+  studentId,
+  groupId,
+  studentSubjectId,
+} = {}) {
   const params = {};
   if (studentId) params.student_id = studentId;
   if (groupId) params.group_id = groupId;
   if (studentSubjectId) params.student_subject_id = studentSubjectId;
-  return cabinetFetch(buildCabinetQueryPath("/schedule/next-plan-item/", params), { method: "GET" });
+  return cabinetFetch(
+    buildCabinetQueryPath("/schedule/next-plan-item/", params),
+    { method: "GET" },
+  );
 }
 
 export function fetchInvitations(params = {}) {
-  return cabinetFetch(buildCabinetQueryPath("/invitations/", params), { method: "GET" });
+  return cabinetFetch(buildCabinetQueryPath("/invitations/", params), {
+    method: "GET",
+  });
 }
 
 export function createInvitation(payload) {
@@ -1060,7 +1192,9 @@ export async function openTelegramConnect() {
 }
 
 export function fetchStudents(params = {}) {
-  return cabinetFetch(buildCabinetQueryPath("/students/", params), { method: "GET" });
+  return cabinetFetch(buildCabinetQueryPath("/students/", params), {
+    method: "GET",
+  });
 }
 
 export function createStudent(payload) {
@@ -1122,7 +1256,11 @@ export function updateStudentSubject(studentId, subjectId, payload) {
   });
 }
 
-export function deleteStudentSubject(studentId, subjectId, { force = false } = {}) {
+export function deleteStudentSubject(
+  studentId,
+  subjectId,
+  { force = false } = {},
+) {
   const qs = force ? "?force=1" : "";
   return cabinetFetch(`/students/${studentId}/subjects/${subjectId}/${qs}`, {
     method: "DELETE",
@@ -1144,7 +1282,8 @@ export function fetchStudentHomeworkOptions(
 ) {
   const params = new URLSearchParams();
   if (scheduleEventId) params.set("schedule_event_id", String(scheduleEventId));
-  if (studentSubjectId) params.set("student_subject_id", String(studentSubjectId));
+  if (studentSubjectId)
+    params.set("student_subject_id", String(studentSubjectId));
   const qs = params.toString();
   return cabinetFetch(
     `/students/${studentId}/homework-options/${qs ? `?${qs}` : ""}`,
@@ -1160,13 +1299,18 @@ export function assignStudentHomework(studentId, payload) {
 }
 
 export function checkVariantTasksOverlap(studentId, variantId) {
-  return cabinetFetch(`/students/${studentId}/check-variant-tasks/?variant_id=${encodeURIComponent(variantId)}`, {
-    method: "GET",
-  });
+  return cabinetFetch(
+    `/students/${studentId}/check-variant-tasks/?variant_id=${encodeURIComponent(variantId)}`,
+    {
+      method: "GET",
+    },
+  );
 }
 
 export function fetchGroups(params = {}) {
-  return cabinetFetch(buildCabinetQueryPath("/groups/", params), { method: "GET" });
+  return cabinetFetch(buildCabinetQueryPath("/groups/", params), {
+    method: "GET",
+  });
 }
 
 export function fetchGroup(id) {
@@ -1234,21 +1378,29 @@ export function fetchReviewItems(params = {}) {
 }
 
 export function fetchReviewItem(reviewId) {
-  return cabinetFetch(`/review/${encodeURIComponent(String(reviewId))}/`, { method: "GET" });
+  return cabinetFetch(`/review/${encodeURIComponent(String(reviewId))}/`, {
+    method: "GET",
+  });
 }
 
 export function checkReviewItem(reviewId, body = {}) {
-  return cabinetFetch(`/review/${encodeURIComponent(String(reviewId))}/check/`, {
-    method: "POST",
-    body: JSON.stringify(body && typeof body === "object" ? body : {}),
-  });
+  return cabinetFetch(
+    `/review/${encodeURIComponent(String(reviewId))}/check/`,
+    {
+      method: "POST",
+      body: JSON.stringify(body && typeof body === "object" ? body : {}),
+    },
+  );
 }
 
 export function returnReviewItem(reviewId, body = {}) {
-  return cabinetFetch(`/review/${encodeURIComponent(String(reviewId))}/return/`, {
-    method: "POST",
-    body: JSON.stringify(body && typeof body === "object" ? body : {}),
-  });
+  return cabinetFetch(
+    `/review/${encodeURIComponent(String(reviewId))}/return/`,
+    {
+      method: "POST",
+      body: JSON.stringify(body && typeof body === "object" ? body : {}),
+    },
+  );
 }
 
 export function fetchReviewHomeworkPreview(reviewId) {
@@ -1272,7 +1424,11 @@ export function createHomeworkFromReview(reviewId, payload = {}) {
   );
 }
 
-async function cabinetFetchMultipart(path, formData, { method = "POST", timeoutMs, signal } = {}) {
+async function cabinetFetchMultipart(
+  path,
+  formData,
+  { method = "POST", timeoutMs, signal } = {},
+) {
   await ensureCsrfCookie();
   const headers = { Accept: "application/json", ...clientVersionHeaders() };
   const csrf = getCsrfToken();
@@ -1311,7 +1467,10 @@ async function cabinetFetchMultipart(path, formData, { method = "POST", timeoutM
     data = null;
   }
 
-  if (!res.ok || (Object.prototype.hasOwnProperty.call(data || {}, "ok") && !data.ok)) {
+  if (
+    !res.ok ||
+    (Object.prototype.hasOwnProperty.call(data || {}, "ok") && !data.ok)
+  ) {
     handleClientUpdateRequired(data);
     const message = formatApiError(data, "Не удалось загрузить файл");
     const err = new Error(message);
@@ -1323,7 +1482,11 @@ async function cabinetFetchMultipart(path, formData, { method = "POST", timeoutM
   return data;
 }
 
-function cabinetFetchMultipartWithProgress(path, formData, { method = "POST", onProgress } = {}) {
+function cabinetFetchMultipartWithProgress(
+  path,
+  formData,
+  { method = "POST", onProgress } = {},
+) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open(method, `${apiBase()}${path}`);
@@ -1364,7 +1527,7 @@ function cabinetFetchMultipartWithProgress(path, formData, { method = "POST", on
 export function uploadReviewFeedback(reviewId, formData) {
   return cabinetFetchMultipart(
     `/review/${encodeURIComponent(String(reviewId))}/upload-feedback/`,
-    formData
+    formData,
   );
 }
 
@@ -1382,7 +1545,7 @@ export function deleteReviewFeedback(reviewId, params) {
   }
   return cabinetFetch(
     `/review/${encodeURIComponent(String(reviewId))}/upload-feedback/?${qs.toString()}`,
-    { method: "DELETE" }
+    { method: "DELETE" },
   );
 }
 
@@ -1398,7 +1561,9 @@ export function fetchLessonPlans(params = {}) {
 }
 
 export function fetchPlanWeeklySchedule(id) {
-  return cabinetFetch(`/lesson-plans/${id}/weekly-schedule/`, { method: "GET" });
+  return cabinetFetch(`/lesson-plans/${id}/weekly-schedule/`, {
+    method: "GET",
+  });
 }
 
 export function submitPlanWeeklySchedule(id, body) {
@@ -1413,11 +1578,16 @@ export function fetchLessonPlan(id) {
 }
 
 export function fetchPlanMissingLessons(id) {
-  return cabinetFetch(`/lesson-plans/${id}/missing-lessons/`, { method: "GET" });
+  return cabinetFetch(`/lesson-plans/${id}/missing-lessons/`, {
+    method: "GET",
+  });
 }
 
 export function createPlanMissingLessons(id) {
-  return cabinetFetch(`/lesson-plans/${id}/missing-lessons/`, { method: "POST", body: "{}" });
+  return cabinetFetch(`/lesson-plans/${id}/missing-lessons/`, {
+    method: "POST",
+    body: "{}",
+  });
 }
 
 export function fetchLessonPlanSubjects() {
@@ -1447,12 +1617,16 @@ export function deleteLessonPlan(id) {
 }
 
 export function deleteHomework(homeworkId) {
-  return cabinetFetch(`/homework/${encodeURIComponent(String(homeworkId))}/`, { method: "DELETE" });
+  return cabinetFetch(`/homework/${encodeURIComponent(String(homeworkId))}/`, {
+    method: "DELETE",
+  });
 }
 
 /** Данные выданного ДЗ для формы редактирования. */
 export function fetchHomeworkForEdit(homeworkId) {
-  return cabinetFetch(`/homework/${encodeURIComponent(String(homeworkId))}/`, { method: "GET" });
+  return cabinetFetch(`/homework/${encodeURIComponent(String(homeworkId))}/`, {
+    method: "GET",
+  });
 }
 
 /** Сохранить правки выданного ДЗ. */
@@ -1465,18 +1639,28 @@ export function updateHomework(homeworkId, payload = {}) {
 
 /** Добавить задание в уже выданное ДЗ (ученик получает оповещение). */
 export function addHomeworkTasks(homeworkId, payload = {}) {
-  return cabinetFetch(`/homework/${encodeURIComponent(String(homeworkId))}/tasks/`, {
-    method: "POST",
-    body: JSON.stringify(payload && typeof payload === "object" ? payload : {}),
-  });
+  return cabinetFetch(
+    `/homework/${encodeURIComponent(String(homeworkId))}/tasks/`,
+    {
+      method: "POST",
+      body: JSON.stringify(
+        payload && typeof payload === "object" ? payload : {},
+      ),
+    },
+  );
 }
 
 /** Скопировать ДЗ и назначить другим ученикам / группе. */
 export function copyHomework(homeworkId, payload = {}) {
-  return cabinetFetch(`/homework/${encodeURIComponent(String(homeworkId))}/copy/`, {
-    method: "POST",
-    body: JSON.stringify(payload && typeof payload === "object" ? payload : {}),
-  });
+  return cabinetFetch(
+    `/homework/${encodeURIComponent(String(homeworkId))}/copy/`,
+    {
+      method: "POST",
+      body: JSON.stringify(
+        payload && typeof payload === "object" ? payload : {},
+      ),
+    },
+  );
 }
 
 export function copyLessonPlan(id) {
@@ -1512,7 +1696,9 @@ export function updateLessonPlanItem(id, payload) {
 
 export function deleteLessonPlanItem(id, { force } = {}) {
   const suffix = force ? "?force=1" : "";
-  return cabinetFetch(`/lesson-plan-items/${id}/${suffix}`, { method: "DELETE" });
+  return cabinetFetch(`/lesson-plan-items/${id}/${suffix}`, {
+    method: "DELETE",
+  });
 }
 
 export function reorderLessonPlanItems(items) {
@@ -1558,15 +1744,18 @@ export function downloadLessonPlanExcelTemplate(params = {}) {
     if (value != null && value !== "") qs.set(key, value);
   });
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
-  return cabinetDownload(`/lesson-plans/excel-template/${suffix}`, "Шаблон_плана_уроков.xlsx");
+  return cabinetDownload(
+    `/lesson-plans/excel-template/${suffix}`,
+    "Шаблон_плана_уроков.xlsx",
+  );
 }
 
 export function exportLessonPlanExcelDraft(payload = {}) {
-  return cabinetDownload(
-    "/lesson-plans/excel-export/",
-    "План_уроков.xlsx",
-    { method: "POST", body: JSON.stringify(payload), json: true },
-  );
+  return cabinetDownload("/lesson-plans/excel-export/", "План_уроков.xlsx", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    json: true,
+  });
 }
 
 export function exportLessonPlanExcel(planId, params = {}) {
@@ -1586,7 +1775,10 @@ export function previewLessonPlanExcel(formData) {
 }
 
 export function importLessonPlanExcel(planId, formData) {
-  return cabinetFetchMultipart(`/lesson-plans/${planId}/import-excel/`, formData);
+  return cabinetFetchMultipart(
+    `/lesson-plans/${planId}/import-excel/`,
+    formData,
+  );
 }
 
 export function updatePlanEnrollment(id, payload) {
@@ -1655,7 +1847,9 @@ export function fetchInteractiveAppearance() {
 // --- Interactive boards (Excalidraw) ---
 
 export function fetchInteractiveBoards(params = {}) {
-  return cabinetFetch(buildCabinetQueryPath("/interactive-boards/", params), { method: "GET" });
+  return cabinetFetch(buildCabinetQueryPath("/interactive-boards/", params), {
+    method: "GET",
+  });
 }
 
 export function fetchInteractiveBoard(id) {
@@ -1731,15 +1925,23 @@ export function fetchInteractiveBoardAccess(id) {
 }
 
 export function uploadInteractiveBoardImage(id, formData) {
-  return cabinetFetchMultipart(`/interactive-boards/${id}/upload-image/`, formData);
+  return cabinetFetchMultipart(
+    `/interactive-boards/${id}/upload-image/`,
+    formData,
+  );
 }
 
 export function uploadInteractiveBoardFile(id, formData) {
-  return cabinetFetchMultipart(`/interactive-boards/${id}/upload-file/`, formData);
+  return cabinetFetchMultipart(
+    `/interactive-boards/${id}/upload-file/`,
+    formData,
+  );
 }
 
 export function deleteInteractiveBoardAsset(boardId, assetId) {
-  return cabinetFetch(`/interactive-boards/${boardId}/assets/${assetId}/`, { method: "DELETE" });
+  return cabinetFetch(`/interactive-boards/${boardId}/assets/${assetId}/`, {
+    method: "DELETE",
+  });
 }
 
 export function fetchStudentInteractiveBoards() {
@@ -1758,7 +1960,9 @@ export function fetchMaterials(params = {}) {
 }
 
 export function fetchMaterial(id) {
-  return cabinetFetch(`/materials/${encodeURIComponent(id)}/`, { method: "GET" });
+  return cabinetFetch(`/materials/${encodeURIComponent(id)}/`, {
+    method: "GET",
+  });
 }
 
 export function updateMaterial(id, payload) {
@@ -1777,30 +1981,48 @@ export async function fetchReadyLesson(slug, { collection } = {}) {
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    const message = data?.message || data?.detail || data?.error || "Не удалось загрузить урок";
-    throw new Error(typeof message === "string" ? message : "Не удалось загрузить урок");
+    const message =
+      data?.message ||
+      data?.detail ||
+      data?.error ||
+      "Не удалось загрузить урок";
+    throw new Error(
+      typeof message === "string" ? message : "Не удалось загрузить урок",
+    );
   }
   return data?.lesson || data;
 }
 
 export async function fetchInterestingItem(slug, { collection } = {}) {
   const qs = collection ? `?collection=${encodeURIComponent(collection)}` : "";
-  const res = await fetch(`/api/interesting/${encodeURIComponent(slug)}/${qs}`, {
-    credentials: "same-origin",
-    cache: "no-store",
-    headers: { Accept: "application/json" },
-  });
+  const res = await fetch(
+    `/api/interesting/${encodeURIComponent(slug)}/${qs}`,
+    {
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    },
+  );
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    const message = data?.message || data?.detail || data?.error || "Не удалось загрузить материал";
-    throw new Error(typeof message === "string" ? message : "Не удалось загрузить материал");
+    const message =
+      data?.message ||
+      data?.detail ||
+      data?.error ||
+      "Не удалось загрузить материал";
+    throw new Error(
+      typeof message === "string" ? message : "Не удалось загрузить материал",
+    );
   }
   return data?.item || data;
 }
 
 export async function startReadyLessonDemo(slug) {
   await ensureCsrfCookie();
-  const headers = { Accept: "application/json", "Content-Type": "application/json" };
+  const headers = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  };
   const csrf = getCsrfToken();
   if (csrf) headers["X-CSRFToken"] = csrf;
   const res = await fetch(`/api/lessons/${encodeURIComponent(slug)}/demo/`, {
@@ -1811,7 +2033,9 @@ export async function startReadyLessonDemo(slug) {
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    const err = new Error(data?.message || data?.detail || "Не удалось открыть демоверсию");
+    const err = new Error(
+      data?.message || data?.detail || "Не удалось открыть демоверсию",
+    );
     err.code = data?.code;
     throw err;
   }
@@ -1820,7 +2044,10 @@ export async function startReadyLessonDemo(slug) {
 
 async function postCatalogJson(path, body) {
   await ensureCsrfCookie();
-  const headers = { Accept: "application/json", "Content-Type": "application/json" };
+  const headers = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  };
   const csrf = getCsrfToken();
   if (csrf) headers["X-CSRFToken"] = csrf;
   const res = await fetch(path, {
@@ -1831,7 +2058,9 @@ async function postCatalogJson(path, body) {
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    const err = new Error(data?.message || data?.detail || "Не удалось выполнить запрос");
+    const err = new Error(
+      data?.message || data?.detail || "Не удалось выполнить запрос",
+    );
     err.code = data?.code;
     err.data = data;
     throw err;
@@ -1847,47 +2076,67 @@ export function quoteReadyLesson(slug, promoCode) {
 }
 
 export function quoteLessonCollection(slug, promoCode) {
-  return postCatalogJson(`/api/lesson-collections/${encodeURIComponent(slug)}/purchase/`, {
-    quote: true,
-    promo_code: promoCode || "",
-  });
+  return postCatalogJson(
+    `/api/lesson-collections/${encodeURIComponent(slug)}/purchase/`,
+    {
+      quote: true,
+      promo_code: promoCode || "",
+    },
+  );
 }
 
 export function quoteInteresting(slug, promoCode) {
-  return postCatalogJson(`/api/interesting/${encodeURIComponent(slug)}/purchase/`, {
-    quote: true,
-    promo_code: promoCode || "",
-  });
+  return postCatalogJson(
+    `/api/interesting/${encodeURIComponent(slug)}/purchase/`,
+    {
+      quote: true,
+      promo_code: promoCode || "",
+    },
+  );
 }
 
 export function startInterestingDemo(slug) {
-  return postCatalogJson(`/api/interesting/${encodeURIComponent(slug)}/demo/`, {});
+  return postCatalogJson(
+    `/api/interesting/${encodeURIComponent(slug)}/demo/`,
+    {},
+  );
 }
 
 export function purchaseInteresting(slug, idempotencyKey, promoCode) {
-  return postCatalogJson(`/api/interesting/${encodeURIComponent(slug)}/purchase/`, {
-    idempotency_key: idempotencyKey || undefined,
-    promo_code: promoCode || undefined,
-  });
+  return postCatalogJson(
+    `/api/interesting/${encodeURIComponent(slug)}/purchase/`,
+    {
+      idempotency_key: idempotencyKey || undefined,
+      promo_code: promoCode || undefined,
+    },
+  );
 }
 
 export async function purchaseReadyLesson(slug, idempotencyKey, promoCode) {
   await ensureCsrfCookie();
-  const headers = { Accept: "application/json", "Content-Type": "application/json" };
+  const headers = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  };
   const csrf = getCsrfToken();
   if (csrf) headers["X-CSRFToken"] = csrf;
-  const res = await fetch(`/api/lessons/${encodeURIComponent(slug)}/purchase/`, {
-    method: "POST",
-    credentials: "same-origin",
-    headers,
-    body: JSON.stringify({
-      idempotency_key: idempotencyKey || undefined,
-      promo_code: promoCode || undefined,
-    }),
-  });
+  const res = await fetch(
+    `/api/lessons/${encodeURIComponent(slug)}/purchase/`,
+    {
+      method: "POST",
+      credentials: "same-origin",
+      headers,
+      body: JSON.stringify({
+        idempotency_key: idempotencyKey || undefined,
+        promo_code: promoCode || undefined,
+      }),
+    },
+  );
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    throw new Error(data?.message || data?.detail || "Не удалось начать покупку");
+    throw new Error(
+      data?.message || data?.detail || "Не удалось начать покупку",
+    );
   }
   return data;
 }
@@ -1907,7 +2156,8 @@ export async function fetchLessonPurchases() {
 
 export async function createTeacherMaterial(payload) {
   await ensureCsrfCookie();
-  const isFormData = typeof FormData !== "undefined" && payload instanceof FormData;
+  const isFormData =
+    typeof FormData !== "undefined" && payload instanceof FormData;
   const headers = { Accept: "application/json", ...clientVersionHeaders() };
   const csrf = getCsrfToken();
   if (csrf) headers["X-CSRFToken"] = csrf;
@@ -1947,7 +2197,9 @@ export function fetchReportsOverview() {
 // --- Subscription ---
 
 export function fetchSubscriptionUsage() {
-  return shareCabinetRead("subscription-usage", () => cabinetFetch("/subscription/usage/", { method: "GET" }));
+  return shareCabinetRead("subscription-usage", () =>
+    cabinetFetch("/subscription/usage/", { method: "GET" }),
+  );
 }
 
 export function fetchSubscriptionCurrent() {
@@ -1959,7 +2211,9 @@ export function fetchSubscriptionPlans() {
 }
 
 export function fetchPublicPricingPlans() {
-  return fetch("/api/cabinet/pricing/plans/", { credentials: "same-origin" }).then(async (res) => {
+  return fetch("/api/cabinet/pricing/plans/", {
+    credentials: "same-origin",
+  }).then(async (res) => {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const err = new Error(data.detail || "Failed to load pricing");
@@ -2000,7 +2254,14 @@ export function previewPlanChange(planSlug, billingPeriod = "month") {
   return changePlan(planSlug, billingPeriod, { preview: true });
 }
 
-export function createPayment(planSlug, billingPeriod = "month", promoCode = null, idempotencyKey = null, promotionId = null, autoRenew = null) {
+export function createPayment(
+  planSlug,
+  billingPeriod = "month",
+  promoCode = null,
+  idempotencyKey = null,
+  promotionId = null,
+  autoRenew = null,
+) {
   const acquisition = readAcquisition();
   return cabinetFetch("/subscription/create-payment/", {
     method: "POST",
@@ -2017,8 +2278,12 @@ export function createPayment(planSlug, billingPeriod = "month", promoCode = nul
       ref: acquisition.ref || undefined,
       // r61: согласие на автопродление (отдельная галочка). Без него — разовая оплата без привязки карты.
       auto_renew: autoRenew?.autoRenew ? true : undefined,
-      auto_renew_consent_text: autoRenew?.autoRenew ? autoRenew.consentText : undefined,
-      auto_renew_consent_version: autoRenew?.autoRenew ? autoRenew.consentVersion : undefined,
+      auto_renew_consent_text: autoRenew?.autoRenew
+        ? autoRenew.consentText
+        : undefined,
+      auto_renew_consent_version: autoRenew?.autoRenew
+        ? autoRenew.consentVersion
+        : undefined,
     }),
   });
 }
@@ -2055,7 +2320,11 @@ export function confirmMockSubscriptionPayment(paymentId) {
   });
 }
 
-export function validatePromoCode(code, planSlug = null, billingPeriod = "month") {
+export function validatePromoCode(
+  code,
+  planSlug = null,
+  billingPeriod = "month",
+) {
   return cabinetFetch("/subscription/apply-promo/", {
     method: "POST",
     body: JSON.stringify({
@@ -2089,16 +2358,22 @@ export function fetchAIUsage() {
 export function openAIAssistant(conversationId) {
   return cabinetFetch("/ai/open/", {
     method: "POST",
-    body: JSON.stringify(conversationId ? { conversation_id: conversationId } : {}),
+    body: JSON.stringify(
+      conversationId ? { conversation_id: conversationId } : {},
+    ),
   });
 }
 
 export function fetchAIConversation(conversationId) {
-  return cabinetFetch(`/ai/conversations/${encodeURIComponent(conversationId)}/`, { method: "GET" });
+  return cabinetFetch(
+    `/ai/conversations/${encodeURIComponent(conversationId)}/`,
+    { method: "GET" },
+  );
 }
 
 export function sendAIRequest(prompt, options = {}) {
-  const requestType = typeof options === "string" ? options : options.requestType || "explain";
+  const requestType =
+    typeof options === "string" ? options : options.requestType || "explain";
   const conversationId = options.conversationId;
   const confirmImages = options.confirmImages;
   const idempotencyKey = options.idempotencyKey;
@@ -2150,21 +2425,29 @@ export function createStudentParentInvite(studentId, payload) {
 }
 
 export function revokeStudentParentInvite(studentId, invitationId) {
-  return cabinetFetch(`/students/${studentId}/parents/invitations/${invitationId}/revoke/`, {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
+  return cabinetFetch(
+    `/students/${studentId}/parents/invitations/${invitationId}/revoke/`,
+    {
+      method: "POST",
+      body: JSON.stringify({}),
+    },
+  );
 }
 
 export function updateStudentParentAccess(studentId, relationshipId, payload) {
-  return cabinetFetch(`/students/${studentId}/parents/relationships/${relationshipId}/`, {
-    method: "PATCH",
-    body: JSON.stringify(payload),
-  });
+  return cabinetFetch(
+    `/students/${studentId}/parents/relationships/${relationshipId}/`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 export function fetchParentInvitePreview(token) {
-  return cabinetFetch(`/parent/invite/${encodeURIComponent(token)}/`, { method: "GET" });
+  return cabinetFetch(`/parent/invite/${encodeURIComponent(token)}/`, {
+    method: "GET",
+  });
 }
 
 export function acceptParentInvite(token) {
@@ -2175,7 +2458,9 @@ export function acceptParentInvite(token) {
 }
 
 export function fetchParentDashboard(params = {}) {
-  return cabinetFetch(buildCabinetQueryPath("/parent/dashboard/", params), { method: "GET" });
+  return cabinetFetch(buildCabinetQueryPath("/parent/dashboard/", params), {
+    method: "GET",
+  });
 }
 
 export function fetchParentChildren() {
@@ -2183,19 +2468,27 @@ export function fetchParentChildren() {
 }
 
 export function fetchParentHomework(params = {}) {
-  return cabinetFetch(buildCabinetQueryPath("/parent/homework/", params), { method: "GET" });
+  return cabinetFetch(buildCabinetQueryPath("/parent/homework/", params), {
+    method: "GET",
+  });
 }
 
 export function fetchParentJournal(params = {}) {
-  return cabinetFetch(buildCabinetQueryPath("/parent/journal/", params), { method: "GET" });
+  return cabinetFetch(buildCabinetQueryPath("/parent/journal/", params), {
+    method: "GET",
+  });
 }
 
 export function fetchParentSchedule(params = {}) {
-  return cabinetFetch(buildCabinetQueryPath("/parent/schedule/", params), { method: "GET" });
+  return cabinetFetch(buildCabinetQueryPath("/parent/schedule/", params), {
+    method: "GET",
+  });
 }
 
 export function fetchParentBilling(params = {}) {
-  return cabinetFetch(buildCabinetQueryPath("/parent/billing/", params), { method: "GET" });
+  return cabinetFetch(buildCabinetQueryPath("/parent/billing/", params), {
+    method: "GET",
+  });
 }
 
 export function claimParentPayment(payload) {
@@ -2206,7 +2499,9 @@ export function claimParentPayment(payload) {
 }
 
 export function fetchJournalEntries(params = {}) {
-  return cabinetFetch(buildCabinetQueryPath("/journal/entries/", params), { method: "GET" });
+  return cabinetFetch(buildCabinetQueryPath("/journal/entries/", params), {
+    method: "GET",
+  });
 }
 
 // --- Student cabinet ---
@@ -2224,14 +2519,19 @@ export function fetchStudentLesson(assignmentId) {
 }
 
 export function completeStudentLesson(assignmentId) {
-  return cabinetFetch(`/student/lessons/${assignmentId}/`, { method: "POST", body: "{}" });
+  return cabinetFetch(`/student/lessons/${assignmentId}/`, {
+    method: "POST",
+    body: "{}",
+  });
 }
 
 export function fetchStudentAssignments({ studentSubjectId } = {}) {
   const params = new URLSearchParams();
   if (studentSubjectId) params.set("student_subject", String(studentSubjectId));
   const qs = params.toString();
-  return cabinetFetch(`/student/assignments/${qs ? `?${qs}` : ""}`, { method: "GET" });
+  return cabinetFetch(`/student/assignments/${qs ? `?${qs}` : ""}`, {
+    method: "GET",
+  });
 }
 
 export function fetchStudentAssignment(homeworkId) {
@@ -2240,7 +2540,10 @@ export function fetchStudentAssignment(homeworkId) {
 
 export function submitStudentAssignment(homeworkId, payload) {
   if (typeof FormData !== "undefined" && payload instanceof FormData) {
-    return cabinetFetchMultipart(`/student/assignments/${homeworkId}/`, payload);
+    return cabinetFetchMultipart(
+      `/student/assignments/${homeworkId}/`,
+      payload,
+    );
   }
   return cabinetFetch(`/student/assignments/${homeworkId}/`, {
     method: "POST",
@@ -2253,7 +2556,9 @@ export function fetchStudentInteractives() {
 }
 
 export function fetchStudentInteractive(assignmentId) {
-  return cabinetFetch(`/student/interactives/${assignmentId}/`, { method: "GET" });
+  return cabinetFetch(`/student/interactives/${assignmentId}/`, {
+    method: "GET",
+  });
 }
 
 export function submitStudentInteractiveAttempt(assignmentId, payload) {
@@ -2267,7 +2572,9 @@ export function fetchStudentSchedule({ studentSubjectId } = {}) {
   const params = new URLSearchParams();
   if (studentSubjectId) params.set("student_subject", String(studentSubjectId));
   const qs = params.toString();
-  return cabinetFetch(`/student/schedule/${qs ? `?${qs}` : ""}`, { method: "GET" });
+  return cabinetFetch(`/student/schedule/${qs ? `?${qs}` : ""}`, {
+    method: "GET",
+  });
 }
 
 export function fetchStudentScheduleEvent(eventId) {
@@ -2282,11 +2589,17 @@ export function fetchCabinetStudent(id) {
   return cabinetFetch(`/students/${id}/`, { method: "GET" });
 }
 
-export function fetchTeacherStudentMaterials(studentId, { studentSubjectId } = {}) {
+export function fetchTeacherStudentMaterials(
+  studentId,
+  { studentSubjectId } = {},
+) {
   const params = new URLSearchParams();
   if (studentSubjectId) params.set("student_subject", String(studentSubjectId));
   const qs = params.toString();
-  return cabinetFetch(`/students/${studentId}/materials/${qs ? `?${qs}` : ""}`, { method: "GET" });
+  return cabinetFetch(
+    `/students/${studentId}/materials/${qs ? `?${qs}` : ""}`,
+    { method: "GET" },
+  );
 }
 
 export function createStudentMaterialFolder(studentId, payload) {
@@ -2304,7 +2617,9 @@ export function updateStudentMaterialFolder(studentId, folderId, payload) {
 }
 
 export function deleteStudentMaterialFolder(studentId, folderId) {
-  return cabinetFetch(`/students/${studentId}/material-folders/${folderId}/`, { method: "DELETE" });
+  return cabinetFetch(`/students/${studentId}/material-folders/${folderId}/`, {
+    method: "DELETE",
+  });
 }
 
 export function placeStudentMaterials(studentId, { keys, folderId }) {
@@ -2322,7 +2637,9 @@ export function fetchStudentMaterials(query = "", { studentSubjectId } = {}) {
   if (query) params.set("q", query);
   if (studentSubjectId) params.set("student_subject", String(studentSubjectId));
   const qs = params.toString();
-  return cabinetFetch(`/student/materials/${qs ? `?${qs}` : ""}`, { method: "GET" });
+  return cabinetFetch(`/student/materials/${qs ? `?${qs}` : ""}`, {
+    method: "GET",
+  });
 }
 
 export function fetchDirectMaterials() {
@@ -2364,7 +2681,9 @@ export function deleteProfileAvatar() {
 /* ── Учёт оплат репетитора ─────────────────────────────────────────── */
 
 export function fetchBillingDashboard(params = {}) {
-  return cabinetFetch(buildCabinetQueryPath("/billing/dashboard/", params), { method: "GET" });
+  return cabinetFetch(buildCabinetQueryPath("/billing/dashboard/", params), {
+    method: "GET",
+  });
 }
 
 export function fetchBillingDashboardDetail(detail, params = {}) {
@@ -2383,7 +2702,9 @@ export function updateBillingSettings(payload) {
 }
 
 export function fetchBillingAccounts(params = {}) {
-  return cabinetFetch(buildCabinetQueryPath("/billing/accounts/", params), { method: "GET" });
+  return cabinetFetch(buildCabinetQueryPath("/billing/accounts/", params), {
+    method: "GET",
+  });
 }
 
 export function fetchBillingAccount(accountId) {
@@ -2391,7 +2712,9 @@ export function fetchBillingAccount(accountId) {
 }
 
 export function fetchStudentBillingAccount(studentId) {
-  return cabinetFetch(`/billing/students/${studentId}/account/`, { method: "GET" });
+  return cabinetFetch(`/billing/students/${studentId}/account/`, {
+    method: "GET",
+  });
 }
 
 export function updateBillingAccountSettings(accountId, payload) {
@@ -2402,7 +2725,9 @@ export function updateBillingAccountSettings(accountId, payload) {
 }
 
 export function fetchBillingTransactions(params = {}) {
-  return cabinetFetch(buildCabinetQueryPath("/billing/transactions/", params), { method: "GET" });
+  return cabinetFetch(buildCabinetQueryPath("/billing/transactions/", params), {
+    method: "GET",
+  });
 }
 
 export function createBillingPayment(payload) {
@@ -2427,7 +2752,9 @@ export function updateEventBillingCharge(recordId, payload) {
 }
 
 export function previewBillingRebuild(accountId) {
-  return cabinetFetch(`/billing/accounts/${accountId}/rebuild/`, { method: "GET" });
+  return cabinetFetch(`/billing/accounts/${accountId}/rebuild/`, {
+    method: "GET",
+  });
 }
 
 export function applyBillingRebuild(accountId) {
@@ -2459,7 +2786,9 @@ export function reverseBillingTransaction(txId, payload = {}) {
 }
 
 export function fetchBillingPackages(params = {}) {
-  return cabinetFetch(buildCabinetQueryPath("/billing/packages/", params), { method: "GET" });
+  return cabinetFetch(buildCabinetQueryPath("/billing/packages/", params), {
+    method: "GET",
+  });
 }
 
 export function createBillingPackage(payload) {
@@ -2546,13 +2875,16 @@ export function settlePackageUnpaid(packageId, payload) {
 }
 
 export function chargeEventBillingFromPackage(recordId, payload) {
-  return cabinetFetch(`/billing/event-billing/${recordId}/charge-from-package/`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-    headers: payload?.idempotency_key
-      ? { "X-Idempotency-Key": payload.idempotency_key }
-      : undefined,
-  });
+  return cabinetFetch(
+    `/billing/event-billing/${recordId}/charge-from-package/`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+      headers: payload?.idempotency_key
+        ? { "X-Idempotency-Key": payload.idempotency_key }
+        : undefined,
+    },
+  );
 }
 
 export function refundEventBillingPackage(recordId, payload = {}) {
@@ -2623,7 +2955,9 @@ export function billingPlanCheck(payload) {
 }
 
 export function fetchBillingReports(params = {}) {
-  return cabinetFetch(buildCabinetQueryPath("/billing/reports/", params), { method: "GET" });
+  return cabinetFetch(buildCabinetQueryPath("/billing/reports/", params), {
+    method: "GET",
+  });
 }
 
 export function billingExportUrl(params = {}) {
@@ -2656,11 +2990,15 @@ export function fetchJournalOverview() {
 }
 
 export function fetchJournalGradebook(params = {}) {
-  return cabinetFetch(buildCabinetQueryPath("/journal/gradebook/", params), { method: "GET" });
+  return cabinetFetch(buildCabinetQueryPath("/journal/gradebook/", params), {
+    method: "GET",
+  });
 }
 
 export function fetchJournalLessons(params = {}) {
-  return cabinetFetch(buildCabinetQueryPath("/journal/lessons/", params), { method: "GET" });
+  return cabinetFetch(buildCabinetQueryPath("/journal/lessons/", params), {
+    method: "GET",
+  });
 }
 
 export function createOfflineJournalLesson(payload) {
@@ -2725,10 +3063,13 @@ export function fetchJournalStudentErrorsSummary(studentId) {
 }
 
 export function createHomeworkFromStudentErrors(studentId, payload = {}) {
-  return cabinetFetch(`/journal/students/${studentId}/errors/create-homework/`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  return cabinetFetch(
+    `/journal/students/${studentId}/errors/create-homework/`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 export function fetchJournalStudentsSummary() {
@@ -2740,7 +3081,9 @@ export function fetchJournalGroup(groupId) {
 }
 
 export function fetchJournalAttendance(params = {}) {
-  return cabinetFetch(buildCabinetQueryPath("/journal/attendance/", params), { method: "GET" });
+  return cabinetFetch(buildCabinetQueryPath("/journal/attendance/", params), {
+    method: "GET",
+  });
 }
 
 export function fetchJournalAnalytics(studentId) {
@@ -2776,7 +3119,9 @@ function filesBase(student = false) {
 }
 
 export function fetchMyFiles(params = {}, { student = false } = {}) {
-  return cabinetFetch(buildCabinetQueryPath(`${filesBase(student)}/`, params), { method: "GET" });
+  return cabinetFetch(buildCabinetQueryPath(`${filesBase(student)}/`, params), {
+    method: "GET",
+  });
 }
 
 export function fetchMyFilesQuota({ student = false } = {}) {
@@ -2790,7 +3135,11 @@ export function createMyFilesFolder(payload, { student = false } = {}) {
   });
 }
 
-export function updateMyFilesFolder(folderId, payload, { student = false } = {}) {
+export function updateMyFilesFolder(
+  folderId,
+  payload,
+  { student = false } = {},
+) {
   return cabinetFetch(`${filesBase(student)}/folders/${folderId}/`, {
     method: "PATCH",
     body: JSON.stringify(payload),
@@ -2798,7 +3147,9 @@ export function updateMyFilesFolder(folderId, payload, { student = false } = {})
 }
 
 export function trashMyFilesFolder(folderId, { student = false } = {}) {
-  return cabinetFetch(`${filesBase(student)}/folders/${folderId}/`, { method: "DELETE" });
+  return cabinetFetch(`${filesBase(student)}/folders/${folderId}/`, {
+    method: "DELETE",
+  });
 }
 
 export function restoreMyFilesFolder(folderId, payload = {}) {
@@ -2824,18 +3175,28 @@ function myFileTooLargeError(cause) {
   return err;
 }
 
-export function uploadMyFile(file, { folderId, displayName, student = false, onProgress } = {}) {
+export function uploadMyFile(
+  file,
+  { folderId, displayName, student = false, onProgress } = {},
+) {
   if (isMyFileTooLarge(file)) return Promise.reject(myFileTooLargeError());
   const formData = new FormData();
   formData.append("file", file);
   if (folderId) formData.append("folder_id", folderId);
   if (displayName) formData.append("display_name", displayName);
   const path = `${filesBase(student)}/upload/`;
-  const request = typeof onProgress === "function"
-    ? ensureCsrfCookie().then(() => cabinetFetchMultipartWithProgress(path, formData, { onProgress }))
-    : cabinetFetchMultipart(path, formData);
+  const request =
+    typeof onProgress === "function"
+      ? ensureCsrfCookie().then(() =>
+          cabinetFetchMultipartWithProgress(path, formData, { onProgress }),
+        )
+      : cabinetFetchMultipart(path, formData);
   return request.catch((err) => {
-    if (err?.status === 413 || err?.code === "FILE_TOO_LARGE" || err?.data?.code === "FILE_TOO_LARGE") {
+    if (
+      err?.status === 413 ||
+      err?.code === "FILE_TOO_LARGE" ||
+      err?.data?.code === "FILE_TOO_LARGE"
+    ) {
       throw myFileTooLargeError(err);
     }
     throw err;
@@ -2843,7 +3204,9 @@ export function uploadMyFile(file, { folderId, displayName, student = false, onP
 }
 
 export function fetchHomeworkAttachments(homeworkId) {
-  return cabinetFetch(`/homework/${homeworkId}/attachments/`, { method: "GET" });
+  return cabinetFetch(`/homework/${homeworkId}/attachments/`, {
+    method: "GET",
+  });
 }
 
 export function uploadHomeworkAttachments(homeworkId, files) {
@@ -2852,7 +3215,10 @@ export function uploadHomeworkAttachments(homeworkId, files) {
   list.forEach((file) => {
     if (file) formData.append("files", file);
   });
-  return cabinetFetchMultipart(`/homework/${homeworkId}/attachments/`, formData);
+  return cabinetFetchMultipart(
+    `/homework/${homeworkId}/attachments/`,
+    formData,
+  );
 }
 
 export function deleteHomeworkAttachment(homeworkId, attachmentId) {
@@ -2888,7 +3254,9 @@ export function restoreMyFile(fileId, payload = {}, { student = false } = {}) {
 
 export function purgeMyFile(fileId, { force = false, student = false } = {}) {
   const qs = force ? "?force=true" : "";
-  return cabinetFetch(`${filesBase(student)}/${fileId}/${qs}`, { method: "DELETE" });
+  return cabinetFetch(`${filesBase(student)}/${fileId}/${qs}`, {
+    method: "DELETE",
+  });
 }
 
 export function copyMyFile(fileId, payload = {}) {
@@ -2958,19 +3326,29 @@ export function emptyMyFilesTrash() {
   });
 }
 
-export function myFileDownloadUrl(fileId, { student = false, shared = false } = {}) {
+export function myFileDownloadUrl(
+  fileId,
+  { student = false, shared = false } = {},
+) {
   if (shared) return `${apiBase()}/student/files/shared/${fileId}/download/`;
   return `${apiBase()}${filesBase(student)}/${fileId}/download/`;
 }
 
-export function myFilePreviewUrl(fileId, { student = false, shared = false } = {}) {
+export function myFilePreviewUrl(
+  fileId,
+  { student = false, shared = false } = {},
+) {
   if (shared) return `${apiBase()}/student/files/shared/${fileId}/preview/`;
   return `${apiBase()}${filesBase(student)}/${fileId}/preview/`;
 }
 
 // ---------- r125: «Решать вариант» вне урока ----------
 
-export function createVariantLiveSession({ variantUrl, title = "", studentId = null }) {
+export function createVariantLiveSession({
+  variantUrl,
+  title = "",
+  studentId = null,
+}) {
   return cabinetFetch("/variant-live/", {
     method: "POST",
     body: JSON.stringify({ variantUrl, title, studentId }),
@@ -2994,19 +3372,28 @@ export function fetchVariantLiveSessions({ variantId } = {}) {
 }
 
 export function fetchVariantLiveSession(sessionId) {
-  return cabinetFetch(`/variant-live/${encodeURIComponent(sessionId)}/`, { method: "GET" });
+  return cabinetFetch(`/variant-live/${encodeURIComponent(sessionId)}/`, {
+    method: "GET",
+  });
 }
 
 export function closeVariantLiveSession(sessionId) {
-  return cabinetFetch(`/variant-live/${encodeURIComponent(sessionId)}/`, { method: "DELETE" });
+  return cabinetFetch(`/variant-live/${encodeURIComponent(sessionId)}/`, {
+    method: "DELETE",
+  });
 }
 
 export function joinVariantLiveSession(sessionId) {
-  return cabinetFetch(`/variant-live/${encodeURIComponent(sessionId)}/join/`, { method: "POST" });
+  return cabinetFetch(`/variant-live/${encodeURIComponent(sessionId)}/join/`, {
+    method: "POST",
+  });
 }
 
 export function fetchVariantLiveAnswers(sessionId) {
-  return cabinetFetch(`/variant-live/${encodeURIComponent(sessionId)}/answers/`, { method: "GET" });
+  return cabinetFetch(
+    `/variant-live/${encodeURIComponent(sessionId)}/answers/`,
+    { method: "GET" },
+  );
 }
 
 export function saveVariantLiveScore(sessionId, { studentId, taskId, score }) {
@@ -3017,7 +3404,10 @@ export function saveVariantLiveScore(sessionId, { studentId, taskId, score }) {
 }
 
 export function fetchVariantIssueQuota(variantId) {
-  return cabinetFetch(`/variant-live/quota/?variant_id=${encodeURIComponent(variantId || "")}`, { method: "GET" });
+  return cabinetFetch(
+    `/variant-live/quota/?variant_id=${encodeURIComponent(variantId || "")}`,
+    { method: "GET" },
+  );
 }
 
 /** r125: live-ответы из урока (meeting) или из «Решать вариант» (session). */
@@ -3026,7 +3416,10 @@ export function fetchLiveAnswersFor({ meetingUuid = "", sessionId = "" } = {}) {
   return fetchVariantLiveAnswers(sessionId);
 }
 
-export function saveLiveScoreFor({ meetingUuid = "", sessionId = "" } = {}, payload) {
+export function saveLiveScoreFor(
+  { meetingUuid = "", sessionId = "" } = {},
+  payload,
+) {
   if (meetingUuid) return saveVideoMeetingLiveScore(meetingUuid, payload);
   return saveVariantLiveScore(sessionId, payload);
 }
@@ -3036,13 +3429,20 @@ export const VARIANT_LIMIT_CODE = "VARIANT_PER_STUDENT_LIMIT";
 /** Сообщение об ошибке лимита вариантов (или null, если это другая ошибка). */
 export function variantLimitMessage(err) {
   const data = err?.data || {};
-  if (err?.code !== VARIANT_LIMIT_CODE && data.code !== VARIANT_LIMIT_CODE) return null;
-  return { text: data.detail || err?.message || "Достигнут лимит вариантов", upgradeUrl: data.upgrade_url || "/cabinet/upgrade" };
+  if (err?.code !== VARIANT_LIMIT_CODE && data.code !== VARIANT_LIMIT_CODE)
+    return null;
+  return {
+    text: data.detail || err?.message || "Достигнут лимит вариантов",
+    upgradeUrl: data.upgrade_url || "/cabinet/upgrade",
+  };
 }
 
 /** r145: общая доска рядом с вариантом. */
 export function fetchVariantBoard(body) {
-  return cabinetFetch("/variant-board/", { method: "POST", body: JSON.stringify(body || {}) });
+  return cabinetFetch("/variant-board/", {
+    method: "POST",
+    body: JSON.stringify(body || {}),
+  });
 }
 
 /** «Доска рядом» на живом уроке: сервер сам выбирает доску и рассылает сплит ученикам. */
