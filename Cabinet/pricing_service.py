@@ -143,10 +143,7 @@ def active_user_discount_rows(user, product_type: str) -> list:
             if row.valid_until and now > row.valid_until:
                 continue
             cache.append(row)
-        try:
-            user._itflux_user_discounts = cache
-        except Exception:
-            pass
+        user._itflux_user_discounts = cache
     types = str(product_type or "")
     return [row for row in cache if types in (row.product_types or [])]
 
