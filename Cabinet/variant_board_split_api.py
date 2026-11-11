@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .meeting_material_session import broadcast_material_event
-from .meeting_present import set_variant_board_split
+from .meeting_board_split import set_variant_board_split
 from .variant_board import VariantBoardError
 from .video_meeting_api import _error_response
 from .video_meeting_service import VideoMeetingError, get_meeting_by_uuid
