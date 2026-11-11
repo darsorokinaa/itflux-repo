@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from django.contrib.auth.models import User
@@ -42,6 +43,7 @@ from .lesson_locked_scores import (
 
 
 PRESENT_KINDS = frozenset({"board", "variant"})
+logger = logging.getLogger(__name__)
 
 
 def append_live_variant_query(url: str, homework_id) -> str:
@@ -241,6 +243,19 @@ def serialize_presented(
     return _attach_board_split(presented, meeting, payload, user, kind)
 
 
+def _close_material_quietly(meeting, user):
+    """Сессия синхронного материала не должна переживать показ доски или варианта."""
+    try:
+        from .meeting_material_session import close_material_session
+
+        close_material_session(meeting=meeting, user=user)
+    except Exception:
+        logger.exception(
+            "close_material_session failed meeting=%s",
+            getattr(meeting, "uuid", None),
+        )
+
+
 def present_board(*, meeting: VideoMeeting, user: User, board_id: str) -> dict:
     assert_can_manage_meeting(user, meeting)
     if meeting.status != VideoMeeting.Status.LIVE:
@@ -248,13 +263,7 @@ def present_board(*, meeting: VideoMeeting, user: User, board_id: str) -> dict:
             "Показать можно только во время урока", code="not_live", status=409
         )
 
-    # Не смешиваем показ доски с сессией синхронного материала.
-    try:
-        from .meeting_material_session import close_material_session
-
-        close_material_session(meeting=meeting, user=user)
-    except Exception:
-        pass
+    _close_material_quietly(meeting, user)
 
     board = InteractiveBoard.objects.filter(
         pk=board_id, owner=meeting.schedule_event.owner
@@ -308,12 +317,7 @@ def present_variant(
             "Показать можно только во время урока", code="not_live", status=409
         )
 
-    try:
-        from .meeting_material_session import close_material_session
-
-        close_material_session(meeting=meeting, user=user)
-    except Exception:
-        pass
+    _close_material_quietly(meeting, user)
 
     event = meeting.schedule_event
     variant_url = (url or "").strip()
