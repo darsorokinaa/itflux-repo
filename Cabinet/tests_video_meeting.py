@@ -956,6 +956,10 @@ class VideoMeetingApiTests(TestCase):
         meeting.refresh_from_db()
         self.assertEqual(meeting.presented_kind, "")
         self._assert_live_variant_hidden_from_review(homework_id)
+        self._variant_board_split_follows_presented_variant()
+        self._student_status_sees_own_board_split()
+        self._close_board_split_keeps_variant()
+        self._present_variant_again_drops_board_split()
 
     def _assert_live_variant_hidden_from_review(self, homework_id):
         from Cabinet.models import Homework, HomeworkSubmission, ReviewItem
@@ -991,8 +995,7 @@ class VideoMeetingApiTests(TestCase):
         )
         self.assertFalse(filtered.filter(pk=orphan.pk).exists())
 
-    @override_settings(LESSON_SECRET="test-lesson-secret-for-present")
-    def test_variant_board_split_follows_presented_variant(self):
+    def _variant_board_split_follows_presented_variant(self):
         meeting = self._create_meeting()
         start_meeting(meeting=meeting, user=self.teacher)
         self.client.force_login(self.teacher)
@@ -1015,8 +1018,7 @@ class VideoMeetingApiTests(TestCase):
         meeting.refresh_from_db()
         self.assertEqual(meeting.presented_payload["boardSplit"]["boardId"], board_id)
 
-    @override_settings(LESSON_SECRET="test-lesson-secret-for-present")
-    def test_student_status_sees_own_board_split(self):
+    def _student_status_sees_own_board_split(self):
         from Cabinet.meeting_material_session import sync_state_payload
 
         meeting = self._create_meeting()
@@ -1048,8 +1050,7 @@ class VideoMeetingApiTests(TestCase):
             (forbidden.status_code, forbidden.data.get("code")), (403, "teacher_only")
         )
 
-    @override_settings(LESSON_SECRET="test-lesson-secret-for-present")
-    def test_close_board_split_keeps_variant(self):
+    def _close_board_split_keeps_variant(self):
         meeting = self._create_meeting()
         start_meeting(meeting=meeting, user=self.teacher)
         self.client.force_login(self.teacher)
@@ -1074,8 +1075,7 @@ class VideoMeetingApiTests(TestCase):
         after = self.client.get(f"/api/video-meetings/{meeting.uuid}/status/")
         self.assertEqual(after.data["presented"]["boardSplit"], {"open": False})
 
-    @override_settings(LESSON_SECRET="test-lesson-secret-for-present")
-    def test_present_variant_again_drops_board_split(self):
+    def _present_variant_again_drops_board_split(self):
         meeting = self._create_meeting()
         start_meeting(meeting=meeting, user=self.teacher)
         self.client.force_login(self.teacher)
