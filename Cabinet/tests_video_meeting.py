@@ -955,8 +955,9 @@ class VideoMeetingApiTests(TestCase):
         self.assertEqual(clear_res.status_code, 200)
         meeting.refresh_from_db()
         self.assertEqual(meeting.presented_kind, "")
+        self._assert_live_variant_hidden_from_review(homework_id)
 
-        # Live-вариант с урока не должен попадать в очередь «Проверка».
+    def _assert_live_variant_hidden_from_review(self, homework_id):
         from Cabinet.models import Homework, HomeworkSubmission, ReviewItem
         from Cabinet.homework_api import exclude_live_meeting_review_items
 
@@ -977,7 +978,6 @@ class VideoMeetingApiTests(TestCase):
                 source_type="homework", source_id=submission.pk
             ).exists()
         )
-        # Даже если ReviewItem создали вручную — список проверки его скрывает.
         orphan = ReviewItem.objects.create(
             teacher=self.teacher,
             student=self.student,
