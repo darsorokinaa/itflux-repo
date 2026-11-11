@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import VariantBoardSplit, {
+import VariantBoardSplit from "./VariantBoardSplit";
+import {
+  boardSplitSyncBody,
   clampBoardWidth,
+  studentSplitStamp,
   variantBoardFrameSrc,
+  variantBoardPickBody,
   variantBoardRequest,
+  visibleStudentSplit,
   VB_MIN,
-} from "./VariantBoardSplit";
-import { boardSplitSyncBody, studentSplitStamp, visibleStudentSplit } from "./variantBoardSplitSync";
+} from "./variantBoardSplitSync";
 import { isVariantEmbed } from "../boards/variantEmbed";
 import { fetchVariantBoard, postVariantBoardSplit } from "../../utils/cabinetAuth";
 
@@ -41,7 +45,6 @@ describe("VariantBoardSplit helpers", () => {
   });
 });
 
-import { variantBoardPickBody } from "./VariantBoardSplit";
 describe("r148 pick body", () => {
   it("only group/mine/student_id, never a board id", () => {
     expect(variantBoardPickBody({ meeting: "m" }, "group")).toEqual({ meeting: "m", target: "group" });
