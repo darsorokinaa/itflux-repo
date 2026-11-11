@@ -1,5 +1,6 @@
 /** r36: вход через Яндекс ID / VK ID. Кнопки показываются, только если провайдер настроен на сервере. */
 import { useEffect, useState } from "react";
+import { readAcquisition } from "../cabinet/visitContext";
 
 export default function SocialLoginButtons({ nextPath = "/cabinet", role = "", consent = null, onConsentMissing = null }) {
   const [providers, setProviders] = useState({ yandex: false, vk: false });
@@ -15,6 +16,11 @@ export default function SocialLoginButtons({ nextPath = "/cabinet", role = "", c
   const href = (p) => {
     const q = new URLSearchParams({ next: nextPath || "/cabinet" });
     if (role) q.set("role", role);
+    const acq = readAcquisition();
+    for (const key of ["utm_source", "utm_medium", "utm_campaign", "utm_content"]) {
+      if (acq[key]) q.set(key, acq[key]);
+    }
+    if (acq.ref) q.set("source_ref", acq.ref);
     // r52: галочки со страницы регистрации (ПД обязательно, реклама — по желанию)
     if (consent?.pd) q.set("pd", "1");
     if (consent?.mkt) q.set("mkt", "1");

@@ -338,6 +338,21 @@ def _item_name(plan, billing_period: str, payment=None) -> str:
     return text[:128]
 
 
+def extra_payment_data(payment) -> dict[str, str]:
+    """DATA для Init: почта чека и источник визита. Вложенный объект в Token не входит."""
+    data: dict[str, str] = {}
+    email = _receipt_email(payment)
+    if email:
+        data["Email"] = email
+    meta = payment.metadata if isinstance(getattr(payment, "metadata", None), dict) else {}
+    acq = meta.get("acquisition") if isinstance(meta.get("acquisition"), dict) else {}
+    for key in ("utm_source", "utm_medium", "utm_campaign", "utm_content", "ref"):
+        value = str(acq.get(key) or "").strip()[:100]
+        if value:
+            data[key] = value
+    return data
+
+
 def _receipt_email(payment) -> str:
     email = (getattr(payment.teacher, "email", None) or "").strip()
     if email:
@@ -468,9 +483,9 @@ class TBankPaymentProvider(PaymentProviderInterface):
         notification_url = _notification_url()
         if notification_url:
             body["NotificationURL"] = notification_url
-        email = _receipt_email(payment)
-        if email:
-            body["DATA"] = {"Email": email}
+        data_fields = extra_payment_data(payment)
+        if data_fields:
+            body["DATA"] = data_fields
         # r101: явный срок жизни формы — тот же, что используется для повторной выдачи ссылки (dedupe).
         if include_return_urls:
             body["RedirectDueDate"] = (

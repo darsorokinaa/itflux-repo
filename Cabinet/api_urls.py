@@ -8,6 +8,7 @@ from . import (
 from .worksheet_ai import api as worksheet_ai_api
 from . import r50_api
 from . import r52_api
+from . import storefront_api
 from . import oneshot_api
 from . import (
     api_views,
@@ -543,6 +544,10 @@ urlpatterns = [
     path("oneshot-popup/<int:popup_id>/close/", oneshot_api.OneShotPopupCloseView.as_view(), name="oneshot_popup_close"),
     path("subscription/plans/", subscription_api.SubscriptionPlansView.as_view(), name="subscription_plans"),
     path("pricing/plans/", subscription_api.PublicPricingPlansView.as_view(), name="pricing_plans_public"),
+    path("pricing/promo-preview/", storefront_api.StorefrontPromoPreviewView.as_view(), name="pricing_promo_preview"),
+    path("pricing/events/", storefront_api.StorefrontEventView.as_view(), name="pricing_storefront_events"),
+    path("tutor-offer/", storefront_api.TutorOfferBannerView.as_view(), name="tutor_offer_banner"),
+    path("ui-notice/dismiss/", storefront_api.UiNoticeDismissView.as_view(), name="ui_notice_dismiss"),
     path("r50/pricing-me/", r50_api.PricingMeView.as_view(), name="r50_pricing_me"),
     path("r50/trial/start/", r50_api.TrialStartView.as_view(), name="r50_trial_start"),
     path("r50/pay/<str:token>/", r50_api.pay_link_view, name="r50_pay_link"),

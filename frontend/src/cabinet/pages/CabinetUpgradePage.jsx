@@ -25,6 +25,7 @@ import TariffUsageBlock from "../components/TariffUsageBlock";
 import { openSupport } from "../support";
 import { buildPlanHighlights, formatStorageLabel, yearSavingsText } from "../../utils/planHighlights";
 import { trackValueGoal } from "../../utils/valuePath";
+import { readPromoCode, savePromoCode } from "../visitContext";
 
 function isLocalFrontendHost() {
   const host = window.location.hostname;
@@ -1150,7 +1151,10 @@ export default function CabinetUpgradePage() {
   const [period, setPeriod] = useState("month");
   const [selectedSlug, setSelectedSlug] = useState(null);
   const [autoRenewConsent, setAutoRenewConsent] = useState(false);
-  const [promoInput, setPromoInput] = useState("");
+  const [promoInput, setPromoInput] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return (new URLSearchParams(window.location.search).get("promo") || "").trim() || readPromoCode();
+  });
   const [promoState, setPromoState] = useState(null);
   const [promoLoading, setPromoLoading] = useState(false);
   const [compareOpen, setCompareOpen] = useState(false);
@@ -1180,6 +1184,37 @@ export default function CabinetUpgradePage() {
     if (qp === "year" || qp === "month") setPeriod(qp);
     const planQp = searchParams.get("plan");
     if (planQp) setSelectedSlug(planQp);
+  }, [searchParams]);
+
+  useEffect(() => {
+    const fromUrl = (searchParams.get("promo") || "").trim();
+    const code = fromUrl || readPromoCode();
+    if (!code) return undefined;
+    let cancelled = false;
+    validatePromoCode(
+      code,
+      searchParams.get("plan") || null,
+      searchParams.get("period") || "month",
+    ).then((data) => {
+      if (cancelled) return;
+      setPromoInput(data.code || code);
+      setPromoState({
+        valid: true,
+        ...data,
+        message: formatPromoAppliedMessage(data),
+      });
+      savePromoCode(data.code || code);
+    }).catch((err) => {
+      if (!cancelled) {
+        setPromoState({
+          valid: false,
+          message: err?.data?.message || err?.data?.detail || "Промокод не найден",
+        });
+      }
+    }).finally(() => {
+      if (!cancelled) setPromoLoading(false);
+    });
+    return () => { cancelled = true; };
   }, [searchParams]);
 
   useEffect(() => {

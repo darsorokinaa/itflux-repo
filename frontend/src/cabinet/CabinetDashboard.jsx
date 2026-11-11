@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useOutletContext } from "react-router-dom";
+import { Link, useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
 import { displayName } from "../pages/CabinetAuthPage";
 import { mapApiStudent } from "./cabinetMappers";
 import { CabinetEmptyState } from "./CabinetSectionUi";
@@ -7,6 +7,7 @@ import CabinetIcon from "./CabinetIcons";
 import CabinetModal from "./components/CabinetModal";
 import HomeworkAssignModal from "./components/HomeworkAssignModal";
 import TeacherOnboardingCard from "./components/TeacherOnboardingCard";
+import PremiumTrialBanner from "./components/PremiumTrialBanner";
 import LessonPreviewModal from "../components/LessonPreviewModal";
 import SavedTimeDetails from "../components/SavedTimeDetails";
 import InterestingPreviewModal from "../components/InterestingPreviewModal";
@@ -661,6 +662,8 @@ function DashboardSkeleton() {
 export default function CabinetDashboard() {
   const { user, usageItems, subscriptionLoading } = useOutletContext();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [checklistHidden, setChecklistHidden] = useState(false);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -704,6 +707,18 @@ export default function CabinetDashboard() {
       setAssignLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (searchParams.get("assign") !== "1") return undefined;
+    const next = new URLSearchParams(searchParams);
+    next.delete("assign");
+    const timer = window.setTimeout(() => {
+      setSearchParams(next, { replace: true });
+      openHomeworkAssign();
+    }, 0);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const confirmStudentPick = () => {
     const student = pickerStudents.find((s) => s.id === pickerValue);
@@ -898,7 +913,13 @@ export default function CabinetDashboard() {
           <p className="td-night" role="status">Рекомендуем отдохнуть! Встретимся завтра!</p>
         ) : null}
 
-        {onboardingVisible ? <TeacherOnboardingCard onboarding={onboarding} /> : null}
+        <PremiumTrialBanner />
+        {onboardingVisible && !checklistHidden ? (
+          <TeacherOnboardingCard
+            onboarding={onboarding}
+            onDismissed={() => setChecklistHidden(true)}
+          />
+        ) : null}
 
         <div className="td-grid">
             {nextEvent ? (
@@ -1085,8 +1106,23 @@ export default function CabinetDashboard() {
               {shownReviews.length === 0 ? (
                 <div className="td-empty">
                   <CabinetIcon name="check" />
-                  <b>Всё проверено</b>
-                  Новых работ пока нет.
+                  {(data?.active_students_count || 0) > 0 ? (
+                    <>
+                      <b>Заданий пока нет</b>
+                      Выдайте вариант или домашнее задание — ответ ученика появится здесь.
+                      <button type="button" className="td-button td-button-primary" onClick={() => openHomeworkAssign()}>
+                        Выдать задание
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <b>Учеников пока нет</b>
+                      Добавьте ученика, чтобы выдать первое задание.
+                      <Link to="/cabinet/students?invite=1" className="td-button td-button-primary">
+                        Добавить ученика
+                      </Link>
+                    </>
+                  )}
                 </div>
               ) : (
                 <div className="td-works__list">

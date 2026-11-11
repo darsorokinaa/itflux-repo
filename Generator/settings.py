@@ -635,3 +635,18 @@ TIMEWEB_AI_GATEWAY_KEY = (os.environ.get("TIMEWEB_AI_GATEWAY_KEY") or "").strip(
 TIMEWEB_AI_GATEWAY_BASE = (os.environ.get("TIMEWEB_AI_GATEWAY_BASE") or "https://api.timeweb.ai/v1").strip().rstrip("/")
 TIMEWEB_AI_TEXT_MODEL = (os.environ.get("TIMEWEB_AI_TEXT_MODEL") or "").strip()
 TIMEWEB_AI_IMAGE_MODEL = (os.environ.get("TIMEWEB_AI_IMAGE_MODEL") or "").strip()
+
+# Почта платформы: пароль, подтверждение, уведомления. Веб-процесс читает
+# именно этот модуль. manage.py подставляет каталог Generator/ первым и
+# поэтому берёт Generator/Generator/settings.py — там тот же блок.
+EMAIL_BACKEND = (os.environ.get("EMAIL_BACKEND") or "django.core.mail.backends.smtp.EmailBackend").strip()
+EMAIL_HOST = (os.environ.get("EMAIL_HOST") or "smtp.yandex.ru").strip()
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT") or "465")
+EMAIL_USE_SSL = (os.environ.get("EMAIL_USE_SSL") or "true").strip().lower() in ("1", "true", "yes", "on")
+EMAIL_USE_TLS = (os.environ.get("EMAIL_USE_TLS") or "false").strip().lower() in ("1", "true", "yes", "on")
+EMAIL_HOST_USER = (os.environ.get("EMAIL_HOST_USER") or "").strip()
+EMAIL_HOST_PASSWORD = (os.environ.get("EMAIL_HOST_PASSWORD") or "").strip()
+DEFAULT_FROM_EMAIL = (
+    os.environ.get("DEFAULT_FROM_EMAIL") or EMAIL_HOST_USER or "itflux.academy@yandex.ru"
+).strip()
+SERVER_EMAIL = (os.environ.get("SERVER_EMAIL") or DEFAULT_FROM_EMAIL).strip()

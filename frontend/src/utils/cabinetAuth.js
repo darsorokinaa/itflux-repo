@@ -1,5 +1,6 @@
 import { getAppVersion } from "./appVersion";
 import { markBootAuthEnd, markBootAuthStart } from "./bootTrace";
+import { readAcquisition } from "../cabinet/visitContext";
 
 function apiBase() {
   return "/api/cabinet";
@@ -2000,6 +2001,7 @@ export function previewPlanChange(planSlug, billingPeriod = "month") {
 }
 
 export function createPayment(planSlug, billingPeriod = "month", promoCode = null, idempotencyKey = null, promotionId = null, autoRenew = null) {
+  const acquisition = readAcquisition();
   return cabinetFetch("/subscription/create-payment/", {
     method: "POST",
     body: JSON.stringify({
@@ -2008,12 +2010,28 @@ export function createPayment(planSlug, billingPeriod = "month", promoCode = nul
       promo_code: promoCode || undefined,
       idempotency_key: idempotencyKey || undefined,
       promotion_id: promotionId || undefined,
+      utm_source: acquisition.utm_source || undefined,
+      utm_medium: acquisition.utm_medium || undefined,
+      utm_campaign: acquisition.utm_campaign || undefined,
+      utm_content: acquisition.utm_content || undefined,
+      ref: acquisition.ref || undefined,
       // r61: согласие на автопродление (отдельная галочка). Без него — разовая оплата без привязки карты.
       auto_renew: autoRenew?.autoRenew ? true : undefined,
       auto_renew_consent_text: autoRenew?.autoRenew ? autoRenew.consentText : undefined,
       auto_renew_consent_version: autoRenew?.autoRenew ? autoRenew.consentVersion : undefined,
     }),
   });
+}
+
+export function dismissUiNotice(key) {
+  return cabinetFetch("/ui-notice/dismiss/", {
+    method: "POST",
+    body: JSON.stringify({ key }),
+  });
+}
+
+export function fetchTutorOffer() {
+  return cabinetFetch("/tutor-offer/");
 }
 
 export function fetchSubscriptionPayment(paymentId, { sync = false } = {}) {

@@ -577,6 +577,12 @@ ERROR_REPORT_NOTIFY_EMAIL = os.environ.get(
     'itflux.academy@yandex.ru',
 ).strip()
 
+# Почта платформы. Тот же блок есть в Generator/settings.py: веб-процесс
+# (gunicorn/daphne из корня репозитория) грузит его, а manage.py — этот файл.
+EMAIL_BACKEND = os.environ.get(
+    'EMAIL_BACKEND',
+    'django.core.mail.backends.smtp.EmailBackend',
+).strip()
 EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.yandex.ru').strip()
 EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '465'))
 EMAIL_USE_SSL = os.environ.get('EMAIL_USE_SSL', 'true').lower() in (
@@ -591,6 +597,7 @@ DEFAULT_FROM_EMAIL = os.environ.get(
     'DEFAULT_FROM_EMAIL',
     EMAIL_HOST_USER or ERROR_REPORT_NOTIFY_EMAIL,
 ).strip()
+SERVER_EMAIL = os.environ.get('SERVER_EMAIL', DEFAULT_FROM_EMAIL).strip()
 
 # —— HTTPS / cookies (прод, DEBUG=false): редирект HTTP→HTTPS обычно в nginx; Django может дублировать — осторожно с петлёй.
 if not DEBUG:

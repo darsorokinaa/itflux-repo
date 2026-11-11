@@ -92,45 +92,10 @@ export async function trackActivationIntent(eventName, {
   }
 }
 
-export const ACQUISITION_STORAGE_KEY = "cabinet_acquisition";
-
-export function captureAcquisition({ search = "", referrer = "" } = {}) {
-  const params = new URLSearchParams(search || "");
-  const payload = {
-    utm_source: (params.get("utm_source") || "").trim().slice(0, 32),
-    utm_medium: (params.get("utm_medium") || "").trim().slice(0, 32),
-    utm_campaign: (params.get("utm_campaign") || "").trim().slice(0, 64),
-    referrer: String(referrer || "").slice(0, 200),
-  };
-  const hasSignal = Boolean(
-    payload.utm_source || payload.utm_medium || payload.utm_campaign || payload.referrer,
-  );
-  if (!hasSignal || typeof window === "undefined") return payload;
-  try {
-    if (!window.sessionStorage.getItem(ACQUISITION_STORAGE_KEY)) {
-      window.sessionStorage.setItem(ACQUISITION_STORAGE_KEY, JSON.stringify(payload));
-    }
-  } catch {
-    /* ignore */
-  }
-  return payload;
-}
-
-export function readAcquisition() {
-  if (typeof window === "undefined") {
-    return { utm_source: "", utm_medium: "", utm_campaign: "", referrer: "" };
-  }
-  try {
-    const raw = window.sessionStorage.getItem(ACQUISITION_STORAGE_KEY);
-    if (!raw) return { utm_source: "", utm_medium: "", utm_campaign: "", referrer: "" };
-    const parsed = JSON.parse(raw);
-    return {
-      utm_source: String(parsed.utm_source || "").slice(0, 32),
-      utm_medium: String(parsed.utm_medium || "").slice(0, 32),
-      utm_campaign: String(parsed.utm_campaign || "").slice(0, 64),
-      referrer: String(parsed.referrer || "").slice(0, 200),
-    };
-  } catch {
-    return { utm_source: "", utm_medium: "", utm_campaign: "", referrer: "" };
-  }
-}
+export {
+  ACQUISITION_STORAGE_KEY,
+  captureAcquisition,
+  readAcquisition,
+  readPromoCode,
+  savePromoCode,
+} from "./visitContext";

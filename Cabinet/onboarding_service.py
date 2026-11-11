@@ -1,19 +1,26 @@
 """
 Activation / onboarding state for teachers.
 
-Computed from existing Cabinet tables. No progress rows, no extra flags.
-Visible checklist: add student → send invite → create lesson.
-Hidden once the teacher has a real schedule event.
+Computed from existing Cabinet tables. The visible checklist is the first day
+until a result: add a student, give a variant or homework, send the link.
+It hides when those three steps are done or the teacher dismisses it.
 """
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from django.contrib.auth.models import User
 from django.db.models import Q
+from django.utils import timezone
 
-from .choices import HomeworkStatus, InvitationStatus, StudentStatus, StudentSubjectStatus
+from .choices import (
+    HomeworkStatus,
+    InvitationStatus,
+    StudentStatus,
+    StudentSubjectStatus,
+)
 from .journal_models import JournalStatus, LessonJournal
 from .models import (
     Homework,
@@ -28,15 +35,31 @@ from .models import (
 )
 
 ACTIVATION_STEP_KEYS = (
-    "student",
     "invite",
-    "schedule",
+    "accepted",
+    "homework",
 )
+
+FIRST_DAY_WINDOW = timedelta(days=14)
+
+ADD_STUDENT_LABEL = "Добавить ученика"
+HOMEWORK_STEP_LABEL = "Выдайте первое ДЗ"
+
+_INVITE_CTA = {
+    "label": ADD_STUDENT_LABEL,
+    "href": "/cabinet/students?invite=1",
+    "hint": "Карточки недостаточно: шаг закроется, когда ученик примет приглашение.",
+    "title": "Пригласите ученика",
+}
 
 STEP_LABELS = {
     "registered": "Зарегистрироваться",
-    "student": "Добавить ученика",
-    "invite": "Отправить приглашение",
+    "student": ADD_STUDENT_LABEL,
+    "invite": "Отправьте приглашение",
+    "accepted": "Ученик принял приглашение",
+    "homework": HOMEWORK_STEP_LABEL,
+    "assignment": "Выдать первый вариант или домашнее задание",
+    "share": "Отправить ученику ссылку",
     "schedule": "Создать занятие",
     "subject": "Добавить предмет",
     "materials": "Подготовить материалы",
@@ -44,27 +67,23 @@ STEP_LABELS = {
 }
 
 CTA_BY_STEP = {
-    "student": {
-        "label": "Добавить ученика",
-        "href": "/cabinet/students?invite=1",
-        "hint": "Это займёт пару минут. Занятие можно поставить сразу — ждать входа ученика не нужно.",
-        "title": "Добавьте первого ученика",
-    },
-    "invite": {
-        "label": "Отправить приглашение",
+    "student": _INVITE_CTA,
+    "invite": _INVITE_CTA,
+    "accepted": {
+        "label": "Открыть приглашения",
         "href": "/cabinet/students?tab=invites",
-        "hint": "Скопируйте ссылку и отправьте ученику. После входа он появится в списке как подключённый.",
-        "title": "Ученик добавлен. Теперь отправьте приглашение",
+        "hint": "Ученик должен открыть ссылку и создать аккаунт. Пока приглашение не принято, ДЗ ему не выдать.",
+        "title": "Дождитесь, пока ученик примет приглашение",
     },
-    "schedule": {
-        "label": "Создать занятие",
-        "href": "/cabinet/schedule",
-        "hint": "Первое занятие можно поставить в календарь сразу после подключения ученика.",
-        "title": "Создайте первое занятие",
+    "homework": {
+        "label": HOMEWORK_STEP_LABEL,
+        "href": "/cabinet?assign=1",
+        "hint": "Ученик уже в кабинете. Выдайте первое домашнее задание — это первый результат.",
+        "title": HOMEWORK_STEP_LABEL,
     },
 }
 
-ONBOARDING_UX_VERSION = 2
+ONBOARDING_UX_VERSION = 3
 
 _ACTIVE_EVENT_STATUSES = (
     ScheduleEvent.Status.PLANNED,
@@ -170,12 +189,10 @@ def teacher_has_conducted_lesson(teacher: User) -> bool:
         actual_finished_at__isnull=False,
     ).exists():
         return True
-    if LessonJournal.objects.filter(
+    return LessonJournal.objects.filter(
         teacher=teacher,
         status=JournalStatus.COMPLETED,
-    ).exists():
-        return True
-    return False
+    ).exists()
 
 
 def teacher_has_started_video_lesson(teacher: User) -> bool:
@@ -193,8 +210,8 @@ def teacher_has_assigned_homework(teacher: User) -> bool:
 
 
 def teacher_has_homework_submission(teacher: User) -> bool:
-    from .models import HomeworkSubmission
     from .choices import SubmissionStatus
+    from .models import HomeworkSubmission
 
     return HomeworkSubmission.objects.filter(
         homework__teacher=teacher,
@@ -241,6 +258,55 @@ def teacher_has_pending_invite(teacher: User) -> bool:
     ).exists()
 
 
+def teacher_has_given_work(teacher: User) -> bool:
+    """Первое ДЗ: выданное домашнее задание, не черновик и не только вариант."""
+    return teacher_has_assigned_homework(teacher)
+
+
+def teacher_invitation_accepted(teacher: User) -> bool:
+    """Шаг засчитан только после принятого приглашения или ученика с аккаунтом."""
+    if teacher_has_connected_student(teacher):
+        return True
+    return StudentInvitation.objects.filter(
+        teacher=teacher,
+        status=InvitationStatus.ACCEPTED,
+    ).exists()
+
+
+def teacher_invitation_sent(teacher: User) -> bool:
+    if teacher_invitation_accepted(teacher):
+        return True
+    return StudentInvitation.objects.filter(
+        teacher=teacher,
+        status=InvitationStatus.PENDING,
+    ).exists()
+
+
+def teacher_has_shared_access(teacher: User) -> bool:
+    if teacher_has_connected_student(teacher):
+        return True
+    return StudentInvitation.objects.filter(teacher=teacher).exclude(
+        status=InvitationStatus.CANCELLED,
+    ).exists()
+
+
+def checklist_dismissed(teacher: User) -> bool:
+    from .storefront_models import TeacherUiDismissal
+
+    return TeacherUiDismissal.objects.filter(
+        user=teacher,
+        notice_key=TeacherUiDismissal.FIRST_DAY_CHECKLIST,
+    ).exists()
+
+
+def _checklist_audience(teacher: User, *, has_student: bool, has_assignment: bool) -> bool:
+    """Новые учителя и те, кто ещё не добавил ни ученика, ни задания."""
+    joined = getattr(teacher, "date_joined", None)
+    recent = bool(joined and joined >= timezone.now() - FIRST_DAY_WINDOW)
+    never_started = not has_student and not has_assignment
+    return recent or never_started
+
+
 def _href_with_student(base: str, student_id: int | None) -> str:
     if not student_id:
         return base
@@ -265,7 +331,8 @@ def _href_with_event(base: str, event_id: int | None, *, prepare: bool = False) 
 def build_teacher_onboarding_state(teacher: User) -> dict[str, Any]:
     """Return a JSON-safe payload for the teacher cabinet home.
 
-    State is derived from the database, not from a stored frontend flag.
+    The three visible steps come from the database. Dismissal is the only
+    stored flag, and it only hides the card.
     """
     has_student = teacher_has_student(teacher)
     has_connected = teacher_has_connected_student(teacher)
@@ -274,28 +341,42 @@ def build_teacher_onboarding_state(teacher: User) -> dict[str, Any]:
     has_event = teacher_has_schedule_event(teacher)
     has_materials = teacher_has_lesson_materials(teacher)
     has_conducted = teacher_has_conducted_lesson(teacher)
+    has_assignment = teacher_has_given_work(teacher)
+    has_share = teacher_has_shared_access(teacher)
+    invite_sent = teacher_invitation_sent(teacher)
+    invite_accepted = teacher_invitation_accepted(teacher)
+    dismissed = checklist_dismissed(teacher)
 
     flags = {
         "registered": True,
-        "student": has_student,
-        "invite": has_connected,
+        "student": invite_accepted,
+        "invite": invite_sent,
+        "accepted": invite_accepted,
+        "homework": has_assignment,
+        "assignment": has_assignment,
+        "share": has_share,
         "schedule": has_event,
         "subject": has_subject,
         "materials": has_materials,
         "conduct": has_conducted,
     }
 
-    if has_event:
-        next_key = None
-    elif not has_student:
-        next_key = "student"
-    elif not has_connected:
+    if not invite_accepted and not invite_sent:
         next_key = "invite"
+    elif not invite_accepted:
+        next_key = "accepted"
+    elif not has_assignment:
+        next_key = "homework"
     else:
-        next_key = "schedule"
+        next_key = None
 
     activation_done = sum(1 for key in ACTIVATION_STEP_KEYS if flags[key])
-    visible = next_key is not None
+    in_audience = _checklist_audience(
+        teacher,
+        has_student=has_student,
+        has_assignment=has_assignment,
+    )
+    visible = bool(in_audience and not dismissed and next_key is not None)
 
     student_id = _first_student_id(teacher) if has_student else None
     event_id = _first_event_id(teacher) if has_event else None
@@ -303,33 +384,23 @@ def build_teacher_onboarding_state(teacher: User) -> dict[str, Any]:
     cta = None
     if next_key:
         spec = dict(CTA_BY_STEP[next_key])
-        href = spec["href"]
-        if next_key == "invite" and not has_pending_invite:
-            href = "/cabinet/students?invite=1"
-        elif next_key == "schedule":
-            href = _href_with_student("/cabinet/schedule", student_id)
-        spec["href"] = href
+        if next_key == "share" and has_pending_invite:
+            spec["href"] = "/cabinet/students?tab=invites"
         spec["step"] = next_key
         cta = spec
 
     steps = [
-        {
-            "key": "registered",
-            "label": STEP_LABELS["registered"],
-            "done": True,
-        }
-    ]
-    steps.extend(
         {
             "key": key,
             "label": STEP_LABELS[key],
             "done": flags[key],
         }
         for key in ACTIVATION_STEP_KEYS
-    )
+    ]
 
     return {
         "visible": visible,
+        "dismissed": dismissed,
         "completed_steps": activation_done,
         "total_steps": len(ACTIVATION_STEP_KEYS),
         "next_step": next_key,
@@ -338,6 +409,10 @@ def build_teacher_onboarding_state(teacher: User) -> dict[str, Any]:
         "ux_version": ONBOARDING_UX_VERSION,
         "flags": {
             "has_student": has_student,
+            "has_assignment": has_assignment,
+            "invitation_sent": invite_sent,
+            "invitation_accepted": invite_accepted,
+            "has_shared_access": has_share,
             "has_connected_student": has_connected,
             "has_pending_invite": has_pending_invite,
             "has_subject": has_subject,

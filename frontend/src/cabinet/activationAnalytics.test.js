@@ -9,6 +9,7 @@ import {
 describe("activationAnalytics", () => {
   beforeEach(() => {
     sessionStorage.clear();
+    localStorage.clear();
     document.cookie = "csrftoken=test-csrf";
     vi.restoreAllMocks();
   });
@@ -28,11 +29,17 @@ describe("activationAnalytics", () => {
   });
 
   it("captures utm without overwriting an existing source", () => {
-    captureAcquisition({ search: "?utm_source=vk&utm_campaign=spring", referrer: "https://vk.com/" });
+    captureAcquisition({
+      search: "?utm_source=vk&utm_campaign=potok1110&utm_content=post608&ref=608",
+      referrer: "https://vk.com/",
+    });
     captureAcquisition({ search: "?utm_source=google", referrer: "https://google.com/" });
     const stored = readAcquisition();
     expect(stored.utm_source).toBe("vk");
-    expect(stored.utm_campaign).toBe("spring");
+    expect(stored.utm_campaign).toBe("potok1110");
+    expect(stored.utm_content).toBe("post608");
+    expect(stored.ref).toBe("608");
+    expect(localStorage.getItem("cabinet_acquisition")).toContain("post608");
   });
 
   it("lists only intent event names", () => {

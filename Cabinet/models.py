@@ -115,6 +115,12 @@ class Profile(models.Model):
     )
     acquisition_medium = models.CharField("Acquisition medium", max_length=32, blank=True, default="")
     acquisition_campaign = models.CharField("Acquisition campaign", max_length=64, blank=True, default="")
+    acquisition_touch = models.JSONField(
+        "Первый источник (utm/ref)",
+        default=dict,
+        blank=True,
+        help_text="utm_source, utm_medium, utm_campaign, utm_content, ref. Без почты и полного URL.",
+    )
     created_at = models.DateTimeField("Создан", auto_now_add=True, null=True)
     updated_at = models.DateTimeField("Обновлён", auto_now=True, null=True)
 
@@ -5616,6 +5622,7 @@ from .student_library_folder_models import (  # noqa: E402
 # ── Аннотации поверх демонстрации экрана ──────────────────────────────────────
 from .meeting_screenshare_models import MeetingScreenShareSession  # noqa: E402, F401
 from .activation_models import ActivationEvent  # noqa: E402, F401
+from .storefront_models import StorefrontEvent, TeacherUiDismissal  # noqa: E402, F401
 
 from .availability_models import (  # noqa: E402
     TeacherAvailability,

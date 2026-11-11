@@ -624,6 +624,9 @@ export default function CabinetReviewPage() {
             icon="check"
             title={emptyCopy.title}
             text={emptyCopy.text}
+            actions={works.length === 0 && !studentName && !searchQuery && !subjectScope ? [
+              { label: "Выдать задание", primary: true, href: "/cabinet?assign=1" },
+            ] : []}
           />
         ) : (
           <div className={`cb-review-inbox${refreshing ? " is-refreshing" : ""}`}>
@@ -694,6 +697,9 @@ export default function CabinetReviewPage() {
           icon="check"
           title={emptyCopy.title}
           text={emptyCopy.text}
+          actions={works.length === 0 && !studentName && !searchQuery && !subjectScope ? [
+            { label: "Выдать задание", primary: true, href: "/cabinet?assign=1" },
+          ] : []}
         />
       ) : (
         <ReviewWorksGrid
