@@ -197,6 +197,10 @@
   line-height: 1.6;
 }
 
+html.seasonal-theme-active.seasonal-dark-bg .lcol-description {
+  color: var(--on-page-text);
+}
+
 .lcol-filters,
 .lcol-kind {
   display: flex;
@@ -289,13 +293,24 @@
 }
 
 .lcol-lessons > .lcol-row:last-child,
-.lcol-lessons > .lcol-row:last-child .lcol-row__button {
+.lcol-lessons > .lcol-row-lock:last-child .lcol-row {
   border-bottom: 0;
 }
 
+/* Обёртка замка не является сеткой. Иначе кнопка попадает в колонку 28px
+   и описание схлопывается в одно слово на строку — у урока, файла и варианта. */
+.lcol-row-lock {
+  display: block;
+  position: relative;
+  min-width: 0;
+  background: #fff;
+}
+
 .lcol-row--locked {
-  padding: 0;
-  background: #fbfcff;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  background: #fff;
 }
 
 .lcol-row--current {
@@ -307,8 +322,7 @@
   background: #f8faff;
 }
 
-.lcol-row--cover:not(.lcol-row--locked),
-.lcol-row--cover .lcol-row__button {
+.lcol-row--cover {
   grid-template-columns: 72px 28px 40px minmax(0, 1fr) auto;
 }
 
@@ -332,6 +346,7 @@
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  width: 100%;
 }
 
 .lcol-row__title {
@@ -339,6 +354,9 @@
   font-size: 16px;
   font-weight: 700;
   line-height: 1.35;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .lcol-row__desc,
@@ -346,6 +364,9 @@
   color: var(--text-sub);
   font-size: 14px;
   line-height: 1.4;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .lcol-row__side {
@@ -722,8 +743,7 @@
     grid-template-columns: 24px 32px minmax(0, 1fr);
   }
 
-  .lcol-row--cover:not(.lcol-row--locked),
-  .lcol-row--cover .lcol-row__button {
+  .lcol-row--cover {
     grid-template-columns: 56px 24px 32px minmax(0, 1fr);
   }
 
@@ -759,6 +779,29 @@
   .lcol-nav__all {
     grid-column: 1 / -1;
   }
+}
+
+@media (max-width: 480px) {
+  .lcol-row__main {
+    grid-column: 1 / -1;
+  }
+
+  .lcol-row__side,
+  .lcol-row--cover .lcol-row__side {
+    justify-self: end;
+  }
+}
+
+/* Сезонная тема делает холст прозрачным. Карточки набора остаются белыми. */
+html.seasonal-theme-active .lcol-top,
+html.seasonal-theme-active .lcol-lessons,
+html.seasonal-theme-active .lcol-card,
+html.seasonal-theme-active .lcol-row,
+html.seasonal-theme-active .lcol-row-lock,
+html.seasonal-theme-active .lcol-row__button {
+  background-color: #fff;
+  background-image: none;
+  color: #1f2328;
 }
 
 @media (prefers-reduced-motion: reduce) {

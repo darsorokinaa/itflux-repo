@@ -25,6 +25,12 @@ import { purchaseReadyLesson, fetchStudents, fetchScheduleEvents } from "../util
 import { pickTryNowLessons, readRecentLessons } from "../utils/recentLessons";
 import { mapApiStudent } from "../cabinet/cabinetMappers";
 import { trackValueGoal } from "../utils/valuePath";
+import {
+  catalogFoundCount,
+  catalogShowsCollections,
+  collectCatalogFilterOptions,
+  filterCollections,
+} from "./lessonCatalogFilters";
 import "../styles/material-access.css";
 import "./lesson-collections.css";
 
@@ -438,31 +444,13 @@ export default function ReadyLessonsPage() {
     trackValueGoal("lesson_catalog_opened");
   }, []);
 
-  const subjectOptions = useMemo(() => {
-    const values = new Set();
-    for (const lesson of lessons) {
-      if (lesson.subject) values.add(lesson.subject);
-    }
-    return Array.from(values).sort((a, b) => a.localeCompare(b, "ru"));
-  }, [lessons]);
-
-  const levelOptions = useMemo(() => {
-    const values = new Set();
-    for (const lesson of lessons) {
-      const exam = lessonExamLabel(lesson);
-      if (exam) values.add(exam);
-      if (lesson.level) values.add(lesson.level);
-    }
-    return Array.from(values).sort((a, b) => a.localeCompare(b, "ru"));
-  }, [lessons]);
-
-  const gradeOptions = useMemo(() => {
-    const values = new Set();
-    for (const lesson of lessons) {
-      if (lesson.grade) values.add(String(lesson.grade));
-    }
-    return Array.from(values).sort((a, b) => Number(a) - Number(b));
-  }, [lessons]);
+  const catalogOptions = useMemo(
+    () => collectCatalogFilterOptions(lessons, collections),
+    [lessons, collections],
+  );
+  const subjectOptions = catalogOptions.subjects;
+  const levelOptions = catalogOptions.levels;
+  const gradeOptions = catalogOptions.grades;
 
   const taskNumberOptions = useMemo(() => {
     const values = new Set();
@@ -508,15 +496,11 @@ export default function ReadyLessonsPage() {
     });
   }, [lessons, search, subject, level, topic, grade, taskNumber, durationFilter, difficulty]);
 
-  const filteredCollections = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return collections.filter((item) => {
-      if (subject && item.subject !== subject) return false;
-      if (grade && String(item.grade || "") !== grade) return false;
-      if (!q) return true;
-      return [item.title, item.short_description, item.subject].filter(Boolean).join(" ").toLowerCase().includes(q);
-    });
-  }, [collections, search, subject, grade]);
+  const filteredCollections = useMemo(
+    () => filterCollections(collections, { search, subject, grade, level }),
+    [collections, search, subject, grade, level],
+  );
+  const showCollections = catalogShowsCollections(catalogKind);
 
   const setCatalogKind = (kind) => {
     const next = new URLSearchParams(searchParams);
@@ -791,7 +775,7 @@ export default function ReadyLessonsPage() {
             <header className="lessons-library-v3__head">
               <h2 className="lessons-library-v3__title">Каталог</h2>
               <p className="lessons-library-v3__meta">
-                Найдено: <strong>{(catalogKind === "collections" ? 0 : filteredLessons.length) + (catalogKind === "lessons" ? 0 : filteredCollections.length)}</strong>
+                Найдено: <strong>{catalogFoundCount(catalogKind, filteredLessons.length, filteredCollections.length)}</strong>
               </p>
             </header>
             <div className="lcol-kind" role="tablist" aria-label="Тип материалов">
@@ -811,7 +795,7 @@ export default function ReadyLessonsPage() {
                 </button>
               ))}
             </div>
-            {catalogKind !== "lessons" && filteredCollections.length ? (
+            {showCollections && filteredCollections.length ? (
               <div className="lessons-library-v3__grid lcol-catalog-grid">
                 {filteredCollections.map((item) => {
                   const theme = getSubjectTheme(item.subject);
@@ -836,7 +820,7 @@ export default function ReadyLessonsPage() {
                   </button>
                 }
               />
-            ) : catalogKind === "collections" ? (
+            ) : showCollections ? (
               filteredCollections.length === 0 ? (
                 <StateView variant="empty" title="Пока нет наборов" description="Опубликованные наборы появятся здесь." />
               ) : null

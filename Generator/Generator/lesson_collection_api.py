@@ -179,6 +179,9 @@ def _item_title(target, kind):
     if target is None:
         return ""
     if kind == "variant":
+        stored = (getattr(target, "title", "") or "").strip()
+        if stored:
+            return stored
         number = target.local_number or target.pk
         return f"Вариант №{number}"
     return getattr(target, "title", "") or ""

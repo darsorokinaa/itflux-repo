@@ -1,10 +1,11 @@
 import { Link } from "react-router-dom";
-import { collectionMetaLine, formatDuration, lessonsLabel } from "./collectionFormat";
+import { collectionItemCount, collectionMetaLine, formatDuration, materialsLabel } from "./collectionFormat";
 
 export default function CollectionHeader({ collection }) {
   const meta = collectionMetaLine(collection);
+  const count = collectionItemCount(collection);
   const facts = [
-    collection?.lessons_count ? `${collection.lessons_count} ${lessonsLabel(collection.lessons_count)}` : null,
+    count ? `${count} ${materialsLabel(count)}` : null,
     formatDuration(collection?.duration_minutes),
     collection?.author ? collection.author : null,
   ].filter(Boolean);
