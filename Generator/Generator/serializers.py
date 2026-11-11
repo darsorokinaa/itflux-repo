@@ -34,6 +34,18 @@ class CatalogAccessMixin:
                 data["archive_url"] = None
             return data
 
+        if instance._meta.model_name == "interestingitem":
+            from Cabinet.interesting_access import InterestingAccessService
+
+            access = InterestingAccessService.get_access(user, instance)
+            data["access"] = access
+            if not access.get("is_full"):
+                data["file_url"] = None
+                data["archive_url"] = None
+            if not access.get("can_view"):
+                data["locked"] = True
+            return data
+
         gate = SubscriptionAccessService.serialize_access_gate(user, instance)
         data["access"] = gate
         if not gate["allowed"]:

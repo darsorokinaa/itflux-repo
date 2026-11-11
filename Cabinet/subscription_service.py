@@ -339,14 +339,22 @@ class PromoCodeError(Exception):
 class PromoCodeService:
 
     @staticmethod
-    def validate(teacher: User, code_str: str, plan_slug: Optional[str] = None, billing_period: Optional[str] = None):
+    def validate(
+        teacher: User,
+        code_str: str,
+        plan_slug: Optional[str] = None,
+        billing_period: Optional[str] = None,
+        product_type: str = "subscription",
+        ledger_student=None,
+    ):
         """
-        Проверяет промокод для учителя. Не применяет — только валидирует.
-        Возвращает объект PromoCode или выбрасывает PromoCodeError.
+        Проверяет промокод. Не применяет — только валидирует.
+        product_type: subscription | lesson | collection | interesting | teacher_ledger.
         """
         from django.utils import timezone as tz
 
         from .models import PromoCode, PromoCodeUsage
+        from .pricing_service import promo_allows_product
 
         try:
             promo = PromoCode.objects.get(code__iexact=code_str.strip())
@@ -371,16 +379,28 @@ class PromoCodeService:
             if int(promo.uses_count or 0) + reserved >= promo.max_uses:
                 raise PromoCodeError("PROMO_LIMIT", "Промокод уже использован.")
 
-        user_uses = PromoCodeUsage.objects.filter(
+        usage_qs = PromoCodeUsage.objects.filter(
             promo_code=promo,
-            teacher=teacher,
             status__in=[
                 PromoCodeUsage.Status.APPLIED,
                 PromoCodeUsage.Status.RESERVED,
             ],
-        ).count()
-        if user_uses >= promo.max_uses_per_user:
+        )
+        if product_type == "teacher_ledger" and ledger_student is not None:
+            usage_qs = usage_qs.filter(ledger_student=ledger_student)
+        else:
+            usage_qs = usage_qs.filter(teacher=teacher)
+        if usage_qs.count() >= promo.max_uses_per_user:
             raise PromoCodeError("PROMO_ALREADY_USED", "Промокод уже использован.")
+
+        if not promo_allows_product(promo, product_type or "subscription"):
+            raise PromoCodeError(
+                "PROMO_NOT_APPLICABLE",
+                "Промокод не действует для этого продукта.",
+            )
+
+        if (product_type or "subscription") != "subscription":
+            return promo
 
         if plan_slug and promo.applicable_plans.exists():
             if not promo.applicable_plans.filter(slug=plan_slug).exists():
@@ -470,6 +490,53 @@ class PromoCodeService:
             discount_applied=discount_info["discount"],
         )
         return promo, discount_info
+
+    @staticmethod
+    @transaction.atomic
+    def reserve_usage(teacher, promo, payment, discount_applied, *, ledger_student=None):
+        """Резерв промокода на платёж. Счётчик растёт только в confirm_for_payment."""
+        from decimal import Decimal
+
+        from .models import PromoCodeUsage
+
+        if payment is not None:
+            existing = PromoCodeUsage.objects.filter(
+                promo_code=promo,
+                teacher=teacher,
+                payment=payment,
+                status=PromoCodeUsage.Status.RESERVED,
+            ).first()
+            if existing:
+                return existing
+        return PromoCodeUsage.objects.create(
+            promo_code=promo,
+            teacher=teacher,
+            payment=payment,
+            ledger_student=ledger_student,
+            status=PromoCodeUsage.Status.RESERVED,
+            discount_applied=Decimal(str(discount_applied or 0)),
+        )
+
+    @staticmethod
+    @transaction.atomic
+    def apply_without_payment(teacher, promo, discount_applied, *, ledger_student=None):
+        """Сразу фиксирует код без платежа Т-Банка (журнал учителя)."""
+        from decimal import Decimal
+
+        from django.db.models import F
+
+        from .models import PromoCode, PromoCodeUsage
+
+        usage = PromoCodeUsage.objects.create(
+            promo_code=promo,
+            teacher=teacher,
+            payment=None,
+            ledger_student=ledger_student,
+            status=PromoCodeUsage.Status.APPLIED,
+            discount_applied=Decimal(str(discount_applied or 0)),
+        )
+        PromoCode.objects.filter(pk=promo.pk).update(uses_count=F("uses_count") + 1)
+        return usage
 
     @staticmethod
     @transaction.atomic

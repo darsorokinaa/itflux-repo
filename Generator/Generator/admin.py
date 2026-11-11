@@ -807,6 +807,8 @@ class InterestingItemAdmin(AdminStoredFileDownloadMixin, admin.ModelAdmin):
         "title",
         "tag",
         "access_level",
+        "standalone_purchase_enabled",
+        "standalone_price",
         "status",
         "sort_order",
         "views_count",
@@ -814,7 +816,7 @@ class InterestingItemAdmin(AdminStoredFileDownloadMixin, admin.ModelAdmin):
         "stored_files_download",
         "updated_at",
     )
-    list_filter = ("status", "access_level", "tag")
+    list_filter = ("status", "access_level", "standalone_purchase_enabled", "tag")
     search_fields = ("title", "slug", "short_description", "tag")
     prepopulated_fields = {"slug": ("title",)}
     list_editable = ("status", "access_level", "sort_order")
@@ -832,6 +834,16 @@ class InterestingItemAdmin(AdminStoredFileDownloadMixin, admin.ModelAdmin):
                     "status",
                     "access_level",
                     "sort_order",
+                )
+            },
+        ),
+        (
+            "Отдельная покупка",
+            {
+                "fields": (
+                    "standalone_purchase_enabled",
+                    "standalone_price",
+                    "standalone_currency",
                 )
             },
         ),

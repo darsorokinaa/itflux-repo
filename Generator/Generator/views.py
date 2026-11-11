@@ -5384,6 +5384,7 @@ def api_lesson_start_demo(request, slug):
 @require_http_methods(["POST"])
 def api_lesson_purchase(request, slug):
     from Cabinet.lesson_access import AccessDenied, LessonPurchaseService
+    from Cabinet.subscription_service import PromoCodeError
 
     if not getattr(request.user, "is_authenticated", False):
         return JsonResponse({"code": "AUTH_REQUIRED", "message": "Войдите, чтобы купить урок."}, status=401)
@@ -5392,17 +5393,22 @@ def api_lesson_purchase(request, slug):
         payload = json.loads(request.body or b"{}")
     except json.JSONDecodeError:
         payload = {}
+    quote = payload.get("quote") is True or str(payload.get("quote") or "").lower() in ("1", "true", "yes")
     try:
         result = LessonPurchaseService.create_checkout(
             request.user,
             lesson,
             idempotency_key=(payload.get("idempotency_key") or "").strip() or None,
+            promo_code=(payload.get("promo_code") or "").strip() or None,
+            quote_only=quote,
         )
     except AccessDenied as exc:
         return JsonResponse(exc.to_dict(), status=403)
+    except PromoCodeError as exc:
+        return JsonResponse(exc.to_dict(), status=400)
     except (ValueError, NotImplementedError) as exc:
         return JsonResponse({"detail": str(exc), "code": "PAYMENT_UNAVAILABLE"}, status=503)
-    return JsonResponse(result, status=201)
+    return JsonResponse(result, status=200 if quote else 201)
 
 
 @require_http_methods(["GET"])
@@ -5549,23 +5555,28 @@ def _visible_interesting_queryset(request):
 
 
 def _interesting_content_access_denied(request, item):
-    """None если доступ есть; иначе редирект в предпросмотр или JsonResponse 403."""
+    """None если доступ есть (тариф, покупка или живое демо); иначе 403.
+
+    После окончания демо файл и архив закрываются на сервере, не только таймером.
+    """
     if _lesson_viewer_is_teacher_or_admin(request):
         return None
-    from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
+    from Cabinet.interesting_access import InterestingAccessService
+    from Cabinet.subscription_access import AccessDenied
 
     user = request.user if getattr(request.user, "is_authenticated", False) else None
-    try:
-        SubscriptionAccessService.raise_if_cannot_access_content(user, item)
-    except AccessDenied as exc:
-        from Cabinet.lesson_collection_access import LessonCollectionAccess
-
-        if LessonCollectionAccess.grant_for_interesting(user, item) in ("full", "demo"):
-            return None
-        if _is_browser_document_request(request):
-            return _catalog_preview_redirect(f"/interesting?preview={item.slug}")
-        return JsonResponse({"error": exc.to_dict()}, status=403)
-    return None
+    access = InterestingAccessService.get_access(user, item)
+    if access.get("can_view"):
+        return None
+    exc = AccessDenied(
+        "CONTENT_ACCESS_DENIED" if not access.get("demo_expired") else "DEMO_EXPIRED",
+        access.get("message") or "Материал доступен на более высоком тарифе",
+        feature="content",
+        min_plan=access.get("required_plan") or "teacher",
+    )
+    if _is_browser_document_request(request):
+        return _catalog_preview_redirect(f"/interesting?preview={item.slug}")
+    return JsonResponse({"error": exc.to_dict(), "access": access}, status=403)
 
 
 @require_http_methods(["GET"])
@@ -5640,14 +5651,12 @@ def api_interesting_detail(request, slug):
 
     qs = annotate_engagement(_visible_interesting_queryset(request), request)
     item = get_object_or_404(qs, slug=slug)
-    from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
+    from Cabinet.subscription_access import AccessDenied
 
     user = request.user if getattr(request.user, "is_authenticated", False) else None
-    access = SubscriptionAccessService.serialize_access_gate(user, item)
-    from Cabinet.lesson_collection_access import LessonCollectionAccess
+    from Cabinet.interesting_access import InterestingAccessService
 
-    if not access["allowed"] and LessonCollectionAccess.grant_for_interesting(user, item) in ("full", "demo"):
-        access = {**access, "allowed": True, "via_collection": True}
+    access = InterestingAccessService.get_access(user, item)
     data = InterestingCatalogSerializer(item, context={"request": request}).data
     data["access"] = access
     from .lesson_collection_api import collection_context_for_lesson
@@ -5658,7 +5667,7 @@ def api_interesting_detail(request, slug):
         request.GET.get("collection") or "",
         interesting=item,
     )
-    if not access["allowed"] and not _lesson_viewer_is_teacher_or_admin(request):
+    if not access.get("can_view") and not _lesson_viewer_is_teacher_or_admin(request):
         data["locked"] = True
         data["file_url"] = None
         data["archive_url"] = None
@@ -5771,6 +5780,69 @@ def _drawing_assets_key():
         except OSError:
             key.append(0)
     return tuple(key)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_interesting_start_demo(request, slug):
+    from Cabinet.interesting_access import InterestingAccessService
+    from Cabinet.subscription_access import AccessDenied
+
+    if not getattr(request.user, "is_authenticated", False):
+        return JsonResponse(
+            {"code": "AUTH_REQUIRED", "message": "Войдите, чтобы открыть демо."},
+            status=401,
+        )
+    item = get_object_or_404(_visible_interesting_queryset(request), slug=slug)
+    try:
+        demo = InterestingAccessService.start_demo(request.user, item)
+    except AccessDenied as exc:
+        return JsonResponse(exc.to_dict(), status=403)
+    access = InterestingAccessService.get_access(request.user, item)
+    return JsonResponse({
+        "ok": True,
+        "demo": {
+            "opened_at": demo.opened_at.isoformat(),
+            "expires_at": demo.expires_at.isoformat(),
+        },
+        "access": access,
+        "view_url": f"/interesting/{item.slug}/view",
+    })
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_interesting_purchase(request, slug):
+    from Cabinet.interesting_access import InterestingAccessService
+    from Cabinet.subscription_access import AccessDenied
+    from Cabinet.subscription_service import PromoCodeError
+
+    if not getattr(request.user, "is_authenticated", False):
+        return JsonResponse(
+            {"code": "AUTH_REQUIRED", "message": "Войдите, чтобы купить тренажёр."},
+            status=401,
+        )
+    item = get_object_or_404(_visible_interesting_queryset(request), slug=slug)
+    try:
+        payload = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        payload = {}
+    quote = payload.get("quote") is True or str(payload.get("quote") or "").lower() in ("1", "true", "yes")
+    try:
+        result = InterestingAccessService.create_checkout(
+            request.user,
+            item,
+            idempotency_key=(payload.get("idempotency_key") or "").strip() or None,
+            promo_code=(payload.get("promo_code") or "").strip() or None,
+            quote_only=quote,
+        )
+    except AccessDenied as exc:
+        return JsonResponse(exc.to_dict(), status=403)
+    except PromoCodeError as exc:
+        return JsonResponse(exc.to_dict(), status=400)
+    except (ValueError, NotImplementedError) as exc:
+        return JsonResponse({"detail": str(exc), "code": "PAYMENT_UNAVAILABLE"}, status=503)
+    return JsonResponse(result, status=200 if quote else 201)
 
 
 @require_http_methods(["GET"])

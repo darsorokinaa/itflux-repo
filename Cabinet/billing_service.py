@@ -263,6 +263,138 @@ def charge_ledger_key(record: EventBillingRecord) -> str:
     return f"charge:{record.id}"
 
 
+def discount_ledger_key(record: EventBillingRecord) -> str:
+    return f"discount:{record.id}"
+
+
+def platform_discount_label(settings) -> str:
+    if not getattr(settings, "platform_discount_active", False):
+        return ""
+    kind = (getattr(settings, "platform_discount_type", "") or "").strip()
+    value = D(getattr(settings, "platform_discount_value", 0) or 0)
+    if value <= 0:
+        return ""
+    if kind == "percent":
+        label = f"Скидка платформы {value:g}% на каждый урок"
+    elif kind == "fixed":
+        label = f"Скидка платформы {value:g} ₽ за урок"
+    else:
+        return ""
+    note = (getattr(settings, "platform_discount_note", "") or "").strip()
+    if note:
+        label = f"{label}. {note}"
+    return label
+
+
+def resolve_lesson_discount(
+    *,
+    teacher,
+    student,
+    settings,
+    list_amount: Decimal,
+    promo_code: str = "",
+    explicit_discount: Decimal = ZERO,
+) -> dict:
+    """
+    Лучшая одна скидка на урок журнала: скидка администратора, назначенный код
+    или введённый код. Скидки не складываются.
+    """
+    from .pricing_service import (
+        PRODUCT_TEACHER_LEDGER,
+        money_off,
+        promo_allows_product,
+        promo_discount_breakdown,
+    )
+    from .subscription_service import PromoCodeError, PromoCodeService
+
+    base = D(list_amount)
+    candidates = []
+    if getattr(settings, "platform_discount_active", False):
+        standing = money_off(
+            settings.platform_discount_type,
+            settings.platform_discount_value,
+            base,
+        )
+        label = platform_discount_label(settings)
+        if standing > 0 and label:
+            candidates.append(
+                {
+                    "discount": standing,
+                    "label": label,
+                    "source": "platform",
+                    "promo": None,
+                    "consume": False,
+                }
+            )
+
+    assigned = None
+    if getattr(settings, "ledger_promo_code_id", None):
+        assigned = settings.ledger_promo_code
+    if (
+        assigned is not None
+        and assigned.is_valid_now()
+        and promo_allows_product(assigned, PRODUCT_TEACHER_LEDGER)
+    ):
+        breakdown = promo_discount_breakdown(assigned, base)
+        if breakdown["discount"] > 0:
+            candidates.append(
+                {
+                    "discount": breakdown["discount"],
+                    "label": f"Промокод {assigned.code}",
+                    "source": "assigned_promo",
+                    "promo": None,
+                    "consume": False,
+                }
+            )
+
+    code = (promo_code or "").strip()
+    if code:
+        try:
+            promo = PromoCodeService.validate(
+                teacher,
+                code,
+                product_type=PRODUCT_TEACHER_LEDGER,
+                ledger_student=student,
+            )
+        except PromoCodeError as exc:
+            raise BillingError(exc.code, exc.message) from exc
+        breakdown = promo_discount_breakdown(promo, base)
+        if breakdown["discount"] > 0:
+            candidates.append(
+                {
+                    "discount": breakdown["discount"],
+                    "label": f"Промокод {promo.code}",
+                    "source": "promo",
+                    "promo": promo,
+                    "consume": True,
+                }
+            )
+
+    manual = D(explicit_discount or 0)
+    if manual > 0:
+        candidates.append(
+            {
+                "discount": min(base, manual),
+                "label": "Индивидуальная скидка",
+                "source": "manual",
+                "promo": None,
+                "consume": False,
+            }
+        )
+
+    if not candidates or base <= 0:
+        return {
+            "discount": ZERO,
+            "label": "",
+            "source": "none",
+            "promo": None,
+            "consume": False,
+        }
+    best = max(candidates, key=lambda row: row["discount"])
+    best["discount"] = min(base, D(best["discount"]))
+    return best
+
+
 def package_ledger_key(record: EventBillingRecord) -> str:
     return f"package:{record.id}"
 
@@ -2310,6 +2442,7 @@ def finalize_event_billing(
     idempotency_key: str = "",
     discount_amount: Decimal = ZERO,
     charge_percent: Optional[Decimal] = None,
+    promo_code: str = "",
 ) -> list[EventBillingRecord]:
     if event.owner_id != teacher.id:
         raise BillingError("FORBIDDEN", "Нет доступа", 403)
@@ -2538,12 +2671,9 @@ def finalize_event_billing(
                 ignore_package_type=True,
             )
 
-        calc_amount = D(price["amount"])
+        list_amount = D(price["amount"])
         if charge_percent is not None:
-            calc_amount = D(calc_amount * D(charge_percent) / Decimal("100"))
-        calc_amount = D(calc_amount - D(discount_amount))
-        if calc_amount < 0:
-            calc_amount = ZERO
+            list_amount = D(list_amount * D(charge_percent) / Decimal("100"))
 
         # Monthly: included lessons — no separate charge
         if settings.billing_type == BillingType.MONTHLY_FIXED and amount is None:
@@ -2566,29 +2696,42 @@ def finalize_event_billing(
                 record.save()
                 results.append(record)
                 continue
-            # Extra lesson
-            extra = D(settings.monthly_extra_lesson_price or 0)
-            calc_amount = extra
+            list_amount = D(settings.monthly_extra_lesson_price or 0)
             price["price_source"] = PriceSource.MANUAL
             price["price_source_label"] = "Урок сверх лимита месячного тарифа"
 
+        offer = resolve_lesson_discount(
+            teacher=teacher,
+            student=record.student,
+            settings=settings,
+            list_amount=list_amount,
+            promo_code=promo_code,
+            explicit_discount=discount_amount,
+        )
+        applied_discount = D(offer["discount"])
+        calc_amount = max(ZERO, D(list_amount - applied_discount))
+
         record.rate = price["rate"]
-        record.calculated_amount = calc_amount
+        record.calculated_amount = list_amount
         record.charged_amount = calc_amount
         record.billing_type = price["billing_type"]
         record.price_source = price["price_source"]
-        record.price_source_label = price["price_source_label"]
-        record.discount_amount = D(discount_amount)
+        source_label = price["price_source_label"] or ""
+        if offer.get("label"):
+            source_label = f"{source_label} · {offer['label']}".strip(" ·")
+        record.price_source_label = source_label
+        record.discount_amount = applied_discount
         record.currency = account.currency
+        charge_tx_amount = list_amount if applied_discount > 0 else calc_amount
 
-        if calc_amount > 0:
+        if charge_tx_amount > 0:
             if not record_has_active_charge(record):
                 try:
                     tx = _append_tx(
                         billing_account=account,
                         student=record.student,
                         transaction_type=TransactionType.CHARGE,
-                        amount=calc_amount,
+                        amount=charge_tx_amount,
                         currency=account.currency,
                         created_by=teacher,
                         event=event,
@@ -2597,6 +2740,29 @@ def finalize_event_billing(
                         metadata={"idempotency_key": existing_key} if existing_key else {},
                         ledger_key=charge_ledger_key(record),
                     )
+                    if applied_discount > 0:
+                        _append_tx(
+                            billing_account=account,
+                            student=record.student,
+                            transaction_type=TransactionType.DISCOUNT,
+                            amount=applied_discount,
+                            currency=account.currency,
+                            created_by=teacher,
+                            event=event,
+                            event_billing=record,
+                            comment=offer.get("label") or "Скидка",
+                            metadata={"source": offer.get("source") or ""},
+                            ledger_key=discount_ledger_key(record),
+                        )
+                        if offer.get("consume") and offer.get("promo") is not None:
+                            from .subscription_service import PromoCodeService
+
+                            PromoCodeService.apply_without_payment(
+                                teacher,
+                                offer["promo"],
+                                applied_discount,
+                                ledger_student=record.student,
+                            )
                 except IntegrityError:
                     existing_tx = BillingTransaction.objects.filter(
                         ledger_key=charge_ledger_key(record)
@@ -2604,8 +2770,8 @@ def finalize_event_billing(
                     if existing_tx is None:
                         raise
                     tx = existing_tx
-                    record.charged_amount = D(existing_tx.amount)
-                    calc_amount = D(existing_tx.amount)
+                    record.charged_amount = max(ZERO, D(existing_tx.amount) - applied_discount)
+                    calc_amount = record.charged_amount
                 else:
                     audit(
                         teacher=teacher,
@@ -2629,7 +2795,7 @@ def finalize_event_billing(
         elif calc_amount <= 0:
             record.charged_amount = ZERO
             record.financial_status = FinancialStatus.NOT_BILLABLE
-            record.is_free = True
+            record.is_free = applied_discount <= 0
             record.finalized_at = timezone.now()
             record.save()
         else:
@@ -2734,6 +2900,7 @@ def unfinalize_event_billing(
                 TransactionType.PACKAGE_CONSUMPTION,
                 TransactionType.CHARGE,
                 TransactionType.PACKAGE_RETURN,
+                TransactionType.DISCOUNT,
             ):
                 reverse_transaction(
                     teacher=teacher,
@@ -2951,32 +3118,50 @@ def _replace_record_charge(
     record = EventBillingRecord.objects.select_for_update(of=("self",)).select_related(
         "billing_account", "student", "event"
     ).get(pk=record.pk)
-    for tx in _active_txs_for_record(record, TransactionType.CHARGE):
+    for tx in _active_txs_for_record(record, TransactionType.CHARGE, TransactionType.DISCOUNT):
         reverse_transaction(
             teacher=teacher,
             tx=tx,
             comment=comment or "Пересчёт начисления",
             touch_record=False,
         )
-    record.charged_amount = D(new_amount)
-    record.calculated_amount = D(new_amount)
+    list_amount = D(new_amount)
+    applied_discount = ZERO
+    discount_label = ""
+    if not manual:
+        offer = resolve_lesson_discount(
+            teacher=teacher,
+            student=record.student,
+            settings=record.billing_account.settings,
+            list_amount=list_amount,
+        )
+        applied_discount = D(offer["discount"])
+        discount_label = offer.get("label") or ""
+    net_amount = max(ZERO, D(list_amount - applied_discount))
+    record.charged_amount = net_amount
+    record.calculated_amount = list_amount
+    record.discount_amount = applied_discount
     if price:
         record.rate = price.get("rate") or record.rate
         record.billing_type = price.get("billing_type") or record.billing_type
         record.price_source = price.get("price_source") or record.price_source
-        record.price_source_label = price.get("price_source_label") or record.price_source_label
+        label = price.get("price_source_label") or record.price_source_label
+        if discount_label:
+            label = f"{label} · {discount_label}".strip(" ·")
+        record.price_source_label = label
     record.manual_override = bool(manual)
     record.finalized_at = timezone.now()
     key = charge_ledger_key(record)
     leftover = BillingTransaction.objects.filter(ledger_key=key).first()
     if leftover:
         _release_ledger_key(leftover)
-    if D(new_amount) > 0:
+    charge_tx_amount = list_amount if applied_discount > 0 else net_amount
+    if charge_tx_amount > 0:
         _append_tx(
             billing_account=record.billing_account,
             student=record.student,
             transaction_type=TransactionType.CHARGE,
-            amount=D(new_amount),
+            amount=charge_tx_amount,
             currency=record.currency or record.billing_account.currency,
             created_by=teacher,
             event=record.event,
@@ -2984,10 +3169,26 @@ def _replace_record_charge(
             comment=comment or "Начисление за урок",
             ledger_key=key,
         )
-        record.financial_status = FinancialStatus.AWAITING_PAYMENT
-        record.is_free = False
+        if applied_discount > 0:
+            _append_tx(
+                billing_account=record.billing_account,
+                student=record.student,
+                transaction_type=TransactionType.DISCOUNT,
+                amount=applied_discount,
+                currency=record.currency or record.billing_account.currency,
+                created_by=teacher,
+                event=record.event,
+                event_billing=record,
+                comment=discount_label or "Скидка",
+                ledger_key=discount_ledger_key(record),
+            )
+        record.financial_status = (
+            FinancialStatus.AWAITING_PAYMENT if net_amount > 0 else FinancialStatus.NOT_BILLABLE
+        )
+        record.is_free = net_amount <= 0 and applied_discount <= 0
         record.save()
-        allocate_available_payments_to_record(record)
+        if net_amount > 0:
+            allocate_available_payments_to_record(record)
         record.refresh_from_db()
         _refresh_financial_status(record)
     else:
@@ -3548,8 +3749,37 @@ def create_package(
     bonus_units: Decimal = ZERO,
     notes: str = "",
     lesson_duration_minutes: Optional[int] = None,
+    promo_code: str = "",
 ) -> LessonPackage:
     account = get_or_create_billing_account(teacher, student)
+    amount = D(purchase_amount)
+    code = (promo_code or "").strip()
+    if code and amount > 0:
+        from .pricing_service import PRODUCT_TEACHER_LEDGER, calculate_catalog_price
+        from .subscription_service import PromoCodeError, PromoCodeService
+
+        try:
+            calc = calculate_catalog_price(
+                teacher,
+                amount,
+                PRODUCT_TEACHER_LEDGER,
+                promo_code=code,
+                validate_promo=True,
+                apply_user_discount=False,
+            )
+        except PromoCodeError as exc:
+            raise BillingError(exc.code, exc.message) from exc
+        if calc["applied_discount_source"] == "promo" and calc.get("promo") is not None:
+            PromoCodeService.apply_without_payment(
+                teacher,
+                calc["promo"],
+                calc["applied_discount"],
+                ledger_student=student,
+            )
+            amount = D(calc["final_price"])
+            extra = calc.get("message") or ""
+            if extra:
+                notes = f"{notes}\n{extra}".strip() if notes else extra
     total = D_units(total_units) + D_units(bonus_units)
     if total <= 0:
         raise BillingError("INVALID_UNITS", "Количество единиц должно быть больше 0")
@@ -3561,7 +3791,7 @@ def create_package(
         unit_type=unit_type,
         total_units=total,
         remaining_units=total,
-        purchase_amount=D(purchase_amount),
+        purchase_amount=amount,
         lesson_duration_minutes=lesson_duration_minutes or None,
         starts_at=starts_at,
         expires_at=expires_at,
@@ -3570,11 +3800,11 @@ def create_package(
         notes=(notes or "").strip(),
     )
     sync_account_billing_type_for_package(account, package)
-    if create_payment_tx and D(purchase_amount) > 0:
+    if create_payment_tx and amount > 0:
         payment = StudentPayment.objects.create(
             billing_account=account,
             student=student,
-            amount=D(purchase_amount),
+            amount=amount,
             currency=account.currency,
             paid_at=timezone.now(),
             purpose=f"Абонемент: {package.title}",
@@ -3586,7 +3816,7 @@ def create_package(
             billing_account=account,
             student=student,
             transaction_type=TransactionType.PACKAGE_PURCHASE,
-            amount=D(purchase_amount),
+            amount=amount,
             currency=account.currency,
             created_by=created_by or teacher,
             package=package,
@@ -3603,7 +3833,7 @@ def create_package(
         new_value={
             "total_units": str(total),
             "unit_type": unit_type,
-            "purchase_amount": str(purchase_amount),
+            "purchase_amount": str(amount),
         },
     )
     # r74: привязать ранее внесённые «висящие» оплаты к новому абонементу.
@@ -4563,7 +4793,18 @@ def serialize_account(account: BillingAccount, *, include_history: bool = False)
             "low_balance_threshold_lessons": settings.low_balance_threshold_lessons,
             "low_balance_threshold_minutes": settings.low_balance_threshold_minutes,
             "use_actual_duration_for_package": settings.use_actual_duration_for_package,
+            "platform_discount_active": bool(settings.platform_discount_active),
+            "platform_discount_type": settings.platform_discount_type or "",
+            "platform_discount_value": str(settings.platform_discount_value or 0),
+            "platform_discount_note": settings.platform_discount_note or "",
+            "platform_discount_label": platform_discount_label(settings),
+            "ledger_promo_code": (
+                settings.ledger_promo_code.code
+                if getattr(settings, "ledger_promo_code_id", None) and settings.ledger_promo_code
+                else ""
+            ),
         },
+        "platform_discount_label": platform_discount_label(settings),
         "balance": {k: str(v) if isinstance(v, Decimal) else v for k, v in balance.items()},
         "package": (
             {
@@ -4794,6 +5035,7 @@ def serialize_event_billing(record: EventBillingRecord) -> dict:
         "rate": str(record.rate),
         "calculated_amount": str(record.calculated_amount),
         "charged_amount": str(record.charged_amount),
+        "discount_amount": str(record.discount_amount or 0),
         "paid_amount": str(record.paid_amount),
         "due_amount": str(due),
         "price_missing": price_missing,
@@ -5892,6 +6134,7 @@ def event_billing_badge(event: ScheduleEvent, student_ids=None) -> list[dict]:
                 "amount": str(amount),
                 "currency": r.currency,
                 "price_source_label": r.price_source_label,
+                "discount_amount": str(r.discount_amount or 0),
                 "price_missing": price_missing,
                 "is_debt": is_debt,
                 "state_code": financial_state_code(r),

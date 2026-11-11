@@ -724,6 +724,122 @@ class LessonDemoAccess(models.Model):
         return self.expires_at > tz.now()
 
 
+class InterestingPurchase(models.Model):
+    """Отдельная покупка тренажёра Generator.InterestingItem. Не зависит от подписки."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Ожидает"
+        PAID = "paid", "Оплачена"
+        REFUNDED = "refunded", "Возврат"
+        CANCELLED = "cancelled", "Отменена"
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="interesting_purchases",
+        verbose_name="Пользователь",
+    )
+    item = models.ForeignKey(
+        "Generator.InterestingItem",
+        on_delete=models.CASCADE,
+        related_name="purchases",
+        verbose_name="Тренажёр",
+    )
+    payment = models.OneToOneField(
+        "Payment",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="interesting_purchase",
+        verbose_name="Платёж",
+    )
+    amount = models.DecimalField("Сумма", max_digits=10, decimal_places=2, default=0)
+    currency = models.CharField("Валюта", max_length=8, default="RUB")
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    purchased_at = models.DateTimeField("Куплено", null=True, blank=True)
+    valid_until = models.DateTimeField(
+        "Действует до",
+        null=True,
+        blank=True,
+        help_text="Пусто — бессрочный доступ.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Покупка тренажёра"
+        verbose_name_plural = "Покупки тренажёров"
+        ordering = ["-purchased_at", "-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "item"],
+                condition=models.Q(status="paid"),
+                name="cab_int_purch_user_item_paid_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["user", "status"], name="cab_int_purch_user_status_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} → interesting {self.item_id} [{self.status}]"
+
+    def is_active(self) -> bool:
+        if self.status != self.Status.PAID:
+            return False
+        if self.valid_until is None:
+            return True
+        from django.utils import timezone as tz
+
+        return self.valid_until > tz.now()
+
+
+class InterestingDemoAccess(models.Model):
+    """Одноразовая демо-сессия тренажёра: 10 минут, UNIQUE(user, item)."""
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="interesting_demo_accesses",
+        verbose_name="Пользователь",
+    )
+    item = models.ForeignKey(
+        "Generator.InterestingItem",
+        on_delete=models.CASCADE,
+        related_name="demo_accesses",
+        verbose_name="Тренажёр",
+    )
+    opened_at = models.DateTimeField("Открыто")
+    expires_at = models.DateTimeField("Сессия до")
+    session_finished_at = models.DateTimeField("Сессия завершена", null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Демодоступ к тренажёру"
+        verbose_name_plural = "Демодоступы к тренажёрам"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "item"],
+                name="cab_int_demo_user_item_uniq",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} demo interesting {self.item_id}"
+
+    def is_session_active(self) -> bool:
+        if self.session_finished_at is not None:
+            return False
+        from django.utils import timezone as tz
+
+        return self.expires_at > tz.now()
+
+
 class TeacherSavedMaterial(models.Model):
     teacher = models.ForeignKey(
         User,
@@ -4050,6 +4166,7 @@ class Payment(models.Model):
         MATERIAL = "material", "Покупка материала"
         LESSON = "lesson", "Покупка готового урока"
         COLLECTION = "collection", "Покупка набора уроков"
+        INTERESTING = "interesting", "Покупка тренажёра"
 
     teacher = models.ForeignKey(
         User,
@@ -4261,6 +4378,11 @@ class TeacherMonthlyUsage(models.Model):
         return f"{self.teacher_id} {self.period_start} v={self.variants_created}"
 
 
+def default_promo_product_types():
+    """Старые и новые коды без явного списка действуют только на подписку."""
+    return ["subscription"]
+
+
 class PromoCode(models.Model):
     class DiscountType(models.TextChoices):
         PERCENT = "percent", "Скидка %"
@@ -4304,6 +4426,12 @@ class PromoCode(models.Model):
     valid_until = models.DateTimeField("Действует до", null=True, blank=True)
     is_active = models.BooleanField("Активен", default=True)
     description = models.CharField("Описание (внутр.)", max_length=255, blank=True)
+    applicable_product_types = models.JSONField(
+        "Типы продуктов",
+        default=default_promo_product_types,
+        blank=True,
+        help_text="subscription, lesson, collection, interesting, teacher_ledger.",
+    )
     created_at = models.DateTimeField("Создан", auto_now_add=True)
     updated_at = models.DateTimeField("Обновлён", auto_now=True)
 
@@ -4345,6 +4473,15 @@ class PromoCodeUsage(models.Model):
         Payment, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="promo_usages", verbose_name="Платёж"
     )
+    ledger_student = models.ForeignKey(
+        "Student",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="promo_usages",
+        verbose_name="Ученик журнала",
+        help_text="Для промокода журнала учителя: лимит на ученика, а не на учителя.",
+    )
     status = models.CharField(
         "Статус",
         max_length=20,
@@ -4373,6 +4510,56 @@ class PromoCodeUsage(models.Model):
 
     def __str__(self):
         return f"{self.promo_code.code} → {self.teacher.username} {self.applied_at:%Y-%m-%d}"
+
+
+class UserDiscount(models.Model):
+    """Персональная скидка платформы. Задаёт только администратор. Не суммируется с промокодом."""
+
+    class DiscountType(models.TextChoices):
+        PERCENT = "percent", "Процент"
+        FIXED = "fixed", "Фиксированная сумма ₽"
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="platform_discounts",
+        verbose_name="Пользователь",
+    )
+    discount_type = models.CharField(
+        "Тип скидки",
+        max_length=20,
+        choices=DiscountType.choices,
+        default=DiscountType.PERCENT,
+    )
+    discount_value = models.DecimalField(
+        "Значение",
+        max_digits=10,
+        decimal_places=2,
+        help_text="Процент (0–100) или сумма в рублях.",
+    )
+    product_types = models.JSONField(
+        "Типы продуктов",
+        default=list,
+        blank=True,
+        help_text="subscription, lesson, collection, interesting.",
+    )
+    valid_from = models.DateTimeField("Действует с", null=True, blank=True)
+    valid_until = models.DateTimeField("Действует до", null=True, blank=True)
+    is_active = models.BooleanField("Активна", default=True)
+    note = models.CharField("Заметка", max_length=255, blank=True, default="")
+    created_at = models.DateTimeField("Создана", auto_now_add=True)
+    updated_at = models.DateTimeField("Обновлена", auto_now=True)
+
+    class Meta:
+        verbose_name = "Персональная скидка"
+        verbose_name_plural = "Персональные скидки"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["user", "is_active"], name="cab_userdisc_user_active_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} {self.discount_type} {self.discount_value}"
 
 
 class Promotion(models.Model):

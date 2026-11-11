@@ -73,6 +73,9 @@ class MockPaymentProvider(PaymentProviderInterface):
         if meta.get("purpose") == "collection" and meta.get("collection_slug"):
             slug = meta["collection_slug"]
             return f"/lessons/collections/{slug}?payment_id={payment.pk}&status=mock"
+        if meta.get("purpose") == "interesting" and meta.get("interesting_slug"):
+            slug = meta["interesting_slug"]
+            return f"/interesting?preview={slug}&payment_id={payment.pk}&status=mock"
         return f"/cabinet/upgrade?payment_id={payment.pk}&status=mock"
 
     def check_status(self, payment) -> dict:
@@ -175,6 +178,18 @@ class PaymentProviderService:
                     billing_period=billing_period,
                     calc=calc,
                     discount_info=discount_info,
+                    idempotency_key=idempotency_key,
+                )
+            if original_amount > 0 and calc.get("applied_discount_source") in (
+                "promo",
+                "user_discount",
+                "referral",
+            ):
+                return cls._grant_zero_price_discount(
+                    teacher=teacher,
+                    plan=plan,
+                    billing_period=billing_period,
+                    calc=calc,
                     idempotency_key=idempotency_key,
                 )
             raise ValueError("Для бесплатного тарифа оплата не требуется")
@@ -581,6 +596,96 @@ class PaymentProviderService:
         }
 
     @classmethod
+    def _grant_zero_price_discount(
+        cls,
+        *,
+        teacher,
+        plan,
+        billing_period,
+        calc,
+        idempotency_key=None,
+    ):
+        """Скидка до нуля (промокод или персональная) без Init."""
+        from .models import Payment, PromoCode
+        from .pricing_service import price_payload
+        from .subscription_service import PromoCodeService, SubscriptionLimitService
+
+        key = (idempotency_key or "").strip() or (
+            f"disc_grant_{teacher.pk}_{plan.slug}_{uuid.uuid4().hex[:8]}"
+        )
+        existing = Payment.objects.filter(idempotency_key=key).first()
+        if existing:
+            meta = existing.metadata if isinstance(existing.metadata, dict) else {}
+            return {
+                "payment_id": existing.pk,
+                "provider_payment_id": existing.provider_payment_id,
+                "provider": existing.provider,
+                "status": existing.status,
+                "payment_url": "",
+                "amount": str(existing.final_amount or 0),
+                "currency": existing.currency,
+                "billing_period": existing.billing_period,
+                "plan_slug": (existing.plan.slug if existing.plan_id else plan.slug),
+                "idempotent": True,
+                "granted": existing.status == Payment.Status.PAID,
+                "pricing": meta.get("pricing"),
+            }
+
+        promo = None
+        if calc.get("applied_discount_source") == "promo" and calc.get("promo_code"):
+            promo = PromoCode.objects.filter(code__iexact=calc["promo_code"]).first()
+        price_meta = price_payload(calc)
+        sub = SubscriptionLimitService.get_or_create_subscription(teacher, apply_promo=False)
+        payment = Payment.objects.create(
+            teacher=teacher,
+            subscription=sub,
+            plan=plan,
+            amount=calc["base_price"],
+            discount_amount=calc["applied_discount"],
+            referral_discount_amount=calc.get("referral_discount") or Decimal("0"),
+            final_amount=Decimal("0.00"),
+            currency=plan.currency,
+            status=Payment.Status.PAID,
+            provider="internal",
+            provider_payment_id=f"grant_{uuid.uuid4().hex[:16]}",
+            idempotency_key=key,
+            billing_period=billing_period,
+            promo_code=promo,
+            paid_at=timezone.now(),
+            metadata={
+                "plan_slug": plan.slug,
+                "billing_period": billing_period,
+                "pricing": price_meta,
+                "applied_discount_source": calc["applied_discount_source"],
+                "granted": True,
+            },
+        )
+        if promo is not None:
+            PromoCodeService.reserve_usage(teacher, promo, payment, calc["applied_discount"])
+            PromoCodeService.confirm_for_payment(payment)
+        cls.activate_subscription_from_payment(payment)
+        return {
+            "payment_id": payment.pk,
+            "provider_payment_id": payment.provider_payment_id,
+            "provider": "internal",
+            "status": payment.status,
+            "payment_url": "",
+            "amount": "0.00",
+            "currency": payment.currency,
+            "billing_period": billing_period,
+            "plan_slug": plan.slug,
+            "granted": True,
+            "pricing": price_meta,
+            "discount": {
+                "original_amount": str(calc["base_price"]),
+                "discount": str(calc["applied_discount"]),
+                "final_amount": "0.00",
+                "applied_discount_source": calc["applied_discount_source"],
+                "message": calc.get("message"),
+            },
+        }
+
+    @classmethod
     def check_payment_status(cls, payment):
         return get_payment_provider(payment.provider or None).check_status(payment)
 
@@ -818,13 +923,20 @@ class PaymentProviderService:
                 customer_key=payment.customer_key,
                 pan_mask=parsed.get("pan_mask") or "",
             )
+            from .interesting_access import InterestingAccessService, is_interesting_payment
             from .lesson_access import LessonPurchaseService, is_lesson_payment
             from .lesson_collection_access import LessonCollectionPurchaseService, is_collection_payment
+            from .subscription_service import PromoCodeService
 
             if is_lesson_payment(payment):
                 LessonPurchaseService.fulfill_payment(payment)
+                PromoCodeService.confirm_for_payment(payment)
             elif is_collection_payment(payment):
                 LessonCollectionPurchaseService.fulfill_payment(payment)
+                PromoCodeService.confirm_for_payment(payment)
+            elif is_interesting_payment(payment):
+                InterestingAccessService.fulfill_payment(payment)
+                PromoCodeService.confirm_for_payment(payment)
             elif _is_legacy_material_shop_payment(payment):
                 logger.info(
                     "legacy_material_shop_payment_ignored payment_id=%s",
@@ -946,7 +1058,15 @@ class PaymentProviderService:
         from .referral_service import ReferralService
         from .subscription_service import SubscriptionLimitService
 
-        if is_lesson_payment(payment) or _is_legacy_material_shop_payment(payment):
+        from .interesting_access import is_interesting_payment
+        from .lesson_collection_access import is_collection_payment
+
+        if (
+            is_lesson_payment(payment)
+            or is_collection_payment(payment)
+            or is_interesting_payment(payment)
+            or _is_legacy_material_shop_payment(payment)
+        ):
             return
 
         plan = payment.plan

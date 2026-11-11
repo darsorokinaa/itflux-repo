@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import uuid
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any, Iterable
@@ -25,6 +24,25 @@ from .subscription_access import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _collection_pricing(user, collection, can_purchase: bool):
+    if not can_purchase:
+        return None
+    from .pricing_service import PRODUCT_COLLECTION, calculate_catalog_price, catalog_price_payload
+
+    try:
+        calc = calculate_catalog_price(
+            user,
+            collection.price,
+            PRODUCT_COLLECTION,
+            promo_code=None,
+            validate_promo=False,
+        )
+    except Exception:
+        logger.exception("collection_price_failed")
+        return None
+    return catalog_price_payload(calc)
 
 COLLECTION_VIEW = "collection_view"
 COLLECTION_LESSON_OPEN = "collection_lesson_open"
@@ -336,17 +354,25 @@ class LessonCollectionAccess:
             "required_plan": cls.required_plan_slug(collection) if plans else "",
             "required_plan_name": plan_label(cls.required_plan_slug(collection)) if plans else "",
             "valid_days": collection.purchase_valid_days,
+            "pricing": _collection_pricing(user, collection, can_purchase),
         }
 
 
 class LessonCollectionPurchaseService:
     @classmethod
-    def create_checkout(cls, user, collection, *, idempotency_key: str | None = None) -> dict:
-        from django.conf import settings as django_settings
-
+    def create_checkout(
+        cls,
+        user,
+        collection,
+        *,
+        idempotency_key: str | None = None,
+        promo_code: str | None = None,
+        quote_only: bool = False,
+    ) -> dict:
         from Generator.models import LessonCollection
+        from .catalog_checkout import open_catalog_checkout
         from .models import Payment
-        from .payment_service import get_payment_provider
+        from .pricing_service import PRODUCT_COLLECTION
 
         if collection.status != LessonCollection.Status.PUBLISHED:
             raise AccessDenied(
@@ -371,72 +397,74 @@ class LessonCollectionPurchaseService:
                 min_plan=access.get("required_plan") or "teacher",
             )
 
-        provider_name = (getattr(django_settings, "PAYMENT_PROVIDER", None) or "mock").strip().lower()
-        payments_on = bool(getattr(django_settings, "PAYMENTS_ENABLED", False))
-        if not payments_on and provider_name != "mock":
-            raise ValueError("Оплата временно недоступна. Попробуйте позже.")
-        if provider_name == "mock" and not django_settings.DEBUG:
-            raise ValueError("Mock payments are disabled in production")
-
-        amount = Decimal(str(collection.price))
-        currency = (collection.currency or "RUB").upper()
         key = (idempotency_key or "").strip() or f"col_{user.pk}_{collection.pk}_{timezone.now().strftime('%Y%m%d')}"
-        existing = Payment.objects.filter(idempotency_key=key).first()
-        if existing:
-            return cls._payload(existing, collection, idempotent=True)
-
-        from .tbank_payment import customer_key_for_teacher
-
-        payment = Payment.objects.create(
-            teacher=user,
-            subscription=None,
-            plan=None,
+        opened = open_catalog_checkout(
+            user=user,
+            product_type=PRODUCT_COLLECTION,
+            list_price=collection.price,
+            currency=collection.currency or "RUB",
             purpose=Payment.Purpose.COLLECTION,
-            amount=amount,
-            discount_amount=Decimal("0"),
-            final_amount=amount,
-            currency=currency,
-            status=Payment.Status.PENDING,
-            provider=provider_name,
-            provider_payment_id=f"mock_{uuid.uuid4().hex[:16]}" if provider_name == "mock" else "",
-            customer_key=customer_key_for_teacher(user),
-            idempotency_key=key,
             metadata={
                 "purpose": "collection",
                 "collection_id": collection.pk,
                 "collection_slug": collection.slug,
                 "collection_title": (collection.title or "")[:120],
             },
+            idempotency_key=key,
+            promo_code=promo_code,
+            quote_only=quote_only,
         )
-        provider = get_payment_provider(provider_name)
-        try:
-            payment_url = provider.create_checkout(payment, None)
-        except Exception:
-            payment.status = Payment.Status.FAILED
-            payment.save(update_fields=["status", "updated_at"])
-            raise
-        if payment_url:
-            meta = dict(payment.metadata or {})
-            meta["payment_url"] = payment_url
-            payment.metadata = meta
-            payment.save(update_fields=["metadata", "updated_at"])
-        _record(COLLECTION_PURCHASE_STARTED, user, collection)
-        return cls._payload(payment, collection, payment_url=payment_url)
+        if opened["quote"]:
+            return {
+                "quote": True,
+                "pricing": opened["pricing"],
+                "amount": opened["pricing"].get("final_amount"),
+                "currency": (collection.currency or "RUB").upper(),
+                "collection_id": collection.pk,
+                "collection_slug": collection.slug,
+                "message": (opened["calc"] or {}).get("message"),
+            }
+        if opened["granted"] and opened["payment"] is not None:
+            cls.fulfill_payment(opened["payment"])
+        elif not opened["idempotent"]:
+            _record(COLLECTION_PURCHASE_STARTED, user, collection)
+        return cls._payload(
+            opened["payment"],
+            collection,
+            idempotent=opened["idempotent"],
+            payment_url=opened.get("payment_url") or "",
+            pricing=opened["pricing"],
+            granted=opened["granted"],
+        )
 
     @staticmethod
-    def _payload(payment, collection, *, idempotent: bool = False, payment_url: str = "") -> dict:
+    def _payload(
+        payment,
+        collection,
+        *,
+        idempotent: bool = False,
+        payment_url: str = "",
+        pricing: dict | None = None,
+        granted: bool = False,
+    ) -> dict:
         meta = payment.metadata if isinstance(payment.metadata, dict) else {}
+        stored_pricing = pricing or (meta.get("pricing") if isinstance(meta.get("pricing"), dict) else None)
         return {
             "payment_id": payment.pk,
             "provider_payment_id": payment.provider_payment_id,
             "provider": payment.provider,
             "status": payment.status,
             "payment_url": payment_url or str(meta.get("payment_url") or ""),
-            "amount": str(payment.final_amount or payment.amount),
+            "amount": str(payment.final_amount if payment.final_amount is not None else payment.amount),
+            "list_price": str(payment.amount),
+            "discount": str(payment.discount_amount or 0),
             "currency": payment.currency,
             "collection_id": collection.pk,
             "collection_slug": collection.slug,
             "idempotent": idempotent,
+            "granted": granted or bool(meta.get("granted")),
+            "pricing": stored_pricing,
+            "message": (stored_pricing or {}).get("message") or "",
         }
 
     @classmethod

@@ -1206,6 +1206,19 @@ class InterestingItem(models.Model):
         help_text="ZIP с index.html и ресурсами интерактива",
     )
     sort_order = models.PositiveIntegerField("Порядок", default=0, db_index=True)
+    standalone_purchase_enabled = models.BooleanField(
+        "Отдельная покупка",
+        default=False,
+        help_text="Можно купить этот тренажёр отдельно, если тариф ниже требуемого.",
+    )
+    standalone_price = models.DecimalField(
+        "Цена отдельной покупки",
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    standalone_currency = models.CharField("Валюта покупки", max_length=8, default="RUB")
     views_count = models.PositiveIntegerField("Просмотры", default=0, db_index=True)
     likes = GenericRelation(
         "CatalogContentLike",
@@ -1235,6 +1248,16 @@ class InterestingItem(models.Model):
                 index += 1
             self.slug = candidate
         super().save(*args, **kwargs)
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        errors = {}
+        if self.standalone_purchase_enabled:
+            if self.standalone_price is None or self.standalone_price <= 0:
+                errors["standalone_price"] = "Укажите цену больше 0 для отдельной покупки."
+        if errors:
+            raise ValidationError(errors)
 
     def __str__(self):
         return self.title

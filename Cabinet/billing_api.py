@@ -518,6 +518,7 @@ class BillingPackagesView(APIView):
                 bonus_units=_dec(data.get("bonus_units"), Decimal("0")),
                 create_payment_tx=not await_payment,
                 notes=data.get("notes") or data.get("comment") or "",
+                promo_code=(data.get("promo_code") or "").strip(),
                 lesson_duration_minutes=(
                     int(data["lesson_duration_minutes"])
                     if data.get("lesson_duration_minutes") not in (None, "")
@@ -963,6 +964,7 @@ class BillingEventFinalizeView(APIView):
                 idempotency_key=data.get("idempotency_key")
                 or request.headers.get("X-Idempotency-Key", ""),
                 discount_amount=_dec(data.get("discount_amount"), Decimal("0")),
+                promo_code=(data.get("promo_code") or "").strip(),
                 charge_percent=_dec(data.get("charge_percent"))
                 if data.get("charge_percent") is not None
                 else None,

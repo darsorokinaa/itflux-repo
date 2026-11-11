@@ -291,6 +291,38 @@ class StudentBillingSettings(models.Model):
         default=True,
         help_text="Для минутного абонемента списывать фактическую длительность",
     )
+    platform_discount_type = models.CharField(
+        "Скидка платформы",
+        max_length=16,
+        blank=True,
+        default="",
+        help_text="Пусто — нет; percent — процент; fixed — фиксированная сумма за урок. Меняет только администратор.",
+    )
+    platform_discount_value = models.DecimalField(
+        "Размер скидки платформы",
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+    )
+    platform_discount_note = models.CharField(
+        "Заметка к скидке",
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    platform_discount_active = models.BooleanField(
+        "Скидка платформы активна",
+        default=False,
+    )
+    ledger_promo_code = models.ForeignKey(
+        "PromoCode",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ledger_student_settings",
+        verbose_name="Промокод журнала",
+        help_text="Код типа teacher_ledger. Применяется к начислениям за урок, пока код действует. Учитель видит, но не меняет.",
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

@@ -1817,7 +1817,60 @@ export async function startReadyLessonDemo(slug) {
   return data;
 }
 
-export async function purchaseReadyLesson(slug, idempotencyKey) {
+async function postCatalogJson(path, body) {
+  await ensureCsrfCookie();
+  const headers = { Accept: "application/json", "Content-Type": "application/json" };
+  const csrf = getCsrfToken();
+  if (csrf) headers["X-CSRFToken"] = csrf;
+  const res = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    headers,
+    body: JSON.stringify(body || {}),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const err = new Error(data?.message || data?.detail || "Не удалось выполнить запрос");
+    err.code = data?.code;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+export function quoteReadyLesson(slug, promoCode) {
+  return postCatalogJson(`/api/lessons/${encodeURIComponent(slug)}/purchase/`, {
+    quote: true,
+    promo_code: promoCode || "",
+  });
+}
+
+export function quoteLessonCollection(slug, promoCode) {
+  return postCatalogJson(`/api/lesson-collections/${encodeURIComponent(slug)}/purchase/`, {
+    quote: true,
+    promo_code: promoCode || "",
+  });
+}
+
+export function quoteInteresting(slug, promoCode) {
+  return postCatalogJson(`/api/interesting/${encodeURIComponent(slug)}/purchase/`, {
+    quote: true,
+    promo_code: promoCode || "",
+  });
+}
+
+export function startInterestingDemo(slug) {
+  return postCatalogJson(`/api/interesting/${encodeURIComponent(slug)}/demo/`, {});
+}
+
+export function purchaseInteresting(slug, idempotencyKey, promoCode) {
+  return postCatalogJson(`/api/interesting/${encodeURIComponent(slug)}/purchase/`, {
+    idempotency_key: idempotencyKey || undefined,
+    promo_code: promoCode || undefined,
+  });
+}
+
+export async function purchaseReadyLesson(slug, idempotencyKey, promoCode) {
   await ensureCsrfCookie();
   const headers = { Accept: "application/json", "Content-Type": "application/json" };
   const csrf = getCsrfToken();
@@ -1826,7 +1879,10 @@ export async function purchaseReadyLesson(slug, idempotencyKey) {
     method: "POST",
     credentials: "same-origin",
     headers,
-    body: JSON.stringify(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
+    body: JSON.stringify({
+      idempotency_key: idempotencyKey || undefined,
+      promo_code: promoCode || undefined,
+    }),
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) {

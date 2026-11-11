@@ -128,6 +128,11 @@ function LessonBillingBlock({
               {b.price_source_label ? (
                 <span className="cb-lesson-billing__source">{b.price_source_label}</span>
               ) : null}
+              {Number(b.discount_amount || 0) > 0 ? (
+                <span className="cb-lesson-billing__source">
+                  Скидка {formatMoney(b.discount_amount, b.currency)}
+                </span>
+              ) : null}
             </li>
           );
         })}

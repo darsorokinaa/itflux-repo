@@ -221,6 +221,13 @@ def _success_url(payment) -> str:
         slug = meta.get("lesson_slug") or meta.get("lesson_id")
         custom = f"{_public_base()}/lessons?preview={slug}"
         return _return_url(payment, status="success", custom=custom)
+    if meta.get("purpose") == "collection" and meta.get("collection_slug"):
+        custom = f"{_public_base()}/lessons/collections/{meta['collection_slug']}"
+        return _return_url(payment, status="success", custom=custom)
+    if meta.get("purpose") == "interesting" and (meta.get("interesting_slug") or meta.get("interesting_id")):
+        slug = meta.get("interesting_slug") or meta.get("interesting_id")
+        custom = f"{_public_base()}/interesting?preview={slug}"
+        return _return_url(payment, status="success", custom=custom)
     return _return_url(
         payment,
         status="success",
@@ -236,6 +243,13 @@ def _fail_url(payment) -> str:
     if meta.get("purpose") == "lesson" and (meta.get("lesson_slug") or meta.get("lesson_id")):
         slug = meta.get("lesson_slug") or meta.get("lesson_id")
         custom = f"{_public_base()}/lessons?preview={slug}"
+        return _return_url(payment, status="fail", custom=custom)
+    if meta.get("purpose") == "collection" and meta.get("collection_slug"):
+        custom = f"{_public_base()}/lessons/collections/{meta['collection_slug']}"
+        return _return_url(payment, status="fail", custom=custom)
+    if meta.get("purpose") == "interesting" and (meta.get("interesting_slug") or meta.get("interesting_id")):
+        slug = meta.get("interesting_slug") or meta.get("interesting_id")
+        custom = f"{_public_base()}/interesting?preview={slug}"
         return _return_url(payment, status="fail", custom=custom)
     return _return_url(
         payment,
@@ -294,6 +308,9 @@ def _safe_description(plan, billing_period: str, payment=None) -> str:
         if meta.get("purpose") == "collection":
             title = re.sub(r"[«»\"']", "", str(meta.get("collection_title") or "набор"))
             return f"Цифровой поток - набор: {title}"[:250]
+        if meta.get("purpose") == "interesting":
+            title = re.sub(r"[«»\"']", "", str(meta.get("interesting_title") or "тренажёр"))
+            return f"Цифровой поток - тренажёр: {title}"[:250]
     period_label = "год" if billing_period == "year" else "месяц"
     name = re.sub(r"[«»\"']", "", str(getattr(plan, "name", "") or "tariff"))
     text = f"Цифровой поток - тариф:  {name} / {period_label}"
@@ -312,6 +329,9 @@ def _item_name(plan, billing_period: str, payment=None) -> str:
         if meta.get("purpose") == "collection":
             title = str(meta.get("collection_title") or "Набор").strip()
             return f"Цифровой поток — набор «{title}»"[:128]
+        if meta.get("purpose") == "interesting":
+            title = str(meta.get("interesting_title") or "Тренажёр").strip()
+            return f"Цифровой поток — тренажёр «{title}»"[:128]
     period_label = "год" if billing_period == "year" else "месяц"
     name = str(getattr(plan, "name", "") or "Подписка").strip()
     text = f"Цифровой поток - тариф: «{name}» на {period_label}"
@@ -584,7 +604,7 @@ class TBankPaymentProvider(PaymentProviderInterface):
         meta = payment.metadata if isinstance(getattr(payment, "metadata", None), dict) else {}
         # r61: Recurrent=Y (привязка карты) только при явном согласии на автопродление в checkout.
         recurrent = (
-            meta.get("purpose") not in ("material", "lesson", "collection")
+            meta.get("purpose") not in ("material", "lesson", "collection", "interesting")
             and meta.get("recurrent_consent") is True
         )
         result = self._init_payment(

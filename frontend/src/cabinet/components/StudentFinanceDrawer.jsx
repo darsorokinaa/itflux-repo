@@ -102,6 +102,9 @@ export default function StudentFinanceDrawer({
                   </strong>
                 </div>
               </div>
+              {account.platform_discount_label ? (
+                <p className="pay-hint">{account.platform_discount_label}. Её задаёт платформа, изменить нельзя.</p>
+              ) : null}
               <div className="pay-drawer-actions pay-drawer-actions--compact">
                 <button type="button" className="pay-btn pay-btn--primary" onClick={() => onPayment?.(account.student_id)}>
                   Добавить оплату
@@ -179,6 +182,14 @@ export default function StudentFinanceDrawer({
                           </strong>
                           {due > 0 && due !== chargedAmt ? (
                             <span className="pay-hint">осталось {formatMoney(due, currency)}</span>
+                          ) : null}
+                          {Number(lesson.discount_amount || 0) > 0 ? (
+                            <span className="pay-hint">
+                              скидка {formatMoney(lesson.discount_amount, currency)}
+                              {Number(lesson.calculated_amount || 0) > chargedAmt
+                                ? ` · было ${formatMoney(lesson.calculated_amount, currency)}`
+                                : ""}
+                            </span>
                           ) : null}
                           {canEditCharge && !editing ? (
                             <button

@@ -3,8 +3,14 @@ import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router-dom";
 import { rememberReturnPath, safeReturnPath } from "../accessGate/accessGate";
 import { useCabinetAuthed } from "../hooks/useAccessGate";
-import { fetchInterestingItem } from "../utils/cabinetAuth";
+import {
+  fetchInterestingItem,
+  purchaseInteresting,
+  quoteInteresting,
+  startInterestingDemo,
+} from "../utils/cabinetAuth";
 import CatalogEngagementBar from "./CatalogEngagementBar";
+import CatalogPromoBox from "./CatalogPromoBox";
 
 const PLAN_NAMES = {
   start: "Старт",
@@ -44,6 +50,8 @@ export default function InterestingPreviewModal({ open, slug, onClose }) {
   const [item, setItem] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [promoCode, setPromoCode] = useState("");
 
   const returnUrl = slug ? previewUrl(slug) : "/interesting";
 
@@ -83,8 +91,53 @@ export default function InterestingPreviewModal({ open, slug, onClose }) {
   }, [open, slug, authed, load]);
 
   const access = item?.access || {};
-  const locked = Boolean(item) && (access.allowed === false || item.locked === true);
+  const locked = Boolean(item) && access.can_view !== true && (access.allowed === false || item.locked === true);
   const requiredPlan = planName(access.min_plan || access.required_plan);
+  const priceNumber = access.pricing?.final_amount ?? access.standalone_price;
+  const priceLabel = priceNumber != null && priceNumber !== ""
+    ? `Купить за ${Number(priceNumber).toLocaleString("ru-RU")} ₽`
+    : "";
+  const canBuy = Boolean(authed && access.can_purchase && priceLabel);
+  const canDemo = Boolean(authed && (access.can_start_demo || access.demo_active));
+  const demoExpired = Boolean(access.demo_expired && !access.demo_active);
+
+  const onBuy = async () => {
+    if (!slug) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await purchaseInteresting(slug, `int-${item?.id || slug}-${Date.now()}`, promoCode);
+      if (result?.payment_url) {
+        window.location.href = result.payment_url;
+        return;
+      }
+      await load();
+    } catch (err) {
+      setError(err?.message || "Не удалось начать покупку");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDemo = async () => {
+    if (!slug) return;
+    if (access.demo_active) {
+      onClose?.();
+      navigate(viewerUrl(slug));
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await startInterestingDemo(slug);
+      onClose?.();
+      navigate(viewerUrl(slug));
+    } catch (err) {
+      setError(err?.message || "Не удалось открыть демо");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (!open || typeof document === "undefined") return undefined;
@@ -177,7 +230,18 @@ export default function InterestingPreviewModal({ open, slug, onClose }) {
                   </div>
                 </div>
               ) : null}
-              {locked ? <p className="material-paywall__message">{message}</p> : null}
+              {locked ? <p className="material-paywall__message">{demoExpired ? "Демо этого тренажёра закончилось." : message}</p> : null}
+              {access.pricing?.message ? (
+                <p className="catalog-promo__msg catalog-promo__msg--ok">{access.pricing.message}</p>
+              ) : null}
+              {error ? <p className="material-viewer__error" role="alert">{error}</p> : null}
+              {canBuy ? (
+                <CatalogPromoBox
+                  onApplied={setPromoCode}
+                  onQuote={(code) => quoteInteresting(slug, code)}
+                  disabled={busy}
+                />
+              ) : null}
               <div className="material-paywall__actions">
                 {!locked ? (
                   <button
@@ -199,9 +263,21 @@ export default function InterestingPreviewModal({ open, slug, onClose }) {
                     Создать аккаунт
                   </Link>
                 ) : (
-                  <Link className="material-access-btn material-access-btn--primary" to="/cabinet/upgrade">
-                    Посмотреть тарифы
-                  </Link>
+                  <>
+                    {canBuy ? (
+                      <button type="button" className="material-access-btn material-access-btn--primary" onClick={onBuy} disabled={busy}>
+                        {priceLabel}
+                      </button>
+                    ) : null}
+                    {canDemo ? (
+                      <button type="button" className="material-access-btn" onClick={onDemo} disabled={busy}>
+                        {access.demo_active ? "Продолжить демо" : "Демо 10 минут"}
+                      </button>
+                    ) : null}
+                    <Link className="material-access-btn material-access-btn--ghost" to="/cabinet/upgrade">
+                      Посмотреть тарифы
+                    </Link>
+                  </>
                 )}
                 <button type="button" className="material-access-btn material-access-btn--ghost" onClick={onClose}>
                   Не сейчас

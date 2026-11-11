@@ -5,7 +5,8 @@ import CollectionHeader from "../components/collections/CollectionHeader";
 import CollectionLessonList from "../components/collections/CollectionLessonList";
 import StateView from "../components/StateView";
 import { useCabinetAuthed } from "../hooks/useAccessGate";
-import { ensureCsrfCookie, getCsrfToken } from "../utils/cabinetAuth";
+import { ensureCsrfCookie, getCsrfToken, quoteLessonCollection } from "../utils/cabinetAuth";
+import CatalogPromoBox from "../components/CatalogPromoBox";
 import "./lesson-collections.css";
 
 async function postCollection(path, body) {
@@ -55,6 +56,7 @@ export default function LessonCollectionPage() {
   const [missing, setMissing] = useState(false);
   const [buying, setBuying] = useState(false);
   const [buyError, setBuyError] = useState("");
+  const [promoCode, setPromoCode] = useState("");
 
   const load = () => {
     setLoading(true);
@@ -92,8 +94,10 @@ export default function LessonCollectionPage() {
       });
       const result = await postCollection(`/api/lesson-collections/${encodeURIComponent(slug)}/purchase/`, {
         idempotency_key: `col-${collection?.id}-${Date.now()}`,
+        promo_code: promoCode || undefined,
       });
       if (result?.payment_url) window.location.href = result.payment_url;
+      if (result?.granted) load();
     } catch {
       setBuyError("Не удалось перейти к оплате. Попробуйте ещё раз.");
     } finally {
@@ -150,6 +154,16 @@ export default function LessonCollectionPage() {
           <div className="lcol-top">
             <CollectionHeader collection={collection} />
             <div>
+              {authed && collection.access?.can_purchase ? (
+                <CatalogPromoBox
+                  onApplied={setPromoCode}
+                  onQuote={(code) => quoteLessonCollection(slug, code)}
+                  disabled={buying}
+                />
+              ) : null}
+              {collection.access?.pricing?.message ? (
+                <p className="catalog-promo__msg catalog-promo__msg--ok">{collection.access.pricing.message}</p>
+              ) : null}
               <CollectionAccessCard collection={collection} onBuy={buy} buying={buying} />
               {buyError ? <p className="lcol-hero__facts">{buyError}</p> : null}
             </div>
