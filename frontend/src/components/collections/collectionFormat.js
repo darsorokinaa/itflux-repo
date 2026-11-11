@@ -11,22 +11,33 @@ export function isDirectFileHref(href) {
   return typeof href === "string" && href.includes("/files/");
 }
 
-export function hoursLabel(count) {
+function ruPlural(count, one, few, many) {
   const value = Math.abs(Number(count) || 0);
   const mod10 = value % 10;
   const mod100 = value % 100;
-  if (mod10 === 1 && mod100 !== 11) return "час";
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "часа";
-  return "часов";
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
+
+export function hoursLabel(count) {
+  return ruPlural(count, "час", "часа", "часов");
 }
 
 export function lessonsLabel(count) {
-  const value = Math.abs(Number(count) || 0);
-  const mod10 = value % 10;
-  const mod100 = value % 100;
-  if (mod10 === 1 && mod100 !== 11) return "урок";
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "урока";
-  return "уроков";
+  return ruPlural(count, "урок", "урока", "уроков");
+}
+
+export function materialsLabel(count) {
+  return ruPlural(count, "материал", "материала", "материалов");
+}
+
+/** Все пункты набора: урок, тренажёр, файл и вариант. */
+export function collectionItemCount(collection) {
+  if (Array.isArray(collection?.lessons) && collection.lessons.length) {
+    return collection.lessons.length;
+  }
+  return Number(collection?.lessons_count) || 0;
 }
 
 export function formatDuration(minutes) {

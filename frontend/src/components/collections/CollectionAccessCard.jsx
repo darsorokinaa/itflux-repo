@@ -1,10 +1,10 @@
 import { Link } from "react-router-dom";
-import { continueLabel, isDirectFileHref, lessonHref, lessonsLabel } from "./collectionFormat";
+import { collectionItemCount, continueLabel, isDirectFileHref, lessonHref, materialsLabel } from "./collectionFormat";
 import CollectionProgress from "./CollectionProgress";
 
 export default function CollectionAccessCard({ collection, onBuy, buying = false }) {
   const access = collection?.access || {};
-  const count = collection?.lessons_count || 0;
+  const count = collectionItemCount(collection);
   const progress = collection?.progress || { viewed: 0, total: count };
   const continueLesson = collection?.continue_lesson;
   const showTariff = !access.has_access && access.plans?.length && access.mode !== "purchase";
@@ -34,7 +34,7 @@ export default function CollectionAccessCard({ collection, onBuy, buying = false
       ) : (
         <>
           <p className="lcol-access__kicker">Полный набор</p>
-          <p className="lcol-access__count">{count} готовых {lessonsLabel(count)}</p>
+          <p className="lcol-access__count">{count} {materialsLabel(count)}</p>
           {showPurchase ? (
             <p className="lcol-access__price">
               {access.compare_at_label ? <span className="lcol-access__old">{access.compare_at_label}</span> : null}
