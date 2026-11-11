@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import video_failover_api, video_meeting_api
+from . import variant_board_split_api, video_failover_api, video_meeting_api
 
 urlpatterns = [
     path(
@@ -75,7 +75,7 @@ urlpatterns = [
     ),
     path(
         "<uuid:meeting_uuid>/variant-board-split/",
-        video_meeting_api.VideoMeetingVariantBoardSplitView.as_view(),
+        variant_board_split_api.VideoMeetingVariantBoardSplitView.as_view(),
         name="video_meeting_variant_board_split",
     ),
     path(

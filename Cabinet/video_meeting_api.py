@@ -31,7 +31,6 @@ from .meeting_present import (
     present_variant,
     redact_plan_item_for_student,
     serialize_presented,
-    set_variant_board_split,
 )
 from .student_api import _interactive_to_player_payload
 from .kontur_talk import issue_kontur_talk_link, kontur_talk_public_status
@@ -614,48 +613,6 @@ class VideoMeetingPresentView(APIView):
             },
         )
         return Response({"success": True, "presented": None})
-
-
-class VideoMeetingVariantBoardSplitView(APIView):
-    """POST — открыть или закрыть «Доску рядом» у показанного варианта.
-
-    Доску выбирает сервер. open=false закрывает только сплит, вариант остаётся.
-    Пока ученик не выбран (409), состояние не пишется и не рассылается.
-    """
-
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, meeting_uuid):
-        from .variant_board import VariantBoardError
-
-        data = request.data if isinstance(request.data, dict) else {}
-        if "open" not in data or not isinstance(data.get("open"), bool):
-            return Response(
-                {"detail": "Укажите open: true или false", "code": "invalid"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        try:
-            meeting = get_meeting_by_uuid(meeting_uuid)
-            student_id = data.get("student_id")
-            if "studentId" in data:
-                student_id = data.get("studentId")
-            presented = set_variant_board_split(
-                meeting=meeting,
-                user=request.user,
-                open_split=data.get("open"),
-                pick={"target": data.get("target"), "student_id": student_id},
-            )
-        except VariantBoardError as exc:
-            return Response(
-                {"detail": str(exc), "code": exc.code, **exc.extra}, status=exc.status
-            )
-        except VideoMeetingError as exc:
-            return _error_response(exc)
-        broadcast_material_event(
-            meeting.uuid,
-            {"type": "resource.presented", "presented": presented},
-        )
-        return Response({"success": True, "presented": presented})
 
 
 class VideoMeetingLiveAnswersView(APIView):
