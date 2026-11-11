@@ -78,10 +78,10 @@ export default function CollectionLessonRow({ collection, lesson, current = fals
 
   if (!lesson.can_open) {
     return (
-      <div className={className} ref={rootRef}>
+      <div className="lcol-row-lock" ref={rootRef}>
         <button
           type="button"
-          className="lcol-row__button"
+          className={className}
           aria-expanded={open}
           aria-controls={popoverId}
           onClick={() => setOpen((value) => !value)}

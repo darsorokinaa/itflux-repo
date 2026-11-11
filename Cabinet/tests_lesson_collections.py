@@ -233,3 +233,10 @@ class LessonCollectionAccessTests(LessonAccessBase):
         variant_row = next(row for row in payload["lessons"] if row["kind"] == "variant")
         self.assertIn("/ege-col/math-col/variant/", variant_row["url"])
         self.assertTrue(variant_row["can_open"])
+        self.assertEqual(variant_row["title"], "Вариант №12")
+
+        variant.title = "Вариант: Геометрия, 7 класс"
+        variant.save(update_fields=["title"])
+        titled = self.client.get("/api/lesson-collections/geometry-7/").json()["collection"]
+        titled_row = next(row for row in titled["lessons"] if row["kind"] == "variant")
+        self.assertEqual(titled_row["title"], "Вариант: Геометрия, 7 класс")

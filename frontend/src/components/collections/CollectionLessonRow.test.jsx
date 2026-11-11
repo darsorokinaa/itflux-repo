@@ -40,12 +40,13 @@ describe("CollectionLessonRow locked layout", () => {
       </MemoryRouter>,
     );
 
-    const row = container.querySelector(".lcol-row--locked");
-    const button = row.querySelector(":scope > .lcol-row__button");
+    const button = container.querySelector("button.lcol-row--locked");
     expect(button).toBeTruthy();
+    expect(button.parentElement.classList.contains("lcol-row-lock")).toBe(true);
+    expect(button.parentElement.classList.contains("lcol-row")).toBe(false);
     expect(button.querySelector(".lcol-row__title").textContent).toBe(lockedLesson.title);
     expect(button.querySelector(".lcol-row__desc").textContent).toBe(lockedLesson.short_description);
-    expect(row.querySelector("a")).toBeNull();
+    expect(button.querySelector("a")).toBeNull();
     expect(screen.getByRole("button", { name: /Теория вероятности/ })).toBeTruthy();
   });
 
@@ -68,12 +69,11 @@ describe("CollectionLessonRow locked layout", () => {
       </MemoryRouter>,
     );
 
-    const row = container.querySelector(".lcol-row--locked");
-    const button = row.querySelector(":scope > .lcol-row__button");
+    const button = container.querySelector("button.lcol-row--locked");
     expect(button.querySelector(".lcol-row__title").textContent).toMatch(/Рабочий лист/);
     expect(button.querySelector(".lcol-row__desc").textContent).toMatch(/PDF для печати/);
     expect(button.querySelector(".lcol-pill").textContent).toBe("Файл");
-    expect(row.querySelector("a")).toBeNull();
+    expect(button.querySelector("a")).toBeNull();
   });
 
   it("keeps an open file as a direct link and a locked variant in the row", () => {
@@ -104,14 +104,16 @@ describe("CollectionLessonRow locked layout", () => {
             id: 20,
             kind: "variant",
             number: 5,
-            title: "Вариант №18",
-            short_description: "Математика · ОГЭ",
+            title: "Вариант: Комплект по вероятности",
+            short_description: "Математика · ОГЭ. Классическая вероятность, противоположное событие и круги Эйлера.",
             can_open: false,
           }}
         />
       </MemoryRouter>,
     );
-    expect(screen.getByRole("button", { name: /Вариант №18/ }).textContent).toMatch(/Вариант/);
+    const variant = screen.getByRole("button", { name: /Вариант: Комплект по вероятности/ });
+    expect(variant.querySelector(".lcol-row__desc").textContent).toMatch(/круги Эйлера/);
+    expect(variant.classList.contains("lcol-row")).toBe(true);
   });
 
   it("still opens a trainer that is not tariff-gated", () => {
@@ -138,11 +140,12 @@ describe("CollectionLessonRow locked layout", () => {
   });
 
   it("does not trap the locked button in the narrow status column", () => {
+    const wrap = css.match(/\.lcol-row-lock \{([^}]+)\}/);
+    expect(wrap[1]).toMatch(/display:\s*block/);
     const locked = css.match(/\.lcol-row--locked \{([^}]+)\}/);
-    expect(locked[1]).toMatch(/display:\s*block/);
-    expect(css).toMatch(/\.lcol-row--locked > \.lcol-row__button \{[^}]*width:\s*100%/);
-    expect(css).toMatch(/html\.seasonal-theme-active \.lcol-top[\s\S]*background-color:\s*#fff/);
-    expect(css).toMatch(/html\.seasonal-theme-active \.lcol-lessons/);
-    expect(css).toMatch(/html\.seasonal-theme-active \.lcol-card/);
+    expect(locked[1]).not.toMatch(/display:\s*block/);
+    expect(locked[1]).toMatch(/width:\s*100%/);
+    expect(css).toMatch(/\.lcol-row--cover \{[^}]*72px 28px 40px minmax\(0, 1fr\) auto/);
+    expect(css).toMatch(/html\.seasonal-theme-active \.lcol-row-lock/);
   });
 });
