@@ -54,6 +54,27 @@ export function readValueReached() {
   }
 }
 
+function pathOnly(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("/")) return (raw.split("?")[0] || "").replace(/\/+$/, "") || "/";
+  try {
+    return (new URL(raw).pathname || "").replace(/\/+$/, "") || "/";
+  } catch {
+    return "";
+  }
+}
+
+/** Регистрация с лендинга и /pricing открывается с ролью «учитель». */
+export function registerRoleForEntry({ next = "", referrer = "", roleParam = "" } = {}) {
+  if (roleParam === "student" || roleParam === "parent") return roleParam;
+  if (roleParam === "teacher") return "teacher";
+  const paths = [pathOnly(next), pathOnly(referrer)];
+  if (paths.some((item) => item === "/" || item === "/pricing")) return "teacher";
+  if (inferValueIntent(next)) return "teacher";
+  return "";
+}
+
 export function inferValueIntent(path) {
   const raw = String(path || "").trim();
   const p = raw.split("?")[0] || "";

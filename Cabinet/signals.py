@@ -3,8 +3,8 @@ from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
 from Generator.models import Task
-from .models import HomeworkSubmission, Profile, ScheduleEvent, Student
-from .choices import StudentStatus
+from .models import Homework, HomeworkSubmission, Profile, ScheduleEvent, Student
+from .choices import HomeworkStatus, StudentStatus
 
 # Статус ученика до save: {student_pk: old_status}
 _pre_save_student_statuses: dict[int, str] = {}
@@ -232,3 +232,37 @@ def r137_sync_plan_date_on_move(sender, instance, created, **kwargs):
         import logging
 
         logging.getLogger(__name__).exception("r137 plan date sync failed event=%s", instance.pk)
+
+
+def _record_homework_created(homework):
+    from .storefront_events import record_storefront_event
+
+    record_storefront_event(
+        event_name="homework_created",
+        user=homework.teacher,
+        object_id=homework.pk,
+        idempotency_key=f"homework:{homework.pk}",
+    )
+
+
+@receiver(post_save, sender=Homework)
+def storefront_homework_created(sender, instance, created, **kwargs):
+    if instance.status == HomeworkStatus.DRAFT:
+        return
+    if not created and not getattr(instance, "_storefront_homework_issued", False):
+        return
+    try:
+        _record_homework_created(instance)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception("storefront homework_created failed homework=%s", instance.pk)
+
+
+@receiver(pre_save, sender=Homework)
+def mark_homework_just_issued(sender, instance, **kwargs):
+    instance._storefront_homework_issued = False
+    if not instance.pk or instance.status == HomeworkStatus.DRAFT:
+        return
+    old = Homework.objects.filter(pk=instance.pk).values_list("status", flat=True).first()
+    instance._storefront_homework_issued = old == HomeworkStatus.DRAFT

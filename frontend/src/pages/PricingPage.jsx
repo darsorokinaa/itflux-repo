@@ -357,7 +357,7 @@ export default function PricingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teacher, trial.available]);
 
-  const registerUrl = (next) => `/cabinet/login?mode=register&next=${encodeURIComponent(next)}`;
+  const registerUrl = (next) => `/cabinet/login?mode=register&role=teacher&next=${encodeURIComponent(next)}`;
 
   const cta = (plan) => {
     if (plan.contact) {

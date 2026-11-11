@@ -12,7 +12,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.tokens import default_token_generator
 from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
-from django.http import JsonResponse
+from django.http import HttpResponseRedirect, JsonResponse
 from django.utils import timezone
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
@@ -509,6 +509,12 @@ def api_register(request):
         payload["referral_reward"] = referral_result
     if registration_promo:
         payload["registration_promo"] = registration_promo
+    try:
+        from .platform_mail import send_confirmation_email
+
+        send_confirmation_email(user, request)
+    except Exception:
+        logger.exception("confirmation email failed user=%s", user.id)
     return JsonResponse(payload, status=201)
 
 
@@ -540,11 +546,10 @@ PASSWORD_RESET_SENT_MESSAGE = (
 )
 
 
-def _public_site_origin(request) -> str:
-    origin = (getattr(settings, "LK_PUBLIC_URL", "") or "").rstrip("/")
-    if origin:
-        return origin
-    return request.build_absolute_uri("/").rstrip("/")
+def _public_site_origin(request=None) -> str:
+    from .platform_mail import public_site_origin
+
+    return public_site_origin(request)
 
 
 def _password_reset_url(request, user) -> str:
@@ -598,6 +603,26 @@ def _send_password_reset_email(request, user) -> bool:
     except Exception:
         logger.exception("Не удалось отправить письмо для восстановления пароля на %s", email)
         return False
+
+
+@require_http_methods(["GET"])
+def api_email_confirm(request):
+    from .platform_mail import user_from_confirmation_token
+
+    user = user_from_confirmation_token(request.GET.get("token") or "")
+    profile = None
+    if user is not None:
+        try:
+            profile = user.profile
+        except Profile.DoesNotExist:
+            profile = None
+    if profile is not None and not profile.email_confirmed:
+        profile.email_confirmed = True
+        profile.save(update_fields=["email_confirmed"])
+        return HttpResponseRedirect("/cabinet/login?email_confirmed=1")
+    if profile is not None:
+        return HttpResponseRedirect("/cabinet/login?email_confirmed=1")
+    return HttpResponseRedirect("/cabinet/login?email_confirmed=0")
 
 
 @require_http_methods(["POST"])

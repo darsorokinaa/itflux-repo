@@ -14,6 +14,8 @@ class StorefrontEvent(models.Model):
         TARIFF_CLICK = "tariff_click", "Клик по тарифу"
         PROMO_APPLIED = "promo_applied", "Промокод применён"
         PAYMENT_CREATED = "payment_created", "Платёж создан"
+        HOMEWORK_CREATED = "homework_created", "Домашнее задание создано"
+        INVITE_ACCEPTED = "invite_accepted", "Приглашение принято"
 
     event_name = models.CharField("Событие", max_length=32, choices=Name.choices, db_index=True)
     user = models.ForeignKey(

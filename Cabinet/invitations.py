@@ -101,6 +101,14 @@ def _emit_invitation_accepted(invitation, student):
             source="invitation_accept",
             metadata={"student_id": student.pk} if student is not None else None,
         )
+        from .storefront_events import record_storefront_event
+
+        record_storefront_event(
+            event_name="invite_accepted",
+            user=invitation.teacher,
+            object_id=invitation.pk,
+            idempotency_key=f"invite:{invitation.pk}",
+        )
     except Exception:
         logger.exception("invitation accepted analytics failed invitation=%s", getattr(invitation, "pk", None))
 

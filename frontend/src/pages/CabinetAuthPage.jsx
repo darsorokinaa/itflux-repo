@@ -18,7 +18,7 @@ import {
   rememberInviteToken,
 } from "../cabinet/inviteAuth";
 import { captureAcquisition, readAcquisition } from "../cabinet/activationAnalytics";
-import { authLeadForIntent, inferValueIntent, trackValueGoal } from "../utils/valuePath";
+import { authLeadForIntent, inferValueIntent, registerRoleForEntry, trackValueGoal } from "../utils/valuePath";
 import { MARKETING_EMAIL_TEXT } from "../r52/consentTexts";
 import "../r52/r52.css";
 
@@ -57,7 +57,12 @@ export default function CabinetAuthPage() {
   const [checkingSession, setCheckingSession] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const [info, setInfo] = useState("");
+  const [info, setInfo] = useState(() => {
+    const flag = searchParams.get("email_confirmed");
+    if (flag === "1") return "Почта подтверждена. Можно войти в кабинет.";
+    if (flag === "0") return "Ссылка подтверждения недействительна или устарела. Войти можно и без неё.";
+    return "";
+  });
   const [referralPreview, setReferralPreview] = useState(null);
 
   const [loginForm, setLoginForm] = useState({ login: "", password: "" });
@@ -66,6 +71,11 @@ export default function CabinetAuthPage() {
   const [resetForm, setResetForm] = useState({ password: "", password_confirm: "" });
   const valueIntent = inferValueIntent(redirectTo);
   const returningToUpgrade = String(redirectTo || "").startsWith("/cabinet/upgrade");
+  const entryRole = registerRoleForEntry({
+    next: redirectTo,
+    referrer: typeof document !== "undefined" ? document.referrer : "",
+    roleParam: searchParams.get("role") || "",
+  });
   const [registerForm, setRegisterForm] = useState({
     email: "",
     username: "",
@@ -73,9 +83,7 @@ export default function CabinetAuthPage() {
     password_confirm: "",
     name: "",
     surname: "",
-    role: inferValueIntent(
-      safeReturnPath(location.state?.from) || safeReturnPath(new URLSearchParams(location.search).get("next")),
-    ) ? "teacher" : "student",
+    role: entryRole || (valueIntent ? "teacher" : "student"),
   });
 
   useEffect(() => {

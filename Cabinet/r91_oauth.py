@@ -147,6 +147,7 @@ def stash_pending(request, provider, ident, ctx):
         "next": ctx.get("next") or "/cabinet",
         "pd": bool(ctx.get("pd")),
         "mkt": bool(ctx.get("mkt")),
+        "acquisition": ctx.get("acquisition") if isinstance(ctx.get("acquisition"), dict) else {},
         "ts": int(time.time()),
     }
     request.session.modified = True
@@ -210,7 +211,7 @@ def oauth_complete(request):
         else:
             user = User.objects.filter(email__iexact=ident["email"]).first() if ident["email"] else None
             if user is None:
-                user = create_oauth_user(provider, ident, role, request)
+                user = create_oauth_user(provider, ident, role, request, p.get("acquisition"))
             SocialAccount.objects.create(user=user, provider=provider, uid=ident["uid"], email=ident["email"])
     request.session.pop(PENDING_KEY, None)
     err = finish_login(request, user, provider, p)

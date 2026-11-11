@@ -68,16 +68,16 @@ class TeacherOnboardingStateTests(TestCase):
     def test_new_teacher_sees_add_student(self):
         state = build_teacher_onboarding_state(self.teacher)
         self.assertTrue(state["visible"])
-        self.assertEqual(state["next_step"], "student")
+        self.assertEqual(state["next_step"], "invite")
         self.assertEqual(state["completed_steps"], 0)
         self.assertEqual(state["total_steps"], 3)
         self.assertEqual(state["cta"]["label"], "Добавить ученика")
         self.assertIn("invite=1", state["cta"]["href"])
-        self.assertEqual(state["steps"][0]["key"], "student")
+        self.assertEqual(state["steps"][0]["key"], "invite")
         self.assertFalse(state["steps"][0]["done"])
         self.assertEqual(
             [step["key"] for step in state["steps"]],
-            ["student", "assignment", "share"],
+            ["invite", "accepted", "homework"],
         )
 
     def test_pre_profile_student_counts_without_accept(self):
@@ -85,9 +85,11 @@ class TeacherOnboardingStateTests(TestCase):
         state = build_teacher_onboarding_state(self.teacher)
         self.assertTrue(state["flags"]["has_student"])
         self.assertFalse(state["flags"]["has_connected_student"])
-        self.assertEqual(state["next_step"], "assignment")
+        self.assertFalse(state["flags"]["invitation_accepted"])
+        self.assertEqual(state["next_step"], "invite")
         self.assertEqual(state["context"]["student_id"], student.pk)
-        self.assertIn("assign=1", state["cta"]["href"])
+        self.assertIn("invite=1", state["cta"]["href"])
+        self.assertFalse(state["steps"][0]["done"])
 
     def test_connected_student_without_subject(self):
         user = User.objects.create_user(username="onb_s", password="pass")
@@ -96,7 +98,10 @@ class TeacherOnboardingStateTests(TestCase):
         self._student(user=user)
         state = build_teacher_onboarding_state(self.teacher)
         self.assertTrue(state["flags"]["has_connected_student"])
-        self.assertEqual(state["next_step"], "assignment")
+        self.assertTrue(state["flags"]["invitation_accepted"])
+        self.assertEqual(state["next_step"], "homework")
+        self.assertEqual(state["cta"]["label"], "Выдайте первое ДЗ")
+        self.assertIn("assign=1", state["cta"]["href"])
 
     def test_subject_then_schedule(self):
         student = self._student()
@@ -104,7 +109,7 @@ class TeacherOnboardingStateTests(TestCase):
             student=student, subject="inf", title="ОГЭ", direction="oge"
         )
         state = build_teacher_onboarding_state(self.teacher)
-        self.assertEqual(state["next_step"], "assignment")
+        self.assertEqual(state["next_step"], "invite")
 
     def test_multiple_subjects_still_one_step(self):
         student = self._student()
@@ -112,7 +117,7 @@ class TeacherOnboardingStateTests(TestCase):
         StudentSubject.objects.create(student=student, subject="math", title="Школа", direction="school")
         state = build_teacher_onboarding_state(self.teacher)
         self.assertTrue(state["flags"]["has_subject"])
-        self.assertEqual(state["next_step"], "assignment")
+        self.assertEqual(state["next_step"], "invite")
 
     def test_event_without_materials(self):
         student = self._student()
@@ -120,7 +125,7 @@ class TeacherOnboardingStateTests(TestCase):
         self._event(student=student)
         state = build_teacher_onboarding_state(self.teacher)
         self.assertTrue(state["visible"])
-        self.assertEqual(state["next_step"], "assignment")
+        self.assertEqual(state["next_step"], "invite")
 
     def test_cancelled_event_does_not_count(self):
         student = self._student()
@@ -129,7 +134,7 @@ class TeacherOnboardingStateTests(TestCase):
         event.status = ScheduleEvent.Status.CANCELLED
         event.save(update_fields=["status"])
         state = build_teacher_onboarding_state(self.teacher)
-        self.assertEqual(state["next_step"], "assignment")
+        self.assertEqual(state["next_step"], "invite")
 
     def test_group_event_counts(self):
         student = self._student()
@@ -149,7 +154,7 @@ class TeacherOnboardingStateTests(TestCase):
         state = build_teacher_onboarding_state(self.teacher)
         self.assertTrue(state["flags"]["has_schedule_event"])
         self.assertTrue(state["visible"])
-        self.assertEqual(state["next_step"], "assignment")
+        self.assertEqual(state["next_step"], "invite")
 
     def test_material_then_conduct(self):
         student = self._student()
@@ -160,7 +165,7 @@ class TeacherOnboardingStateTests(TestCase):
         state = build_teacher_onboarding_state(self.teacher)
         self.assertTrue(state["flags"]["has_materials"])
         self.assertTrue(state["visible"])
-        self.assertEqual(state["next_step"], "assignment")
+        self.assertEqual(state["next_step"], "invite")
 
     def test_finished_video_hides_onboarding(self):
         student = self._student()
@@ -175,7 +180,7 @@ class TeacherOnboardingStateTests(TestCase):
         )
         state = build_teacher_onboarding_state(self.teacher)
         self.assertTrue(state["visible"])
-        self.assertEqual(state["next_step"], "assignment")
+        self.assertEqual(state["next_step"], "invite")
         self.assertTrue(state["flags"]["has_conducted_lesson"])
 
     def test_completed_event_without_video_hides_onboarding(self):
@@ -185,14 +190,14 @@ class TeacherOnboardingStateTests(TestCase):
         event.save(update_fields=["status"])
         state = build_teacher_onboarding_state(self.teacher)
         self.assertTrue(state["visible"])
-        self.assertEqual(state["next_step"], "assignment")
+        self.assertEqual(state["next_step"], "invite")
 
     def test_foreign_teacher_data_isolated(self):
         self._student(teacher=self.other)
         own = build_teacher_onboarding_state(self.teacher)
         other = build_teacher_onboarding_state(self.other)
-        self.assertEqual(own["next_step"], "student")
-        self.assertEqual(other["next_step"], "assignment")
+        self.assertEqual(own["next_step"], "invite")
+        self.assertEqual(other["next_step"], "invite")
         self.assertNotEqual(own["context"]["student_id"], other["context"]["student_id"])
 
     def test_dashboard_includes_onboarding(self):
@@ -200,7 +205,7 @@ class TeacherOnboardingStateTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         onboarding = resp.json().get("onboarding") or {}
         self.assertTrue(onboarding.get("visible"))
-        self.assertEqual(onboarding.get("next_step"), "student")
+        self.assertEqual(onboarding.get("next_step"), "invite")
         self.assertNotIn("email", str(onboarding).lower())
         self.assertNotIn("@", str(onboarding.get("cta") or {}))
 
@@ -224,7 +229,7 @@ class TeacherOnboardingStateTests(TestCase):
             status=HomeworkStatus.ASSIGNED,
         )
         state = build_teacher_onboarding_state(self.teacher)
-        self.assertEqual(state["next_step"], "share")
+        self.assertEqual(state["next_step"], "invite")
         self.assertTrue(state["visible"])
         linked = User.objects.create_user("onb_linked", "onb_linked@test.ru", "pass")
         student.user = linked
@@ -244,7 +249,7 @@ class TeacherOnboardingStateTests(TestCase):
         )
         state = build_teacher_onboarding_state(self.teacher)
         self.assertFalse(state["flags"]["has_assignment"])
-        self.assertEqual(state["next_step"], "assignment")
+        self.assertEqual(state["next_step"], "invite")
 
     def test_dismiss_hides_checklist(self):
         from Cabinet.storefront_models import TeacherUiDismissal
@@ -256,7 +261,7 @@ class TeacherOnboardingStateTests(TestCase):
         state = build_teacher_onboarding_state(self.teacher)
         self.assertFalse(state["visible"])
         self.assertTrue(state["dismissed"])
-        self.assertEqual(state["next_step"], "student")
+        self.assertEqual(state["next_step"], "invite")
 
     def test_established_teacher_with_student_is_not_shown(self):
         self.teacher.date_joined = timezone.now() - timedelta(days=40)

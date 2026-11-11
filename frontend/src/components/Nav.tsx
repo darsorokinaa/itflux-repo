@@ -245,7 +245,9 @@ function useHeaderSession() {
   const name = user ? displayName(user) : "";
   const initial = name ? name.charAt(0).toUpperCase() : "";
   const isTeacher = user?.role === "teacher";
-  const href = authed ? getCabinetHomePath(user) : "/cabinet/login";
+  const entryPath = typeof window !== "undefined" ? window.location.pathname.replace(/\/+$/, "") || "/" : "";
+  const teacherEntry = entryPath === "/" || entryPath === "/pricing";
+  const href = authed ? getCabinetHomePath(user) : teacherEntry ? "/cabinet/login?role=teacher" : "/cabinet/login";
   const label = authed
     ? (isTeacher ? `Кабинет учителя — ${name}` : `Личный кабинет — ${name}`)
     : "Личный кабинет";

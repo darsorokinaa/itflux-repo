@@ -68,6 +68,8 @@ def oauth_start(request, provider):
         return HttpResponseRedirect(f"{SITE_ORIGIN}{request.get_full_path()}")
     state = secrets.token_urlsafe(24)
     role = request.GET.get("role")
+    from .acquisition import acquisition_from_request
+
     request.session["oauth_ctx"] = {
         "provider": provider,
         "state": state,
@@ -77,6 +79,7 @@ def oauth_start(request, provider):
         # r52: галочки со страницы регистрации (ПД — обязательно, реклама — по желанию).
         "pd": request.GET.get("pd") == "1",
         "mkt": request.GET.get("mkt") == "1",
+        "acquisition": acquisition_from_request(request),
     }
     if provider == "yandex":
         q = {"response_type": "code", "client_id": cfg[0], "redirect_uri": redirect_uri(provider),
@@ -167,7 +170,7 @@ def oauth_callback(request, provider):
 
                     stash_pending(request, provider, ident, ctx)
                     return HttpResponseRedirect("/cabinet/oauth/role?" + urlencode({"next": ctx.get("next") or "/cabinet"}))
-                user = create_oauth_user(provider, ident, role, request)
+                user = create_oauth_user(provider, ident, role, request, ctx.get("acquisition"))
             SocialAccount.objects.create(user=user, provider=provider, uid=ident["uid"], email=ident["email"])
 
     err = finish_login(request, user, provider, ctx)
@@ -176,7 +179,7 @@ def oauth_callback(request, provider):
     return HttpResponseRedirect(ctx.get("next") or "/cabinet")
 
 
-def create_oauth_user(provider, ident, role, request):
+def create_oauth_user(provider, ident, role, request, acquisition=None):
     user = User.objects.create_user(
         username=_unique_username((ident["email"].split("@")[0] if ident["email"] else f"{provider}{ident['uid']}")),
         email=ident["email"],
@@ -187,7 +190,14 @@ def create_oauth_user(provider, ident, role, request):
     profile.name = (ident.get("first_name") or "")[:100]
     profile.surname = (ident.get("last_name") or "")[:100]
     profile.role = role
-    profile.save(update_fields=["name", "surname", "role"])
+    fields = ["name", "surname", "role"]
+    if role == Profile.Role.TEACHER:
+        from .acquisition import apply_teacher_acquisition
+
+        fields.extend(apply_teacher_acquisition(profile, request, acquisition))
+    profile.email_confirmed = True
+    fields.append("email_confirmed")
+    profile.save(update_fields=fields)
     if profile.role == Profile.Role.TEACHER:
         try:
             from .activation_events import TEACHER_REGISTERED, record_event

@@ -35,19 +35,31 @@ from .models import (
 )
 
 ACTIVATION_STEP_KEYS = (
-    "student",
-    "assignment",
-    "share",
+    "invite",
+    "accepted",
+    "homework",
 )
 
 FIRST_DAY_WINDOW = timedelta(days=14)
 
+ADD_STUDENT_LABEL = "Добавить ученика"
+HOMEWORK_STEP_LABEL = "Выдайте первое ДЗ"
+
+_INVITE_CTA = {
+    "label": ADD_STUDENT_LABEL,
+    "href": "/cabinet/students?invite=1",
+    "hint": "Карточки недостаточно: шаг закроется, когда ученик примет приглашение.",
+    "title": "Пригласите ученика",
+}
+
 STEP_LABELS = {
     "registered": "Зарегистрироваться",
-    "student": "Добавить ученика",
+    "student": ADD_STUDENT_LABEL,
+    "invite": "Отправьте приглашение",
+    "accepted": "Ученик принял приглашение",
+    "homework": HOMEWORK_STEP_LABEL,
     "assignment": "Выдать первый вариант или домашнее задание",
     "share": "Отправить ученику ссылку",
-    "invite": "Отправить приглашение",
     "schedule": "Создать занятие",
     "subject": "Добавить предмет",
     "materials": "Подготовить материалы",
@@ -55,25 +67,19 @@ STEP_LABELS = {
 }
 
 CTA_BY_STEP = {
-    "student": {
-        "label": "Добавить ученика",
-        "href": "/cabinet/students?invite=1",
-        "hint": "Это займёт пару минут. После ученика можно сразу выдать вариант или домашнее задание.",
-        "title": "Добавьте первого ученика",
+    "student": _INVITE_CTA,
+    "invite": _INVITE_CTA,
+    "accepted": {
+        "label": "Открыть приглашения",
+        "href": "/cabinet/students?tab=invites",
+        "hint": "Ученик должен открыть ссылку и создать аккаунт. Пока приглашение не принято, ДЗ ему не выдать.",
+        "title": "Дождитесь, пока ученик примет приглашение",
     },
-    "assignment": {
-        "label": "Выдать задание",
+    "homework": {
+        "label": HOMEWORK_STEP_LABEL,
         "href": "/cabinet?assign=1",
-        "hint": "Соберите вариант в генераторе или выдайте домашнее задание — так появится первый результат.",
-        "title": "Выдайте первый вариант или задание",
-        "alt_label": "Собрать вариант",
-        "alt_href": "/generator",
-    },
-    "share": {
-        "label": "Отправить ссылку",
-        "href": "/cabinet/students?invite=1",
-        "hint": "Скопируйте ссылку и отправьте ученику, чтобы он открыл задание.",
-        "title": "Отправьте ученику ссылку",
+        "hint": "Ученик уже в кабинете. Выдайте первое домашнее задание — это первый результат.",
+        "title": HOMEWORK_STEP_LABEL,
     },
 }
 
@@ -253,12 +259,27 @@ def teacher_has_pending_invite(teacher: User) -> bool:
 
 
 def teacher_has_given_work(teacher: User) -> bool:
-    """Вариант, выданный ученику, или домашнее задание не в черновике."""
-    if teacher_has_assigned_homework(teacher):
-        return True
-    from .variant_live_models import VariantIssuance
+    """Первое ДЗ: выданное домашнее задание, не черновик и не только вариант."""
+    return teacher_has_assigned_homework(teacher)
 
-    return VariantIssuance.objects.filter(teacher=teacher).exists()
+
+def teacher_invitation_accepted(teacher: User) -> bool:
+    """Шаг засчитан только после принятого приглашения или ученика с аккаунтом."""
+    if teacher_has_connected_student(teacher):
+        return True
+    return StudentInvitation.objects.filter(
+        teacher=teacher,
+        status=InvitationStatus.ACCEPTED,
+    ).exists()
+
+
+def teacher_invitation_sent(teacher: User) -> bool:
+    if teacher_invitation_accepted(teacher):
+        return True
+    return StudentInvitation.objects.filter(
+        teacher=teacher,
+        status=InvitationStatus.PENDING,
+    ).exists()
 
 
 def teacher_has_shared_access(teacher: User) -> bool:
@@ -322,26 +343,30 @@ def build_teacher_onboarding_state(teacher: User) -> dict[str, Any]:
     has_conducted = teacher_has_conducted_lesson(teacher)
     has_assignment = teacher_has_given_work(teacher)
     has_share = teacher_has_shared_access(teacher)
+    invite_sent = teacher_invitation_sent(teacher)
+    invite_accepted = teacher_invitation_accepted(teacher)
     dismissed = checklist_dismissed(teacher)
 
     flags = {
         "registered": True,
-        "student": has_student,
+        "student": invite_accepted,
+        "invite": invite_sent,
+        "accepted": invite_accepted,
+        "homework": has_assignment,
         "assignment": has_assignment,
         "share": has_share,
-        "invite": has_connected,
         "schedule": has_event,
         "subject": has_subject,
         "materials": has_materials,
         "conduct": has_conducted,
     }
 
-    if not has_student:
-        next_key = "student"
+    if not invite_accepted and not invite_sent:
+        next_key = "invite"
+    elif not invite_accepted:
+        next_key = "accepted"
     elif not has_assignment:
-        next_key = "assignment"
-    elif not has_share:
-        next_key = "share"
+        next_key = "homework"
     else:
         next_key = None
 
@@ -385,6 +410,8 @@ def build_teacher_onboarding_state(teacher: User) -> dict[str, Any]:
         "flags": {
             "has_student": has_student,
             "has_assignment": has_assignment,
+            "invitation_sent": invite_sent,
+            "invitation_accepted": invite_accepted,
             "has_shared_access": has_share,
             "has_connected_student": has_connected,
             "has_pending_invite": has_pending_invite,

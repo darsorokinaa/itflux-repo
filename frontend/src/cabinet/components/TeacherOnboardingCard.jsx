@@ -20,7 +20,7 @@ export default function TeacherOnboardingCard({ onboarding, onDismissed }) {
 
   useEffect(() => {
     if (!onboarding?.visible) return;
-    if (nextStep === "student") {
+    if (nextStep === "student" || nextStep === "invite") {
       trackActivationIntent("add_student_cta_viewed", { source: "onboarding_card" });
     }
   }, [onboarding?.visible, nextStep]);
@@ -28,9 +28,9 @@ export default function TeacherOnboardingCard({ onboarding, onDismissed }) {
   if (!onboarding?.visible) return null;
 
   const onCtaClick = () => {
-    if (onboarding.next_step === "student") {
+    if (onboarding.next_step === "student" || onboarding.next_step === "invite") {
       trackActivationIntent("add_student_clicked", { source: "onboarding_card" });
-    } else if (onboarding.next_step === "share") {
+    } else if (onboarding.next_step === "share" || onboarding.next_step === "accepted") {
       trackActivationIntent("student_invite_share_clicked", { source: "onboarding_card" });
     }
   };

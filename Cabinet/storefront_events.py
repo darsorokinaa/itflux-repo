@@ -12,11 +12,15 @@ CLIENT_EVENTS = frozenset({
     StorefrontEvent.Name.TARIFF_CLICK,
     StorefrontEvent.Name.PROMO_APPLIED,
 })
-SERVER_EVENTS = frozenset({StorefrontEvent.Name.PAYMENT_CREATED})
+SERVER_EVENTS = frozenset({
+    StorefrontEvent.Name.PAYMENT_CREATED,
+    StorefrontEvent.Name.HOMEWORK_CREATED,
+    StorefrontEvent.Name.INVITE_ACCEPTED,
+})
 _META_KEYS = ("plan_slug", "promo_code", "billing_period")
 
 
-def sanitize_storefront_metadata(raw, *, payment_id=None) -> dict:
+def sanitize_storefront_metadata(raw, *, payment_id=None, object_id=None) -> dict:
     source = raw if isinstance(raw, dict) else {}
     meta = {}
     plan = clean_acquisition_token(source.get("plan_slug"), limit=32)
@@ -33,17 +37,30 @@ def sanitize_storefront_metadata(raw, *, payment_id=None) -> dict:
             meta["payment_id"] = int(payment_id)
         except (TypeError, ValueError):
             pass
+    if object_id:
+        try:
+            meta["object_id"] = int(object_id)
+        except (TypeError, ValueError):
+            pass
     return meta
 
 
-def record_storefront_event(*, event_name: str, user=None, metadata=None, idempotency_key: str = "", payment_id=None):
+def record_storefront_event(
+    *,
+    event_name: str,
+    user=None,
+    metadata=None,
+    idempotency_key: str = "",
+    payment_id=None,
+    object_id=None,
+):
     """Возвращает (event, created). Повтор с тем же ключом не создаёт вторую строку."""
     name = str(event_name or "").strip()
     allowed = set(CLIENT_EVENTS) | set(SERVER_EVENTS)
     if name not in allowed:
         raise ValueError("unknown storefront event")
     key = clean_acquisition_token(idempotency_key, limit=80) or ""
-    meta = sanitize_storefront_metadata(metadata, payment_id=payment_id)
+    meta = sanitize_storefront_metadata(metadata, payment_id=payment_id, object_id=object_id)
     if key:
         existing = StorefrontEvent.objects.filter(idempotency_key=key).first()
         if existing:

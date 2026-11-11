@@ -113,7 +113,9 @@ function useCabinetTab() {
   }, []);
 
   const name = user ? displayName(user) : "";
-  const href = authed ? getCabinetHomePath(user) : "/cabinet/login";
+  const entryPath = typeof window !== "undefined" ? window.location.pathname.replace(/\/+$/, "") || "/" : "";
+  const teacherEntry = entryPath === "/" || entryPath === "/pricing";
+  const href = authed ? getCabinetHomePath(user) : teacherEntry ? "/cabinet/login?role=teacher" : "/cabinet/login";
   const label = authed
     ? (user?.role === "teacher" ? `Кабинет учителя — ${name}` : `Личный кабинет — ${name}`)
     : "Личный кабинет";

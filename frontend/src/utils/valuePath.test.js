@@ -5,6 +5,7 @@ import {
   authSearchWithNext,
   inferValueIntent,
   markFirstVisit,
+  registerRoleForEntry,
   secondsSinceFirstVisit,
 } from "./valuePath";
 
@@ -44,5 +45,17 @@ describe("time to first value timestamp", () => {
     markFirstVisit();
     expect(sessionStorage.getItem("itflux_first_visit_at")).toBe(first);
     expect(secondsSinceFirstVisit()).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("registerRoleForEntry", () => {
+  it("preselects the teacher role from the landing page and pricing", () => {
+    expect(registerRoleForEntry({ roleParam: "teacher" })).toBe("teacher");
+    expect(registerRoleForEntry({ next: "/pricing" })).toBe("teacher");
+    expect(registerRoleForEntry({ referrer: "https://itflux-academy.ru/" })).toBe("teacher");
+    expect(registerRoleForEntry({ referrer: "https://itflux-academy.ru/pricing" })).toBe("teacher");
+    expect(registerRoleForEntry({ next: "/cabinet/login", roleParam: "student" })).toBe("student");
+    expect(registerRoleForEntry({ next: "/tasks" })).toBe("teacher");
+    expect(registerRoleForEntry({})).toBe("");
   });
 });
