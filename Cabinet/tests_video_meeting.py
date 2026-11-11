@@ -908,6 +908,64 @@ class VideoMeetingApiTests(TestCase):
         )
         self.assertFalse(filtered.filter(pk=orphan.pk).exists())
 
+    @override_settings(LESSON_SECRET="test-lesson-secret-for-present")
+    def test_variant_board_split_follows_presented_variant(self):
+        from Cabinet.meeting_material_session import sync_state_payload
+
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        self.client.force_login(self.teacher)
+        presented = self.client.post(
+            f"/api/video-meetings/{meeting.uuid}/present/",
+            {"kind": "variant", "title": "Вариант 1", "url": "/oge/inf/variant/42"},
+            format="json",
+        )
+        self.assertEqual(presented.status_code, 200, presented.content)
+        idle = self.client.post(
+            f"/api/video-meetings/{meeting.uuid}/variant-board-split/",
+            {"open": True},
+            format="json",
+        )
+        self.assertEqual(idle.status_code, 200, idle.content)
+        board_id = idle.data["presented"]["boardSplit"]["boardId"]
+        self.assertTrue(board_id)
+        self.assertEqual(idle.data["presented"]["boardSplit"]["kind"], "student")
+        self.assertEqual(idle.data["presented"]["kind"], "variant")
+        meeting.refresh_from_db()
+        self.assertEqual(meeting.presented_payload["boardSplit"]["boardId"], board_id)
+
+        self.client.force_login(self.student_user)
+        status_res = self.client.get(f"/api/video-meetings/{meeting.uuid}/status/")
+        self.assertEqual(status_res.data["presented"]["boardSplit"]["boardId"], board_id)
+        late = sync_state_payload(meeting, self.student_user)
+        self.assertEqual(late["presented"]["boardSplit"]["boardId"], board_id)
+        forbidden = self.client.post("/api/cabinet/variant-board/", {"meeting": str(meeting.uuid)}, format="json")
+        self.assertEqual((forbidden.status_code, forbidden.data.get("code")), (403, "teacher_only"))
+
+        self.client.force_login(self.teacher)
+        closed = self.client.post(
+            f"/api/video-meetings/{meeting.uuid}/variant-board-split/",
+            {"open": False},
+            format="json",
+        )
+        self.assertEqual(closed.status_code, 200, closed.content)
+        self.assertEqual(closed.data["presented"]["boardSplit"], {"open": False})
+        self.assertEqual(closed.data["presented"]["kind"], "variant")
+        self.client.force_login(self.student_user)
+        after = self.client.get(f"/api/video-meetings/{meeting.uuid}/status/")
+        self.assertEqual(after.data["presented"]["boardSplit"], {"open": False})
+
+        self.client.force_login(self.teacher)
+        again = self.client.post(
+            f"/api/video-meetings/{meeting.uuid}/present/",
+            {"kind": "variant", "title": "Вариант 1", "url": "/oge/inf/variant/42"},
+            format="json",
+        )
+        self.assertEqual(again.status_code, 200, again.content)
+        self.assertNotIn("boardSplit", again.data["presented"])
+        meeting.refresh_from_db()
+        self.assertNotIn("boardSplit", meeting.presented_payload)
+
     def test_domain_with_https_normalized_for_jwt_sub(self):
         from Cabinet.jitsi_service import get_jitsi_domain, get_jitsi_sub, normalize_jitsi_host
 

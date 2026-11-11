@@ -3044,3 +3044,11 @@ export function variantLimitMessage(err) {
 export function fetchVariantBoard(body) {
   return cabinetFetch("/variant-board/", { method: "POST", body: JSON.stringify(body || {}) });
 }
+
+/** «Доска рядом» на живом уроке: сервер сам выбирает доску и рассылает сплит ученикам. */
+export function postVariantBoardSplit(meetingUuid, body) {
+  return videoMeetingFetch(`/${meetingUuid}/variant-board-split/`, {
+    method: "POST",
+    body: JSON.stringify(body || {}),
+  });
+}

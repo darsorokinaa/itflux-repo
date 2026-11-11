@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { fetchVariantBoard } from "../../utils/cabinetAuth";
+import { createMeetingMaterialCollab } from "../meetingMaterialCollab";
+import { fetchVariantBoard, fetchVideoMeetingStatus, postVariantBoardSplit } from "../../utils/cabinetAuth";
+import { boardSplitSyncBody, studentSplitStamp, visibleStudentSplit } from "./variantBoardSplitSync";
 import "../styles/variant-board-split.css";
 
 /** r145: «Доска рядом» — общая tldraw-доска справа от варианта. */
@@ -46,10 +48,13 @@ function readWidth() {
 
 function useIsMobile() {
   const q = `(max-width: ${VB_MOBILE_MAX}px)`;
-  const [m, setM] = useState(() => typeof window !== "undefined" && window.matchMedia?.(q).matches);
+  const [m, setM] = useState(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+    return window.matchMedia(q).matches;
+  });
   useEffect(() => {
-    const mq = window.matchMedia?.(q);
-    if (!mq) return undefined;
+    if (typeof window.matchMedia !== "function") return undefined;
+    const mq = window.matchMedia(q);
     const on = () => setM(mq.matches);
     mq.addEventListener?.("change", on);
     return () => mq.removeEventListener?.("change", on);
@@ -57,7 +62,110 @@ function useIsMobile() {
   return Boolean(m);
 }
 
-export default function VariantBoardSplit({ meetingUuid, liveSessionId, homeworkId }) {
+function useRemotePresented(meetingUuid, enabled) {
+  const [presented, setPresented] = useState(null);
+  useEffect(() => {
+    if (!enabled || !meetingUuid) return undefined;
+    let cancelled = false;
+    const pull = () => {
+      fetchVideoMeetingStatus(meetingUuid)
+        .then((st) => {
+          if (!cancelled) setPresented(st?.presented ?? null);
+        })
+        .catch(() => {});
+    };
+    pull();
+    if (typeof WebSocket !== "function") {
+      return () => {
+        cancelled = true;
+      };
+    }
+    const collab = createMeetingMaterialCollab(meetingUuid, {
+      onSyncState: (payload) => {
+        if (payload && Object.prototype.hasOwnProperty.call(payload, "presented")) pull();
+      },
+      onPresented: () => pull(),
+    });
+    return () => {
+      cancelled = true;
+      collab.close();
+    };
+  }, [meetingUuid, enabled]);
+  return presented;
+}
+
+function publishSplit(meetingUuid, open, pick) {
+  if (!meetingUuid) return;
+  postVariantBoardSplit(meetingUuid, boardSplitSyncBody(open, pick)).catch((e) => {
+    if (e?.status === 409) return;
+  });
+}
+
+function pickFromBoard(board) {
+  if (!board) return null;
+  if (board.kind === "group") return "group";
+  return board.studentId ?? null;
+}
+
+function StudentSplitChrome({
+  split, collapsed, onCollapse, onExpand, width, isMobile, dragging, onDragStart,
+}) {
+  const boardId = split?.boardId || "";
+  const [tabState, setTabState] = useState({ boardId, tab: "board" });
+  const tab = tabState.boardId === boardId ? tabState.tab : "board";
+  const setTab = (next) => setTabState({ boardId, tab: next });
+  if (!split) return null;
+  if (collapsed) {
+    return (
+      <button type="button" className="vb-toggle" onClick={onExpand} data-testid="variant-board-show">
+        Показать доску
+      </button>
+    );
+  }
+  const title = split.kind === "group" ? "Доска группы" : "Доска";
+  const hidePanel = isMobile && tab !== "board";
+  return (
+    <>
+      {isMobile && (
+        <div className="vb-tabs" role="tablist" data-testid="variant-board-tabs">
+          <button type="button" role="tab" aria-selected={tab === "variant"} className={tab === "variant" ? "is-active" : ""} onClick={() => setTab("variant")}>Вариант</button>
+          <button type="button" role="tab" aria-selected={tab === "board"} className={tab === "board" ? "is-active" : ""} onClick={() => setTab("board")}>Доска</button>
+          <button type="button" className="vb-tabs-close" aria-label="Скрыть доску" onClick={onCollapse}>✕</button>
+        </div>
+      )}
+      <aside
+        className={`vb-panel${isMobile ? " vb-panel--mobile" : ""}${hidePanel ? " vb-panel--hidden" : ""}`}
+        style={isMobile ? undefined : { width: `${width}px` }}
+        data-testid="variant-board-panel"
+      >
+        {!isMobile && (
+          <div className="vb-divider" onPointerDown={onDragStart} role="separator" aria-orientation="vertical" title="Потяните, чтобы изменить ширину" />
+        )}
+        {!isMobile && (
+          <div className="vb-panel-head">
+            <button type="button" className="vb-close" onClick={onCollapse} aria-label="Скрыть доску" title="Скрыть доску">✕ Скрыть</button>
+            <span className="vb-panel-title">{title}</span>
+          </div>
+        )}
+        <div className="vb-board-body">
+          <iframe
+            key={split.boardId}
+            className="vb-board-frame"
+            title={title}
+            src={variantBoardFrameSrc(split.boardId)}
+            data-testid="variant-board-frame"
+            allow="clipboard-read; clipboard-write; fullscreen"
+          />
+          {dragging && <div className="vb-drag-shield" />}
+        </div>
+      </aside>
+    </>
+  );
+}
+
+export default function VariantBoardSplit({
+  meetingUuid, liveSessionId, homeworkId, readOnly = false, presented,
+}) {
   const request = variantBoardRequest({ meetingUuid, liveSessionId, homeworkId });
   const [open, setOpen] = useState(false);
   const [board, setBoard] = useState(null);
@@ -69,10 +177,27 @@ export default function VariantBoardSplit({ meetingUuid, liveSessionId, homework
   const [students, setStudents] = useState(null);
   const [studentId, setStudentId] = useState(null);
   const [group, setGroup] = useState(null);
+  const [hiddenStamp, setHiddenStamp] = useState("");
   const isMobile = useIsMobile();
+  const followRemote = Boolean(readOnly && presented === undefined);
+  const remotePresented = useRemotePresented(meetingUuid, followRemote);
+  const shownPresented = followRemote ? remotePresented : presented;
+  const split = readOnly ? visibleStudentSplit(shownPresented) : null;
+  const stamp = studentSplitStamp(shownPresented);
+  const collapsed = Boolean(readOnly && stamp && hiddenStamp === stamp);
   const reqKey = request ? JSON.stringify(request) : "";
+  const [seenKey, setSeenKey] = useState(reqKey);
+  if (seenKey !== reqKey) {
+    setSeenKey(reqKey);
+    setBoard(null);
+    setStudents(null);
+    setStudentId(null);
+    setGroup(null);
+  }
   const widthRef = useRef(width);
   widthRef.current = width;
+  const boardRef = useRef(board);
+  boardRef.current = board;
 
   const load = useCallback(async (pickId) => {
     if (!reqKey) return;
@@ -85,6 +210,7 @@ export default function VariantBoardSplit({ meetingUuid, liveSessionId, homework
       setStudentId(data.kind === "group" ? "group" : (data.studentId ?? null));
       if (Array.isArray(data.students)) setStudents(data.students);
       setGroup(data.group || null);
+      publishSplit(meetingUuid, true, pickFromBoard(data));
     } catch (e) {
       if (e?.status === 409 && Array.isArray(e?.data?.students)) {
         setBoard(null);
@@ -97,39 +223,36 @@ export default function VariantBoardSplit({ meetingUuid, liveSessionId, homework
     } finally {
       setLoading(false);
     }
-  }, [reqKey]);
-
-  useEffect(() => {
-    setBoard(null);
-    setStudents(null);
-    setStudentId(null);
-    setGroup(null);
-  }, [reqKey]);
+  }, [reqKey, meetingUuid]);
 
   const toggle = () => {
-    setOpen((v) => {
-      const next = !v;
-      if (next) {
-        setTab("board");
-        if (!board) load();
-      }
-      return next;
-    });
+    const next = !open;
+    setOpen(next);
+    if (next) {
+      setTab("board");
+      const current = boardRef.current;
+      if (!current) load();
+      else publishSplit(meetingUuid, true, pickFromBoard(current));
+      return;
+    }
+    publishSplit(meetingUuid, false, null);
   };
+
+  const panelOpen = readOnly ? Boolean(split && !collapsed) : open;
 
   useEffect(() => {
     const root = document.documentElement;
-    if (open && !isMobile) {
+    if (panelOpen && !isMobile) {
       root.classList.add("vb-split-open");
       root.style.setProperty("--vb-board-width", `${width}px`);
     } else {
       root.classList.remove("vb-split-open");
     }
-    root.classList.toggle("vb-split-mobile", open && isMobile);
+    root.classList.toggle("vb-split-mobile", panelOpen && isMobile);
     return () => {
       root.classList.remove("vb-split-open", "vb-split-mobile");
     };
-  }, [open, isMobile, width]);
+  }, [panelOpen, isMobile, width]);
 
   useEffect(() => {
     const onResize = () => setWidth((w) => clampBoardWidth(w, window.innerWidth));
@@ -158,7 +281,25 @@ export default function VariantBoardSplit({ meetingUuid, liveSessionId, homework
     window.addEventListener("pointerup", up);
   };
 
-  if (!request || typeof document === "undefined") return null;
+  if (typeof document === "undefined") return null;
+  if (readOnly) {
+    if (!meetingUuid) return null;
+    return createPortal(
+      <StudentSplitChrome
+        split={split}
+        collapsed={collapsed}
+        onCollapse={() => setHiddenStamp(stamp)}
+        onExpand={() => setHiddenStamp("")}
+        width={width}
+        isMobile={isMobile}
+        dragging={dragging}
+        onDragStart={startDrag}
+      />,
+      document.body,
+    );
+  }
+
+  if (!request) return null;
 
   const switchEl = board && group && !students ? (
                 <span className="vb-switch" role="group" aria-label="Какая доска" data-testid="variant-board-switch">
@@ -196,6 +337,7 @@ export default function VariantBoardSplit({ meetingUuid, liveSessionId, homework
           className="vb-board-frame"
           title={board.title || "Доска"}
           src={variantBoardFrameSrc(board.boardId)}
+          data-testid="variant-board-frame"
           allow="clipboard-read; clipboard-write; fullscreen"
         />
       )}

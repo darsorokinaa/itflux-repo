@@ -5,6 +5,7 @@ from __future__ import annotations
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
@@ -33,6 +34,7 @@ from .lesson_locked_scores import LOCK_KEY, grading_tasks, locked_scores, reappl
 
 
 PRESENT_KINDS = frozenset({"board", "variant"})
+_SPLIT_CONTROLLER_ROLES = frozenset({"teacher", "coteacher", "staff"})
 
 
 def append_live_variant_query(url: str, homework_id) -> str:
@@ -221,7 +223,7 @@ def serialize_presented(meeting: VideoMeeting, *, user: User | None = None) -> d
 
     open_url = append_meeting_query(open_url, meeting.uuid)
 
-    return {
+    presented = {
         "kind": kind,
         "title": payload.get("title") or "",
         "openUrl": open_url,
@@ -231,6 +233,11 @@ def serialize_presented(meeting: VideoMeeting, *, user: User | None = None) -> d
         "variantId": payload.get("variantId") or payload.get("variant_id"),
         "presentedAt": meeting.presented_at.isoformat() if meeting.presented_at else None,
     }
+    if kind == "variant":
+        board_split = _board_split_for_viewer(meeting, payload, user)
+        if board_split is not None:
+            presented["boardSplit"] = board_split
+    return presented
 
 
 def present_board(*, meeting: VideoMeeting, user: User, board_id: str) -> dict:
@@ -359,6 +366,131 @@ def present_variant(
         ]
     )
     return serialize_presented(meeting, user=user)
+
+
+def _split_board(board_id):
+    if not board_id:
+        return None
+    try:
+        return (
+            InteractiveBoard.objects.select_related("student", "group")
+            .filter(pk=board_id, is_archived=False)
+            .first()
+        )
+    except (ValueError, ValidationError, TypeError):
+        return None
+
+
+def _viewer_can_see_board_split(meeting: VideoMeeting, user: User | None, raw: dict) -> bool:
+    """Личная доска — только её ученику, групповая — участникам группы с доступом."""
+    if user is None or not getattr(user, "is_authenticated", False):
+        return False
+    board = _split_board(raw.get("boardId"))
+    if board is None:
+        return False
+    access = resolve_access(user, meeting.schedule_event)
+    if access.role in _SPLIT_CONTROLLER_ROLES and access.allowed:
+        return True
+    if access.role != "student" or not access.allowed:
+        return False
+    student = _resolve_roster_student_for_user(meeting.schedule_event, user)
+    if student is None or board.get_permission_for(user) is None:
+        return False
+    if raw.get("kind") == "group":
+        group = board.group if board.group_id else None
+        return bool(group and group.students.filter(pk=student.pk, status="active").exists())
+    if str(raw.get("studentId") or "") != str(student.pk):
+        return False
+    return board.student_id == student.pk and not board.group_id
+
+
+def _board_split_for_viewer(meeting: VideoMeeting, payload: dict, user: User | None) -> dict | None:
+    raw = payload.get("boardSplit")
+    if not isinstance(raw, dict):
+        return None
+    if raw.get("open") is not True:
+        return {"open": False}
+    if not _viewer_can_see_board_split(meeting, user, raw):
+        return {"open": False}
+    kind = "group" if raw.get("kind") == "group" else "student"
+    shown = {"open": True, "kind": kind, "boardId": str(raw.get("boardId"))}
+    if kind == "student" and raw.get("studentId") not in (None, ""):
+        shown["studentId"] = raw.get("studentId")
+    return shown
+
+
+def set_variant_board_split(
+    *,
+    meeting: VideoMeeting,
+    user: User,
+    open_split: bool,
+    target=None,
+    student_id=None,
+) -> dict:
+    """Учитель открывает или закрывает «Доску рядом» у показанного варианта.
+
+    Доску выбирает сервер (meeting_board). id доски от клиента не читается.
+    Пока ученик не выбран (409), показ не меняется и ничего не рассылается.
+    """
+    from .variant_board import meeting_board
+
+    assert_can_manage_meeting(user, meeting)
+    if meeting.status != VideoMeeting.Status.LIVE:
+        raise VideoMeetingError(
+            "Доску рядом можно открыть только во время урока",
+            code="not_live",
+            status=409,
+        )
+    if meeting.presented_kind != "variant":
+        raise VideoMeetingError(
+            "Сначала покажите вариант ученикам",
+            code="not_presented",
+            status=409,
+        )
+    resolved = None
+    if open_split:
+        # 409 choose_student выходит до записи и до рассылки.
+        resolved = meeting_board(
+            user=user,
+            meeting_uuid=str(meeting.uuid),
+            student_id=student_id,
+            target=target,
+        )
+    with transaction.atomic():
+        locked = VideoMeeting.objects.select_for_update().get(pk=meeting.pk)
+        if locked.status != VideoMeeting.Status.LIVE:
+            raise VideoMeetingError(
+                "Доску рядом можно открыть только во время урока",
+                code="not_live",
+                status=409,
+            )
+        if locked.presented_kind != "variant":
+            raise VideoMeetingError(
+                "Сначала покажите вариант ученикам",
+                code="not_presented",
+                status=409,
+            )
+        payload = dict(locked.presented_payload or {})
+        if not open_split:
+            payload["boardSplit"] = {"open": False}
+        else:
+            kind = "group" if resolved.get("kind") == "group" else "student"
+            split = {
+                "open": True,
+                "kind": kind,
+                "boardId": str(resolved.get("boardId") or ""),
+            }
+            if not split["boardId"]:
+                raise VideoMeetingError("Доска недоступна", code="not_found", status=404)
+            if kind == "student" and resolved.get("studentId") not in (None, ""):
+                split["studentId"] = resolved.get("studentId")
+            payload["boardSplit"] = split
+        locked.presented_payload = payload
+        locked.presented_at = timezone.now()
+        locked.presented_by = user
+        locked.save(update_fields=["presented_payload", "presented_at", "presented_by", "updated_at"])
+    locked.refresh_from_db()
+    return serialize_presented(locked, user=user)
 
 
 def clear_presented(*, meeting: VideoMeeting, user: User) -> None:

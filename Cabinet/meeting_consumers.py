@@ -408,6 +408,15 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
         # state тоже персонален для ученика (только свои answers/fields) — без
         # переперсонализации на control.transferred все получали бы срез сессии,
         # посчитанный для учителя, который вызвал передачу управления.
+        # boardSplit.boardId персонален: чужую доску ученика в сокет не кладём.
+        if payload.get("type") in (
+            "resource.presented",
+            "RESOURCE_PRESENTED",
+            "resource.cleared",
+            "RESOURCE_CLEARED",
+        ):
+            presented = await self._presented_for_viewer()
+            payload = {**payload, "presented": presented}
         if payload.get("type") in (
             "material.opened",
             "material.permission_changed",
@@ -621,6 +630,13 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
     def _sync_state(self):
         meeting = get_meeting_by_uuid(self.meeting_uuid)
         return sync_state_payload(meeting, self.user)
+
+    @database_sync_to_async
+    def _presented_for_viewer(self):
+        from .meeting_present import serialize_presented
+
+        meeting = get_meeting_by_uuid(self.meeting_uuid)
+        return serialize_presented(meeting, user=self.user)
 
     @database_sync_to_async
     def _open_session(self, data: dict):

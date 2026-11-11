@@ -3469,13 +3469,16 @@ function ExamPage() {
   return (
     <VariantThemeRoot payload={variant?.theme}>
     <>
-    {/* r151: «Доска рядом» — только у учителя. */}
+    {/* Учитель открывает «Доску рядом» сам. Ученик на уроке видит тот же сплит, если доска его. */}
     {isTeacherRole(cabinetUser) && (meetingUuid || liveSessionId || (isLiveVariant && cabinetAssignmentId)) && (
       <VariantBoardSplit
         meetingUuid={meetingUuid}
         liveSessionId={liveSessionId}
         homeworkId={isLiveVariant ? cabinetAssignmentId : null}
       />
+    )}
+    {cabinetUser && !isTeacherRole(cabinetUser) && meetingUuid && (
+      <VariantBoardSplit meetingUuid={meetingUuid} readOnly />
     )}
     <div className="exam-edu-shell digital-flow-page">
     </div>
