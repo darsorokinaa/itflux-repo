@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { closeVariantLiveSession, fetchMyVariants, renameMyVariant } from "../../utils/cabinetAuth";
 import { liveSolveJoinUrl } from "../liveSolve";
 import "../styles/my-variants.css";
@@ -252,7 +253,12 @@ export default function MyVariantsPage() {
       {!data && !error ? <p className="mv-muted">Загрузка…</p> : null}
       {data && rows.length === 0 ? (
         <div className="mv-empty">
-          {data.variants.length ? "Ничего не найдено." : "Вы ещё не создали ни одного варианта. Соберите вариант в генераторе — он появится здесь."}
+          {data.variants.length ? "Ничего не найдено." : (
+            <>
+              <p>Вы ещё не создали ни одного варианта.</p>
+              <Link to="/generator" className="cb-btn cb-btn--primary cb-btn--sm">Собрать вариант</Link>
+            </>
+          )}
         </div>
       ) : null}
       <div className="mv-grid">

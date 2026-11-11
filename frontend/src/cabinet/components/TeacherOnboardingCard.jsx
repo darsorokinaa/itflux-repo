@@ -1,13 +1,13 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { trackActivationIntent } from "../activationAnalytics";
-import { readValueReached } from "../../utils/valuePath";
+import { dismissUiNotice } from "../../utils/cabinetAuth";
 
 function progressLabel(done, total) {
   return `${done} из ${total} шагов выполнено`;
 }
 
-export default function TeacherOnboardingCard({ onboarding }) {
+export default function TeacherOnboardingCard({ onboarding, onDismissed }) {
   const steps = Array.isArray(onboarding?.steps) ? onboarding.steps : [];
   const activationSteps = steps.filter((step) => step.key !== "registered");
   const completed = activationSteps.filter((step) => step.done).length;
@@ -15,10 +15,8 @@ export default function TeacherOnboardingCard({ onboarding }) {
   const percent = total ? Math.round((completed / total) * 100) : 0;
   const cta = onboarding?.cta;
   const nextStep = onboarding?.next_step;
-  const afterValue = Boolean(readValueReached()) && nextStep === "student";
-  const title = afterValue
-    ? "Урок уже есть. Подключите ученика, чтобы провести его здесь"
-    : (cta?.title || "Добавьте первого ученика");
+  const title = cta?.title || "Первые шаги";
+  const [hiding, setHiding] = useState(false);
 
   useEffect(() => {
     if (!onboarding?.visible) return;
@@ -32,10 +30,18 @@ export default function TeacherOnboardingCard({ onboarding }) {
   const onCtaClick = () => {
     if (onboarding.next_step === "student") {
       trackActivationIntent("add_student_clicked", { source: "onboarding_card" });
-    } else if (onboarding.next_step === "invite") {
+    } else if (onboarding.next_step === "share") {
       trackActivationIntent("student_invite_share_clicked", { source: "onboarding_card" });
-    } else if (onboarding.next_step === "schedule") {
-      trackActivationIntent("lesson_creation_started", { source: "onboarding_card" });
+    }
+  };
+
+  const dismiss = async () => {
+    setHiding(true);
+    try {
+      await dismissUiNotice("first_day_checklist");
+      onDismissed?.();
+    } catch {
+      setHiding(false);
     }
   };
 
@@ -46,11 +52,16 @@ export default function TeacherOnboardingCard({ onboarding }) {
           <h2>{title}</h2>
           <p>{progressLabel(completed, total)}</p>
         </div>
-        {cta ? (
-          <Link to={cta.href} className="td-button td-button-primary" onClick={onCtaClick}>
-            {cta.label}
-          </Link>
-        ) : null}
+        <div className="td-onboarding__actions">
+          {cta ? (
+            <Link to={cta.href} className="td-button td-button-primary" onClick={onCtaClick}>
+              {cta.label}
+            </Link>
+          ) : null}
+          <button type="button" className="td-onboarding__dismiss" onClick={dismiss} disabled={hiding}>
+            Скрыть
+          </button>
+        </div>
       </div>
 
       <div
@@ -65,7 +76,7 @@ export default function TeacherOnboardingCard({ onboarding }) {
       </div>
 
       <ol className="td-onboarding__steps">
-        {steps.map((step) => {
+        {activationSteps.map((step) => {
           const done = step.done;
           return (
             <li
@@ -83,9 +94,11 @@ export default function TeacherOnboardingCard({ onboarding }) {
         })}
       </ol>
       {cta?.hint ? <p className="td-onboarding__hint">{cta.hint}</p> : null}
-      <p className="td-onboarding__alt">
-        <Link to="/lessons">Или сначала откройте готовый урок</Link>
-      </p>
+      {cta?.alt_href ? (
+        <p className="td-onboarding__alt">
+          <Link to={cta.alt_href}>{cta.alt_label || "Собрать вариант"}</Link>
+        </p>
+      ) : null}
     </article>
   );
 }

@@ -369,16 +369,16 @@ class ActivationEventTests(TestCase):
         teacher = self._teacher()
         Student.objects.create(teacher=teacher, first_name="А", last_name="Б")
         state = build_teacher_onboarding_state(teacher)
-        self.assertEqual(state["next_step"], "invite")
-        self.assertIn("приглашен", state["cta"]["label"].lower())
+        self.assertEqual(state["next_step"], "assignment")
+        self.assertIn("задан", state["cta"]["label"].lower())
 
     def test_onboarding_state_connected_no_lesson(self):
         teacher = self._teacher()
         user = self._student_user()
         Student.objects.create(teacher=teacher, first_name="А", last_name="Б", user=user)
         state = build_teacher_onboarding_state(teacher)
-        self.assertEqual(state["next_step"], "schedule")
-        self.assertIn("занят", state["cta"]["label"].lower())
+        self.assertEqual(state["next_step"], "assignment")
+        self.assertIn("задан", state["cta"]["label"].lower())
 
     def test_onboarding_hidden_after_lesson(self):
         teacher = self._teacher()
@@ -397,8 +397,8 @@ class ActivationEventTests(TestCase):
             notify=False,
         )
         state = build_teacher_onboarding_state(teacher)
-        self.assertFalse(state["visible"])
-        self.assertIsNone(state["next_step"])
+        self.assertTrue(state["visible"])
+        self.assertEqual(state["next_step"], "assignment")
 
     def test_analytics_permissions(self):
         teacher = self._teacher()

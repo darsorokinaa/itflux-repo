@@ -344,12 +344,18 @@ def api_register(request):
             utm_campaign=data.get("utm_campaign") or "",
             referrer=data.get("referrer") or "",
         )
+        from .acquisition import acquisition_has_signal, acquisition_payload
+
+        touch = acquisition_payload(data)
         profile.acquisition_source = src
         profile.acquisition_medium = medium
         profile.acquisition_campaign = campaign
         profile_update_fields.extend(
             ["acquisition_source", "acquisition_medium", "acquisition_campaign"]
         )
+        if acquisition_has_signal(touch):
+            profile.acquisition_touch = touch
+            profile_update_fields.append("acquisition_touch")
     profile.save(update_fields=profile_update_fields)
 
     if role == Profile.Role.TEACHER:

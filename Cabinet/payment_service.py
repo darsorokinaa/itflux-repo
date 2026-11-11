@@ -141,6 +141,7 @@ class PaymentProviderService:
         *,
         idempotency_key: str = None,
         requested_promotion_id=None,
+        acquisition: dict = None,
     ):
         from django.conf import settings as django_settings
 
@@ -264,6 +265,8 @@ class PaymentProviderService:
         }
         if calc.get("promotion_id"):
             metadata["promotion_id"] = calc["promotion_id"]
+        if acquisition:
+            metadata["acquisition"] = acquisition
         # Согласие на автопродление: из явного флага в metadata вызывающего слоя
         # или из текущего состояния подписки (пользователь уже включил toggle).
         # r61: Recurrent=Y и автопродление — только при явной галочке согласия в этом checkout.
@@ -315,6 +318,18 @@ class PaymentProviderService:
             plan.slug,
             final_amount,
         )
+        try:
+            from .storefront_events import record_storefront_event
+
+            record_storefront_event(
+                event_name="payment_created",
+                user=teacher,
+                metadata={"plan_slug": plan.slug, "billing_period": billing_period, "promo_code": promo_obj.code if promo_obj else ""},
+                idempotency_key=f"payment:{payment.pk}",
+                payment_id=payment.pk,
+            )
+        except Exception:
+            logger.exception("storefront payment_created failed payment_id=%s", payment.pk)
 
         if promo_obj is not None:
             try:

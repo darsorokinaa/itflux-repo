@@ -1074,6 +1074,10 @@ html.seasonal-theme-active:not(.seasonal-heavy):not(.variant-theme-owns-page) .a
 html.seasonal-theme-active:not(.seasonal-heavy) :is(
   .td-panel:not(.td-live):not(.td-alert),
   .td-onboarding,
+  .td-offer-banner,
+  .cb-empty-state,
+  .cb-students-empty,
+  .mv-empty,
   .cb-widget,
   .cb-metric,
   .cb-card,
@@ -1105,6 +1109,24 @@ html.seasonal-theme-active:not(.seasonal-heavy) :is(
   color: #1F2328;
   border-color: var(--seasonal-card-border, inherit);
   box-shadow: inset 3px 0 0 var(--seasonal-accent, transparent), var(--shadow-card, 0 8px 24px rgba(15, 23, 42, 0.06));
+}
+
+html.seasonal-theme-active:not(.seasonal-heavy) :is(
+  .td-onboarding,
+  .td-offer-banner,
+  .cb-empty-state,
+  .cb-students-empty,
+  .mv-empty
+) :is(h2, h3, p, li, span, label) {
+  color: #1F2328;
+}
+
+html.seasonal-theme-active:not(.seasonal-heavy) :is(.td-onboarding, .td-offer-banner) :is(
+  a.td-button-primary,
+  .td-button-primary
+) {
+  color: #fff;
+  background: #2f6fed;
 }
 
 html.seasonal-theme-active:not(.seasonal-heavy) .all-tasks-item__head {

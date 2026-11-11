@@ -572,6 +572,7 @@ function InvitationsTab({
   onRenew,
   onDelete,
   copiedInviteId,
+  onCreate,
 }) {
   const filtered = useMemo(() => {
     if (filter === "all") {
@@ -600,6 +601,13 @@ function InvitationsTab({
           <p className="cb-students-empty__text">
             Отправьте приглашение ученику — оно появится в этом списке.
           </p>
+          {onCreate ? (
+            <div className="cb-students-empty__actions">
+              <button type="button" className="cb-btn cb-btn--primary cb-btn--sm" onClick={onCreate}>
+                Добавить ученика
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : (
         <>
@@ -1607,7 +1615,7 @@ export default function CabinetStudentsPage() {
               </p>
               <div className="cb-students-empty__actions">
                 <button type="button" className="cb-btn cb-btn--primary cb-btn--sm" onClick={openCreateStudent}>
-                  Пригласить
+                  Добавить ученика
                 </button>
                 <button type="button" className="cb-btn cb-btn--outline cb-btn--sm" onClick={openCreateGroup}>
                   Создать группу
@@ -1779,6 +1787,7 @@ export default function CabinetStudentsPage() {
           onRenew={handleRenewInvite}
           onDelete={handleDeleteInvite}
           copiedInviteId={copiedInviteId}
+          onCreate={openCreateStudent}
         />
       ) : null}
 

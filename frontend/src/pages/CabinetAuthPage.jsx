@@ -222,8 +222,12 @@ export default function CabinetAuthPage() {
       next = { ...next, referral_code: ref };
     }
     const acquisition = readAcquisition();
-    if (acquisition.utm_source || acquisition.utm_medium || acquisition.utm_campaign || acquisition.referrer) {
-      next = { ...next, ...acquisition };
+    if (
+      acquisition.utm_source || acquisition.utm_medium || acquisition.utm_campaign
+      || acquisition.utm_content || acquisition.ref || acquisition.referrer
+    ) {
+      const { ref: sourceRef, ...utm } = acquisition;
+      next = { ...next, ...utm, source_ref: sourceRef || undefined };
     }
     return next;
   };

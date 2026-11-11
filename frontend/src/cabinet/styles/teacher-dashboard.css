@@ -1571,6 +1571,45 @@
 .td-onboarding__head h2 {
   font-size: 16px;
   font-weight: 700;
+  color: #172336;
+}
+
+.td-onboarding__actions,
+.td-offer-banner__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.td-onboarding__dismiss {
+  border: 0;
+  background: transparent;
+  color: #3d4a5c;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.td-offer-banner {
+  margin-bottom: 22px;
+  padding: 22px 23px 18px;
+  border: 1px solid var(--td-line);
+  border-radius: var(--td-radius);
+  background: #fff;
+  color: #172336;
+  box-shadow: var(--td-shadow);
+}
+
+.td-offer-banner p {
+  margin: 0 0 14px;
+  color: #172336;
+  line-height: 1.45;
+}
+
+.td-empty .td-button {
+  margin-top: 12px;
 }
 
 .td-onboarding__head p,

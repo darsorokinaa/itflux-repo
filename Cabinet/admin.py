@@ -73,6 +73,7 @@ from .models import (
     WheelSegment,
     Payment,
     Profile,
+    StorefrontEvent,
     PromoCode,
     PromoCodeUsage,
     Promotion,
@@ -1491,7 +1492,7 @@ class FundraiserAdmin(admin.ModelAdmin):
 @admin.register(Payment)
 class PaymentAdmin(admin.ModelAdmin):
     list_display = (
-        "teacher", "purpose", "plan", "final_amount", "amount", "currency",
+        "teacher", "acquisition_summary", "purpose", "plan", "final_amount", "amount", "currency",
         "status", "provider", "promotion", "is_recurrent", "billing_period", "paid_at", "created_at",
     )
     list_filter = ("purpose", "status", "provider", "currency", "billing_period", "is_recurrent")
@@ -1499,8 +1500,31 @@ class PaymentAdmin(admin.ModelAdmin):
         "teacher__username", "teacher__email",
         "provider_payment_id", "idempotency_key", "order_id", "rebill_id",
     )
-    readonly_fields = ("created_at", "updated_at", "idempotency_key")
+    readonly_fields = ("created_at", "updated_at", "idempotency_key", "acquisition_summary")
     ordering = ("-created_at",)
+
+    @admin.display(description="Источник")
+    def acquisition_summary(self, obj):
+        meta = obj.metadata if isinstance(obj.metadata, dict) else {}
+        acq = meta.get("acquisition") if isinstance(meta.get("acquisition"), dict) else {}
+        parts = [
+            str(acq.get(key))
+            for key in ("utm_source", "utm_medium", "utm_campaign", "utm_content", "ref")
+            if acq.get(key)
+        ]
+        return " · ".join(parts) or "—"
+
+
+@admin.register(StorefrontEvent)
+class StorefrontEventAdmin(admin.ModelAdmin):
+    list_display = ("event_name", "user", "occurred_at", "metadata")
+    list_filter = ("event_name",)
+    search_fields = ("idempotency_key", "user__username")
+    readonly_fields = ("event_name", "user", "occurred_at", "metadata", "idempotency_key", "created_at")
+    ordering = ("-occurred_at",)
+
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(Receipt)

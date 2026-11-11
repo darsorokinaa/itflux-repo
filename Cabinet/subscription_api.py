@@ -1062,6 +1062,12 @@ class SubscriptionCreatePaymentView(APIView):
         elif billing_period in ("yearly", "year", "annual"):
             billing_period = "year"
         promo_code = (request.data.get("promo_code") or "").strip()
+        from .acquisition import acquisition_payload, merge_first_touch, profile_touch
+
+        acquisition = merge_first_touch(
+            acquisition_payload(request.data),
+            profile_touch(getattr(request.user, "profile", None)),
+        )
         idempotency_key = (request.data.get("idempotency_key") or "").strip() or None
         requested_promotion_id = request.data.get("promotion_id")
         # Frontend не передаёт amount — цена только на backend.
@@ -1128,6 +1134,7 @@ class SubscriptionCreatePaymentView(APIView):
                 discount_info=discount_info,
                 idempotency_key=idempotency_key,
                 requested_promotion_id=requested_promotion_id,
+                acquisition=acquisition or None,
             )
         except PromoCodeError as exc:
             return Response(exc.to_dict(), status=400)
@@ -1336,6 +1343,17 @@ class PromoCodeValidateView(APIView):
             **primary,
             "by_plan": by_plan,
         }
+        try:
+            from .storefront_events import record_storefront_event
+
+            record_storefront_event(
+                event_name="promo_applied",
+                user=request.user,
+                metadata={"promo_code": code_str, "billing_period": billing_period, "plan_slug": plan_slug or ""},
+                idempotency_key=f"promo-api:{request.user.pk}:{code_str.lower()}:{billing_period}",
+            )
+        except Exception:
+            logger.exception("storefront promo_applied failed user=%s", request.user.pk)
         if calc_message := primary.get("message"):
             payload["message"] = calc_message
         return Response(payload)

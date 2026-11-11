@@ -101,6 +101,7 @@ import AppUpdateBanner from "./components/AppUpdateBanner";
 import { ensureSiteFavicon } from "./utils/ensureSiteFavicon";
 import { markUpdateFromClientRequired } from "./utils/appUpdate";
 import { SeasonalThemeProvider } from "./seasonal/SeasonalThemeProvider";
+import { captureAcquisition, savePromoCode } from "./cabinet/visitContext";
 import { importWithRetry } from "./utils/importWithRetry";
 import { useActiveLiveMeeting } from "./cabinet/liveMeetingSession";
 
@@ -385,10 +386,24 @@ function ClientUpdateRequiredListener() {
   return null;
 }
 
+function VisitContextCapture() {
+  const { search } = useLocation();
+  useEffect(() => {
+    captureAcquisition({
+      search,
+      referrer: typeof document !== "undefined" ? document.referrer : "",
+    });
+    const promo = new URLSearchParams(search).get("promo");
+    if (promo && promo.trim()) savePromoCode(promo.trim());
+  }, [search]);
+  return null;
+}
+
 function App() {
   return (
     <BrowserRouter>
       <SeasonalThemeProvider>
+      <VisitContextCapture />
       <CyrillicPathRedirect />
       <ScrollToTop />
       <MetaDescriptionSync />

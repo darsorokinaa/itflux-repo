@@ -3,15 +3,16 @@
  * r56: лимиты и цены берутся из /api/cabinet/pricing/plans/ (TariffPlan в БД),
  * при недоступности API — запасные значения FALLBACK.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import "./pricing.css";
 import "../r52/r52.css";
-import { PROMO_UNTIL } from "../r52/consentTexts";
 import SchoolRequestModal from "../components/SchoolRequestModal";
 import TeacherQuotesBlock from "../components/TeacherQuotesBlock";
 import SavedTimeDetails from "../components/SavedTimeDetails";
 import { ensureCsrfCookie, getCsrfToken } from "../utils/cabinetAuth";
+import { clearPromoCode, readPromoCode, savePromoCode } from "../cabinet/visitContext";
+import { trackStorefront } from "../cabinet/storefrontEvents";
 
 const fmt = (n) => Number(n).toLocaleString("ru-RU").replace(/\u00a0/g, " ");
 
@@ -134,10 +135,8 @@ function buildPlans(apiPlans) {
 function buildRows(plans) {
   const [s, t, p, sc] = plans.map((x) => x.v);
   const price = (pl) => (pl.month ? `${fmt(pl.month)} ₽` : "0 ₽");
-  const yearPrice = (pl) => (pl.year ? `${fmt(pl.year)} ₽ (≈ ${fmt(Math.round(pl.year / 12))} ₽/мес)` : "—");
   return [
     ["Цена в месяц", price(s), price(t), price(p), "по запросу"],
-    ["Цена в год", "—", yearPrice(t), yearPrice(p), "по запросу"],
     ["Ученики", upTo(s.students), upTo(t.students), upTo(p.students), "по договорённости"],
     ["Группы", "✓ (в пределах лимита учеников)", "✓ (в пределах лимита учеников)", "без ограничений", "без ограничений"],
     ["Расписание", "✓", "✓", "✓", "✓"],
@@ -188,10 +187,6 @@ const FAQ = [
     a: "Мы ничего не удалим и не заблокируем. Создать новый вариант, лист или интерактив сверх лимита не получится до начала следующего месяца или до перехода на тариф выше. Когда до лимита останется 20 %, появится предупреждение. Если учеников больше, чем позволяет тариф, добавить нового будет нельзя, а уже добавленные останутся. То же самое — при переходе на тариф ниже.",
   },
   {
-    q: "Чем выгодна оплата за год?",
-    a: "Она на 30 % дешевле помесячной: «Репетитор» стоит 8 316 ₽ вместо 11 880 ₽, «Профи» — 16 716 ₽ вместо 23 880 ₽. Оплата вносится сразу за 12 месяцев.",
-  },
-  {
     q: "Есть ли автопродление и как его отключить?",
     a: (
       <>
@@ -214,15 +209,32 @@ const FAQ = [
   },
 ];
 
+function teacherOfferCopy(preview) {
+  const plan = preview?.plans?.teacher;
+  if (!preview?.valid || !plan?.promo_applied) return "";
+  const first = fmt(plan.final_price);
+  const next = fmt(plan.renewal_price);
+  const until = preview.valid_until_label;
+  if (preview.first_payment_only && Number(plan.final_price) + 0.005 < Number(plan.renewal_price)) {
+    const untilBit = until ? `До ${until}: ` : "";
+    return `${untilBit}первый месяц «Репетитор» — ${first} ₽ по промокоду ${preview.code}, далее ${next} ₽ в месяц.`;
+  }
+  return `«Репетитор» — ${first} ₽ в месяц по промокоду ${preview.code}.`;
+}
+
 export default function PricingPage() {
-  const [period, setPeriod] = useState("year");
   const [schoolOpen, setSchoolOpen] = useState(false);
   const [me, setMe] = useState(null);
   const [apiPlans, setApiPlans] = useState(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [promoInput, setPromoInput] = useState("");
+  const [promoPreview, setPromoPreview] = useState(null);
+  const [promoError, setPromoError] = useState("");
+  const [promoLoading, setPromoLoading] = useState(false);
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const viewed = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -243,7 +255,71 @@ export default function PricingPage() {
   }, []);
 
   const PLANS = useMemo(() => buildPlans(apiPlans), [apiPlans]);
-  const ROWS = useMemo(() => buildRows(PLANS), [PLANS]);
+  const offerCopy = teacherOfferCopy(promoPreview);
+  const ROWS = useMemo(() => {
+    const rows = buildRows(PLANS);
+    const teacherQuote = promoPreview?.plans?.teacher;
+    if (!promoPreview?.valid || !teacherQuote?.promo_applied) return rows;
+    const cell = (slug) => {
+      const quote = promoPreview.plans?.[slug];
+      return quote?.promo_applied ? `${fmt(quote.final_price)} ₽` : "—";
+    };
+    rows.splice(1, 0, ["Первый месяц с промокодом", "—", cell("teacher"), cell("pro"), "—"]);
+    return rows;
+  }, [PLANS, promoPreview]);
+
+  useEffect(() => {
+    if (viewed.current) return;
+    viewed.current = true;
+    trackStorefront("pricing_view");
+  }, []);
+
+  useEffect(() => {
+    const fromUrl = (params.get("promo") || "").trim();
+    const cleared = params.get("promo") === "";
+    const stored = cleared ? "" : (fromUrl || readPromoCode());
+    if (fromUrl) savePromoCode(fromUrl);
+    setPromoInput(stored);
+    let cancelled = false;
+    const query = stored ? `?code=${encodeURIComponent(stored)}` : "";
+    setPromoLoading(true);
+    fetch(`/api/cabinet/pricing/promo-preview/${query}`, { credentials: "same-origin" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        if (data.valid) {
+          setPromoPreview(data);
+          setPromoInput(data.code || stored);
+          setPromoError("");
+          if (data.code) savePromoCode(data.code);
+          trackStorefront("promo_applied", { promo_code: data.code }, data.code);
+        } else if (stored) {
+          setPromoPreview(null);
+          setPromoError(data.message || "Промокод не применяется.");
+        } else {
+          setPromoPreview(null);
+          setPromoError("");
+        }
+      })
+      .catch(() => {
+        if (!cancelled && stored) setPromoError("Не удалось проверить промокод.");
+      })
+      .finally(() => { if (!cancelled) setPromoLoading(false); });
+    return () => { cancelled = true; };
+  }, [params]);
+
+  const applyTypedPromo = () => {
+    const code = promoInput.trim();
+    const next = new URLSearchParams(params);
+    if (code) {
+      savePromoCode(code);
+      next.set("promo", code);
+    } else {
+      clearPromoCode();
+      next.set("promo", "");
+    }
+    navigate({ pathname: "/pricing", search: `?${next.toString()}` }, { replace: true });
+  };
 
   const teacher = !!(me && me.authenticated && me.is_teacher);
   const current = teacher ? me.current_plan : null;
@@ -298,10 +374,14 @@ export default function PricingPage() {
         <Link className="pricing-card__cta pricing-card__cta--outline" to={registerUrl("/cabinet")}>Начать бесплатно</Link>
       );
     }
-    const upgrade = `/cabinet/upgrade?plan=${plan.slug}&period=${period}`;
+    const promoQuery = promoPreview?.valid && promoPreview.code
+      ? `&promo=${encodeURIComponent(promoPreview.code)}`
+      : "";
+    const upgrade = `/cabinet/upgrade?plan=${plan.slug}&period=month${promoQuery}`;
+    const onChoose = () => trackStorefront("tariff_click", { plan_slug: plan.slug }, plan.slug);
     if (plan.slug === "pro") {
       if (!teacher) {
-        return <Link className="pricing-card__cta" to={registerUrl("/pricing?trial=1")}>Попробовать 14 дней бесплатно</Link>;
+        return <Link className="pricing-card__cta" to={registerUrl("/pricing?trial=1")} onClick={onChoose}>Попробовать 14 дней бесплатно</Link>;
       }
       if (trial.available) {
         return (
@@ -310,12 +390,12 @@ export default function PricingPage() {
           </button>
         );
       }
-      return <Link className="pricing-card__cta" to={upgrade}>Перейти на «Профи»</Link>;
+      return <Link className="pricing-card__cta" to={upgrade} onClick={onChoose}>Перейти на «Профи»</Link>;
     }
     return teacher ? (
-      <Link className="pricing-card__cta" to={upgrade}>Выбрать «Репетитор»</Link>
+      <Link className="pricing-card__cta" to={upgrade} onClick={onChoose}>Выбрать «Репетитор»</Link>
     ) : (
-      <Link className="pricing-card__cta" to={registerUrl(upgrade)}>Выбрать «Репетитор»</Link>
+      <Link className="pricing-card__cta" to={registerUrl(upgrade)} onClick={onChoose}>Выбрать «Репетитор»</Link>
     );
   };
 
@@ -331,14 +411,6 @@ export default function PricingPage() {
           Расписание, журнал, учёт оплат и проверка ДЗ доступны на всех тарифах, даже на бесплатном. Тариф
           выбирайте по числу учеников и объёму материалов.
         </p>
-        <div className="pricing-period" role="group" aria-label="Период оплаты">
-          <button type="button" className={period === "month" ? "is-active" : ""} aria-pressed={period === "month"} onClick={() => setPeriod("month")}>
-            Помесячно
-          </button>
-          <button type="button" className={period === "year" ? "is-active" : ""} aria-pressed={period === "year"} onClick={() => setPeriod("year")}>
-            За год −30 %
-          </button>
-        </div>
       </header>
 
       {saved ? (
@@ -350,19 +422,39 @@ export default function PricingPage() {
         </section>
       ) : null}
 
-      {Date.now() <= PROMO_UNTIL.getTime() ? (
-        <p className="r52-promo">
-          До 30 ноября: <b>−50 %</b> на первый месяц «Профи» по промокоду <b>potok1110</b> или <b>−40 %</b> на «Профи» за год по
-          промокоду <b>potok1110y</b>.
-        </p>
-      ) : null}
+      {offerCopy ? <p className="r52-promo pricing-offer">{offerCopy}</p> : null}
+
+      <form
+        className="pricing-code"
+        onSubmit={(event) => {
+          event.preventDefault();
+          applyTypedPromo();
+        }}
+      >
+        <label htmlFor="pricing-promo-code">Промокод</label>
+        <input
+          id="pricing-promo-code"
+          name="promo"
+          value={promoInput}
+          autoComplete="off"
+          onChange={(event) => setPromoInput(event.target.value)}
+        />
+        <button type="submit" disabled={promoLoading}>
+          {promoLoading ? "Проверяем…" : "Применить"}
+        </button>
+        {promoPreview?.valid ? <p className="pricing-code__ok">Код {promoPreview.code} применён</p> : null}
+        {promoError ? <p className="pricing-code__err" role="alert">{promoError}</p> : null}
+      </form>
 
       {notice ? <p className="pricing-status pricing-status--err" role="alert">{notice}</p> : null}
 
       <section className="pricing-grid pricing-grid--4" aria-label="Тарифы">
         {PLANS.map((plan) => {
-          const yearly = period === "year" && plan.year;
-          const perMonth = yearly ? Math.round(plan.year / 12) : plan.month;
+          const quote = promoPreview?.plans?.[plan.slug];
+          const offerOn = Boolean(
+            quote?.promo_applied && Number(quote.final_price) + 0.005 < Number(quote.base_price || plan.month),
+          );
+          const perMonth = offerOn ? Number(quote.final_price) : plan.month;
           return (
             <article
               key={plan.slug}
@@ -375,19 +467,14 @@ export default function PricingPage() {
                   "По запросу"
                 ) : plan.month === 0 ? (
                   <>0 ₽ <span>навсегда</span></>
+                ) : offerOn ? (
+                  <>{fmt(perMonth)} ₽<span>первый месяц</span></>
                 ) : (
                   <>{fmt(perMonth)} ₽<span>/мес</span></>
                 )}
               </p>
-              {yearly ? (
-                <div className="pricing-card__yearly">
-                  <p className="pricing-card__now">{fmt(plan.year)} ₽ в год, оплата сразу</p>
-                  <p className="pricing-card__save">
-                    <s>{fmt(plan.month * 12)} ₽</s> · экономия {fmt(plan.month * 12 - plan.year)} ₽
-                  </p>
-                </div>
-              ) : plan.year ? (
-                <p className="pricing-card__now">или {fmt(Math.round(plan.year / 12))} ₽/мес при оплате за год</p>
+              {offerOn ? (
+                <p className="pricing-card__now">далее {fmt(quote.renewal_price)} ₽/мес</p>
               ) : null}
               <p className="pricing-card__desc">{plan.lead}</p>
               <ul className="pricing-card__list">
