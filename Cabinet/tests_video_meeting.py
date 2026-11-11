@@ -993,8 +993,6 @@ class VideoMeetingApiTests(TestCase):
 
     @override_settings(LESSON_SECRET="test-lesson-secret-for-present")
     def test_variant_board_split_follows_presented_variant(self):
-        from Cabinet.meeting_material_session import sync_state_payload
-
         meeting = self._create_meeting()
         start_meeting(meeting=meeting, user=self.teacher)
         self.client.force_login(self.teacher)
@@ -1017,6 +1015,25 @@ class VideoMeetingApiTests(TestCase):
         meeting.refresh_from_db()
         self.assertEqual(meeting.presented_payload["boardSplit"]["boardId"], board_id)
 
+    @override_settings(LESSON_SECRET="test-lesson-secret-for-present")
+    def test_student_status_sees_own_board_split(self):
+        from Cabinet.meeting_material_session import sync_state_payload
+
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        self.client.force_login(self.teacher)
+        self.client.post(
+            f"/api/video-meetings/{meeting.uuid}/present/",
+            {"kind": "variant", "title": "Вариант 1", "url": "/oge/inf/variant/42"},
+            format="json",
+        )
+        opened = self.client.post(
+            f"/api/video-meetings/{meeting.uuid}/variant-board-split/",
+            {"open": True},
+            format="json",
+        )
+        board_id = opened.data["presented"]["boardSplit"]["boardId"]
+        meeting.refresh_from_db()
         self.client.force_login(self.student_user)
         status_res = self.client.get(f"/api/video-meetings/{meeting.uuid}/status/")
         self.assertEqual(
@@ -1031,20 +1048,47 @@ class VideoMeetingApiTests(TestCase):
             (forbidden.status_code, forbidden.data.get("code")), (403, "teacher_only")
         )
 
+    @override_settings(LESSON_SECRET="test-lesson-secret-for-present")
+    def test_close_board_split_keeps_variant(self):
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
         self.client.force_login(self.teacher)
+        self.client.post(
+            f"/api/video-meetings/{meeting.uuid}/present/",
+            {"kind": "variant", "title": "Вариант 1", "url": "/oge/inf/variant/42"},
+            format="json",
+        )
+        self.client.post(
+            f"/api/video-meetings/{meeting.uuid}/variant-board-split/",
+            {"open": True},
+            format="json",
+        )
         closed = self.client.post(
             f"/api/video-meetings/{meeting.uuid}/variant-board-split/",
             {"open": False},
             format="json",
         )
-        self.assertEqual(closed.status_code, 200, closed.content)
-        self.assertEqual(closed.data["presented"]["boardSplit"], {"open": False})
         self.assertEqual(closed.data["presented"]["kind"], "variant")
+        self.assertEqual(closed.data["presented"]["boardSplit"], {"open": False})
         self.client.force_login(self.student_user)
         after = self.client.get(f"/api/video-meetings/{meeting.uuid}/status/")
         self.assertEqual(after.data["presented"]["boardSplit"], {"open": False})
 
+    @override_settings(LESSON_SECRET="test-lesson-secret-for-present")
+    def test_present_variant_again_drops_board_split(self):
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
         self.client.force_login(self.teacher)
+        self.client.post(
+            f"/api/video-meetings/{meeting.uuid}/present/",
+            {"kind": "variant", "title": "Вариант 1", "url": "/oge/inf/variant/42"},
+            format="json",
+        )
+        self.client.post(
+            f"/api/video-meetings/{meeting.uuid}/variant-board-split/",
+            {"open": True},
+            format="json",
+        )
         again = self.client.post(
             f"/api/video-meetings/{meeting.uuid}/present/",
             {"kind": "variant", "title": "Вариант 1", "url": "/oge/inf/variant/42"},

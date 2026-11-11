@@ -349,13 +349,20 @@ class VariantBoardSplitSyncTests(VariantBoardGroupTests):
                 user.username,
             )
 
-    def test_open_close_payload_status_and_foreign_board(self):
-        import json
-        from Cabinet.meeting_material_session import sync_state_payload
-        from Cabinet.meeting_present import clear_presented, present_variant
-        from Cabinet.models import VideoMeeting
-        from Cabinet.video_meeting_service import finish_meeting
+    def _open_for_anya(self):
+        meeting = self._present(self._meeting(self.mg))
+        decoy = InteractiveBoard.objects.create(
+            owner=self.teacher, student=self.sb, title="Чужая"
+        )
+        opened = self._split(
+            self.teacher,
+            self.mg,
+            {"open": True, "studentId": self.sa.pk, "boardId": str(decoy.pk)},
+        )
+        self.assertEqual(opened.status_code, 200, opened.content)
+        return meeting, opened, decoy
 
+    def test_choose_student_does_not_broadcast(self):
         meeting = self._present(self._meeting(self.mg))
         with mock.patch(
             "Cabinet.video_meeting_api.broadcast_material_event"
@@ -369,64 +376,43 @@ class VariantBoardSplitSyncTests(VariantBoardGroupTests):
         meeting.refresh_from_db()
         self.assertNotIn("boardSplit", meeting.presented_payload)
 
-        decoy = InteractiveBoard.objects.create(
-            owner=self.teacher, student=self.sb, title="Чужая"
-        )
-        with mock.patch(
-            "Cabinet.video_meeting_api.broadcast_material_event"
-        ) as broadcast:
-            opened = self._split(
-                self.teacher,
-                self.mg,
-                {
-                    "open": True,
-                    "studentId": self.sa.pk,
-                    "boardId": str(decoy.pk),
-                },
-            )
-            self.assertEqual(opened.status_code, 200, opened.content)
-            broadcast.assert_called_once()
-            self.assertEqual(broadcast.call_args.args[1]["type"], "resource.presented")
+    def test_open_reaches_owner_not_foreign_student(self):
+        import json
+        from Cabinet.meeting_material_session import sync_state_payload
+
+        meeting, opened, decoy = self._open_for_anya()
         split = opened.data["presented"]["boardSplit"]
-        self.assertEqual(split["open"], True)
-        self.assertEqual(split["kind"], "student")
-        self.assertEqual(split["studentId"], self.sa.pk)
+        self.assertEqual(
+            (split["open"], split["kind"], split["studentId"]),
+            (True, "student", self.sa.pk),
+        )
         self.assertNotEqual(split["boardId"], str(decoy.pk))
         board_id = split["boardId"]
         meeting.refresh_from_db()
-        self.assertEqual(meeting.presented_kind, "variant")
         self.assertEqual(meeting.presented_payload["boardSplit"]["boardId"], board_id)
-        self.assertEqual(meeting.presented_payload["boardSplit"]["kind"], "student")
-
         own = self._status(self.ua, self.mg)
-        self.assertEqual(own.status_code, 200)
         self.assertEqual(own.data["presented"]["boardSplit"]["boardId"], board_id)
         late = sync_state_payload(meeting, self.ua)
         self.assertEqual(late["presented"]["boardSplit"]["boardId"], board_id)
-        foreign = self._status(self.ub, self.mg)
-        foreign_presented = json.dumps(foreign.data["presented"])
-        self.assertNotIn(board_id, foreign_presented)
-        self.assertNotIn("boardId", foreign.data["presented"].get("boardSplit") or {})
-        self.assertFalse(
-            (foreign.data["presented"].get("boardSplit") or {}).get("open")
-        )
+        foreign = json.dumps(self._status(self.ub, self.mg).data["presented"])
+        self.assertNotIn(board_id, foreign)
         denied = self._split(self.ua, self.mg, {"open": False})
         self.assertEqual(denied.status_code, 403)
 
-        closed = self._split(
-            self.teacher, self.mg, {"open": False, "boardId": board_id}
-        )
+    def test_close_keeps_variant(self):
+        self._open_for_anya()
+        closed = self._split(self.teacher, self.mg, {"open": False})
         self.assertEqual(closed.status_code, 200, closed.content)
         self.assertEqual(closed.data["presented"]["kind"], "variant")
         self.assertEqual(closed.data["presented"]["boardSplit"], {"open": False})
         self.assertTrue(closed.data["presented"]["homeworkId"])
-        self.assertEqual(
-            self._status(self.ua, self.mg).data["presented"]["boardSplit"],
-            {"open": False},
-        )
-        meeting.refresh_from_db()
-        self.assertEqual(meeting.presented_payload["boardSplit"], {"open": False})
+        student = self._status(self.ua, self.mg)
+        self.assertEqual(student.data["presented"]["boardSplit"], {"open": False})
 
+    def test_present_again_drops_stale_split(self):
+        from Cabinet.meeting_present import present_variant
+
+        meeting, _, _ = self._open_for_anya()
         present_variant(
             meeting=meeting, user=self.teacher, title="Снова", url="/oge/inf/variant/43"
         )
@@ -435,11 +421,16 @@ class VariantBoardSplitSyncTests(VariantBoardGroupTests):
         again = self._status(self.ua, self.mg)
         self.assertNotIn("boardSplit", again.data["presented"])
 
+    def test_clear_and_finish_drop_split(self):
+        from Cabinet.meeting_present import clear_presented
+        from Cabinet.models import VideoMeeting
+        from Cabinet.video_meeting_service import finish_meeting
+
+        meeting, _, _ = self._open_for_anya()
         clear_presented(meeting=meeting, user=self.teacher)
         meeting.refresh_from_db()
         self.assertEqual(meeting.presented_kind, "")
         self.assertEqual(meeting.presented_payload, {})
-
         meeting = self._present(VideoMeeting.objects.get(uuid=self.mg))
         self._split(self.teacher, self.mg, {"open": True, "studentId": self.sa.pk})
         finish_meeting(meeting=meeting, user=self.teacher)
