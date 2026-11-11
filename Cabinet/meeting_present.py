@@ -32,7 +32,6 @@ from .models import (
 from .video_meeting_service import (
     VideoMeetingError,
     assert_can_manage_meeting,
-    resolve_access,
 )
 from .lesson_locked_scores import (
     LOCK_KEY,
