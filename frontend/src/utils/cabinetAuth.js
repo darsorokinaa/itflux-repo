@@ -1972,49 +1972,36 @@ export function updateMaterial(id, payload) {
   });
 }
 
-export async function fetchReadyLesson(slug, { collection } = {}) {
-  const qs = collection ? `?collection=${encodeURIComponent(collection)}` : "";
-  const res = await fetch(`/api/lessons/${encodeURIComponent(slug)}/${qs}`, {
+async function fetchPublicJson(url, fallback, pick) {
+  const res = await fetch(url, {
     credentials: "same-origin",
     cache: "no-store",
     headers: { Accept: "application/json" },
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    const message =
-      data?.message ||
-      data?.detail ||
-      data?.error ||
-      "Не удалось загрузить урок";
-    throw new Error(
-      typeof message === "string" ? message : "Не удалось загрузить урок",
-    );
+    const message = data?.message || data?.detail || data?.error || fallback;
+    throw new Error(typeof message === "string" ? message : fallback);
   }
-  return data?.lesson || data;
+  return pick(data);
+}
+
+export async function fetchReadyLesson(slug, { collection } = {}) {
+  const qs = collection ? `?collection=${encodeURIComponent(collection)}` : "";
+  return fetchPublicJson(
+    `/api/lessons/${encodeURIComponent(slug)}/${qs}`,
+    "Не удалось загрузить урок",
+    (data) => data?.lesson || data,
+  );
 }
 
 export async function fetchInterestingItem(slug, { collection } = {}) {
   const qs = collection ? `?collection=${encodeURIComponent(collection)}` : "";
-  const res = await fetch(
+  return fetchPublicJson(
     `/api/interesting/${encodeURIComponent(slug)}/${qs}`,
-    {
-      credentials: "same-origin",
-      cache: "no-store",
-      headers: { Accept: "application/json" },
-    },
+    "Не удалось загрузить материал",
+    (data) => data?.item || data,
   );
-  const data = await res.json().catch(() => null);
-  if (!res.ok) {
-    const message =
-      data?.message ||
-      data?.detail ||
-      data?.error ||
-      "Не удалось загрузить материал";
-    throw new Error(
-      typeof message === "string" ? message : "Не удалось загрузить материал",
-    );
-  }
-  return data?.item || data;
 }
 
 export async function startReadyLessonDemo(slug) {

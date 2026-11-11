@@ -392,19 +392,13 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
                 action = "object_upsert"
         try:
             result = await self._apply_screenshare_operation(data, action)
-        except VideoMeetingError as exc:
-            await self._send_error(
-                exc.message,
-                code=exc.code,
-                extra={
-                    "operation_id": data.get("operation_id") or data.get("operationId")
-                },
-            )
-            return
         except Exception as exc:
-            reraise_if_saturated(exc)
-            logger.exception("screenshare_op_failed meeting=%s", self.meeting_uuid)
-            await self._send_error("Ошибка применения аннотации", code="server_error")
+            await self._fail_operation(
+                data,
+                exc,
+                log_label="screenshare_op_failed",
+                client_message="Ошибка применения аннотации",
+            )
             return
 
         if result.get("duplicate"):
@@ -464,15 +458,7 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
         # state тоже персонален для ученика (только свои answers/fields) — без
         # переперсонализации на control.transferred все получали бы срез сессии,
         # посчитанный для учителя, который вызвал передачу управления.
-        # boardSplit.boardId персонален: чужую доску ученика в сокет не кладём.
-        if payload.get("type") in (
-            "resource.presented",
-            "RESOURCE_PRESENTED",
-            "resource.cleared",
-            "RESOURCE_CLEARED",
-        ):
-            presented = await self._presented_for_viewer()
-            payload = {**payload, "presented": presented}
+        payload = await self._with_viewer_presented(payload)
         if payload.get("type") in (
             "material.opened",
             "material.permission_changed",
@@ -651,19 +637,13 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
         # author_id / author_role с клиента игнорируем — берём из сессии.
         try:
             result = await self._apply_operation(data, action)
-        except VideoMeetingError as exc:
-            await self._send_error(
-                exc.message,
-                code=exc.code,
-                extra={
-                    "operation_id": data.get("operation_id") or data.get("operationId")
-                },
-            )
-            return
         except Exception as exc:
-            reraise_if_saturated(exc)
-            logger.exception("material_op_failed meeting=%s", self.meeting_uuid)
-            await self._send_error("Ошибка применения операции", code="server_error")
+            await self._fail_operation(
+                data,
+                exc,
+                log_label="material_op_failed",
+                client_message="Ошибка применения операции",
+            )
             return
 
         if result.get("duplicate"):
@@ -742,6 +722,33 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
     def _sync_state(self):
         meeting = get_meeting_by_uuid(self.meeting_uuid)
         return sync_state_payload(meeting, self.user)
+
+    async def _with_viewer_presented(self, payload):
+        """Чужой boardId не уходит в сокет: показ пересобирается для этого зрителя."""
+        kind = payload.get("type")
+        if kind not in (
+            "resource.presented",
+            "RESOURCE_PRESENTED",
+            "resource.cleared",
+            "RESOURCE_CLEARED",
+        ):
+            return payload
+        presented = await self._presented_for_viewer()
+        return {**payload, "presented": presented}
+
+    async def _fail_operation(self, data, exc, *, log_label, client_message):
+        if isinstance(exc, VideoMeetingError):
+            await self._send_error(
+                exc.message,
+                code=exc.code,
+                extra={
+                    "operation_id": data.get("operation_id") or data.get("operationId")
+                },
+            )
+            return
+        reraise_if_saturated(exc)
+        logger.exception("%s meeting=%s", log_label, self.meeting_uuid)
+        await self._send_error(client_message, code="server_error")
 
     @database_sync_to_async
     def _presented_for_viewer(self):
