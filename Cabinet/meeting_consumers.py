@@ -402,17 +402,11 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
             return
 
         if result.get("duplicate"):
-            await self.send(
-                text_data=json.dumps(
-                    {
-                        "type": "screenshare.operation_ack",
-                        "duplicate": True,
-                        "operation_id": data.get("operation_id")
-                        or data.get("operationId"),
-                        "version": result.get("version"),
-                    },
-                    ensure_ascii=False,
-                )
+            await self._send_ack(
+                "screenshare.operation_ack",
+                data.get("operation_id") or data.get("operationId"),
+                result.get("version"),
+                duplicate=True,
             )
             return
 
@@ -421,16 +415,11 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
             return
         await self._broadcast(operation)
         if not result.get("ephemeral"):
-            await self.send(
-                text_data=json.dumps(
-                    {
-                        "type": "screenshare.operation_ack",
-                        "duplicate": False,
-                        "operation_id": operation.get("operation_id"),
-                        "version": operation.get("version"),
-                    },
-                    ensure_ascii=False,
-                )
+            await self._send_ack(
+                "screenshare.operation_ack",
+                operation.get("operation_id"),
+                operation.get("version"),
+                duplicate=False,
             )
 
     async def meeting_material_event(self, event):
@@ -647,32 +636,20 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
             return
 
         if result.get("duplicate"):
-            await self.send(
-                text_data=json.dumps(
-                    {
-                        "type": "material.operation_ack",
-                        "duplicate": True,
-                        "operation_id": data.get("operation_id")
-                        or data.get("operationId"),
-                        "version": result.get("version"),
-                    },
-                    ensure_ascii=False,
-                )
+            await self._send_ack(
+                "material.operation_ack",
+                data.get("operation_id") or data.get("operationId"),
+                result.get("version"),
+                duplicate=True,
             )
             return
 
         if result.get("stale"):
-            await self.send(
-                text_data=json.dumps(
-                    {
-                        "type": "material.operation_ack",
-                        "stale": True,
-                        "operation_id": data.get("operation_id")
-                        or data.get("operationId"),
-                        "version": result.get("version"),
-                    },
-                    ensure_ascii=False,
-                )
+            await self._send_ack(
+                "material.operation_ack",
+                data.get("operation_id") or data.get("operationId"),
+                result.get("version"),
+                stale=True,
             )
             return
 
@@ -685,16 +662,11 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
         if typed and typed != operation.get("type"):
             await self._broadcast({**operation, "type": typed})
         if not result.get("ephemeral"):
-            await self.send(
-                text_data=json.dumps(
-                    {
-                        "type": "material.operation_ack",
-                        "duplicate": False,
-                        "operation_id": operation.get("operation_id"),
-                        "version": operation.get("version"),
-                    },
-                    ensure_ascii=False,
-                )
+            await self._send_ack(
+                "material.operation_ack",
+                operation.get("operation_id"),
+                operation.get("version"),
+                duplicate=False,
             )
 
     @database_sync_to_async
@@ -735,6 +707,15 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
             return payload
         presented = await self._presented_for_viewer()
         return {**payload, "presented": presented}
+
+    async def _send_ack(self, ack_type, operation_id, version, **extra):
+        body = {
+            "type": ack_type,
+            **extra,
+            "operation_id": operation_id,
+            "version": version,
+        }
+        await self.send(text_data=json.dumps(body, ensure_ascii=False))
 
     async def _fail_operation(self, data, exc, *, log_label, client_message):
         if isinstance(exc, VideoMeetingError):
