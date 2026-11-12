@@ -1111,6 +1111,26 @@ html.seasonal-theme-active:not(.seasonal-heavy) :is(
   box-shadow: inset 3px 0 0 var(--seasonal-accent, transparent), var(--shadow-card, 0 8px 24px rgba(15, 23, 42, 0.06));
 }
 
+/* Карточка банка остаётся сплошной белой: акцентная полоска слева
+   просвечивала только у строки ответа и выглядела как чужая граница. */
+html.seasonal-theme-active:not(.seasonal-heavy) .all-tasks-item__card {
+  box-shadow: var(--shadow-card, 0 8px 24px rgba(15, 23, 42, 0.06));
+}
+
+html.seasonal-theme-active:not(.seasonal-heavy) .all-tasks-item--prog-sheet .all-tasks-item__card {
+  box-shadow: 0 10px 28px rgba(28, 25, 23, 0.06);
+}
+
+html.seasonal-theme-active:not(.seasonal-heavy) .all-tasks-item--in-workbook .all-tasks-item__card {
+  box-shadow: inset 0 0 0 2px rgba(43, 82, 245, 0.35), var(--shadow-card, 0 8px 24px rgba(15, 23, 42, 0.06));
+}
+
+html.seasonal-theme-active:not(.seasonal-heavy) .all-tasks-item__answer-block,
+html.seasonal-theme-active:not(.seasonal-heavy) .all-tasks-item__content {
+  background-color: #fff;
+  background-image: none;
+}
+
 html.seasonal-theme-active:not(.seasonal-heavy) :is(
   .td-onboarding,
   .td-offer-banner,
