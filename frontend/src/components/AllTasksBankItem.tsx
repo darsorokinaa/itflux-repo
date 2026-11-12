@@ -56,6 +56,17 @@ export const EMPTY_STAFF_GROUPS: StaffGroupOption[] = [];
 export const EMPTY_STAFF_SUBTOPICS: StaffSubtopicOption[] = [];
 export const EMPTY_TASK_TAGS: TaskTag[] = [];
 
+function MetaChunk({ children }: { children: ReactNode }) {
+  return (
+    <span className="all-tasks-item__meta-chunk">
+      <span className="all-tasks-item__meta-sep" aria-hidden>
+        ·
+      </span>
+      <span className="all-tasks-item__meta-chunk-text">{children}</span>
+    </span>
+  );
+}
+
 function BankStudentFiles({ task }: { task: BankTask }) {
   const files = Array.isArray(task.student_files) ? task.student_files : [];
   if (!files.length) return null;
@@ -245,19 +256,21 @@ const AllTasksTaskBody = memo(function AllTasksTaskBody({
           onSaved={onStaffSaved}
         />
       ) : null}
-      {answerHtml && Number((task as { part_id?: number | string | null }).part_id) !== 2 ? (
-        <TaskAnswerCheck taskId={task.id} prompt={taskHtml} />
-      ) : null}
       {answerHtml ? (
-        <div className="all-tasks-item__answer-foot">
-          <button
-            type="button"
-            className="all-tasks-item__answer-btn"
-            onClick={() => onToggleAnswer(task.id)}
-            aria-expanded={answerOpen ? "true" : "false"}
-          >
-            {answerOpen ? "Скрыть ответ" : "Посмотреть ответ"}
-          </button>
+        <div className="all-tasks-item__answer-block">
+          {Number((task as { part_id?: number | string | null }).part_id) !== 2 ? (
+            <TaskAnswerCheck taskId={task.id} prompt={taskHtml} />
+          ) : null}
+          <div className="all-tasks-item__answer-foot">
+            <button
+              type="button"
+              className="all-tasks-item__answer-btn"
+              onClick={() => onToggleAnswer(task.id)}
+              aria-expanded={answerOpen ? "true" : "false"}
+            >
+              {answerOpen ? "Скрыть ответ" : "Посмотреть ответ"}
+            </button>
+          </div>
         </div>
       ) : null}
       {answerOpen ? (
@@ -346,65 +359,17 @@ export const AllTasksBankItem = memo(function AllTasksBankItem({
                   {task.source_label === "teacher" ? "Моя задача" : "Общий банк"}
                 </span>
               ) : null}
-              {task.public_code ? (
-                <>
-                  <span className="all-tasks-item__meta-sep" aria-hidden>
-                    ·
-                  </span>
-                  <span>{task.public_code}</span>
-                </>
-              ) : null}
-              <span className="all-tasks-item__meta-sep" aria-hidden>
-                ·
-              </span>
-              <span>ID {task.id}</span>
-              {task.vpr_class != null ? (
-                <>
-                  <span className="all-tasks-item__meta-sep" aria-hidden>
-                    ·
-                  </span>
-                  <span>{task.vpr_class} класс</span>
-                </>
-              ) : null}
+              {task.public_code ? <MetaChunk>{task.public_code}</MetaChunk> : null}
+              <MetaChunk>ID {task.id}</MetaChunk>
+              {task.vpr_class != null ? <MetaChunk>{task.vpr_class} класс</MetaChunk> : null}
               {task.vpr_advanced ? (
-                <>
-                  <span className="all-tasks-item__meta-sep" aria-hidden>
-                    ·
-                  </span>
-                  <span>Углублённый</span>
-                </>
+                <MetaChunk>Углублённый</MetaChunk>
               ) : task.vpr_basic ? (
-                <>
-                  <span className="all-tasks-item__meta-sep" aria-hidden>
-                    ·
-                  </span>
-                  <span>Базовый</span>
-                </>
+                <MetaChunk>Базовый</MetaChunk>
               ) : null}
-              {task.bank_note ? (
-                <>
-                  <span className="all-tasks-item__meta-sep" aria-hidden>
-                    ·
-                  </span>
-                  <span>{task.bank_note}</span>
-                </>
-              ) : null}
-              {task.task_title ? (
-                <>
-                  <span className="all-tasks-item__meta-sep" aria-hidden>
-                    ·
-                  </span>
-                  <span>{task.task_title}</span>
-                </>
-              ) : null}
-              {task.subtopic ? (
-                <>
-                  <span className="all-tasks-item__meta-sep" aria-hidden>
-                    ·
-                  </span>
-                  <span>{task.subtopic}</span>
-                </>
-              ) : null}
+              {task.bank_note ? <MetaChunk>{task.bank_note}</MetaChunk> : null}
+              {task.task_title ? <MetaChunk>{task.task_title}</MetaChunk> : null}
+              {task.subtopic ? <MetaChunk>{task.subtopic}</MetaChunk> : null}
               {!answerHtml ? <TaskNoAnswerBadge /> : null}
             </p>
             <div className="all-tasks-item__actions">
@@ -476,49 +441,15 @@ const AllTasksGroupPart = memo(function AllTasksGroupPart({
       <div className="all-tasks-item__group-part-head">
         <p className="all-tasks-item__meta">
           <span className="all-tasks-item__num">№{taskNumber}</span>
-          <span className="all-tasks-item__meta-sep" aria-hidden>
-            ·
-          </span>
-          <span>ID {task.id}</span>
-          {task.vpr_class != null ? (
-            <>
-              <span className="all-tasks-item__meta-sep" aria-hidden>
-                ·
-              </span>
-              <span>{task.vpr_class} класс</span>
-            </>
-          ) : null}
+          <MetaChunk>ID {task.id}</MetaChunk>
+          {task.vpr_class != null ? <MetaChunk>{task.vpr_class} класс</MetaChunk> : null}
           {task.vpr_advanced ? (
-            <>
-              <span className="all-tasks-item__meta-sep" aria-hidden>
-                ·
-              </span>
-              <span>Углублённый</span>
-            </>
+            <MetaChunk>Углублённый</MetaChunk>
           ) : task.vpr_basic ? (
-            <>
-              <span className="all-tasks-item__meta-sep" aria-hidden>
-                ·
-              </span>
-              <span>Базовый</span>
-            </>
+            <MetaChunk>Базовый</MetaChunk>
           ) : null}
-          {task.task_title ? (
-            <>
-              <span className="all-tasks-item__meta-sep" aria-hidden>
-                ·
-              </span>
-              <span>{task.task_title}</span>
-            </>
-          ) : null}
-          {task.part_title ? (
-            <>
-              <span className="all-tasks-item__meta-sep" aria-hidden>
-                ·
-              </span>
-              <span>{task.part_title}</span>
-            </>
-          ) : null}
+          {task.task_title ? <MetaChunk>{task.task_title}</MetaChunk> : null}
+          {task.part_title ? <MetaChunk>{task.part_title}</MetaChunk> : null}
           {!answerHtml ? <TaskNoAnswerBadge /> : null}
         </p>
         <div className="all-tasks-item__actions">
@@ -649,18 +580,8 @@ export const AllTasksGroupItem = memo(function AllTasksGroupItem({
           <header className="all-tasks-item__head all-tasks-item__head--group">
             <p className="all-tasks-item__meta">
               <span className="all-tasks-item__num">Группа заданий</span>
-              <span className="all-tasks-item__meta-sep" aria-hidden>
-                ·
-              </span>
-              <span>вариант #{groupId}</span>
-              {groupNums.length ? (
-                <>
-                  <span className="all-tasks-item__meta-sep" aria-hidden>
-                    ·
-                  </span>
-                  <span>№{groupNums.join(", ")}</span>
-                </>
-              ) : null}
+              <MetaChunk>вариант #{groupId}</MetaChunk>
+              {groupNums.length ? <MetaChunk>№{groupNums.join(", ")}</MetaChunk> : null}
               {groupHasMissingAnswer ? <TaskNoAnswerBadge /> : null}
             </p>
             <div className="all-tasks-item__actions">
