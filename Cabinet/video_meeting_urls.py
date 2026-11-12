@@ -74,6 +74,11 @@ urlpatterns = [
         name="video_meeting_present",
     ),
     path(
+        "<uuid:meeting_uuid>/variant-board-split/",
+        video_meeting_api.VideoMeetingVariantBoardSplitView.as_view(),
+        name="video_meeting_variant_board_split",
+    ),
+    path(
         "<uuid:meeting_uuid>/live-answers/",
         video_meeting_api.VideoMeetingLiveAnswersView.as_view(),
         name="video_meeting_live_answers",
