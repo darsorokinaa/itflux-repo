@@ -31,6 +31,7 @@ from .meeting_present import (
     present_variant,
     redact_plan_item_for_student,
     serialize_presented,
+    set_variant_board_split,
 )
 from .student_api import _interactive_to_player_payload
 from .kontur_talk import issue_kontur_talk_link, kontur_talk_public_status
@@ -68,9 +69,7 @@ def _error_response(exc: VideoMeetingError, *, meeting=None) -> Response:
         payload["status"] = meeting.status
     elif exc.code in ("not_live", "finished", "cancelled", "invalid_status"):
         # Клиенту удобно читать статус рядом с detail.
-        payload.setdefault(
-            "status", exc.code if exc.code != "not_live" else "scheduled"
-        )
+        payload.setdefault("status", exc.code if exc.code != "not_live" else "scheduled")
     return Response(payload, status=exc.status)
 
 
@@ -80,9 +79,7 @@ def _early_entry_or_none(event, meeting):
 
         return serialize_early_entry(event, meeting)
     except Exception:
-        logger.exception(
-            "early_entry_serialize_failed event=%s", getattr(event, "pk", None)
-        )
+        logger.exception("early_entry_serialize_failed event=%s", getattr(event, "pk", None))
         return None
 
 
@@ -102,28 +99,22 @@ class VideoMeetingForEventView(APIView):
         meeting = VideoMeeting.objects.filter(schedule_event=event).first()
         access = resolve_access(request.user, event)
         state = meeting_join_window_state(event, meeting)
-        return Response(
-            {
-                "eventId": event.pk,
-                "title": event.title,
-                "startsAt": event.starts_at.isoformat(),
-                "endsAt": event.ends_at.isoformat(),
-                "eventStatus": event.status,
-                "joinState": state,
-                "joinStateLabel": ui_state_message(state),
-                "canManage": access.role in ("teacher", "staff"),
-                "videoMeeting": serialize_meeting_summary(
-                    meeting, event=event, user=request.user
-                ),
-            }
-        )
+        return Response({
+            "eventId": event.pk,
+            "title": event.title,
+            "startsAt": event.starts_at.isoformat(),
+            "endsAt": event.ends_at.isoformat(),
+            "eventStatus": event.status,
+            "joinState": state,
+            "joinStateLabel": ui_state_message(state),
+            "canManage": access.role in ("teacher", "staff"),
+            "videoMeeting": serialize_meeting_summary(meeting, event=event, user=request.user),
+        })
 
     def post(self, request, event_id: int):
         try:
             event = get_event_for_teacher(event_id, request.user)
-            meeting, created = get_or_create_meeting_for_event(
-                event=event, created_by=request.user
-            )
+            meeting, created = get_or_create_meeting_for_event(event=event, created_by=request.user)
         except VideoMeetingError as exc:
             return _error_response(exc)
 
@@ -150,26 +141,19 @@ class VideoMeetingEarlyEntryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, event_id: int):
-        from .early_room import (
-            ensure_meeting_for_student_early_entry,
-            serialize_early_entry,
-        )
+        from .early_room import ensure_meeting_for_student_early_entry, serialize_early_entry
 
         try:
             event = get_event_for_teacher(event_id, request.user)
-            meeting = ensure_meeting_for_student_early_entry(
-                user=request.user, event=event
-            )
+            meeting = ensure_meeting_for_student_early_entry(user=request.user, event=event)
         except VideoMeetingError as exc:
             return _error_response(exc)
-        return Response(
-            {
-                "success": True,
-                "meeting": serialize_meeting_compact(meeting),
-                "pageUrl": f"/cabinet/meetings/{meeting.uuid}",
-                "earlyEntry": serialize_early_entry(event, meeting),
-            }
-        )
+        return Response({
+            "success": True,
+            "meeting": serialize_meeting_compact(meeting),
+            "pageUrl": f"/cabinet/meetings/{meeting.uuid}",
+            "earlyEntry": serialize_early_entry(event, meeting),
+        })
 
 
 class VideoMeetingWaitingRoomView(APIView):
@@ -198,9 +182,7 @@ class VideoMeetingDetailView(APIView):
             meeting = get_meeting_by_uuid(meeting_uuid)
             access = resolve_access(request.user, meeting.schedule_event)
             if not access.allowed:
-                raise VideoMeetingError(
-                    access.reason or "Доступ запрещён", code="forbidden", status=403
-                )
+                raise VideoMeetingError(access.reason or "Доступ запрещён", code="forbidden", status=403)
         except VideoMeetingError as exc:
             return _error_response(exc)
 
@@ -212,9 +194,7 @@ class VideoMeetingDetailView(APIView):
 
         plan_item, lesson_number = resolve_plan_item_for_event(event)
         plan_item_json = (
-            _plan_item_to_json(plan_item, lesson_number=lesson_number)
-            if plan_item
-            else None
+            _plan_item_to_json(plan_item, lesson_number=lesson_number) if plan_item else None
         )
         can_manage = access.role in ("teacher", "coteacher", "staff")
         if not can_manage:
@@ -222,52 +202,44 @@ class VideoMeetingDetailView(APIView):
 
         subject = lesson_meeting_subject(event)
         audience = lesson_meeting_audience(event)
-        return Response(
-            {
-                "videoMeeting": serialize_meeting_summary(
-                    meeting, event=event, user=request.user
+        return Response({
+            "videoMeeting": serialize_meeting_summary(meeting, event=event, user=request.user),
+            "event": {
+                "id": event.pk,
+                "title": subject,
+                "eventTitle": event.title,
+                "audience": audience,
+                "topic": (plan_item_json or {}).get("topic") or event.topic or "",
+                "startsAt": event.starts_at.isoformat(),
+                "endsAt": event.ends_at.isoformat(),
+                "status": event.status,
+                "materials": (event.materials or "") if can_manage else "",
+                "teacherComment": (event.teacher_comment or "") if can_manage else "",
+                "planItem": plan_item_json,
+                "studentId": event.student_id,
+                "groupId": event.group_id,
+                "lessonId": event.lesson_id,
+                "teacherName": (
+                    getattr(event.owner, "profile", None).get_display_name()
+                    if getattr(event.owner, "profile", None)
+                    else (event.owner.get_full_name() or event.owner.username)
                 ),
-                "event": {
-                    "id": event.pk,
-                    "title": subject,
-                    "eventTitle": event.title,
-                    "audience": audience,
-                    "topic": (plan_item_json or {}).get("topic") or event.topic or "",
-                    "startsAt": event.starts_at.isoformat(),
-                    "endsAt": event.ends_at.isoformat(),
-                    "status": event.status,
-                    "materials": (event.materials or "") if can_manage else "",
-                    "teacherComment": (event.teacher_comment or "")
-                    if can_manage
-                    else "",
-                    "planItem": plan_item_json,
-                    "studentId": event.student_id,
-                    "groupId": event.group_id,
-                    "lessonId": event.lesson_id,
-                    "teacherName": (
-                        getattr(event.owner, "profile", None).get_display_name()
-                        if getattr(event.owner, "profile", None)
-                        else (event.owner.get_full_name() or event.owner.username)
-                    ),
-                },
-                "joinState": state,
-                "joinStateLabel": ui_state_message(state),
-                "earlyEntry": _early_entry_or_none(event, meeting),
-                "canManage": can_manage,
-                "konturTalk": kontur_talk_public_status(),
-                "viewerUserId": request.user.pk,
-                "viewerRole": access.role,
-                "canControlMaterial": bool(
-                    getattr(access, "can_control_material", can_manage)
-                ),
-                "presented": serialize_presented(meeting, user=request.user),
-                "materialSession": serialize_material_session(
-                    get_active_material_session(meeting),
-                    user=request.user,
-                    include_state=True,
-                ),
-            }
-        )
+            },
+            "joinState": state,
+            "joinStateLabel": ui_state_message(state),
+            "earlyEntry": _early_entry_or_none(event, meeting),
+            "canManage": can_manage,
+            "konturTalk": kontur_talk_public_status(),
+            "viewerUserId": request.user.pk,
+            "viewerRole": access.role,
+            "canControlMaterial": bool(getattr(access, "can_control_material", can_manage)),
+            "presented": serialize_presented(meeting, user=request.user),
+            "materialSession": serialize_material_session(
+                get_active_material_session(meeting),
+                user=request.user,
+                include_state=True,
+            ),
+        })
 
 
 class VideoMeetingStatusView(APIView):
@@ -280,9 +252,7 @@ class VideoMeetingStatusView(APIView):
             meeting = get_meeting_by_uuid(meeting_uuid)
             access = resolve_access(request.user, meeting.schedule_event)
             if not access.allowed:
-                raise VideoMeetingError(
-                    access.reason or "Доступ запрещён", code="forbidden", status=403
-                )
+                raise VideoMeetingError(access.reason or "Доступ запрещён", code="forbidden", status=403)
         except VideoMeetingError as exc:
             return _error_response(exc)
 
@@ -291,33 +261,27 @@ class VideoMeetingStatusView(APIView):
         state = meeting_join_window_state(event, meeting)
         if meeting.status == "live":
             touch_live_meeting_activity(meeting)
-        return Response(
-            {
-                "uuid": str(meeting.uuid),
-                "status": meeting.status,
-                "statusLabel": meeting.get_status_display(),
-                "joinState": state,
-                "joinStateLabel": ui_state_message(state),
-                "joinUrl": f"/cabinet/meetings/{meeting.uuid}",
-                "canManage": access.role in ("teacher", "staff"),
-                "actualStartedAt": (
-                    meeting.actual_started_at.isoformat()
-                    if meeting.actual_started_at
-                    else None
-                ),
-                "actualFinishedAt": (
-                    meeting.actual_finished_at.isoformat()
-                    if meeting.actual_finished_at
-                    else None
-                ),
-                "presented": serialize_presented(meeting, user=request.user),
-                "materialSession": serialize_material_session(
-                    get_active_material_session(meeting),
-                    user=request.user,
-                    include_state=True,
-                ),
-            }
-        )
+        return Response({
+            "uuid": str(meeting.uuid),
+            "status": meeting.status,
+            "statusLabel": meeting.get_status_display(),
+            "joinState": state,
+            "joinStateLabel": ui_state_message(state),
+            "joinUrl": f"/cabinet/meetings/{meeting.uuid}",
+            "canManage": access.role in ("teacher", "staff"),
+            "actualStartedAt": (
+                meeting.actual_started_at.isoformat() if meeting.actual_started_at else None
+            ),
+            "actualFinishedAt": (
+                meeting.actual_finished_at.isoformat() if meeting.actual_finished_at else None
+            ),
+            "presented": serialize_presented(meeting, user=request.user),
+            "materialSession": serialize_material_session(
+                get_active_material_session(meeting),
+                user=request.user,
+                include_state=True,
+            ),
+        })
 
 
 class VideoMeetingKonturTalkView(APIView):
@@ -351,9 +315,7 @@ class VideoMeetingJoinConfigView(APIView):
         meeting = None
         try:
             meeting = get_meeting_by_uuid(meeting_uuid)
-            config = build_join_config(
-                meeting=meeting, user=request.user, request=request
-            )
+            config = build_join_config(meeting=meeting, user=request.user, request=request)
         except VideoMeetingError as exc:
             return _error_response(exc, meeting=meeting)
         response = Response(config)
@@ -371,16 +333,14 @@ class VideoMeetingStartView(APIView):
             meeting = start_meeting(meeting=meeting, user=request.user)
         except VideoMeetingError as exc:
             return _error_response(exc)
-        return Response(
-            {
-                "success": True,
-                "videoMeeting": serialize_meeting_summary(
-                    meeting, event=meeting.schedule_event, user=request.user
-                ),
-                "meeting": serialize_meeting_compact(meeting),
-                "joinUrl": f"/cabinet/meetings/{meeting.uuid}",
-            }
-        )
+        return Response({
+            "success": True,
+            "videoMeeting": serialize_meeting_summary(
+                meeting, event=meeting.schedule_event, user=request.user
+            ),
+            "meeting": serialize_meeting_compact(meeting),
+            "joinUrl": f"/cabinet/meetings/{meeting.uuid}",
+        })
 
 
 class VideoMeetingFinishView(APIView):
@@ -392,17 +352,15 @@ class VideoMeetingFinishView(APIView):
             meeting = finish_meeting(meeting=meeting, user=request.user)
         except VideoMeetingError as exc:
             return _error_response(exc)
-        return Response(
-            {
-                "success": True,
-                "videoMeeting": serialize_meeting_summary(
-                    meeting, event=meeting.schedule_event, user=request.user
-                ),
-                "meeting": serialize_meeting_compact(meeting),
-                "eventStatus": meeting.schedule_event.status,
-                "nextStep": lesson_journal_next_step(meeting.schedule_event),
-            }
-        )
+        return Response({
+            "success": True,
+            "videoMeeting": serialize_meeting_summary(
+                meeting, event=meeting.schedule_event, user=request.user
+            ),
+            "meeting": serialize_meeting_compact(meeting),
+            "eventStatus": meeting.schedule_event.status,
+            "nextStep": lesson_journal_next_step(meeting.schedule_event),
+        })
 
 
 class VideoMeetingAttendanceJoinView(APIView):
@@ -414,11 +372,9 @@ class VideoMeetingAttendanceJoinView(APIView):
             meeting = get_meeting_by_uuid(meeting_uuid)
             participant_id = ""
             if isinstance(request.data, dict):
-                participant_id = (
-                    request.data.get("jitsiParticipantId")
-                    or request.data.get("jitsi_participant_id")
-                    or ""
-                )
+                participant_id = request.data.get("jitsiParticipantId") or request.data.get(
+                    "jitsi_participant_id"
+                ) or ""
             session = record_attendance_join(
                 meeting=meeting,
                 user=request.user,
@@ -426,14 +382,12 @@ class VideoMeetingAttendanceJoinView(APIView):
             )
         except VideoMeetingError as exc:
             return _error_response(exc, meeting=meeting)
-        return Response(
-            {
-                "id": session.pk,
-                "joinedAt": session.joined_at.isoformat(),
-                "leftAt": session.left_at.isoformat() if session.left_at else None,
-                "durationSeconds": session.duration_seconds,
-            }
-        )
+        return Response({
+            "id": session.pk,
+            "joinedAt": session.joined_at.isoformat(),
+            "leftAt": session.left_at.isoformat() if session.left_at else None,
+            "durationSeconds": session.duration_seconds,
+        })
 
 
 class VideoMeetingAttendanceLeaveView(APIView):
@@ -446,9 +400,7 @@ class VideoMeetingAttendanceLeaveView(APIView):
             data = request.data if isinstance(request.data, dict) else {}
             if not data and request.POST:
                 data = request.POST
-            participant_id = (
-                data.get("jitsiParticipantId") or data.get("jitsi_participant_id") or ""
-            )
+            participant_id = data.get("jitsiParticipantId") or data.get("jitsi_participant_id") or ""
             session = record_attendance_leave(
                 meeting=meeting,
                 user=request.user,
@@ -458,16 +410,14 @@ class VideoMeetingAttendanceLeaveView(APIView):
             return _error_response(exc)
         if session is None:
             return Response({"ok": True, "closed": False})
-        return Response(
-            {
-                "ok": True,
-                "closed": True,
-                "id": session.pk,
-                "joinedAt": session.joined_at.isoformat(),
-                "leftAt": session.left_at.isoformat() if session.left_at else None,
-                "durationSeconds": session.duration_seconds,
-            }
-        )
+        return Response({
+            "ok": True,
+            "closed": True,
+            "id": session.pk,
+            "joinedAt": session.joined_at.isoformat(),
+            "leftAt": session.left_at.isoformat() if session.left_at else None,
+            "durationSeconds": session.duration_seconds,
+        })
 
 
 class VideoMeetingAttendanceListView(APIView):
@@ -485,7 +435,6 @@ class VideoMeetingAttendanceListView(APIView):
 def _route_meta(request) -> dict:
     """r95: cdn/direct по Host (cdn.itflux-academy.ru = релей с proxy_protocol), браузер/ОС без версии ОС."""
     from Generator import cdn_users
-
     try:
         route = "cdn" if cdn_users.is_cdn(request) else "direct"
         ua = cdn_users.short_ua(request.META.get("HTTP_USER_AGENT", ""))[:40]
@@ -507,18 +456,11 @@ class VideoMeetingTechnicalEventView(APIView):
             meeting = get_meeting_by_uuid(meeting_uuid)
             access = resolve_access(request.user, meeting.schedule_event)
             if not access.allowed:
-                raise VideoMeetingError(
-                    access.reason or "Доступ запрещён", code="forbidden", status=403
-                )
+                raise VideoMeetingError(access.reason or "Доступ запрещён", code="forbidden", status=403)
             data = request.data if isinstance(request.data, dict) else {}
             event_type = str(data.get("eventType") or data.get("event_type") or "")[:40]
-            metadata = (
-                data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
-            )
-            metadata = {
-                **metadata,
-                **_route_meta(request),
-            }  # r95: маршрут и семейство браузера — с сервера
+            metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+            metadata = {**metadata, **_route_meta(request)}  # r95: маршрут и семейство браузера — с сервера
             event = record_technical_event(
                 meeting=meeting,
                 user=request.user,
@@ -527,26 +469,18 @@ class VideoMeetingTechnicalEventView(APIView):
                 source="frontend",
                 reason=str(data.get("reason") or data.get("code") or "")[:128],
                 jitsi_participant_id=str(
-                    data.get("jitsiParticipantId")
-                    or data.get("jitsi_participant_id")
-                    or ""
+                    data.get("jitsiParticipantId") or data.get("jitsi_participant_id") or ""
                 )[:255],
                 browser_tab_session_id=str(
-                    data.get("browserTabSessionId")
-                    or data.get("browser_tab_session_id")
-                    or ""
+                    data.get("browserTabSessionId") or data.get("browser_tab_session_id") or ""
                 )[:64],
-                call_session_id=str(
-                    data.get("callSessionId") or data.get("call_session_id") or ""
-                )[:64],
+                call_session_id=str(data.get("callSessionId") or data.get("call_session_id") or "")[:64],
                 metadata=metadata,
             )
         except VideoMeetingError as exc:
             return _error_response(exc, meeting=meeting)
         if event is None:
-            return Response(
-                {"ok": False, "ignored": True}, status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"ok": False, "ignored": True}, status=status.HTTP_400_BAD_REQUEST)
         return Response({"ok": True, "id": event.pk, "eventType": event.event_type})
 
 
@@ -563,23 +497,14 @@ class VideoMeetingPresentView(APIView):
             if kind == "board":
                 board_id = data.get("boardId") or data.get("board_id")
                 if not board_id:
-                    raise VideoMeetingError(
-                        "Укажите boardId", code="invalid", status=400
-                    )
-                presented = present_board(
-                    meeting=meeting, user=request.user, board_id=str(board_id)
-                )
+                    raise VideoMeetingError("Укажите boardId", code="invalid", status=400)
+                presented = present_board(meeting=meeting, user=request.user, board_id=str(board_id))
             elif kind == "variant":
                 presented = present_variant(
                     meeting=meeting,
                     user=request.user,
                     title=str(data.get("title") or ""),
-                    url=str(
-                        data.get("url")
-                        or data.get("openUrl")
-                        or data.get("open_url")
-                        or ""
-                    ),
+                    url=str(data.get("url") or data.get("openUrl") or data.get("open_url") or ""),
                     material_id=data.get("materialId") or data.get("material_id"),
                 )
             else:
@@ -613,6 +538,44 @@ class VideoMeetingPresentView(APIView):
             },
         )
         return Response({"success": True, "presented": None})
+
+
+class VideoMeetingVariantBoardSplitView(APIView):
+    """POST — открыть или закрыть «Доску рядом» у показанного варианта.
+
+    Доску выбирает сервер. open=false закрывает только сплит, вариант остаётся.
+    Пока ученик не выбран (409), состояние не пишется и не рассылается.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, meeting_uuid):
+        from .variant_board import VariantBoardError
+
+        data = request.data if isinstance(request.data, dict) else {}
+        if "open" not in data or not isinstance(data.get("open"), bool):
+            return Response(
+                {"detail": "Укажите open: true или false", "code": "invalid"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            meeting = get_meeting_by_uuid(meeting_uuid)
+            presented = set_variant_board_split(
+                meeting=meeting,
+                user=request.user,
+                open_split=data.get("open"),
+                target=data.get("target"),
+                student_id=data.get("studentId") if "studentId" in data else data.get("student_id"),
+            )
+        except VariantBoardError as exc:
+            return Response({"detail": str(exc), "code": exc.code, **exc.extra}, status=exc.status)
+        except VideoMeetingError as exc:
+            return _error_response(exc)
+        broadcast_material_event(
+            meeting.uuid,
+            {"type": "resource.presented", "presented": presented},
+        )
+        return Response({"success": True, "presented": presented})
 
 
 class VideoMeetingLiveAnswersView(APIView):
@@ -663,19 +626,13 @@ class VideoMeetingMaterialSessionView(APIView):
             meeting = get_meeting_by_uuid(meeting_uuid)
             access = resolve_access(request.user, meeting.schedule_event)
             if not access.allowed:
-                raise VideoMeetingError(
-                    access.reason or "Доступ запрещён", code="forbidden", status=403
-                )
+                raise VideoMeetingError(access.reason or "Доступ запрещён", code="forbidden", status=403)
         except VideoMeetingError as exc:
             return _error_response(exc)
         session = get_active_material_session(meeting)
-        return Response(
-            {
-                "materialSession": serialize_material_session(
-                    session, user=request.user, include_state=True
-                ),
-            }
-        )
+        return Response({
+            "materialSession": serialize_material_session(session, user=request.user, include_state=True),
+        })
 
     def post(self, request, meeting_uuid):
         try:
@@ -684,39 +641,21 @@ class VideoMeetingMaterialSessionView(APIView):
             session = open_material_session(
                 meeting=meeting,
                 user=request.user,
-                resource_kind=str(
-                    data.get("resourceKind") or data.get("resource_kind") or ""
-                ),
+                resource_kind=str(data.get("resourceKind") or data.get("resource_kind") or ""),
                 title=str(data.get("title") or ""),
-                open_url=str(
-                    data.get("openUrl") or data.get("open_url") or data.get("url") or ""
-                ),
-                content_text=str(
-                    data.get("contentText")
-                    or data.get("content_text")
-                    or data.get("text")
-                    or ""
-                ),
+                open_url=str(data.get("openUrl") or data.get("open_url") or data.get("url") or ""),
+                content_text=str(data.get("contentText") or data.get("content_text") or data.get("text") or ""),
                 material_id=data.get("materialId") or data.get("material_id"),
                 interactive_id=data.get("interactiveId") or data.get("interactive_id"),
-                cabinet_file_id=data.get("cabinetFileId")
-                or data.get("cabinet_file_id"),
+                cabinet_file_id=data.get("cabinetFileId") or data.get("cabinet_file_id"),
                 row_kind=str(data.get("kind") or data.get("rowKind") or ""),
-                material_type=str(
-                    data.get("materialType") or data.get("material_type") or ""
-                ),
-                interactive_type=str(
-                    data.get("interactiveType") or data.get("interactive_type") or ""
-                ),
-                initial_state=data.get("state")
-                if isinstance(data.get("state"), dict)
-                else None,
+                material_type=str(data.get("materialType") or data.get("material_type") or ""),
+                interactive_type=str(data.get("interactiveType") or data.get("interactive_type") or ""),
+                initial_state=data.get("state") if isinstance(data.get("state"), dict) else None,
             )
         except VideoMeetingError as exc:
             return _error_response(exc)
-        serialized = serialize_material_session(
-            session, user=request.user, include_state=True
-        )
+        serialized = serialize_material_session(session, user=request.user, include_state=True)
         broadcast_material_event(
             meeting.uuid,
             {
@@ -730,12 +669,10 @@ class VideoMeetingMaterialSessionView(APIView):
                 "materialSession": serialized,
             },
         )
-        return Response(
-            {
-                "success": True,
-                "materialSession": serialized,
-            }
-        )
+        return Response({
+            "success": True,
+            "materialSession": serialized,
+        })
 
     def delete(self, request, meeting_uuid):
         try:
@@ -760,14 +697,8 @@ class VideoMeetingMaterialPermissionView(APIView):
             data = request.data if isinstance(request.data, dict) else {}
             session_id = data.get("sessionId") or data.get("session_id")
             follow_policy = data.get("followPolicy") or data.get("follow_policy")
-            mode = (
-                data.get("mode")
-                or data.get("interactionMode")
-                or data.get("interaction_mode")
-            )
-            presentation_mode = data.get("presentationMode") or data.get(
-                "presentation_mode"
-            )
+            mode = data.get("mode") or data.get("interactionMode") or data.get("interaction_mode")
+            presentation_mode = data.get("presentationMode") or data.get("presentation_mode")
 
             if presentation_mode:
                 session = set_presentation_mode(
@@ -775,8 +706,7 @@ class VideoMeetingMaterialPermissionView(APIView):
                     user=request.user,
                     mode=str(presentation_mode),
                     session_id=session_id,
-                    collaboration_permission=data.get("collaborationPermission")
-                    or data.get("collaboration_permission"),
+                    collaboration_permission=data.get("collaborationPermission") or data.get("collaboration_permission"),
                 )
             elif follow_policy:
                 session = set_follow_policy(
@@ -784,8 +714,7 @@ class VideoMeetingMaterialPermissionView(APIView):
                     user=request.user,
                     policy=str(follow_policy),
                     session_id=session_id,
-                    independent_user_ids=data.get("independentUserIds")
-                    or data.get("independent_user_ids"),
+                    independent_user_ids=data.get("independentUserIds") or data.get("independent_user_ids"),
                 )
             elif mode:
                 session = set_interaction_mode(
@@ -793,24 +722,15 @@ class VideoMeetingMaterialPermissionView(APIView):
                     user=request.user,
                     mode=str(mode or ""),
                     session_id=session_id,
-                    collaborative_scope=data.get("collaborativeScope")
-                    or data.get("collaborative_scope"),
-                    collaborative_user_ids=data.get("collaborativeUserIds")
-                    or data.get("collaborative_user_ids"),
-                    collaboration_permission=data.get("collaborationPermission")
-                    or data.get("collaboration_permission"),
+                    collaborative_scope=data.get("collaborativeScope") or data.get("collaborative_scope"),
+                    collaborative_user_ids=data.get("collaborativeUserIds") or data.get("collaborative_user_ids"),
+                    collaboration_permission=data.get("collaborationPermission") or data.get("collaboration_permission"),
                 )
             else:
-                raise VideoMeetingError(
-                    "Укажите mode, followPolicy или presentationMode",
-                    code="invalid",
-                    status=400,
-                )
+                raise VideoMeetingError("Укажите mode, followPolicy или presentationMode", code="invalid", status=400)
         except VideoMeetingError as exc:
             return _error_response(exc)
-        serialized = serialize_material_session(
-            session, user=request.user, include_state=True
-        )
+        serialized = serialize_material_session(session, user=request.user, include_state=True)
         broadcast_material_event(
             meeting.uuid,
             {
@@ -822,21 +742,16 @@ class VideoMeetingMaterialPermissionView(APIView):
                 "controller_user_id": session.controller_id,
                 "collaborative_scope": session.collaborative_scope,
                 "collaborative_user_ids": list(session.collaborative_user_ids or []),
-                "collaboration_permission": getattr(
-                    session, "collaboration_permission", None
-                )
-                or "annotate",
+                "collaboration_permission": getattr(session, "collaboration_permission", None) or "annotate",
                 "independent_user_ids": list(session.independent_user_ids or []),
                 "version": session.version,
                 "materialSession": serialized,
             },
         )
-        return Response(
-            {
-                "success": True,
-                "materialSession": serialized,
-            }
-        )
+        return Response({
+            "success": True,
+            "materialSession": serialized,
+        })
 
 
 class VideoMeetingMaterialControlView(APIView):
@@ -848,9 +763,7 @@ class VideoMeetingMaterialControlView(APIView):
         try:
             meeting = get_meeting_by_uuid(meeting_uuid)
             data = request.data if isinstance(request.data, dict) else {}
-            to_user_id = (
-                data.get("toUserId") or data.get("to_user_id") or request.user.pk
-            )
+            to_user_id = data.get("toUserId") or data.get("to_user_id") or request.user.pk
             session = transfer_material_control(
                 meeting=meeting,
                 user=request.user,
@@ -859,9 +772,7 @@ class VideoMeetingMaterialControlView(APIView):
             )
         except VideoMeetingError as exc:
             return _error_response(exc)
-        serialized = serialize_material_session(
-            session, user=request.user, include_state=True
-        )
+        serialized = serialize_material_session(session, user=request.user, include_state=True)
         broadcast_material_event(
             meeting.uuid,
             {
@@ -896,20 +807,14 @@ class VideoMeetingMaterialInteractiveView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
         session = get_active_material_session(meeting)
-        if (
-            not session
-            or not session.interactive_id
-            or int(session.interactive_id) != int(interactive_id)
-        ):
+        if not session or not session.interactive_id or int(session.interactive_id) != int(interactive_id):
             return Response(
                 {"detail": "Интерактив сейчас не открыт на уроке."},
                 status=status.HTTP_404_NOT_FOUND,
             )
         interactive = session.interactive
         if interactive is None:
-            return Response(
-                {"detail": "Интерактив не найден."}, status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({"detail": "Интерактив не найден."}, status=status.HTTP_404_NOT_FOUND)
         return Response({"interactive": _interactive_to_player_payload(interactive)})
 
 
@@ -926,37 +831,29 @@ class VideoMeetingMaterialOperationView(APIView):
                 meeting=meeting,
                 user=request.user,
                 action=str(data.get("action") or ""),
-                payload=data.get("payload")
-                if isinstance(data.get("payload"), dict)
-                else {},
-                operation_id=str(
-                    data.get("operationId") or data.get("operation_id") or ""
-                ),
+                payload=data.get("payload") if isinstance(data.get("payload"), dict) else {},
+                operation_id=str(data.get("operationId") or data.get("operation_id") or ""),
                 session_id=data.get("sessionId") or data.get("session_id"),
-                base_version=data.get("baseVersion")
-                if data.get("baseVersion") is not None
-                else data.get("base_version"),
+                base_version=data.get("baseVersion") if data.get("baseVersion") is not None else data.get("base_version"),
             )
         except VideoMeetingError as exc:
             return _error_response(exc)
         operation = result.get("operation")
         if operation and not result.get("duplicate"):
             broadcast_material_event(meeting.uuid, operation)
-        return Response(
-            {
-                "success": True,
-                "duplicate": bool(result.get("duplicate")),
-                "stale": bool(result.get("stale")),
-                "ephemeral": bool(result.get("ephemeral")),
-                "operation": operation,
-                "version": result.get("version"),
-                "materialSession": serialize_material_session(
-                    result.get("session"),
-                    user=request.user,
-                    include_state=True,
-                ),
-            }
-        )
+        return Response({
+            "success": True,
+            "duplicate": bool(result.get("duplicate")),
+            "stale": bool(result.get("stale")),
+            "ephemeral": bool(result.get("ephemeral")),
+            "operation": operation,
+            "version": result.get("version"),
+            "materialSession": serialize_material_session(
+                result.get("session"),
+                user=request.user,
+                include_state=True,
+            ),
+        })
 
 
 class VideoMeetingConnectionProbeView(APIView):
@@ -968,18 +865,14 @@ class VideoMeetingConnectionProbeView(APIView):
         if not rate_limit_check(request, "jitsi_probe", 12, 300):
             return rate_limit_drf_response()
         try:
-            issue_jwt = (
-                str(request.query_params.get("credentials", "1") or "1").strip() != "0"
-            )
+            issue_jwt = str(request.query_params.get("credentials", "1") or "1").strip() != "0"
             payload = build_connection_probe_config(
                 user=request.user,
                 request=request,
                 issue_jwt=issue_jwt,
             )
         except Exception:
-            logger.exception(
-                "jitsi_connection_probe_failed user_id=%s", request.user.pk
-            )
+            logger.exception("jitsi_connection_probe_failed user_id=%s", request.user.pk)
             return Response(
                 {
                     "error": "Не удалось подготовить проверку видеосвязи",

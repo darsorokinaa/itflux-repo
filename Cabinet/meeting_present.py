@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import logging
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
@@ -29,20 +29,12 @@ from .models import (
     Student,
     VideoMeeting,
 )
-from .video_meeting_service import (
-    VideoMeetingError,
-    assert_can_manage_meeting,
-)
-from .lesson_locked_scores import (
-    LOCK_KEY,
-    grading_tasks,
-    locked_scores,
-    reapply_locked_scores,
-)
+from .video_meeting_service import VideoMeetingError, assert_can_manage_meeting, resolve_access
+from .lesson_locked_scores import LOCK_KEY, grading_tasks, locked_scores, reapply_locked_scores
 
 
 PRESENT_KINDS = frozenset({"board", "variant"})
-logger = logging.getLogger(__name__)
+_SPLIT_CONTROLLER_ROLES = frozenset({"teacher", "coteacher", "staff"})
 
 
 def append_live_variant_query(url: str, homework_id) -> str:
@@ -55,9 +47,7 @@ def append_live_variant_query(url: str, homework_id) -> str:
     query["cabinet_assignment"] = str(homework_id)
     query["homework_mode"] = "1"
     query["live_meeting"] = "1"
-    return urlunsplit(
-        (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
-    )
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
 def append_meeting_query(url: str, meeting_uuid: str) -> str:
@@ -68,9 +58,7 @@ def append_meeting_query(url: str, meeting_uuid: str) -> str:
     parts = urlsplit(raw)
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
     query["meeting"] = str(meeting_uuid)
-    return urlunsplit(
-        (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
-    )
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
 def list_event_students(event: ScheduleEvent) -> list[Student]:
@@ -94,14 +82,11 @@ def redact_plan_item_for_student(plan_item_json: dict | None) -> dict | None:
     return {
         "id": plan_item_json.get("id"),
         "order": plan_item_json.get("order"),
-        "lesson_number": plan_item_json.get("lesson_number")
-        or plan_item_json.get("lessonNumber"),
+        "lesson_number": plan_item_json.get("lesson_number") or plan_item_json.get("lessonNumber"),
         "title": plan_item_json.get("title") or "",
         "topic": plan_item_json.get("topic") or "",
         "subtopic": plan_item_json.get("subtopic") or "",
-        "task_number": plan_item_json.get("task_number")
-        or plan_item_json.get("taskNumber")
-        or "",
+        "task_number": plan_item_json.get("task_number") or plan_item_json.get("taskNumber") or "",
         "materials": [],
         "attached_interactives": [],
         "homework_materials": [],
@@ -116,9 +101,7 @@ def redact_plan_item_for_student(plan_item_json: dict | None) -> dict | None:
     }
 
 
-def _grant_board_access_to_event_students(
-    board: InteractiveBoard, event: ScheduleEvent
-) -> None:
+def _grant_board_access_to_event_students(board: InteractiveBoard, event: ScheduleEvent) -> None:
     ensure_linked_student_edit_access(board)
     for student in list_event_students(event):
         if not student.user_id:
@@ -143,11 +126,7 @@ def _ensure_live_variant_homework(
     spa_url = normalize_variant_spa_url(variant_url)
     variant_id = extract_variant_id(spa_url or variant_url)
     if not variant_id:
-        raise VideoMeetingError(
-            "Не удалось определить вариант по ссылке",
-            code="invalid_variant",
-            status=400,
-        )
+        raise VideoMeetingError("Не удалось определить вариант по ссылке", code="invalid_variant", status=400)
 
     live_title = f"Вариант №{variant_id}"
     marker = f"{LIVE_MEETING_HOMEWORK_MARKER}{event.pk}:variant:{variant_id}"
@@ -198,9 +177,7 @@ def _student_open_url_for_homework(
 ) -> str:
     if not student.user_id:
         return normalize_variant_spa_url(variant_url) or variant_url
-    token = issue_homework_token(
-        homework_id=homework.id, student_user_id=student.user_id, hours=6
-    )
+    token = issue_homework_token(homework_id=homework.id, student_user_id=student.user_id, hours=6)
     return build_variant_open_url(
         base_url=variant_url,
         homework_id=homework.id,
@@ -209,23 +186,42 @@ def _student_open_url_for_homework(
     )
 
 
-def _resolve_roster_student_for_user(
-    event: ScheduleEvent, user: User
-) -> Student | None:
+def _resolve_roster_student_for_user(event: ScheduleEvent, user: User) -> Student | None:
     students = list_event_students(event)
     return next((s for s in students if s.user_id == user.pk), None)
 
 
-def serialize_presented(
-    meeting: VideoMeeting, *, user: User | None = None
-) -> dict | None:
+def serialize_presented(meeting: VideoMeeting, *, user: User | None = None) -> dict | None:
     kind = (meeting.presented_kind or "").strip()
     if kind not in PRESENT_KINDS:
         return None
-    from .meeting_board_split import _attach_board_split, _presented_open_url
-
     payload = dict(meeting.presented_payload or {})
-    open_url = _presented_open_url(meeting, payload, user, kind)
+    open_url = payload.get("openUrl") or payload.get("open_url") or ""
+
+    # Персональная ссылка на вариант для текущего ученика.
+    if kind == "variant" and user is not None:
+        access = resolve_access(user, meeting.schedule_event)
+        if access.role == "student":
+            homework_id = payload.get("homeworkId") or payload.get("homework_id")
+            base_url = payload.get("variantUrl") or payload.get("variant_url") or open_url
+            if homework_id and base_url:
+                student = _resolve_roster_student_for_user(meeting.schedule_event, user)
+                homework = Homework.objects.filter(pk=homework_id).first() if student else None
+                if student and homework:
+                    open_url = _student_open_url_for_homework(
+                        homework,
+                        student,
+                        base_url,
+                        live_meeting=True,
+                    )
+
+    # Учителю тоже нужны live-параметры, чтобы на странице варианта шла таблица ответов.
+    if kind == "variant":
+        homework_id = payload.get("homeworkId") or payload.get("homework_id")
+        if homework_id:
+            open_url = append_live_variant_query(open_url, homework_id)
+
+    open_url = append_meeting_query(open_url, meeting.uuid)
 
     presented = {
         "kind": kind,
@@ -235,38 +231,29 @@ def serialize_presented(
         "homeworkId": payload.get("homeworkId") or payload.get("homework_id"),
         "materialId": payload.get("materialId") or payload.get("material_id"),
         "variantId": payload.get("variantId") or payload.get("variant_id"),
-        "presentedAt": meeting.presented_at.isoformat()
-        if meeting.presented_at
-        else None,
+        "presentedAt": meeting.presented_at.isoformat() if meeting.presented_at else None,
     }
-    return _attach_board_split(presented, meeting, payload, user, kind)
-
-
-def _close_material_quietly(meeting, user):
-    """Сессия синхронного материала не должна переживать показ доски или варианта."""
-    try:
-        from .meeting_material_session import close_material_session
-
-        close_material_session(meeting=meeting, user=user)
-    except Exception:
-        logger.exception(
-            "close_material_session failed meeting=%s",
-            getattr(meeting, "uuid", None),
-        )
+    if kind == "variant":
+        board_split = _board_split_for_viewer(meeting, payload, user)
+        if board_split is not None:
+            presented["boardSplit"] = board_split
+    return presented
 
 
 def present_board(*, meeting: VideoMeeting, user: User, board_id: str) -> dict:
     assert_can_manage_meeting(user, meeting)
     if meeting.status != VideoMeeting.Status.LIVE:
-        raise VideoMeetingError(
-            "Показать можно только во время урока", code="not_live", status=409
-        )
+        raise VideoMeetingError("Показать можно только во время урока", code="not_live", status=409)
 
-    _close_material_quietly(meeting, user)
+    # Не смешиваем показ доски с сессией синхронного материала.
+    try:
+        from .meeting_material_session import close_material_session
 
-    board = InteractiveBoard.objects.filter(
-        pk=board_id, owner=meeting.schedule_event.owner
-    ).first()
+        close_material_session(meeting=meeting, user=user)
+    except Exception:
+        pass
+
+    board = InteractiveBoard.objects.filter(pk=board_id, owner=meeting.schedule_event.owner).first()
     if board is None:
         board = InteractiveBoard.objects.filter(pk=board_id).first()
         if board is None:
@@ -312,11 +299,14 @@ def present_variant(
 ) -> dict:
     assert_can_manage_meeting(user, meeting)
     if meeting.status != VideoMeeting.Status.LIVE:
-        raise VideoMeetingError(
-            "Показать можно только во время урока", code="not_live", status=409
-        )
+        raise VideoMeetingError("Показать можно только во время урока", code="not_live", status=409)
 
-    _close_material_quietly(meeting, user)
+    try:
+        from .meeting_material_session import close_material_session
+
+        close_material_session(meeting=meeting, user=user)
+    except Exception:
+        pass
 
     event = meeting.schedule_event
     variant_url = (url or "").strip()
@@ -332,24 +322,17 @@ def present_variant(
         label = label or material.title
 
     if not variant_url:
-        raise VideoMeetingError(
-            "Нужна ссылка на вариант", code="invalid_variant", status=400
-        )
+        raise VideoMeetingError("Нужна ссылка на вариант", code="invalid_variant", status=400)
 
     # r125: показ варианта на уроке тоже расходует лимит «вариантов на ученика в месяц».
     from . import variant_issuance
 
     try:
         variant_issuance.check_and_record(
-            user,
-            list_event_students(event),
-            extract_variant_id(variant_url),
-            source="lesson",
+            user, list_event_students(event), extract_variant_id(variant_url), source="lesson",
         )
     except variant_issuance.VariantLimitExceeded as exc:
-        raise VideoMeetingError(
-            exc.message, code=variant_issuance.LIMIT_CODE, status=403
-        )
+        raise VideoMeetingError(exc.message, code=variant_issuance.LIMIT_CODE, status=403)
 
     homework = _ensure_live_variant_homework(
         event=event,
@@ -383,6 +366,131 @@ def present_variant(
         ]
     )
     return serialize_presented(meeting, user=user)
+
+
+def _split_board(board_id):
+    if not board_id:
+        return None
+    try:
+        return (
+            InteractiveBoard.objects.select_related("student", "group")
+            .filter(pk=board_id, is_archived=False)
+            .first()
+        )
+    except (ValueError, ValidationError, TypeError):
+        return None
+
+
+def _viewer_can_see_board_split(meeting: VideoMeeting, user: User | None, raw: dict) -> bool:
+    """Личная доска — только её ученику, групповая — участникам группы с доступом."""
+    if user is None or not getattr(user, "is_authenticated", False):
+        return False
+    board = _split_board(raw.get("boardId"))
+    if board is None:
+        return False
+    access = resolve_access(user, meeting.schedule_event)
+    if access.role in _SPLIT_CONTROLLER_ROLES and access.allowed:
+        return True
+    if access.role != "student" or not access.allowed:
+        return False
+    student = _resolve_roster_student_for_user(meeting.schedule_event, user)
+    if student is None or board.get_permission_for(user) is None:
+        return False
+    if raw.get("kind") == "group":
+        group = board.group if board.group_id else None
+        return bool(group and group.students.filter(pk=student.pk, status="active").exists())
+    if str(raw.get("studentId") or "") != str(student.pk):
+        return False
+    return board.student_id == student.pk and not board.group_id
+
+
+def _board_split_for_viewer(meeting: VideoMeeting, payload: dict, user: User | None) -> dict | None:
+    raw = payload.get("boardSplit")
+    if not isinstance(raw, dict):
+        return None
+    if raw.get("open") is not True:
+        return {"open": False}
+    if not _viewer_can_see_board_split(meeting, user, raw):
+        return {"open": False}
+    kind = "group" if raw.get("kind") == "group" else "student"
+    shown = {"open": True, "kind": kind, "boardId": str(raw.get("boardId"))}
+    if kind == "student" and raw.get("studentId") not in (None, ""):
+        shown["studentId"] = raw.get("studentId")
+    return shown
+
+
+def set_variant_board_split(
+    *,
+    meeting: VideoMeeting,
+    user: User,
+    open_split: bool,
+    target=None,
+    student_id=None,
+) -> dict:
+    """Учитель открывает или закрывает «Доску рядом» у показанного варианта.
+
+    Доску выбирает сервер (meeting_board). id доски от клиента не читается.
+    Пока ученик не выбран (409), показ не меняется и ничего не рассылается.
+    """
+    from .variant_board import meeting_board
+
+    assert_can_manage_meeting(user, meeting)
+    if meeting.status != VideoMeeting.Status.LIVE:
+        raise VideoMeetingError(
+            "Доску рядом можно открыть только во время урока",
+            code="not_live",
+            status=409,
+        )
+    if meeting.presented_kind != "variant":
+        raise VideoMeetingError(
+            "Сначала покажите вариант ученикам",
+            code="not_presented",
+            status=409,
+        )
+    resolved = None
+    if open_split:
+        # 409 choose_student выходит до записи и до рассылки.
+        resolved = meeting_board(
+            user=user,
+            meeting_uuid=str(meeting.uuid),
+            student_id=student_id,
+            target=target,
+        )
+    with transaction.atomic():
+        locked = VideoMeeting.objects.select_for_update().get(pk=meeting.pk)
+        if locked.status != VideoMeeting.Status.LIVE:
+            raise VideoMeetingError(
+                "Доску рядом можно открыть только во время урока",
+                code="not_live",
+                status=409,
+            )
+        if locked.presented_kind != "variant":
+            raise VideoMeetingError(
+                "Сначала покажите вариант ученикам",
+                code="not_presented",
+                status=409,
+            )
+        payload = dict(locked.presented_payload or {})
+        if not open_split:
+            payload["boardSplit"] = {"open": False}
+        else:
+            kind = "group" if resolved.get("kind") == "group" else "student"
+            split = {
+                "open": True,
+                "kind": kind,
+                "boardId": str(resolved.get("boardId") or ""),
+            }
+            if not split["boardId"]:
+                raise VideoMeetingError("Доска недоступна", code="not_found", status=404)
+            if kind == "student" and resolved.get("studentId") not in (None, ""):
+                split["studentId"] = resolved.get("studentId")
+            payload["boardSplit"] = split
+        locked.presented_payload = payload
+        locked.presented_at = timezone.now()
+        locked.presented_by = user
+        locked.save(update_fields=["presented_payload", "presented_at", "presented_by", "updated_at"])
+    locked.refresh_from_db()
+    return serialize_presented(locked, user=user)
 
 
 def clear_presented(*, meeting: VideoMeeting, user: User) -> None:
@@ -567,17 +675,16 @@ def build_live_answers(*, homework, variant_id, students, title="") -> dict:
     """r125: общий ответ таблицы live-ответов (урок и «Решать вариант»)."""
     # При дублях берём последнюю правку, иначе опрос показывает старый черновик.
     submissions = {}
-    for row in HomeworkSubmission.objects.filter(
-        homework=homework, student__in=students
-    ).order_by("updated_at", "id"):
+    for row in (
+        HomeworkSubmission.objects.filter(homework=homework, student__in=students)
+        .order_by("updated_at", "id")
+    ):
         submissions[row.student_id] = row
     tasks = _with_grading(_variant_tasks_answer_key(variant_id), variant_id)
     rows = []
     for student in students:
         submission = submissions.get(student.id)
-        assignment = serialize_assignment_payload(
-            homework=homework, submission=submission
-        )
+        assignment = serialize_assignment_payload(homework=homework, submission=submission)
         rows.append(
             {
                 "studentId": student.id,
@@ -585,18 +692,14 @@ def build_live_answers(*, homework, variant_id, students, title="") -> dict:
                 "status": assignment.get("status"),
                 "score": assignment.get("score"),
                 # На уроке учителю нужны и черновик ученика, и правильные ответы в таблице.
-                "result": assignment.get("result")
-                if isinstance(assignment.get("result"), dict)
-                else {
+                "result": assignment.get("result") if isinstance(assignment.get("result"), dict) else {
                     "checked": {},
                     "by_number": {},
                     "by_task_id": {},
                     "scores": {},
                 },
                 "updatedAt": submission.updated_at.isoformat() if submission else None,
-                "lockedScores": locked_scores(submission.result_payload)
-                if submission
-                else {},
+                "lockedScores": locked_scores(submission.result_payload) if submission else {},
             }
         )
     return {
@@ -615,10 +718,7 @@ def _with_grading(tasks: list[dict], variant_id) -> list[dict]:
         info = {row["id"]: row for row in grading_tasks(variant_id)}
     except Exception:
         import logging
-
-        logging.getLogger("cabinet.meeting").exception(
-            "live grading info failed variant=%s", variant_id
-        )
+        logging.getLogger("cabinet.meeting").exception("live grading info failed variant=%s", variant_id)
         return tasks
     for task in tasks:
         extra = info.get(task.get("id"))
@@ -630,9 +730,7 @@ def _with_grading(tasks: list[dict], variant_id) -> list[dict]:
     return tasks
 
 
-def live_variant_set_score(
-    *, meeting: VideoMeeting, user: User, student_id, task_id, score
-) -> dict:
+def live_variant_set_score(*, meeting: VideoMeeting, user: User, student_id, task_id, score) -> dict:
     """r120: учитель один раз выставляет балл за задание второй части на уроке."""
     assert_can_manage_meeting(user, meeting)
     if meeting.presented_kind != "variant":
@@ -656,9 +754,7 @@ def live_variant_set_score(
     )
 
 
-def set_locked_live_score(
-    *, homework, variant_id, allowed_student_ids, user, student_id, task_id, score
-) -> dict:
+def set_locked_live_score(*, homework, variant_id, allowed_student_ids, user, student_id, task_id, score) -> dict:
     """r125: общий для урока и «Решать вариант» одноразовый балл второй части."""
     try:
         student_id = int(student_id)
@@ -671,19 +767,11 @@ def set_locked_live_score(
     if task is None:
         raise VideoMeetingError("Задание не входит в вариант.", status=400)
     if task["part"] != 2:
-        raise VideoMeetingError(
-            "Балл вручную ставится только за вторую часть.", status=400
-        )
+        raise VideoMeetingError("Балл вручную ставится только за вторую часть.", status=400)
     max_score = int(task["maxScore"])
-    raw_score = (
-        str(score).strip()
-        if isinstance(score, (int, str)) and not isinstance(score, bool)
-        else ""
-    )
+    raw_score = str(score).strip() if isinstance(score, (int, str)) and not isinstance(score, bool) else ""
     if not raw_score.isdigit():
-        raise VideoMeetingError(
-            f"Балл должен быть целым числом от 0 до {max_score}.", status=400
-        )
+        raise VideoMeetingError(f"Балл должен быть целым числом от 0 до {max_score}.", status=400)
     value = int(raw_score)
     if value < 0 or value > max_score:
         raise VideoMeetingError(f"Балл должен быть от 0 до {max_score}.", status=400)
@@ -699,17 +787,11 @@ def set_locked_live_score(
         )
         if submission is None:
             raise VideoMeetingError("Ученик ещё не начал вариант.", status=400)
-        result = (
-            dict(submission.result_payload)
-            if isinstance(submission.result_payload, dict)
-            else {}
-        )
+        result = dict(submission.result_payload) if isinstance(submission.result_payload, dict) else {}
         locks = dict(locked_scores(result))
         key = str(task_id)
         if key in locks:
-            raise VideoMeetingError(
-                "Балл уже сохранён и не может быть изменён.", status=409
-            )
+            raise VideoMeetingError("Балл уже сохранён и не может быть изменён.", status=409)
         locks[key] = {
             "score": value,
             "max": max_score,
@@ -718,20 +800,12 @@ def set_locked_live_score(
         }
         result[LOCK_KEY] = locks
         result = reapply_locked_scores(result)
-        previous = (
-            submission.result_payload
-            if isinstance(submission.result_payload, dict)
-            else {}
-        )
+        previous = submission.result_payload if isinstance(submission.result_payload, dict) else {}
         result = store_variant_scoring(
             result,
             homework,
-            previous_snapshot=previous.get("tasks_snapshot")
-            if isinstance(previous.get("tasks_snapshot"), list)
-            else None,
-            previous_grading=previous.get("grading_snapshot")
-            if isinstance(previous.get("grading_snapshot"), list)
-            else None,
+            previous_snapshot=previous.get("tasks_snapshot") if isinstance(previous.get("tasks_snapshot"), list) else None,
+            previous_grading=previous.get("grading_snapshot") if isinstance(previous.get("grading_snapshot"), list) else None,
         )
         submission.result_payload = result
         assign_submission_score(submission, result)

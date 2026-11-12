@@ -26,11 +26,7 @@ from .meeting_screenshare import (
     serialize_screenshare_session,
     set_screenshare_permission,
 )
-from .video_meeting_service import (
-    VideoMeetingError,
-    get_meeting_by_uuid,
-    resolve_access,
-)
+from .video_meeting_service import VideoMeetingError, get_meeting_by_uuid, resolve_access
 from .realtime_db import critical_connect
 from .ws_lifecycle import (
     WsLifecycleMixin,
@@ -111,16 +107,14 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
         )
         payload = await self._sync_state()
         await self.send(text_data=json.dumps(payload, ensure_ascii=False))
-        await self._broadcast(
-            {
-                "type": "material.presence_join",
-                "lesson_id": str(self.meeting_uuid),
-                "user_id": self.user.pk,
-                "author_id": self.user.pk,
-                "author_role": self.role,
-                "display_name": self.display_name,
-            }
-        )
+        await self._broadcast({
+            "type": "material.presence_join",
+            "lesson_id": str(self.meeting_uuid),
+            "user_id": self.user.pk,
+            "author_id": self.user.pk,
+            "author_role": self.role,
+            "display_name": self.display_name,
+        })
 
     async def disconnect(self, close_code):
         log_ws_lifecycle(
@@ -133,16 +127,14 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
             **ws_connection_timing(self),
         )
         if getattr(self, "group_name", None):
-            await self._broadcast(
-                {
-                    "type": "material.presence_leave",
-                    "lesson_id": str(getattr(self, "meeting_uuid", "")),
-                    "user_id": getattr(self.user, "pk", None),
-                    "author_id": getattr(self.user, "pk", None),
-                    "author_role": getattr(self, "role", ""),
-                    "display_name": getattr(self, "display_name", ""),
-                }
-            )
+            await self._broadcast({
+                "type": "material.presence_leave",
+                "lesson_id": str(getattr(self, "meeting_uuid", "")),
+                "user_id": getattr(self.user, "pk", None),
+                "author_id": getattr(self.user, "pk", None),
+                "author_role": getattr(self, "role", ""),
+                "display_name": getattr(self, "display_name", ""),
+            })
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
         logger.info(
             "material_ws_disconnect meeting=%s user=%s code=%s",
@@ -153,52 +145,55 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
 
     async def receive(self, text_data=None, bytes_data=None):
         mark_ws_activity(self)
-        if await self._payload_too_large(text_data, bytes_data) or not text_data:
+        if bytes_data and len(bytes_data) > MAX_WS_TEXT_BYTES:
+            await self._send_error("Слишком большое сообщение", code="payload_too_large")
             return
-        data = await self._load_message(text_data)
-        if data is None:
+        if text_data and len(text_data) > MAX_WS_TEXT_BYTES:
+            await self._send_error("Слишком большое сообщение", code="payload_too_large")
             return
-        note_ws_inbound(self, data)
-        await self._dispatch_message((data.get("type") or "").strip(), data)
-
-    async def _payload_too_large(self, text_data, bytes_data):
-        size = max(len(bytes_data or b""), len(text_data or ""))
-        if size > MAX_WS_TEXT_BYTES:
-            await self._send_error(
-                "Слишком большое сообщение", code="payload_too_large"
-            )
-            return True
-        return False
-
-    async def _load_message(self, text_data):
+        if not text_data:
+            return
         try:
             data = json.loads(text_data)
         except (TypeError, ValueError):
             await self._send_error("Некорректный JSON", code="invalid_json")
-            return None
-        if not isinstance(data, dict):
-            await self._send_error(
-                "Сообщение должно быть объектом", code="invalid_json"
-            )
-            return None
-        return data
-
-    def _presence_join_body(self):
-        return {
-            "type": "material.presence_join",
-            "lesson_id": str(self.meeting_uuid),
-            "user_id": self.user.pk,
-            "author_id": self.user.pk,
-            "author_role": self.role,
-            "display_name": self.display_name,
-        }
-
-    async def _dispatch_message(self, msg_type, data):
-        if msg_type == "material.request_sync":
-            await self._restore_material_snapshot()
             return
+        if not isinstance(data, dict):
+            await self._send_error("Сообщение должно быть объектом", code="invalid_json")
+            return
+        note_ws_inbound(self, data)
+
+        msg_type = (data.get("type") or "").strip()
+        if msg_type == "material.request_sync":
+            payload = await self._sync_state()
+            await self.send(text_data=json.dumps(payload, ensure_ascii=False))
+            logger.info(
+                "material_snapshot_restore meeting=%s user=%s role=%s session=%s revision=%s",
+                self.meeting_uuid,
+                self.user.pk,
+                self.role,
+                (payload.get("materialSession") or {}).get("sessionId"),
+                payload.get("server_revision") or (payload.get("materialSession") or {}).get("version"),
+            )
+            await self._broadcast({
+                "type": "material.presence_join",
+                "lesson_id": str(self.meeting_uuid),
+                "user_id": self.user.pk,
+                "author_id": self.user.pk,
+                "author_role": self.role,
+                "display_name": self.display_name,
+            })
+            return
+
         if msg_type == "material.presence_ping":
-            await self._broadcast(self._presence_join_body())
+            await self._broadcast({
+                "type": "material.presence_join",
+                "lesson_id": str(self.meeting_uuid),
+                "user_id": self.user.pk,
+                "author_id": self.user.pk,
+                "author_role": self.role,
+                "display_name": self.display_name,
+            })
             return
 
         if msg_type == "ping":
@@ -211,24 +206,9 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
         if msg_type == "material.close":
             await self._handle_close(data)
             return
-        if (
-            msg_type == "material.permission_changed"
-            or msg_type == "material.set_permission"
-            or msg_type == "material.set_mode"
-        ):
+        if msg_type == "material.permission_changed" or msg_type == "material.set_permission" or msg_type == "material.set_mode":
             await self._handle_permission(data)
             return
-        if await self._dispatch_material_pointer(msg_type, data):
-            return
-
-        if msg_type in ("material.follow_status", "FOLLOW_TEACHER_CHANGED"):
-            await self._handle_follow_status(data)
-            return
-        if await self._dispatch_screenshare(msg_type, data):
-            return
-        await self._send_error("Неизвестный тип сообщения", code="unknown_type")
-
-    async def _dispatch_material_pointer(self, msg_type, data):
         if msg_type in (
             "material.operation",
             "material.navigation",
@@ -238,51 +218,35 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
             action = (data.get("action") or "").strip()
             if action in EPHEMERAL_ACTIONS:
                 await self._broadcast_ephemeral(data)
-            else:
-                await self._handle_operation(data)
-            return True
-        if msg_type not in (
-            "material.cursor",
-            "material.pointer",
-            "material.student_viewport",
-        ):
-            return False
-        if msg_type.endswith("pointer"):
-            action = "pointer"
-        elif msg_type.endswith("student_viewport"):
-            action = "student_viewport"
-        else:
-            action = "cursor"
-        await self._broadcast_ephemeral(
-            {**data, "action": data.get("action") or action}
-        )
-        return True
+                return
+            await self._handle_operation(data)
+            return
+        if msg_type in ("material.cursor", "material.pointer", "material.student_viewport"):
+            data = {
+                **data,
+                "action": data.get("action") or (
+                    "pointer" if msg_type.endswith("pointer")
+                    else "student_viewport" if msg_type.endswith("student_viewport")
+                    else "cursor"
+                ),
+            }
+            await self._broadcast_ephemeral(data)
+            return
 
-    async def _restore_material_snapshot(self):
-        payload = await self._sync_state()
-        await self.send(text_data=json.dumps(payload, ensure_ascii=False))
-        logger.info(
-            "material_snapshot_restore meeting=%s user=%s role=%s session=%s revision=%s",
-            self.meeting_uuid,
-            self.user.pk,
-            self.role,
-            (payload.get("materialSession") or {}).get("sessionId"),
-            payload.get("server_revision")
-            or (payload.get("materialSession") or {}).get("version"),
-        )
-        await self._broadcast(self._presence_join_body())
+        if msg_type in ("material.follow_status", "FOLLOW_TEACHER_CHANGED"):
+            await self._handle_follow_status(data)
+            return
 
-    async def _dispatch_screenshare(self, msg_type, data):
         if msg_type in (
             "screenshare.report",
             "screenshare.state",
             "annotation.session.report",
         ):
             await self._handle_screenshare_report(data)
-            return True
+            return
         if msg_type in ("screenshare.set_permission", "screenshare.permission"):
             await self._handle_screenshare_permission(data)
-            return True
+            return
         if msg_type in (
             "screenshare.operation",
             "screenshare.pointer",
@@ -292,29 +256,27 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
             "annotation.pointer",
         ):
             await self._handle_screenshare_operation(data, msg_type)
-            return True
-        return False
+            return
+
+        await self._send_error("Неизвестный тип сообщения", code="unknown_type")
 
     async def _handle_follow_status(self, data: dict):
         payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
         following = payload.get("following")
         if following is None:
             following = data.get("following", True)
-        await self._broadcast(
-            {
-                "type": "material.follow_status",
-                "lesson_id": str(self.meeting_uuid),
-                "user_id": self.user.pk,
-                "author_id": self.user.pk,
-                "author_role": self.role,
-                "display_name": self.display_name,
-                "payload": {
-                    "following": bool(following),
-                    "material_id": payload.get("material_id")
-                    or payload.get("materialId"),
-                },
-            }
-        )
+        await self._broadcast({
+            "type": "material.follow_status",
+            "lesson_id": str(self.meeting_uuid),
+            "user_id": self.user.pk,
+            "author_id": self.user.pk,
+            "author_role": self.role,
+            "display_name": self.display_name,
+            "payload": {
+                "following": bool(following),
+                "material_id": payload.get("material_id") or payload.get("materialId"),
+            },
+        })
         logger.info(
             "material_follow_status meeting=%s user=%s following=%s",
             self.meeting_uuid,
@@ -335,23 +297,19 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
         except Exception as exc:
             reraise_if_saturated(exc)
             logger.exception("screenshare_report_failed meeting=%s", self.meeting_uuid)
-            await self._send_error(
-                "Не удалось обновить демонстрацию экрана", code="server_error"
-            )
+            await self._send_error("Не удалось обновить демонстрацию экрана", code="server_error")
             return
         if not bool(active) and session is not None and session.is_active:
             return
         serialized = serialize_screenshare_session(session) if session else None
         is_active = bool(serialized and serialized.get("active"))
-        await self._broadcast(
-            {
-                "type": "screenshare.started" if is_active else "screenshare.ended",
-                "meetingUuid": str(self.meeting_uuid),
-                "screenshareSession": serialized if is_active else None,
-                "author_id": self.user.pk,
-                "author_role": self.role,
-            }
-        )
+        await self._broadcast({
+            "type": "screenshare.started" if is_active else "screenshare.ended",
+            "meetingUuid": str(self.meeting_uuid),
+            "screenshareSession": serialized if is_active else None,
+            "author_id": self.user.pk,
+            "author_role": self.role,
+        })
 
     async def _handle_screenshare_permission(self, data: dict):
         payload = data.get("payload") if isinstance(data.get("payload"), dict) else data
@@ -366,21 +324,15 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
             await self._send_error(exc.message, code=exc.code)
             return
         serialized = serialize_screenshare_session(session)
-        await self._broadcast(
-            {
-                "type": "screenshare.permission",
-                "meetingUuid": str(self.meeting_uuid),
-                "screenshareSession": serialized,
-                "participantsCanAnnotate": serialized.get("participantsCanAnnotate")
-                if serialized
-                else False,
-                "showAuthorNames": serialized.get("showAuthorNames")
-                if serialized
-                else False,
-                "author_id": self.user.pk,
-                "author_role": self.role,
-            }
-        )
+        await self._broadcast({
+            "type": "screenshare.permission",
+            "meetingUuid": str(self.meeting_uuid),
+            "screenshareSession": serialized,
+            "participantsCanAnnotate": serialized.get("participantsCanAnnotate") if serialized else False,
+            "showAuthorNames": serialized.get("showAuthorNames") if serialized else False,
+            "author_id": self.user.pk,
+            "author_role": self.role,
+        })
 
     async def _handle_screenshare_operation(self, data: dict, msg_type: str):
         action = data.get("action") or ""
@@ -397,22 +349,26 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
                 action = "object_upsert"
         try:
             result = await self._apply_screenshare_operation(data, action)
-        except Exception as exc:
-            await self._fail_operation(
-                data,
-                exc,
-                log_label="screenshare_op_failed",
-                client_message="Ошибка применения аннотации",
+        except VideoMeetingError as exc:
+            await self._send_error(
+                exc.message,
+                code=exc.code,
+                extra={"operation_id": data.get("operation_id") or data.get("operationId")},
             )
+            return
+        except Exception as exc:
+            reraise_if_saturated(exc)
+            logger.exception("screenshare_op_failed meeting=%s", self.meeting_uuid)
+            await self._send_error("Ошибка применения аннотации", code="server_error")
             return
 
         if result.get("duplicate"):
-            await self._send_ack(
-                "screenshare.operation_ack",
-                data.get("operation_id") or data.get("operationId"),
-                result.get("version"),
-                duplicate=True,
-            )
+            await self.send(text_data=json.dumps({
+                "type": "screenshare.operation_ack",
+                "duplicate": True,
+                "operation_id": data.get("operation_id") or data.get("operationId"),
+                "version": result.get("version"),
+            }, ensure_ascii=False))
             return
 
         operation = result.get("operation")
@@ -420,12 +376,12 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
             return
         await self._broadcast(operation)
         if not result.get("ephemeral"):
-            await self._send_ack(
-                "screenshare.operation_ack",
-                operation.get("operation_id"),
-                operation.get("version"),
-                duplicate=False,
-            )
+            await self.send(text_data=json.dumps({
+                "type": "screenshare.operation_ack",
+                "duplicate": False,
+                "operation_id": operation.get("operation_id"),
+                "version": operation.get("version"),
+            }, ensure_ascii=False))
 
     async def meeting_material_event(self, event):
         payload = event.get("payload")
@@ -452,16 +408,22 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
         # state тоже персонален для ученика (только свои answers/fields) — без
         # переперсонализации на control.transferred все получали бы срез сессии,
         # посчитанный для учителя, который вызвал передачу управления.
-        payload = await self._with_viewer_presented(payload)
+        # boardSplit.boardId персонален: чужую доску ученика в сокет не кладём.
+        if payload.get("type") in (
+            "resource.presented",
+            "RESOURCE_PRESENTED",
+            "resource.cleared",
+            "RESOURCE_CLEARED",
+        ):
+            presented = await self._presented_for_viewer()
+            payload = {**payload, "presented": presented}
         if payload.get("type") in (
             "material.opened",
             "material.permission_changed",
             "material.sync_state",
             "control.transferred",
         ):
-            session_id = payload.get("session_id") or (
-                payload.get("materialSession") or {}
-            ).get("sessionId")
+            session_id = payload.get("session_id") or (payload.get("materialSession") or {}).get("sessionId")
             if session_id:
                 personalized = await self._serialize_session_by_id(session_id)
                 if personalized:
@@ -471,12 +433,8 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
                         "materialSession": personalized,
                         "interaction_mode": personalized.get("interactionMode"),
                         "collaborative_scope": personalized.get("collaborativeScope"),
-                        "collaborative_user_ids": personalized.get(
-                            "collaborativeUserIds"
-                        ),
-                        "state": personalized.get("state")
-                        if "state" in personalized
-                        else payload.get("state"),
+                        "collaborative_user_ids": personalized.get("collaborativeUserIds"),
+                        "state": personalized.get("state") if "state" in personalized else payload.get("state"),
                         "version": personalized.get("version"),
                     }
         await self.send(text_data=json.dumps(payload, ensure_ascii=False))
@@ -487,9 +445,7 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
             {"type": "meeting.material_event", "payload": payload},
         )
 
-    async def _send_error(
-        self, message: str, *, code: str = "error", extra: dict | None = None
-    ):
+    async def _send_error(self, message: str, *, code: str = "error", extra: dict | None = None):
         body = {"type": "material.error", "code": code, "message": message}
         if extra:
             body.update(extra)
@@ -497,9 +453,7 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
 
     async def _handle_open(self, data: dict):
         if self.role not in ("teacher", "coteacher", "staff"):
-            await self._send_error(
-                "Только преподаватель может открыть материал", code="forbidden"
-            )
+            await self._send_error("Только преподаватель может открыть материал", code="forbidden")
             logger.info(
                 "material_open_denied meeting=%s user=%s",
                 self.meeting_uuid,
@@ -518,84 +472,63 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
             return
 
         serialized = await self._serialize_session(session)
-        await self._broadcast(
-            {
-                "type": "material.opened",
-                "lesson_id": serialized.get("lessonId"),
-                "session_id": serialized.get("sessionId"),
-                "material": serialized.get("material"),
-                "interaction_mode": serialized.get("interactionMode"),
-                "collaborative_scope": serialized.get("collaborativeScope"),
-                "collaborative_user_ids": serialized.get("collaborativeUserIds"),
-                "state": serialized.get("state"),
-                "version": serialized.get("version"),
-                "materialSession": serialized,
-            }
-        )
+        await self._broadcast({
+            "type": "material.opened",
+            "lesson_id": serialized.get("lessonId"),
+            "session_id": serialized.get("sessionId"),
+            "material": serialized.get("material"),
+            "interaction_mode": serialized.get("interactionMode"),
+            "collaborative_scope": serialized.get("collaborativeScope"),
+            "collaborative_user_ids": serialized.get("collaborativeUserIds"),
+            "state": serialized.get("state"),
+            "version": serialized.get("version"),
+            "materialSession": serialized,
+        })
 
     async def _handle_close(self, data: dict):
         if self.role not in ("teacher", "coteacher", "staff"):
-            await self._send_error(
-                "Только преподаватель может закрыть материал", code="forbidden"
-            )
+            await self._send_error("Только преподаватель может закрыть материал", code="forbidden")
             return
         try:
             await self._close_session(data.get("session_id") or data.get("sessionId"))
         except VideoMeetingError as exc:
             await self._send_error(exc.message, code=exc.code)
             return
-        await self._broadcast(
-            {
-                "type": "material.closed",
-                "session_id": data.get("session_id") or data.get("sessionId"),
-                "meetingUuid": self.meeting_uuid,
-            }
-        )
+        await self._broadcast({
+            "type": "material.closed",
+            "session_id": data.get("session_id") or data.get("sessionId"),
+            "meetingUuid": self.meeting_uuid,
+        })
 
     async def _handle_permission(self, data: dict):
         if self.role not in ("teacher", "coteacher", "staff"):
-            await self._send_error(
-                "Только преподаватель может менять режим", code="forbidden"
-            )
+            await self._send_error("Только преподаватель может менять режим", code="forbidden")
             logger.info(
                 "material_permission_denied meeting=%s user=%s",
                 self.meeting_uuid,
                 self.user.pk,
             )
             return
-        mode = (
-            data.get("mode")
-            or data.get("interaction_mode")
-            or data.get("interactionMode")
-        )
-        presentation_mode = data.get("presentationMode") or data.get(
-            "presentation_mode"
-        )
+        mode = data.get("mode") or data.get("interaction_mode") or data.get("interactionMode")
+        presentation_mode = data.get("presentationMode") or data.get("presentation_mode")
         try:
             session = await self._set_permission(data, mode, presentation_mode)
         except VideoMeetingError as exc:
             await self._send_error(exc.message, code=exc.code)
             return
         serialized = await self._serialize_session(session)
-        await self._broadcast(
-            {
-                "type": "material.permission_changed",
-                "session_id": session.pk,
-                "interaction_mode": session.interaction_mode,
-                "follow_policy": session.follow_policy,
-                "presentation_mode": serialized.get("presentationMode")
-                if serialized
-                else None,
-                "collaborative_scope": session.collaborative_scope,
-                "collaborative_user_ids": list(session.collaborative_user_ids or []),
-                "collaboration_permission": getattr(
-                    session, "collaboration_permission", None
-                )
-                or "annotate",
-                "version": session.version,
-                "materialSession": serialized,
-            }
-        )
+        await self._broadcast({
+            "type": "material.permission_changed",
+            "session_id": session.pk,
+            "interaction_mode": session.interaction_mode,
+            "follow_policy": session.follow_policy,
+            "presentation_mode": serialized.get("presentationMode") if serialized else None,
+            "collaborative_scope": session.collaborative_scope,
+            "collaborative_user_ids": list(session.collaborative_user_ids or []),
+            "collaboration_permission": getattr(session, "collaboration_permission", None) or "annotate",
+            "version": session.version,
+            "materialSession": serialized,
+        })
 
     async def _broadcast_ephemeral(self, data: dict):
         """Cursor, viewport and previews are latest-state-wins.
@@ -608,54 +541,52 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
         if action not in EPHEMERAL_ACTIONS:
             return
         payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
-        await self._broadcast(
-            {
-                "type": "material.cursor"
-                if action in ("cursor", "pointer")
-                else f"material.{action}",
-                "session_id": data.get("session_id") or data.get("sessionId"),
-                "operation_id": str(
-                    data.get("operation_id") or data.get("operationId") or ""
-                )[:64],
-                "author_id": self.user.pk,
-                "author_role": self.role,
-                "display_name": self.display_name,
-                "action": action,
-                "payload": payload,
-                "ephemeral": True,
-            }
-        )
+        await self._broadcast({
+            "type": "material.cursor" if action in ("cursor", "pointer") else f"material.{action}",
+            "session_id": data.get("session_id") or data.get("sessionId"),
+            "operation_id": str(data.get("operation_id") or data.get("operationId") or "")[:64],
+            "author_id": self.user.pk,
+            "author_role": self.role,
+            "display_name": self.display_name,
+            "action": action,
+            "payload": payload,
+            "ephemeral": True,
+        })
 
     async def _handle_operation(self, data: dict):
         action = data.get("action") or ""
         # author_id / author_role с клиента игнорируем — берём из сессии.
         try:
             result = await self._apply_operation(data, action)
-        except Exception as exc:
-            await self._fail_operation(
-                data,
-                exc,
-                log_label="material_op_failed",
-                client_message="Ошибка применения операции",
+        except VideoMeetingError as exc:
+            await self._send_error(
+                exc.message,
+                code=exc.code,
+                extra={"operation_id": data.get("operation_id") or data.get("operationId")},
             )
+            return
+        except Exception as exc:
+            reraise_if_saturated(exc)
+            logger.exception("material_op_failed meeting=%s", self.meeting_uuid)
+            await self._send_error("Ошибка применения операции", code="server_error")
             return
 
         if result.get("duplicate"):
-            await self._send_ack(
-                "material.operation_ack",
-                data.get("operation_id") or data.get("operationId"),
-                result.get("version"),
-                duplicate=True,
-            )
+            await self.send(text_data=json.dumps({
+                "type": "material.operation_ack",
+                "duplicate": True,
+                "operation_id": data.get("operation_id") or data.get("operationId"),
+                "version": result.get("version"),
+            }, ensure_ascii=False))
             return
 
         if result.get("stale"):
-            await self._send_ack(
-                "material.operation_ack",
-                data.get("operation_id") or data.get("operationId"),
-                result.get("version"),
-                stale=True,
-            )
+            await self.send(text_data=json.dumps({
+                "type": "material.operation_ack",
+                "stale": True,
+                "operation_id": data.get("operation_id") or data.get("operationId"),
+                "version": result.get("version"),
+            }, ensure_ascii=False))
             return
 
         operation = result.get("operation")
@@ -667,12 +598,12 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
         if typed and typed != operation.get("type"):
             await self._broadcast({**operation, "type": typed})
         if not result.get("ephemeral"):
-            await self._send_ack(
-                "material.operation_ack",
-                operation.get("operation_id"),
-                operation.get("version"),
-                duplicate=False,
-            )
+            await self.send(text_data=json.dumps({
+                "type": "material.operation_ack",
+                "duplicate": False,
+                "operation_id": operation.get("operation_id"),
+                "version": operation.get("version"),
+            }, ensure_ascii=False))
 
     @database_sync_to_async
     def _display_name(self):
@@ -700,42 +631,6 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
         meeting = get_meeting_by_uuid(self.meeting_uuid)
         return sync_state_payload(meeting, self.user)
 
-    async def _with_viewer_presented(self, payload):
-        """Чужой boardId не уходит в сокет: показ пересобирается для этого зрителя."""
-        kind = payload.get("type")
-        if kind not in (
-            "resource.presented",
-            "RESOURCE_PRESENTED",
-            "resource.cleared",
-            "RESOURCE_CLEARED",
-        ):
-            return payload
-        presented = await self._presented_for_viewer()
-        return {**payload, "presented": presented}
-
-    async def _send_ack(self, ack_type, operation_id, version, **extra):
-        body = {
-            "type": ack_type,
-            **extra,
-            "operation_id": operation_id,
-            "version": version,
-        }
-        await self.send(text_data=json.dumps(body, ensure_ascii=False))
-
-    async def _fail_operation(self, data, exc, *, log_label, client_message):
-        if isinstance(exc, VideoMeetingError):
-            await self._send_error(
-                exc.message,
-                code=exc.code,
-                extra={
-                    "operation_id": data.get("operation_id") or data.get("operationId")
-                },
-            )
-            return
-        reraise_if_saturated(exc)
-        logger.exception("%s meeting=%s", log_label, self.meeting_uuid)
-        await self._send_error(client_message, code="server_error")
-
     @database_sync_to_async
     def _presented_for_viewer(self):
         from .meeting_present import serialize_presented
@@ -749,34 +644,17 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
         return open_material_session(
             meeting=meeting,
             user=self.user,
-            resource_kind=str(
-                data.get("resource_kind") or data.get("resourceKind") or ""
-            ),
+            resource_kind=str(data.get("resource_kind") or data.get("resourceKind") or ""),
             title=str(data.get("title") or ""),
-            open_url=str(
-                data.get("open_url") or data.get("openUrl") or data.get("url") or ""
-            ),
-            content_text=str(
-                data.get("content_text")
-                or data.get("contentText")
-                or data.get("text")
-                or ""
-            ),
+            open_url=str(data.get("open_url") or data.get("openUrl") or data.get("url") or ""),
+            content_text=str(data.get("content_text") or data.get("contentText") or data.get("text") or ""),
             material_id=data.get("material_id") or data.get("materialId"),
             interactive_id=data.get("interactive_id") or data.get("interactiveId"),
             cabinet_file_id=data.get("cabinet_file_id") or data.get("cabinetFileId"),
-            row_kind=str(
-                data.get("row_kind") or data.get("rowKind") or data.get("kind") or ""
-            ),
-            material_type=str(
-                data.get("material_type") or data.get("materialType") or ""
-            ),
-            interactive_type=str(
-                data.get("interactive_type") or data.get("interactiveType") or ""
-            ),
-            initial_state=data.get("state")
-            if isinstance(data.get("state"), dict)
-            else None,
+            row_kind=str(data.get("row_kind") or data.get("rowKind") or data.get("kind") or ""),
+            material_type=str(data.get("material_type") or data.get("materialType") or ""),
+            interactive_type=str(data.get("interactive_type") or data.get("interactiveType") or ""),
+            initial_state=data.get("state") if isinstance(data.get("state"), dict) else None,
         )
 
     @database_sync_to_async
@@ -785,9 +663,7 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
         close_material_session(meeting=meeting, user=self.user, session_id=session_id)
 
     @database_sync_to_async
-    def _set_permission(
-        self, data: dict, mode: str, presentation_mode: str | None = None
-    ):
+    def _set_permission(self, data: dict, mode: str, presentation_mode: str | None = None):
         meeting = get_meeting_by_uuid(self.meeting_uuid)
         if presentation_mode:
             return set_presentation_mode(
@@ -795,8 +671,7 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
                 user=self.user,
                 mode=str(presentation_mode),
                 session_id=data.get("session_id") or data.get("sessionId"),
-                collaboration_permission=data.get("collaboration_permission")
-                or data.get("collaborationPermission"),
+                collaboration_permission=data.get("collaboration_permission") or data.get("collaborationPermission"),
             )
         follow_policy = data.get("follow_policy") or data.get("followPolicy")
         if follow_policy and not mode:
@@ -805,20 +680,16 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
                 user=self.user,
                 policy=str(follow_policy),
                 session_id=data.get("session_id") or data.get("sessionId"),
-                independent_user_ids=data.get("independent_user_ids")
-                or data.get("independentUserIds"),
+                independent_user_ids=data.get("independent_user_ids") or data.get("independentUserIds"),
             )
         return set_interaction_mode(
             meeting=meeting,
             user=self.user,
             mode=mode,
             session_id=data.get("session_id") or data.get("sessionId"),
-            collaborative_scope=data.get("collaborative_scope")
-            or data.get("collaborativeScope"),
-            collaborative_user_ids=data.get("collaborative_user_ids")
-            or data.get("collaborativeUserIds"),
-            collaboration_permission=data.get("collaboration_permission")
-            or data.get("collaborationPermission"),
+            collaborative_scope=data.get("collaborative_scope") or data.get("collaborativeScope"),
+            collaborative_user_ids=data.get("collaborative_user_ids") or data.get("collaborativeUserIds"),
+            collaboration_permission=data.get("collaboration_permission") or data.get("collaborationPermission"),
         )
 
     @database_sync_to_async
@@ -828,14 +699,10 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
             meeting=meeting,
             user=self.user,
             action=action,
-            payload=data.get("payload")
-            if isinstance(data.get("payload"), dict)
-            else {},
+            payload=data.get("payload") if isinstance(data.get("payload"), dict) else {},
             operation_id=str(data.get("operation_id") or data.get("operationId") or ""),
             session_id=data.get("session_id") or data.get("sessionId"),
-            base_version=data.get("base_version")
-            if data.get("base_version") is not None
-            else data.get("baseVersion"),
+            base_version=data.get("base_version") if data.get("base_version") is not None else data.get("baseVersion"),
         )
 
     @database_sync_to_async
@@ -844,9 +711,7 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
         from .meeting_material_models import MeetingMaterialSession
 
         fresh = (
-            MeetingMaterialSession.objects.select_related(
-                "meeting", "meeting__schedule_event", "material"
-            )
+            MeetingMaterialSession.objects.select_related("meeting", "meeting__schedule_event", "material")
             .filter(pk=session.pk)
             .first()
         )
@@ -857,9 +722,7 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
         from .meeting_material_models import MeetingMaterialSession
 
         fresh = (
-            MeetingMaterialSession.objects.select_related(
-                "meeting", "meeting__schedule_event", "material"
-            )
+            MeetingMaterialSession.objects.select_related("meeting", "meeting__schedule_event", "material")
             .filter(pk=session_id, is_active=True)
             .first()
         )
@@ -872,17 +735,14 @@ class VideoMeetingConsumer(WsLifecycleMixin, AsyncWebsocketConsumer):
             meeting=meeting,
             user=self.user,
             active=active,
-            local_sharing=bool(
-                payload.get("localSharing") or payload.get("local_sharing")
-            ),
+            local_sharing=bool(payload.get("localSharing") or payload.get("local_sharing")),
             presenter_jitsi_id=str(
                 payload.get("presenterJitsiId")
                 or payload.get("presenter_jitsi_id")
                 or ""
             ),
             content_width=payload.get("contentWidth") or payload.get("content_width"),
-            content_height=payload.get("contentHeight")
-            or payload.get("content_height"),
+            content_height=payload.get("contentHeight") or payload.get("content_height"),
         )
 
     @database_sync_to_async
