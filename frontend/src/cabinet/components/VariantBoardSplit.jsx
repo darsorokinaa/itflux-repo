@@ -1,8 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createMeetingMaterialCollab } from "../meetingMaterialCollab";
-import { fetchVariantBoard, fetchVideoMeetingStatus, postVariantBoardSplit } from "../../utils/cabinetAuth";
-import { boardSplitSyncBody, studentSplitStamp, visibleStudentSplit } from "./variantBoardSplitSync";
+import { fetchVariantBoard, fetchVideoMeetingStatus } from "../../utils/cabinetAuth";
+import {
+  boardSplitSyncBody,
+  postVariantBoardSplit,
+  studentSplitStamp,
+  visibleStudentSplit,
+} from "./variantBoardSplitSync";
 import "../styles/variant-board-split.css";
 
 /** r145: «Доска рядом» — общая tldraw-доска справа от варианта. */
@@ -195,11 +200,11 @@ export default function VariantBoardSplit({
     setGroup(null);
   }
   const widthRef = useRef(width);
-  widthRef.current = width;
-  const boardRef = useRef(board);
-  boardRef.current = board;
+  useEffect(() => {
+    widthRef.current = width;
+  }, [width]);
 
-  const load = useCallback(async (pickId) => {
+  const load = async (pickId) => {
     if (!reqKey) return;
     setLoading(true);
     setError("");
@@ -223,16 +228,15 @@ export default function VariantBoardSplit({
     } finally {
       setLoading(false);
     }
-  }, [reqKey, meetingUuid]);
+  };
 
   const toggle = () => {
     const next = !open;
     setOpen(next);
     if (next) {
       setTab("board");
-      const current = boardRef.current;
-      if (!current) load();
-      else publishSplit(meetingUuid, true, pickFromBoard(current));
+      if (!board) load();
+      else publishSplit(meetingUuid, true, pickFromBoard(board));
       return;
     }
     publishSplit(meetingUuid, false, null);

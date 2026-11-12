@@ -1,3 +1,4 @@
+# fmt: off
 """API видеоконференций Jitsi."""
 
 from __future__ import annotations

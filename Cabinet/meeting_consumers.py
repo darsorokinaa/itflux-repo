@@ -1,3 +1,4 @@
+# fmt: off
 """WebSocket комнаты видеоурока: синхронизация материалов."""
 
 from __future__ import annotations

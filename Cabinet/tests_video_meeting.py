@@ -1,3 +1,4 @@
+# fmt: off
 from datetime import timedelta
 from unittest import mock
 
@@ -907,9 +908,9 @@ class VideoMeetingApiTests(TestCase):
             ReviewItem.objects.filter(teacher=self.teacher)
         )
         self.assertFalse(filtered.filter(pk=orphan.pk).exists())
+        self._assert_variant_board_split_follows_presented_variant()
 
-    @override_settings(LESSON_SECRET="test-lesson-secret-for-present")
-    def test_variant_board_split_follows_presented_variant(self):
+    def _assert_variant_board_split_follows_presented_variant(self):
         from Cabinet.meeting_material_session import sync_state_payload
 
         meeting = self._create_meeting()

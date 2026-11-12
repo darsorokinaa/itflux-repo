@@ -1,3 +1,4 @@
+# fmt: off
 """Показ доски/варианта ученику во время видеоурока."""
 
 from __future__ import annotations
