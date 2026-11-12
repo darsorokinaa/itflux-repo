@@ -59,7 +59,10 @@ export default function TaskAnswerCheck({ taskId, prompt = "" }: { taskId: numbe
   };
 
   return (
-    <form className="all-tasks-check" onSubmit={onSubmit}>
+    <form
+      className={state === "idle" ? "all-tasks-check" : `all-tasks-check all-tasks-check--${state}`}
+      onSubmit={onSubmit}
+    >
       {truth ? (
         <TruthTableInput
           variables={truth.variables ?? undefined}
