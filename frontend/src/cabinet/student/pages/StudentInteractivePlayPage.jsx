@@ -9,6 +9,7 @@ import {
   fetchStudentInteractive,
   submitStudentInteractiveAttempt,
 } from "../../../utils/cabinetAuth";
+import "../../styles/interactive-player-core.css";
 import "../../styles/interactive-play.css";
 import "../../styles/interactive-appearance.css";
 

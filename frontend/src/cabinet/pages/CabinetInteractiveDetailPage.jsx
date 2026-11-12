@@ -47,23 +47,25 @@ import "../styles/interactives-catalog.css";
 import "../styles/interactive-appearance.css";
 import "../styles/interactive-launch.css";
 
-function useMobileLaunch() {
-  const [isMobile, setIsMobile] = useState(() =>
-    typeof window !== "undefined" && window.matchMedia("(max-width: 768px)").matches,
+function useMaxWidth(maxWidth) {
+  const query = `(max-width: ${maxWidth}px)`;
+  const [matches, setMatches] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia(query).matches,
   );
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 768px)");
-    const handler = (e) => setIsMobile(e.matches);
+    const mq = window.matchMedia(query);
+    const handler = (e) => setMatches(e.matches);
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
-  }, []);
-  return isMobile;
+  }, [query]);
+  return matches;
 }
 
 export default function CabinetInteractiveDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const isMobile = useMobileLaunch();
+  const isMobile = useMaxWidth(768);
+  const showStickyActions = useMaxWidth(640);
   const { toast, notifySoon } = useSoonToast();
   const { catalog, loading: catalogLoading } = useInteractiveAppearanceCatalog();
 
@@ -416,7 +418,7 @@ export default function CabinetInteractiveDetailPage() {
 
       <LaunchResultsSection results={interactive.results} />
 
-      {isMobile ? (
+      {showStickyActions ? (
         <div className="ix-launch-mobile-bar">
           {interactive.status === "draft" || interactive.status === "review" ? (
             <button type="button" className="cb-btn cb-btn--primary cb-btn--pill" onClick={handlePublish}>

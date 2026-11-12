@@ -117,7 +117,8 @@ function WheelResultPanel({
 const WHEEL_VIEW_SIZE = 400;
 
 function WheelSegmentLabel({ cx, cy, radius, mid, title, segmentCount, compact }) {
-  const layout = getWheelLabelLayout(segmentCount, compact);
+  const fullTitle = title?.trim() || "";
+  const layout = getWheelLabelLayout(segmentCount, compact, fullTitle);
   const boxWidth = getWheelLabelBoxWidth(radius, segmentCount);
   const lineHeight = layout.fontSize + 2;
   const boxHeight = layout.maxLines * lineHeight + 4;
@@ -125,6 +126,7 @@ function WheelSegmentLabel({ cx, cy, radius, mid, title, segmentCount, compact }
 
   return (
     <g transform={`rotate(${mid}, ${pos.x}, ${pos.y})`}>
+      <title>{fullTitle || "—"}</title>
       <foreignObject
         x={pos.x - boxWidth / 2}
         y={pos.y - boxHeight / 2}
@@ -134,6 +136,7 @@ function WheelSegmentLabel({ cx, cy, radius, mid, title, segmentCount, compact }
         <div
           xmlns="http://www.w3.org/1999/xhtml"
           className="ix-wheel-slice-label"
+          title={fullTitle || undefined}
           style={{
             width: `${boxWidth}px`,
             height: `${boxHeight}px`,
@@ -144,7 +147,7 @@ function WheelSegmentLabel({ cx, cy, radius, mid, title, segmentCount, compact }
             WebkitLineClamp: layout.maxLines,
           }}
         >
-          {title?.trim() || "—"}
+          {fullTitle || "—"}
         </div>
       </foreignObject>
     </g>

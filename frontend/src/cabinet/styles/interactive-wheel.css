@@ -11,7 +11,9 @@
 }
 
 .ix-wheel--full {
-  width: min(calc(100vw - 32px), 440px);
+  /* Up to ~560 on iPad, but shrink so the disc, spin button and shell
+     still fit a short landscape viewport such as 1180×820. */
+  width: min(560px, calc(100vw - 48px), calc(100dvh - 320px));
   max-width: 100%;
 }
 
@@ -85,7 +87,7 @@
 }
 
 .ix-wheel--empty .ix-wheel__empty {
-  min-height: min(calc(100vw - 32px), 440px);
+  min-height: 0;
   width: 100%;
   aspect-ratio: 1;
   max-height: none;
@@ -247,9 +249,7 @@
   text-align: center;
   color: #FFFFFF;
   font-weight: 700;
-  word-break: break-word;
   overflow-wrap: anywhere;
-  hyphens: auto;
   padding: 0 1px;
   box-sizing: border-box;
 }
@@ -334,7 +334,7 @@
   align-items: center;
   gap: 16px;
   width: 100%;
-  max-width: 480px;
+  max-width: min(560px, 100%);
   margin: 0 auto;
   padding: 0 8px;
   box-sizing: border-box;
@@ -420,8 +420,23 @@
   font-weight: 700;
 }
 
+@media (max-height: 920px) {
+  .ix-shell__body:has(.ix-wheel-player) {
+    padding-top: 8px;
+    padding-bottom: 12px;
+  }
+
+  .ix-wheel-player {
+    gap: 8px;
+  }
+
+  .ix-wheel__disc-wrap {
+    margin-top: 8px;
+  }
+}
+
 @media (max-width: 640px) {
   .ix-wheel--full {
-    width: min(calc(100vw - 24px), 440px);
+    width: min(560px, calc(100vw - 32px), calc(100dvh - 300px));
   }
 }

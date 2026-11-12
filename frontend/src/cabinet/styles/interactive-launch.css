@@ -601,20 +601,16 @@
 
 .ix-visual-themes--compact {
   display: flex;
-  flex-wrap: nowrap;
-  overflow-x: auto;
+  flex-wrap: wrap;
+  overflow: visible;
   gap: 10px;
   padding-bottom: 4px;
-  scrollbar-width: none;
-}
-
-.ix-visual-themes--compact::-webkit-scrollbar {
-  display: none;
 }
 
 .ix-visual-theme--compact {
-  flex: 0 0 108px;
-  min-width: 108px;
+  flex: 1 1 108px;
+  min-width: 96px;
+  max-width: 148px;
 }
 
 .ix-visual-theme--compact .ix-visual-theme__preview {
@@ -1154,16 +1150,67 @@
 
   .ix-template-switcher__list {
     flex-direction: row;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
+    flex-wrap: wrap;
+    overflow: visible;
     padding-bottom: 4px;
   }
   .ix-template-switcher__list li {
-    flex: 0 0 auto;
+    flex: 1 1 auto;
+    min-width: 0;
   }
   .ix-template-switcher__item {
-    white-space: nowrap;
+    white-space: normal;
+    height: 100%;
+  }
+}
+
+/* Hero owns Start/Edit. The info bar keeps publish, duplicate and more. */
+.ix-launch-info__actions--v2 .ix-launch-info__start,
+.ix-launch-info__actions--v2 .ix-launch-info__edit {
+  display: none;
+}
+
+.ix-launch-hero .cb-preview-match__cols {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ix-launch-hero .cb-match-item {
+  min-height: 44px;
+}
+
+@media (max-width: 1180px) {
+  .cabinet-layout:has(.ix-launch-page) .cabinet-header {
+    flex-wrap: wrap;
+  }
+
+  .cabinet-layout.cb-layout:has(.ix-launch-page) .cabinet-header-right {
+    flex: 1 0 100%;
+    flex-wrap: wrap;
+    width: 100%;
+    max-width: none;
+    margin-left: 0;
+  }
+
+  .cabinet-layout:has(.ix-launch-page) .cabinet-global-search.cabinet-header-search--desktop,
+  .cabinet-layout:has(.ix-launch-page) .cabinet-global-search.cabinet-header-search--mobile.is-open {
+    flex: 1 0 100%;
+    width: 100%;
+    max-width: none;
+    order: 5;
+  }
+
+  .cabinet-layout:has(.ix-launch-page) .cabinet-global-search.cabinet-header-search--desktop .cabinet-header-search,
+  .cabinet-layout:has(.ix-launch-page) .cabinet-global-search.cabinet-header-search--mobile.is-open .cabinet-header-search,
+  .cabinet-layout:has(.ix-launch-page) .cabinet-header-search input {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .ix-launch-page.cb-section--interactive-detail {
+    padding-bottom: calc(var(--cb-mobile-nav-height, 86px) + 24px + env(safe-area-inset-bottom, 0px));
   }
 }
 
@@ -1171,16 +1218,25 @@
   .ix-launch-info__actions--v2 {
     display: none;
   }
+}
+
+@media (max-width: 640px) {
+  .ix-launch-hero__intro-actions,
+  .ix-launch-hero__intro--empty .ix-launch-hero__edit-link,
+  .ix-launch-page:has(.ix-launch-hero:not(.ix-launch-hero--playing)) .ix-launch-info__title,
+  .ix-launch-hero .ix-quiz-player__title {
+    display: none;
+  }
 
   .ix-launch-mobile-bar {
     display: flex;
     position: sticky;
-    bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+    bottom: var(--cb-mobile-nav-height, calc(86px + env(safe-area-inset-bottom, 0px)));
     z-index: 1190;
     gap: 8px;
-    padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+    padding: 10px 14px;
     margin: 4px -14px 0;
-    background: rgba(244, 247, 251, 0.98);
+    background: #F4F7FB;
     border-top: 1px solid #E2E8F0;
   }
 
@@ -1188,12 +1244,22 @@
     flex: 1;
     min-height: 46px;
   }
+
+  .ix-launch-page.cb-section--interactive-detail {
+    padding-bottom: calc(var(--cb-mobile-nav-height, 86px) + 88px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (max-width: 479px) {
+  .ix-launch-hero .cb-preview-match__cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 640px) {
   .ix-launch-hero {
-    min-height: 360px;
-    max-height: 400px;
+    min-height: 280px;
+    max-height: none;
     padding: 24px 16px;
   }
   .ix-launch-hero__start {
