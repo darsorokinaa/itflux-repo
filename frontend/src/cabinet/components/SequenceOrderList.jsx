@@ -83,7 +83,8 @@ export default function SequenceOrderList({
             onDrop={(e) => handleDrop(e, id)}
             onDragEnd={handleDragEnd}
           >
-            {showNumbers ? <span className="cb-sequence-item__num">{index + 1}</span> : null}
+            {bare ? <span className="cb-sequence-item__handle" aria-hidden="true">⋮⋮</span> : null}
+            {showNumbers || bare ? <span className="cb-sequence-item__num">{index + 1}</span> : null}
             <div className="cb-sequence-item__content">
               <span className="cb-sequence-item__text">{step?.text}</span>
               {step?.image_url ? (

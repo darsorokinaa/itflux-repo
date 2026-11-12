@@ -8,8 +8,8 @@ import {
 import { canShareInteractive } from "../interactivesData";
 import { mapApiInteractiveDetail } from "../interactivesApi";
 import { fetchInteractive } from "../../utils/cabinetAuth";
+import "../styles/interactive-player-core.css";
 import "../styles/interactive-play.css";
-import "../styles/interactive-wheel.css";
 import "../styles/interactive-appearance.css";
 
 export default function CabinetInteractivePlayPage() {

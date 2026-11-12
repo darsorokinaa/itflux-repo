@@ -23,6 +23,10 @@
   min-height: min(52vh, 320px);
 }
 
+.interactive-player--bare .cb-flash-card__inner {
+  min-height: min(52vh, 320px);
+}
+
 .interactive-player--bare .cb-flash-card__face {
   border: none;
   box-shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
@@ -259,8 +263,9 @@
   min-width: 140px;
 }
 
-@media (max-width: 640px) {
-  .interactive-player--bare .cb-preview-match__cols {
+@media (max-width: 479px) {
+  .interactive-player--bare .cb-preview-match__cols,
+  .interactive-play-page .cb-preview-match__cols {
     grid-template-columns: minmax(0, 1fr);
   }
 }
@@ -805,19 +810,98 @@
   -webkit-backdrop-filter: blur(8px);
 }
 
+.ix-play-intro {
+  text-align: center;
+  padding: 8px 12px 0;
+  color: var(--ix-tone-text, #0F172A);
+}
+
+.ix-play-intro__type {
+  margin: 0 0 8px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ix-tone-text-muted, #64748B);
+}
+
+.ix-play-intro__title {
+  margin: 0 0 12px;
+  font-size: clamp(1.25rem, 3vw, 1.6rem);
+  font-weight: 800;
+  line-height: 1.25;
+  color: var(--ix-tone-text, #0F172A);
+}
+
+.ix-play-intro__text {
+  margin: 0 auto 20px;
+  max-width: 42ch;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--ix-tone-text-muted, #475569);
+}
+
+.ix-play-intro__start {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 12px 28px;
+  border: none;
+  border-radius: 999px;
+  background: #2563EB;
+  color: #FFFFFF;
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.28);
+}
+
+.ix-play-intro__start:hover {
+  background: #1D4ED8;
+}
+
+.ix-play-intro__start:focus-visible {
+  outline: 2px solid #1D4ED8;
+  outline-offset: 3px;
+}
+
+@media (max-width: 820px) {
+  .ix-shell .ix-quiz-player__title {
+    display: none;
+  }
+
+  .ix-shell__bar-start {
+    flex: 1 1 100%;
+  }
+
+  .ix-shell__bar-actions {
+    flex: 1 1 auto;
+    width: auto;
+    max-width: 100%;
+    justify-content: flex-start;
+  }
+}
+
 @media (max-width: 640px) {
   .ix-shell__bar {
     padding: 10px 12px;
   }
 
-  .ix-shell__bar-actions {
-    width: 100%;
+  .ix-shell__bar-actions .cb-btn,
+  .ix-shell__bar-actions a {
+    flex: 0 1 auto;
+    width: auto;
+    max-width: 100%;
+    min-height: 44px;
   }
 
-  .ix-shell__bar-actions .cb-btn {
-    flex: 1;
-    min-height: 44px;
-    justify-content: center;
+  .ix-shell .ix-quiz-player__title {
+    display: none;
   }
 
   .ix-shell__body {

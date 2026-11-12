@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState, useEffect } from "react";
 import WheelVisual from "./WheelVisual";
+import "../styles/interactive-wheel.css";
 import { getInteractiveDisplayTitle } from "../interactivesData";
 import { resolveInteractiveAppearance } from "../interactiveAppearance";
 import { formatWheelPoints, getWheelSettings } from "../wheelUtils";

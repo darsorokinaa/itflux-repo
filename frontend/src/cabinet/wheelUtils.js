@@ -198,15 +198,17 @@ export function getWheelLabelBoxWidth(radius, segmentCount) {
   return Math.max(28, Math.min(96, chord * 0.88));
 }
 
-export function getWheelLabelLayout(segmentCount, compact) {
-  if (segmentCount <= 4) {
-    return { fontSize: compact ? 20 : 24, maxLines: 3 };
-  }
-  if (segmentCount <= 6) {
-    return { fontSize: compact ? 18 : 22, maxLines: 2 };
-  }
-  if (segmentCount <= 10) {
-    return { fontSize: compact ? 16 : 20, maxLines: 2 };
-  }
-  return { fontSize: compact ? 14 : 16, maxLines: 2 };
+export function getWheelLabelLayout(segmentCount, compact, title = "") {
+  let fontSize;
+  if (segmentCount <= 4) fontSize = compact ? 16 : 18;
+  else if (segmentCount <= 6) fontSize = compact ? 14 : 16;
+  else if (segmentCount <= 10) fontSize = compact ? 13 : 14;
+  else fontSize = compact ? 11 : 12;
+
+  const length = String(title || "").trim().length;
+  if (length > 32) fontSize = Math.max(9, fontSize - 4);
+  else if (length > 20) fontSize = Math.max(10, fontSize - 3);
+  else if (length > 12) fontSize = Math.max(11, fontSize - 2);
+
+  return { fontSize, maxLines: 2 };
 }

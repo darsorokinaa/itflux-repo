@@ -686,6 +686,41 @@
   cursor: pointer;
 }
 
+/* Сезонная тема красит страницу, но карточки плеера остаются белыми. */
+html.seasonal-theme-active :is(.interactive-play-page, .ix-launch-hero) :is(
+  .cb-flash-card__face,
+  .cb-match-item:not(.cb-match-item--selected):not(.cb-match-item--done):not(.cb-match-item--wrong),
+  .cb-sequence-item:not(.cb-sequence-item--ok):not(.cb-sequence-item--bad):not(.cb-sequence-item--over),
+  .ix-quiz-question-card,
+  .ix-quiz-play-answer:not(.ix-quiz-play-answer--selected):not(.ix-quiz-play-answer--correct):not(.ix-quiz-play-answer--wrong),
+  .ix-quiz-result-card
+) {
+  background-color: #FFFFFF;
+  background-image: none;
+  color: #0F172A;
+}
+
+html.seasonal-theme-active :is(.interactive-play-page, .ix-launch-hero) :is(
+  .cb-flash-card__face,
+  .cb-flash-card__face p,
+  .cb-match-item:not(.cb-match-item--done):not(.cb-match-item--wrong),
+  .cb-match-item__text,
+  .cb-sequence-item:not(.cb-sequence-item--ok):not(.cb-sequence-item--bad),
+  .cb-sequence-item__text,
+  .ix-quiz-question-card,
+  .ix-quiz-question-card__text,
+  .ix-quiz-play-answer:not(.ix-quiz-play-answer--correct):not(.ix-quiz-play-answer--wrong),
+  .ix-quiz-result-card,
+  .ix-quiz-result-card__score
+) {
+  color: #0F172A;
+}
+
+html.seasonal-theme-active :is(.interactive-play-page, .ix-launch-hero) .cb-flash-card__label,
+html.seasonal-theme-active :is(.interactive-play-page, .ix-launch-hero) .cb-flash-card__face small {
+  color: #64748B;
+}
+
 .ix-appearance__sound-card__play:hover {
   background: #eef0ff;
   color: #5867e8;

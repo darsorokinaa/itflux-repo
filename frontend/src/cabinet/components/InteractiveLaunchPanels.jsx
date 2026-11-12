@@ -336,7 +336,7 @@ export function LaunchInfoBar({
         ) : (
           <button
             type="button"
-            className="cb-btn cb-btn--primary cb-btn--sm cb-btn--pill"
+            className="cb-btn cb-btn--primary cb-btn--sm cb-btn--pill ix-launch-info__start"
             disabled={!canStart}
             onClick={onStart}
           >
