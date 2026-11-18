@@ -95,3 +95,66 @@
     bottom: 72px;
   }
 }
+
+
+/* Запасной Телемост: карточка вне масштабируемой сцены мини-плеера. */
+.telemost-call-card {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 11060;
+  width: min(360px, calc(100vw - 24px));
+  box-sizing: border-box;
+  padding: 14px 16px 16px;
+  border-radius: 16px;
+  background: #0f172a;
+  color: #e2e8f0;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.35);
+  pointer-events: auto;
+}
+
+.telemost-call-card__title {
+  margin: 0 0 10px;
+  font: 600 15px/1.35 system-ui, -apple-system, sans-serif;
+}
+
+.telemost-call-card__open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 10px;
+  background: #2563eb;
+  color: #fff;
+  font: 600 14px/1.2 system-ui, -apple-system, sans-serif;
+  cursor: pointer;
+}
+
+.telemost-call-card__open:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.telemost-call-card__note {
+  margin: 10px 0 0;
+  font: 12px/1.4 system-ui, -apple-system, sans-serif;
+  color: #94a3b8;
+}
+
+.telemost-call-card__error {
+  margin: 8px 0 0;
+  color: #fecaca;
+  font: 13px/1.35 system-ui, -apple-system, sans-serif;
+}
+
+@media (max-width: 640px) {
+  .telemost-call-card {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    width: auto;
+  }
+}

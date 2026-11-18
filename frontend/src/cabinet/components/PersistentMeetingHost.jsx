@@ -7,6 +7,7 @@ import { resolvePersistentMeetingView, useActiveLiveMeeting } from "../liveMeeti
 import { useFloatingDrag } from "../useFloatingDrag";
 import "../styles/meeting-persist.css";
 import MeetingEntryGate from "../../r91/MeetingEntryGate";
+import TelemostCallCard from "./TelemostCallCard";
 
 const VideoMeetingPage = lazy(() => importWithRetry(() => import("../pages/VideoMeetingPage")));
 
@@ -37,6 +38,7 @@ export default function PersistentMeetingHost() {
   if (!view) return null;
   const meetingPath = `/cabinet/meetings/${encodeURIComponent(view.uuid)}`;
   return (
+    <>
     <div
       ref={nodeRef}
       className={`meeting-persist ${mini ? "meeting-persist--mini" : "meeting-persist--full"}`}
@@ -75,5 +77,7 @@ export default function PersistentMeetingHost() {
         </div>
       </div>
     </div>
+    <TelemostCallCard meetingUuid={view.uuid} />
+    </>
   );
 }
