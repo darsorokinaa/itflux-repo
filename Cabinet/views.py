@@ -478,6 +478,14 @@ def api_register(request):
             )
             referral_result = None
 
+    if not invite_token and not parent_invite_token:
+        try:
+            from .colleague_invite import ColleagueInviteService
+
+            ColleagueInviteService.bind_from_request(user, request, data)
+        except Exception:
+            logger.exception("colleague invite bind failed user=%s", user.id)
+
     registration_promo = None
     if role == Profile.Role.TEACHER:
         from .registration_promo import apply_registration_promo

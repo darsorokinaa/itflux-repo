@@ -117,6 +117,16 @@ def sync_plan_on_event_complete(sender, instance, created, **kwargs):
         return  # статус не изменился, повторный save — пропускаем
 
     try:
+        from .colleague_invite import ColleagueInviteService
+
+        ColleagueInviteService.note_activity(instance.owner, "lesson")
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "colleague lesson qualification failed event=%s", instance.pk
+        )
+
+    try:
         from .student_release import StudentReleaseService
         StudentReleaseService.release_for_event(instance)
     except Exception:
@@ -257,6 +267,16 @@ def storefront_homework_created(sender, instance, created, **kwargs):
         import logging
 
         logging.getLogger(__name__).exception("storefront homework_created failed homework=%s", instance.pk)
+    try:
+        from .colleague_invite import ColleagueInviteService
+
+        ColleagueInviteService.note_activity(instance.teacher, "homework")
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "colleague homework qualification failed homework=%s", instance.pk
+        )
 
 
 @receiver(pre_save, sender=Homework)

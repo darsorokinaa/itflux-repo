@@ -7,6 +7,7 @@ import CabinetIcon from "./CabinetIcons";
 import CabinetModal from "./components/CabinetModal";
 import HomeworkAssignModal from "./components/HomeworkAssignModal";
 import TeacherOnboardingCard from "./components/TeacherOnboardingCard";
+import ColleagueInviteCard from "./components/ColleagueInviteCard";
 import PremiumTrialBanner from "./components/PremiumTrialBanner";
 import LessonPreviewModal from "../components/LessonPreviewModal";
 import SavedTimeDetails from "../components/SavedTimeDetails";
@@ -914,6 +915,7 @@ export default function CabinetDashboard() {
         ) : null}
 
         <PremiumTrialBanner />
+        <ColleagueInviteCard />
         {onboardingVisible && !checklistHidden ? (
           <TeacherOnboardingCard
             onboarding={onboarding}

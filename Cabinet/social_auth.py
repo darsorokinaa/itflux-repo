@@ -69,6 +69,7 @@ def oauth_start(request, provider):
     state = secrets.token_urlsafe(24)
     role = request.GET.get("role")
     from .acquisition import acquisition_from_request
+    from .colleague_invite import colleague_code_from_request
 
     request.session["oauth_ctx"] = {
         "provider": provider,
@@ -80,6 +81,7 @@ def oauth_start(request, provider):
         "pd": request.GET.get("pd") == "1",
         "mkt": request.GET.get("mkt") == "1",
         "acquisition": acquisition_from_request(request),
+        "colleague_code": colleague_code_from_request(request),
     }
     if provider == "yandex":
         q = {"response_type": "code", "client_id": cfg[0], "redirect_uri": redirect_uri(provider),
@@ -171,12 +173,22 @@ def oauth_callback(request, provider):
                     stash_pending(request, provider, ident, ctx)
                     return HttpResponseRedirect("/cabinet/oauth/role?" + urlencode({"next": ctx.get("next") or "/cabinet"}))
                 user = create_oauth_user(provider, ident, role, request, ctx.get("acquisition"))
+                _bind_colleague_invite(user, request, ctx.get("colleague_code") or "")
             SocialAccount.objects.create(user=user, provider=provider, uid=ident["uid"], email=ident["email"])
 
     err = finish_login(request, user, provider, ctx)
     if err:
         return _fail(err)
     return HttpResponseRedirect(ctx.get("next") or "/cabinet")
+
+
+def _bind_colleague_invite(user, request, code=""):
+    try:
+        from .colleague_invite import ColleagueInviteService
+
+        ColleagueInviteService.bind_from_request(user, request, code=code or "")
+    except Exception:
+        logger.exception("colleague invite bind failed user=%s", getattr(user, "id", None))
 
 
 def create_oauth_user(provider, ident, role, request, acquisition=None):

@@ -211,6 +211,13 @@ def process_expired_subscriptions(*, limit: int = 500) -> dict:
             ):
                 continue
             try:
+                from .colleague_invite import ColleagueInviteService
+
+                if ColleagueInviteService.apply_due_deferred(locked):
+                    continue
+            except Exception:
+                logger.exception("colleague deferred bonus failed sub=%s", locked.pk)
+            try:
                 from .r50_tariffs import remember_expired
 
                 remember_expired(locked)

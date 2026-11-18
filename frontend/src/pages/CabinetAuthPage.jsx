@@ -18,6 +18,7 @@ import {
   rememberInviteToken,
 } from "../cabinet/inviteAuth";
 import { captureAcquisition, readAcquisition } from "../cabinet/activationAnalytics";
+import { captureColleagueCode, ensureDeviceId, readColleagueCode } from "../cabinet/colleagueInvite";
 import { authLeadForIntent, inferValueIntent, registerRoleForEntry, trackValueGoal } from "../utils/valuePath";
 import { MARKETING_EMAIL_TEXT } from "../r52/consentTexts";
 import "../r52/r52.css";
@@ -40,6 +41,7 @@ export default function CabinetAuthPage() {
   const inviteToken = searchParams.get("invite") || readStoredInviteToken();
   const parentInviteToken = searchParams.get("parent_invite") || "";
   const referralCode = searchParams.get("ref") || searchParams.get("referral") || "";
+  const colleagueCode = searchParams.get("colleague") || readColleagueCode();
   const redirectTo = safeReturnPath(location.state?.from)
     || safeReturnPath(searchParams.get("next"))
     || (parentInviteToken ? `/parent/invite/accept/${parentInviteToken}/` : "")
@@ -50,6 +52,7 @@ export default function CabinetAuthPage() {
 
   const [mode, setMode] = useState(() => {
     if (searchParams.get("mode") === "register") return "register";
+    if (searchParams.get("colleague") && searchParams.get("mode") !== "login") return "register";
     if (searchParams.get("mode") === "reset" && resetUid && resetToken) return "reset";
     if (searchParams.get("mode") === "forgot") return "forgot";
     return "login";
@@ -64,6 +67,7 @@ export default function CabinetAuthPage() {
     return "";
   });
   const [referralPreview, setReferralPreview] = useState(null);
+  const [colleagueNote, setColleagueNote] = useState("");
 
   const [loginForm, setLoginForm] = useState({ login: "", password: "" });
   const [consents, setConsents] = useState({ pd: false, mkt: false });
@@ -95,7 +99,28 @@ export default function CabinetAuthPage() {
       search: location.search,
       referrer: typeof document !== "undefined" ? document.referrer : "",
     });
-  }, [location.search]);
+    if (colleagueCode) captureColleagueCode(colleagueCode);
+  }, [location.search, colleagueCode]);
+
+  useEffect(() => {
+    if (!colleagueCode || inviteToken) {
+      setColleagueNote("");
+      return undefined;
+    }
+    ensureDeviceId();
+    let cancelled = false;
+    fetch(`/api/cabinet/colleague/${encodeURIComponent(colleagueCode)}/touch/`, { credentials: "same-origin" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        if (!cancelled) setColleagueNote(payload?.valid ? payload.message || "" : "");
+      })
+      .catch(() => {
+        if (!cancelled) setColleagueNote("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [colleagueCode, inviteToken]);
 
   useEffect(() => {
     const nextMode = searchParams.get("mode");
@@ -229,6 +254,10 @@ export default function CabinetAuthPage() {
     if (ref && !inviteToken && !parentInviteToken) {
       next = { ...next, referral_code: ref };
     }
+    const colleague = readColleagueCode();
+    if (colleague && !inviteToken && !parentInviteToken) {
+      next = { ...next, colleague_code: colleague, device_id: ensureDeviceId() };
+    }
     const acquisition = readAcquisition();
     if (
       acquisition.utm_source || acquisition.utm_medium || acquisition.utm_campaign
@@ -282,9 +311,11 @@ export default function CabinetAuthPage() {
       }
       try {
         sessionStorage.removeItem("cabinet_referral_code");
+        sessionStorage.removeItem("cabinet_colleague_code");
       } catch {
         // ignore storage errors
       }
+      document.cookie = "itflux_colleague=;path=/;max-age=0;SameSite=Lax";
       await goAfterAuth(result);
     } catch (err) {
       if (err?.code === "already_registered" || err?.status === 409) {
@@ -395,6 +426,9 @@ export default function CabinetAuthPage() {
           </p>
         </div>
 
+        {colleagueNote && mode === "register" && !inviteToken ? (
+          <p className="cabinet-auth-referral" role="status">{colleagueNote}</p>
+        ) : null}
         {referralPreview && !inviteToken ? (
           <p className="cabinet-auth-referral" role="status">
             Реферальная ссылка «{referralPreview.title}»: {referralPreview.message}

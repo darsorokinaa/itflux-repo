@@ -2066,6 +2066,19 @@ export function validatePromoCode(code, planSlug = null, billingPeriod = "month"
   });
 }
 
+export function fetchColleagueInvite() {
+  let deviceId = "";
+  try {
+    deviceId = window.localStorage.getItem("itflux_device") || "";
+  } catch {
+    deviceId = "";
+  }
+  return cabinetFetch("/colleague/", {
+    method: "GET",
+    headers: deviceId ? { "X-Device-Id": deviceId } : {},
+  });
+}
+
 export function createReferralLink() {
   return cabinetFetch("/subscription/referral-link/", {
     method: "POST",

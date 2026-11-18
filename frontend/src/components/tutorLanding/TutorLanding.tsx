@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { fmtRub, useTariffPlans, yearDiscountPercent, type PublicPlan } from "./useTariffPlans";
 import SeasonalHeroSticker from "../../seasonal/SeasonalHeroSticker";
+import { loginHrefWithColleague } from "../../cabinet/colleagueInvite";
 import "./tutor-landing.css";
 import imgBank from "./img/bank.webp";
 import imgTextbook from "./img/textbook.webp";
@@ -41,16 +42,15 @@ export default function TutorLanding({ isTeacher = false, heroOnly = false }: Pr
   const paidPlans = landingPlans.filter((p) => Number(p.price_month) > 0);
   const minPaid = paidPlans.length ? Math.min(...paidPlans.map((p) => Number(p.price_month))) : null;
   const discount = paidPlans.map(yearDiscountPercent).find((x) => x != null) ?? null;
-  const startCta = isTeacher ? "/cabinet" : REGISTER_URL;
+  const startCta = isTeacher ? "/cabinet" : loginHrefWithColleague(REGISTER_URL);
+  const studentsRegister = loginHrefWithColleague(
+    `/cabinet/login?mode=register&next=${encodeURIComponent("/cabinet/students")}`,
+  );
 
   if (heroOnly) {
     return (
       <div className="tl" data-tutor-landing="hero">
-        <TutorHero ctaTo={startCta} studentsTo={
-          isTeacher
-            ? "/cabinet/students"
-            : `/cabinet/login?mode=register&next=${encodeURIComponent("/cabinet/students")}`
-        } />
+        <TutorHero ctaTo={startCta} studentsTo={isTeacher ? "/cabinet/students" : studentsRegister} />
       </div>
     );
   }
@@ -59,11 +59,7 @@ export default function TutorLanding({ isTeacher = false, heroOnly = false }: Pr
     <div className="tl" data-tutor-landing="1">
       <TutorHero
         ctaTo={startCta}
-        studentsTo={
-          isTeacher
-            ? "/cabinet/students"
-            : `/cabinet/login?mode=register&next=${encodeURIComponent("/cabinet/students")}`
-        }
+        studentsTo={isTeacher ? "/cabinet/students" : studentsRegister}
       />
       <TutorFeatures />
       <TutorMaterials />
