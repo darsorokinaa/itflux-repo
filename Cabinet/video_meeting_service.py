@@ -366,10 +366,15 @@ def start_meeting(*, meeting: VideoMeeting, user: User) -> VideoMeeting:
         locked.status = VideoMeeting.Status.LIVE
         locked.actual_started_at = timezone.now()
         locked.save(update_fields=["status", "actual_started_at", "updated_at"])
+    owner = user
+    if meeting.schedule_event_id:
+        try:
+            owner = meeting.schedule_event.owner
+        except Exception:
+            owner = user
     try:
         from .activation_events import LESSON_STARTED, record_event
 
-        owner = meeting.schedule_event.owner if meeting.schedule_event_id else user
         record_event(
             LESSON_STARTED,
             owner,
@@ -379,6 +384,12 @@ def start_meeting(*, meeting: VideoMeeting, user: User) -> VideoMeeting:
         )
     except Exception:
         logger.exception("lesson_started analytics failed meeting=%s", getattr(meeting, "pk", None))
+    try:
+        from .colleague_invite import ColleagueInviteService
+
+        ColleagueInviteService.note_activity(owner, "lesson")
+    except Exception:
+        logger.exception("colleague lesson qualification failed meeting=%s", getattr(meeting, "pk", None))
     return locked
 
 

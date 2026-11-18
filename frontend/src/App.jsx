@@ -102,6 +102,7 @@ import { ensureSiteFavicon } from "./utils/ensureSiteFavicon";
 import { markUpdateFromClientRequired } from "./utils/appUpdate";
 import { SeasonalThemeProvider } from "./seasonal/SeasonalThemeProvider";
 import { captureAcquisition, savePromoCode } from "./cabinet/visitContext";
+import { captureColleagueCode } from "./cabinet/colleagueInvite";
 import { importWithRetry } from "./utils/importWithRetry";
 import { useActiveLiveMeeting } from "./cabinet/liveMeetingSession";
 
@@ -393,6 +394,8 @@ function VisitContextCapture() {
       search,
       referrer: typeof document !== "undefined" ? document.referrer : "",
     });
+    const colleague = new URLSearchParams(search).get("colleague");
+    if (colleague) captureColleagueCode(colleague);
     const promo = new URLSearchParams(search).get("promo");
     if (promo && promo.trim()) savePromoCode(promo.trim());
   }, [search]);

@@ -2,7 +2,7 @@ from . import social_auth  # r36
 from . import r91_oauth  # r91
 from django.urls import path, include
 
-from . import avatar_api, views
+from . import avatar_api, colleague_api, views
 
 urlpatterns = [
     # r36: Яндекс ID / VK ID
@@ -24,6 +24,12 @@ urlpatterns = [
         name="cabinet_api_password_reset_confirm",
     ),
     path("referral/<str:code>/preview/", views.api_referral_preview, name="cabinet_api_referral_preview"),
+    path("colleague/", colleague_api.api_colleague_summary, name="cabinet_api_colleague_summary"),
+    path(
+        "colleague/<str:code>/touch/",
+        colleague_api.api_colleague_touch,
+        name="cabinet_api_colleague_touch",
+    ),
     path("logout/", views.api_logout, name="cabinet_api_logout"),
     path("profile/avatar/", avatar_api.ProfileAvatarView.as_view(), name="cabinet_profile_avatar"),
     path(

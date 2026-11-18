@@ -148,6 +148,7 @@ def stash_pending(request, provider, ident, ctx):
         "pd": bool(ctx.get("pd")),
         "mkt": bool(ctx.get("mkt")),
         "acquisition": ctx.get("acquisition") if isinstance(ctx.get("acquisition"), dict) else {},
+        "colleague_code": str(ctx.get("colleague_code") or "")[:32],
         "ts": int(time.time()),
     }
     request.session.modified = True
@@ -212,6 +213,14 @@ def oauth_complete(request):
             user = User.objects.filter(email__iexact=ident["email"]).first() if ident["email"] else None
             if user is None:
                 user = create_oauth_user(provider, ident, role, request, p.get("acquisition"))
+                from .colleague_invite import ColleagueInviteService
+
+                try:
+                    ColleagueInviteService.bind_from_request(
+                        user, request, code=p.get("colleague_code") or ""
+                    )
+                except Exception:
+                    logger.exception("colleague invite bind failed user=%s", user.id)
             SocialAccount.objects.create(user=user, provider=provider, uid=ident["uid"], email=ident["email"])
     request.session.pop(PENDING_KEY, None)
     err = finish_login(request, user, provider, p)

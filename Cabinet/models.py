@@ -5760,3 +5760,9 @@ from .r50_models import EmailOptOut, SubscriptionReminderLog, TrialGrant  # noqa
 from .oneshot_models import OneShotPopup  # noqa: E402, F401
 from .cdn_handoff_models import CdnHandoffToken, CdnPreference  # noqa: E402, F401
 from .variant_live_models import VariantIssuance, VariantLiveSession  # noqa: E402, F401
+from .colleague_models import (  # noqa: E402, F401
+    ColleagueInviteAudit,
+    ColleagueInviteLink,
+    ColleagueInviteSettings,
+    ColleagueReferral,
+)

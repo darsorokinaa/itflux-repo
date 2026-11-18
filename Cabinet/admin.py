@@ -30,6 +30,10 @@ from .models import (
     ReferralLink,
     ReferralLinkRegistration,
     ReferralReward,
+    ColleagueInviteAudit,
+    ColleagueInviteLink,
+    ColleagueInviteSettings,
+    ColleagueReferral,
     FlashcardItem,
     Fundraiser,
     Homework,
@@ -1615,6 +1619,93 @@ class ReferralLinkRegistrationAdmin(admin.ModelAdmin):
         "invitee_discount_used_at", "invitee_discount_payment", "registered_at",
     )
     ordering = ("-registered_at",)
+
+
+@admin.register(ColleagueInviteSettings)
+class ColleagueInviteSettingsAdmin(admin.ModelAdmin):
+    list_display = (
+        "bonus_days", "monthly_cap", "fingerprint_window_hours", "enabled", "updated_at",
+    )
+    fields = ("bonus_days", "monthly_cap", "fingerprint_window_hours", "enabled", "updated_at")
+    readonly_fields = ("updated_at",)
+
+    def has_add_permission(self, request):
+        return not ColleagueInviteSettings.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.action(description="Отозвать бонус приглашения")
+def revoke_colleague_bonus(modeladmin, request, queryset):
+    from .colleague_invite import ColleagueInviteService
+
+    done = 0
+    for row in queryset:
+        ColleagueInviteService.revoke(row, actor=request.user, note="Отозвано в админке")
+        done += 1
+    modeladmin.message_user(request, f"Отозвано записей: {done}")
+
+
+@admin.register(ColleagueReferral)
+class ColleagueReferralAdmin(admin.ModelAdmin):
+    list_display = (
+        "inviter", "invited", "status", "qualification", "bonus_days",
+        "effect", "created_at", "granted_at", "revoked_at",
+    )
+    list_filter = ("status", "qualification", "effect")
+    search_fields = (
+        "inviter__username", "inviter__email",
+        "invited__username", "invited__email",
+        "link__code", "email_normalized",
+    )
+    raw_id_fields = ("inviter", "invited", "link", "revoked_by")
+    readonly_fields = (
+        "inviter", "invited", "link", "status", "qualification", "qualified_at",
+        "granted_at", "revoked_at", "revoked_by", "revoke_note",
+        "email_normalized", "phone_normalized", "ip_address", "device_fingerprint",
+        "bonus_days", "effect", "subscription_before", "subscription_after", "created_at",
+    )
+    actions = [revoke_colleague_bonus]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ColleagueInviteAudit)
+class ColleagueInviteAuditAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "action", "reason", "inviter", "invited", "bonus_days", "detail")
+    list_filter = ("action", "reason")
+    search_fields = (
+        "detail", "reason",
+        "inviter__email", "invited__email",
+        "inviter__username", "invited__username",
+    )
+    raw_id_fields = ("referral", "inviter", "invited", "actor")
+    readonly_fields = (
+        "referral", "inviter", "invited", "actor", "action", "reason",
+        "detail", "bonus_days", "created_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ColleagueInviteLink)
+class ColleagueInviteLinkAdmin(admin.ModelAdmin):
+    list_display = ("code", "owner", "is_active", "last_seen_at", "created_at")
+    search_fields = ("code", "owner__username", "owner__email")
+    raw_id_fields = ("owner",)
+    readonly_fields = ("code", "owner", "last_ip", "last_fingerprint", "last_seen_at", "created_at")
+
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(EventReminderLog)
