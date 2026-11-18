@@ -9,3 +9,39 @@
 .legal-card dd { margin: 0; overflow-wrap: anywhere; }
 .legal-page a { color: #1f6bff; }
 @media (max-width: 520px) { .legal-card dl { grid-template-columns: 1fr; } .legal-card dt { margin-top: 0.4rem; } }
+.legal-subtitle { margin: 0 0 0.6rem; color: #5b667a; }
+.legal-draft {
+  background: #fff6e5;
+  border: 1px solid #e6c77a;
+  color: #5a4300;
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin: 0 0 1.2rem;
+}
+.legal-marker {
+  background: #fff3bf;
+  border-radius: 4px;
+  padding: 0 0.2em;
+  font-weight: 600;
+  color: #5a4300;
+}
+.legal-toc {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 1.2rem;
+  padding: 12px 16px;
+  background: #f8fafc;
+  border-radius: 12px;
+  font-size: 14px;
+}
+.legal-table-wrap { overflow-x: auto; margin: 0 0 1rem; }
+.legal-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+.legal-table th, .legal-table td {
+  border: 1px solid rgba(20, 32, 51, 0.14);
+  padding: 0.55rem 0.7rem;
+  text-align: left;
+  vertical-align: top;
+}
+.legal-table th { background: #f4f7fb; font-weight: 700; }
+.legal-page ul, .legal-page ol { margin: 0 0 0.7rem; padding-left: 1.25rem; }
+.legal-page li { margin: 0 0 0.35rem; }

@@ -61,6 +61,13 @@ describe("AcademyLandingPage", () => {
     expect(calls).toHaveLength(2);
     for (const link of calls) expect(link.getAttribute("href")).toBe("#academy-form");
     expect(screen.queryByText(/Добавить перед публикацией/)).toBeNull();
+    expect(screen.queryByText(/профильной математике/)).toBeNull();
+    expect(screen.getByText(/Готовим к ОГЭ и ЕГЭ по информатике\./)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "согласие на обработку персональных данных" }).getAttribute("href")).toBe("/academy/consent");
+    expect(screen.getByRole("link", { name: "Политикой обработки персональных данных" }).getAttribute("href")).toBe("/privacy");
+    expect(screen.getByRole("link", { name: "Публичная оферта академии" }).getAttribute("href")).toBe("/academy/offer");
+    expect(screen.getByRole("link", { name: "Согласие на обработку персональных данных" }).getAttribute("href")).toBe("/academy/consent");
+    expect(screen.queryByRole("option", { name: /математика/ })).toBeNull();
   });
 
   it("shows MAX from the constant and hides it when the constant is empty", () => {
@@ -108,7 +115,7 @@ describe("AcademyLandingPage", () => {
     expect(body.utm_medium).toBe("cpc");
     expect(body.utm_term).toBe("nov");
     expect(body.referrer).toBe("https://vk.com/itfluxacademy");
-    expect(body.consent_text_version).toBe("academy_lead_consent_v1");
+    expect(body.consent_text_version).toBe("academy_lead_consent_v2");
     expect(body.company_website).toBe("");
     expect(trackGoal).toHaveBeenCalledWith("academy_lead_submit", { subject: "ege_inf", grade: "10" });
   });

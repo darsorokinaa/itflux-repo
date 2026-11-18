@@ -32,6 +32,8 @@ const InterestingViewerPage = lazy(() => import("./pages/InterestingViewerPage")
 const ForTeachersPage = lazy(() => import("./pages/ForTeachersPage"));
 const TutorLandingPage = lazy(() => import("./pages/TutorLandingPage"));
 const AcademyLandingPage = lazy(() => import("./pages/AcademyLandingPage"));
+const AcademyOfferPage = lazy(() => import("./pages/AcademyOfferPage"));
+const AcademyConsentPage = lazy(() => import("./pages/AcademyConsentPage"));
 const TeacherBookingPage = lazy(() => import("./pages/TeacherBookingPage"));
 const CabinetAuthPage = lazy(() => import("./pages/CabinetAuthPage"));
 const OAuthRolePage = lazy(() => import("./r91/OAuthRolePage"));
@@ -149,7 +151,9 @@ function LegacyInviteRedirect() {
 const EXACT_META_DESCRIPTIONS = {
   "/": "Цифровой поток — онлайн-платформа для подготовки к ОГЭ и ЕГЭ: генератор вариантов, банк задач и инструменты для учителя.",
   "/privacy": "Политика конфиденциальности платформы «Цифровой поток».",
-  "/academy": "Готовим к ОГЭ и ЕГЭ по информатике и к ЕГЭ по профильной математике. Занятия проходят на той же платформе, где учителя уже ведут уроки, выдают домашние работы и проверяют задания.",
+  "/academy": "Готовим к ОГЭ и ЕГЭ по информатике. Занятия проходят на той же платформе, где учителя уже ведут уроки, выдают домашние работы и проверяют задания.",
+  "/academy/offer": "Черновик публичной оферты онлайн-академии «Цифровой поток» на подготовку к ОГЭ и ЕГЭ по информатике.",
+  "/academy/consent": "Черновик согласия на обработку персональных данных для заявки в онлайн-академию «Цифровой поток».",
   "/offer": "Публичная оферта онлайн-сервиса «Цифровой поток» для репетиторов.",
   "/contacts": "Контакты и реквизиты «Цифрового потока».",
   "/rozhdestvenskiy-sbor": "Рождественский сбор для детей из детских домов и учреждений социальной защиты города Иваново и Ивановской области. Подписки, донаты и переводы идут на праздник и подарки.",
@@ -435,6 +439,10 @@ function App() {
           <Route path="/repetitor/" element={<TutorLandingPage />} />
           <Route path="/academy" element={<AcademyLandingPage />} />
           <Route path="/academy/" element={<AcademyLandingPage />} />
+          <Route path="/academy/offer" element={<AcademyOfferPage />} />
+          <Route path="/academy/offer/" element={<AcademyOfferPage />} />
+          <Route path="/academy/consent" element={<AcademyConsentPage />} />
+          <Route path="/academy/consent/" element={<AcademyConsentPage />} />
           <Route path="/lessons" element={<ReadyLessonsPage />} />
           <Route path="/lessons/collections/:slug" element={<LessonCollectionPage />} />
           <Route path="/lessons/:slug/view" element={<LessonViewerPage />} />

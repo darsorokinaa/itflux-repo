@@ -1,6 +1,6 @@
 /** Поля и проверка заявки на диагностику. Сообщения совпадают с сервером. */
 
-export const ACADEMY_CONSENT_VERSION = "academy_lead_consent_v1";
+export { ACADEMY_CONSENT_VERSION, ACADEMY_CONSENT_CHECKBOX_TEXT } from "./academyConsentText";
 
 export const ACADEMY_SUCCESS_MESSAGE =
   "Заявка принята. Я свяжусь с вами, чтобы выбрать время диагностики и рассказать, как подключиться к платформе.";
@@ -8,7 +8,6 @@ export const ACADEMY_SUCCESS_MESSAGE =
 export const SUBJECTS = [
   { value: "oge_inf", label: "ОГЭ информатика", grades: [9] },
   { value: "ege_inf", label: "ЕГЭ информатика", grades: [10, 11] },
-  { value: "ege_math", label: "ЕГЭ профильная математика", grades: [10, 11] },
 ];
 
 const UTM_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"];

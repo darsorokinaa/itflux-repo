@@ -59,6 +59,7 @@ class SeoR87Tests(TestCase):
                   "/parent/invite/accept/tok", "/community/invite/tok", "/tasks/my", "/tasks/my/new", "/search/tasks",
                   "/search-variant", "/worksheets", "/teachers", "/repetitor", "/privacy", "/offer", "/contacts",
                   "/personal-data-consent", "/messages-agreement", "/for-teachers", "/generator", "/vpr", "/about",
+                  "/academy", "/academy/offer", "/academy/consent",
                   "/ege/inf/variant/12", "/zadaniya", "/zadaniya/ege", "/zadaniya/ege/inf", "/zadaniya/ege/inf/2",
                   "/robots.txt", "/sitemap.xml"):
             self.assertEqual(self.get(p).status_code, 200, p)

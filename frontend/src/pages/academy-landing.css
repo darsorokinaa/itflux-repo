@@ -245,7 +245,7 @@ html.seasonal-theme-active.seasonal-dark-bg .academy {
 
 @media (min-width: 720px) {
   .academy-wrap { width: min(1080px, calc(100% - 64px)); padding-top: 40px; }
-  .academy-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .academy-grid { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
   .academy-form { padding: 24px; }
   .academy-submit { width: auto; min-width: 280px; }
 }

@@ -62,8 +62,11 @@ class AcademyLeadValidationTests(SimpleTestCase):
         cleaned, errors = validate_academy_lead({**VALID, "grade": "9", "subject": "oge_inf"})
         self.assertEqual(errors, {})
         self.assertEqual(cleaned["grade"], 9)
-        _, eleventh = validate_academy_lead({**VALID, "grade": 11, "subject": "ege_math"})
+        cleaned, eleventh = validate_academy_lead({**VALID, "grade": 11, "subject": "ege_inf"})
         self.assertEqual(eleventh, {})
+        self.assertEqual(cleaned["subject"], "ege_inf")
+        _, math = validate_academy_lead({**VALID, "grade": 11, "subject": "ege_math"})
+        self.assertEqual(math.get("subject"), "Выберите предмет.")
 
     def test_contact_is_telegram_or_phone(self):
         for contact in ("@itflux", "https://t.me/itfluxacademy", "+7 (909) 169-09-31", "89091690931", "9091690931"):
@@ -124,6 +127,9 @@ class AcademyLeadApiTests(TestCase):
         self.assertEqual(lead.subject, "ege_inf")
         self.assertEqual(lead.status, AcademyLead.Status.NEW)
         self.assertEqual(lead.consent_text_version, ACADEMY_CONSENT_VERSION)
+        self.assertEqual(ACADEMY_CONSENT_VERSION, "academy_lead_consent_v2")
+        from Cabinet.academy_consent import academy_consent_checkbox_text
+        self.assertIn("законный представитель", academy_consent_checkbox_text(lead.consent_text_version))
         self.assertIsNotNone(lead.consent_at)
         self.assertTrue(lead.consent)
         self.assertEqual(lead.utm_source, "vk")
@@ -139,7 +145,7 @@ class AcademyLeadApiTests(TestCase):
         self.assertNotIn(ip, message.body)
 
     def test_rejects_mismatch_and_does_not_store(self):
-        response = self.post({**VALID, "grade": 9, "subject": "ege_math"})
+        response = self.post({**VALID, "grade": 9, "subject": "ege_inf"})
         self.assertEqual(response.status_code, 400)
         self.assertIn("subject", response.json()["errors"])
         self.assertEqual(AcademyLead.objects.count(), 0)
@@ -193,3 +199,29 @@ class AcademyLeadApiTests(TestCase):
         self.assertEqual(meta.json()["canonical"], "https://itflux-academy.ru/academy")
         sitemap = self.client.get("/sitemap.xml")
         self.assertIn("<loc>https://itflux-academy.ru/academy</loc>", sitemap.content.decode())
+
+    def test_academy_legal_drafts_are_noindex_and_not_in_sitemap(self):
+        sitemap = self.client.get("/sitemap.xml").content.decode()
+        self.assertIn("<loc>https://itflux-academy.ru/academy</loc>", sitemap)
+        for path in ("/academy/offer", "/academy/consent"):
+            page = self.client.get(path)
+            self.assertEqual(page.status_code, 200, path)
+            html = page.content.decode()
+            self.assertIn('name="robots" content="noindex', html)
+            self.assertIn(f'rel="canonical" href="https://itflux-academy.ru{path}"', html)
+            self.assertNotIn(f"<loc>https://itflux-academy.ru{path}</loc>", sitemap)
+            self.assertEqual(self.client.get(path + "/").status_code, 200, path + "/")
+            meta = self.client.get(f"/api/seo/meta/?path={path}")
+            self.assertTrue(meta.json()["noindex"])
+            self.assertEqual(meta.json()["canonical"], f"https://itflux-academy.ru{path}")
+
+    def test_consent_version_text_is_stored_in_code(self):
+        from Cabinet.academy_consent import (
+            ACADEMY_CONSENT_CHECKBOX_TEXTS,
+            academy_consent_checkbox_text,
+            academy_consent_page_text,
+        )
+        self.assertEqual(ACADEMY_CONSENT_VERSION, "academy_lead_consent_v2")
+        self.assertIn("законный представитель", academy_consent_checkbox_text())
+        self.assertIn("бесплатную диагностику", academy_consent_page_text())
+        self.assertIn("Нажимая кнопку", ACADEMY_CONSENT_CHECKBOX_TEXTS["academy_lead_consent_v1"])

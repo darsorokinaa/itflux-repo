@@ -15,7 +15,6 @@ class AcademyLead(models.Model):
     class Subject(models.TextChoices):
         OGE_INF = "oge_inf", "ОГЭ информатика"
         EGE_INF = "ege_inf", "ЕГЭ информатика"
-        EGE_MATH = "ege_math", "ЕГЭ профильная математика"
 
     class Status(models.TextChoices):
         NEW = "new", "новая"
@@ -59,7 +58,7 @@ class AcademyLead(models.Model):
             models.CheckConstraint(
                 condition=(
                     Q(grade=9, subject="oge_inf")
-                    | Q(grade__in=[10, 11], subject__in=["ege_inf", "ege_math"])
+                    | Q(grade__in=[10, 11], subject="ege_inf")
                 ),
                 name="academy_lead_grade_subject",
             ),

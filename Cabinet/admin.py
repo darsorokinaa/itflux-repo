@@ -1914,6 +1914,7 @@ class AcademyLeadAdmin(admin.ModelAdmin):
         "consent",
         "consent_at",
         "consent_text_version",
+        "consent_text",
         "utm_source",
         "utm_medium",
         "utm_campaign",
@@ -1925,3 +1926,18 @@ class AcademyLeadAdmin(admin.ModelAdmin):
         "updated_at",
     )
     fields = ("status", "notes") + readonly_fields
+
+    @admin.display(description="Текст согласия этой версии")
+    def consent_text(self, obj):
+        from .academy_consent import academy_consent_checkbox_text, academy_consent_page_text
+        checkbox = academy_consent_checkbox_text(obj.consent_text_version)
+        page = academy_consent_page_text(obj.consent_text_version)
+        if not checkbox and not page:
+            return obj.consent_text_version
+        parts = [f"Версия: {obj.consent_text_version}"]
+        if checkbox:
+            parts.append("Галочка: " + checkbox)
+        if page:
+            parts.append(page)
+        return "\n\n".join(parts)
+

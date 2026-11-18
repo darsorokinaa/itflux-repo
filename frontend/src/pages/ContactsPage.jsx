@@ -10,7 +10,7 @@ export default function ContactsPage() {
       <div className="legal-card">
         <dl>
           <dt>E-mail</dt>
-          <dd><a href="mailto:itflux.academy@yandex.ru">itflux.academy@yandex.ru</a></dd>
+          <dd><a href="mailto:itflux.academy@yandex.com">itflux.academy@yandex.com</a></dd>
           <dt>Телефон</dt>
           <dd><a href="tel:+79091690931">+7 909 169-09-31</a></dd>
           <dt>Сайт</dt>

@@ -15,7 +15,7 @@ class Migration(migrations.Migration):
                 ("student_name", models.CharField(max_length=200, verbose_name="Имя ученика")),
                 ("parent_name", models.CharField(blank=True, default="", max_length=200, verbose_name="Имя родителя")),
                 ("grade", models.PositiveSmallIntegerField(choices=[(9, "9"), (10, "10"), (11, "11")], db_index=True, verbose_name="Класс")),
-                ("subject", models.CharField(choices=[("oge_inf", "ОГЭ информатика"), ("ege_inf", "ЕГЭ информатика"), ("ege_math", "ЕГЭ профильная математика")], db_index=True, max_length=16, verbose_name="Предмет")),
+                ("subject", models.CharField(choices=[("oge_inf", "ОГЭ информатика"), ("ege_inf", "ЕГЭ информатика")], db_index=True, max_length=16, verbose_name="Предмет")),
                 ("contact", models.CharField(max_length=80, verbose_name="Контакт")),
                 ("comment", models.TextField(blank=True, default="", verbose_name="Комментарий")),
                 ("consent", models.BooleanField(default=False, verbose_name="Согласие на обработку ПД")),
@@ -41,7 +41,7 @@ class Migration(migrations.Migration):
                     models.CheckConstraint(
                         condition=models.Q(
                             models.Q(("grade", 9), ("subject", "oge_inf")),
-                            models.Q(("grade__in", [10, 11]), ("subject__in", ["ege_inf", "ege_math"])),
+                            models.Q(("grade__in", [10, 11]), ("subject", "ege_inf")),
                             _connector="OR",
                         ),
                         name="academy_lead_grade_subject",

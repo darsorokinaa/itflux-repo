@@ -16,12 +16,12 @@ from django.views.decorators.http import require_http_methods
 
 from Cabinet.rate_limit import client_ip, rate_limit_check, rate_limit_json_response
 
+from .academy_consent import ACADEMY_CONSENT_VERSION
 from .academy_models import AcademyLead
 
 logger = logging.getLogger(__name__)
 
-# Текст галочки на лендинге. Новая формулировка — новая версия, старые заявки не переписываем.
-ACADEMY_CONSENT_VERSION = "academy_lead_consent_v1"
+# Текст галочки и полная формулировка версии — Cabinet.academy_consent.
 ACADEMY_NOTIFY_EMAIL = "itflux.academy@yandex.com"
 ACADEMY_SUCCESS_MESSAGE = (
     "Заявка принята. Я свяжусь с вами, чтобы выбрать время диагностики "
@@ -44,7 +44,7 @@ _UTM_LIMITS = {
     "utm_term": 64,
 }
 _SUBJECTS = {choice.value for choice in AcademyLead.Subject}
-_EGE_SUBJECTS = {AcademyLead.Subject.EGE_INF, AcademyLead.Subject.EGE_MATH}
+_EGE_SUBJECTS = {AcademyLead.Subject.EGE_INF}
 _MISMATCH = "Для 9 класса доступен ОГЭ по информатике, для 10–11 классов — ЕГЭ."
 
 
