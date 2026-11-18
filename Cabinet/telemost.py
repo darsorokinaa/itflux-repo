@@ -53,8 +53,19 @@ def is_telemost_meeting_url(url):
     return bool(url and TELEMOST_JOIN_URL_RE.match(str(url).strip()))
 
 
+def _setting(*names):
+    for name in names:
+        value = str(getattr(settings, name, "") or "").strip()
+        if value:
+            return value
+    return ""
+
+
 def _redirect_uri():
-    return (getattr(settings, "YANDEX_TELEMOST_REDIRECT_URI", "") or DEFAULT_REDIRECT_URI).strip()
+    return (
+        _setting("YANDEX_TELEMOST_REDIRECT_URI", "TELEMOST_REDIRECT_URI")
+        or DEFAULT_REDIRECT_URI
+    )
 
 
 def _oauth_scope_param():
@@ -67,7 +78,7 @@ def _oauth_scope_param():
 
 
 def telemost_authorize_code_url():
-    client_id = settings.YANDEX_TELEMOST_CLIENT_ID
+    client_id = _setting("YANDEX_TELEMOST_CLIENT_ID", "TELEMOST_CLIENT_ID")
     if not client_id:
         return None
     redirect_uri = _redirect_uri()
@@ -96,8 +107,8 @@ def _cache_token(token, expires_in=None):
 
 
 def _post_yandex_token(data):
-    client_id = settings.YANDEX_TELEMOST_CLIENT_ID
-    client_secret = settings.YANDEX_TELEMOST_CLIENT_SECRET
+    client_id = _setting("YANDEX_TELEMOST_CLIENT_ID", "TELEMOST_CLIENT_ID")
+    client_secret = _setting("YANDEX_TELEMOST_CLIENT_SECRET", "TELEMOST_CLIENT_SECRET")
     if not client_id or not client_secret:
         return None, "Не заданы Client ID или Client secret Телемоста."
 
@@ -122,29 +133,29 @@ def _post_yandex_token(data):
 
 
 def _token_from_auth_code():
-    code = (settings.YANDEX_TELEMOST_AUTH_CODE or "").strip()
+    code = _setting("YANDEX_TELEMOST_AUTH_CODE", "TELEMOST_AUTH_CODE")
     if not code:
         return None, None
 
     return _post_yandex_token({
         "grant_type": "authorization_code",
         "code": code,
-        "client_id": settings.YANDEX_TELEMOST_CLIENT_ID,
-        "client_secret": settings.YANDEX_TELEMOST_CLIENT_SECRET,
+        "client_id": _setting("YANDEX_TELEMOST_CLIENT_ID", "TELEMOST_CLIENT_ID"),
+        "client_secret": _setting("YANDEX_TELEMOST_CLIENT_SECRET", "TELEMOST_CLIENT_SECRET"),
         "redirect_uri": _redirect_uri(),
     })
 
 
 def _token_from_refresh():
-    refresh = (getattr(settings, "YANDEX_TELEMOST_REFRESH_TOKEN", "") or "").strip()
+    refresh = _setting("YANDEX_TELEMOST_REFRESH_TOKEN", "TELEMOST_REFRESH_TOKEN")
     if not refresh:
         return None, None
 
     return _post_yandex_token({
         "grant_type": "refresh_token",
         "refresh_token": refresh,
-        "client_id": settings.YANDEX_TELEMOST_CLIENT_ID,
-        "client_secret": settings.YANDEX_TELEMOST_CLIENT_SECRET,
+        "client_id": _setting("YANDEX_TELEMOST_CLIENT_ID", "TELEMOST_CLIENT_ID"),
+        "client_secret": _setting("YANDEX_TELEMOST_CLIENT_SECRET", "TELEMOST_CLIENT_SECRET"),
     })
 
 
@@ -155,8 +166,8 @@ def _token_from_service_exchange():
 
     return _post_yandex_token({
         "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
-        "client_id": settings.YANDEX_TELEMOST_CLIENT_ID,
-        "client_secret": settings.YANDEX_TELEMOST_CLIENT_SECRET,
+        "client_id": _setting("YANDEX_TELEMOST_CLIENT_ID", "TELEMOST_CLIENT_ID"),
+        "client_secret": _setting("YANDEX_TELEMOST_CLIENT_SECRET", "TELEMOST_CLIENT_SECRET"),
         "subject_token": email,
         "subject_token_type": "urn:yandex:params:oauth:token-type:email",
     })
@@ -164,7 +175,7 @@ def _token_from_service_exchange():
 
 def resolve_telemost_oauth_token(*, force_refresh=False):
     if not force_refresh:
-        explicit = (settings.YANDEX_TELEMOST_OAUTH_TOKEN or "").strip()
+        explicit = _setting("YANDEX_TELEMOST_OAUTH_TOKEN", "TELEMOST_OAUTH_TOKEN")
         if explicit:
             return explicit, None
 
@@ -184,7 +195,7 @@ def resolve_telemost_oauth_token(*, force_refresh=False):
         return token, None
 
     if not force_refresh:
-        explicit = (settings.YANDEX_TELEMOST_OAUTH_TOKEN or "").strip()
+        explicit = _setting("YANDEX_TELEMOST_OAUTH_TOKEN", "TELEMOST_OAUTH_TOKEN")
         if explicit:
             return explicit, None
 
@@ -203,13 +214,16 @@ def resolve_telemost_oauth_token(*, force_refresh=False):
 
 
 def telemost_is_configured():
-    if (settings.YANDEX_TELEMOST_OAUTH_TOKEN or "").strip():
+    if _setting("YANDEX_TELEMOST_OAUTH_TOKEN", "TELEMOST_OAUTH_TOKEN"):
         return True
-    if (getattr(settings, "YANDEX_TELEMOST_REFRESH_TOKEN", "") or "").strip():
+    if _setting("YANDEX_TELEMOST_REFRESH_TOKEN", "TELEMOST_REFRESH_TOKEN"):
         return True
-    if (settings.YANDEX_TELEMOST_AUTH_CODE or "").strip():
+    if _setting("YANDEX_TELEMOST_AUTH_CODE", "TELEMOST_AUTH_CODE"):
         return True
-    return bool(settings.YANDEX_TELEMOST_CLIENT_ID and settings.YANDEX_TELEMOST_CLIENT_SECRET)
+    return bool(
+        _setting("YANDEX_TELEMOST_CLIENT_ID", "TELEMOST_CLIENT_ID")
+        and _setting("YANDEX_TELEMOST_CLIENT_SECRET", "TELEMOST_CLIENT_SECRET")
+    )
 
 
 def _request_conference(token, payload):

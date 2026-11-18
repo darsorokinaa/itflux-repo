@@ -83,6 +83,23 @@ YANDEX_TELEMOST_AUTO_CREATE = os.environ.get(
     "YANDEX_TELEMOST_AUTO_CREATE", "true"
 ).strip().lower() not in ("0", "false", "no", "off")
 
+# Алиасы без префикса YANDEX_ — тот же сервисный аккаунт, токен можно подменить.
+if not YANDEX_TELEMOST_OAUTH_TOKEN:
+    YANDEX_TELEMOST_OAUTH_TOKEN = os.environ.get("TELEMOST_OAUTH_TOKEN", "").strip()
+if not YANDEX_TELEMOST_REFRESH_TOKEN:
+    YANDEX_TELEMOST_REFRESH_TOKEN = os.environ.get("TELEMOST_REFRESH_TOKEN", "").strip()
+if not YANDEX_TELEMOST_CLIENT_ID:
+    YANDEX_TELEMOST_CLIENT_ID = os.environ.get("TELEMOST_CLIENT_ID", "").strip()
+if not YANDEX_TELEMOST_CLIENT_SECRET:
+    YANDEX_TELEMOST_CLIENT_SECRET = os.environ.get("TELEMOST_CLIENT_SECRET", "").strip()
+TELEMOST_OAUTH_TOKEN = YANDEX_TELEMOST_OAUTH_TOKEN
+TELEMOST_REFRESH_TOKEN = YANDEX_TELEMOST_REFRESH_TOKEN
+TELEMOST_CLIENT_ID = YANDEX_TELEMOST_CLIENT_ID
+TELEMOST_CLIENT_SECRET = YANDEX_TELEMOST_CLIENT_SECRET
+TELEMOST_BACKUP_ENABLED = os.environ.get(
+    "TELEMOST_BACKUP_ENABLED", "true"
+).strip().lower() not in ("0", "false", "no", "off")
+
 # —— Jitsi Meet (видеоуроки в кабинете) ——
 # Пустой домен в production не становится meet.jit.si. Публичный хост — только DEBUG
 # или JITSI_ALLOW_PUBLIC_MEET=true (см. Cabinet/jitsi_service.py).

@@ -34,6 +34,11 @@ urlpatterns = [
         name="video_meeting_join_config",
     ),
     path(
+        "<uuid:meeting_uuid>/telemost/",
+        video_meeting_api.VideoMeetingTelemostView.as_view(),
+        name="video_meeting_telemost",
+    ),
+    path(
         "<uuid:meeting_uuid>/kontur-talk/",
         video_meeting_api.VideoMeetingKonturTalkView.as_view(),
         name="video_meeting_kontur_talk",

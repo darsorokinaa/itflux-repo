@@ -4851,3 +4851,21 @@ body:has(.video-lesson-page) .cb-modal-backdrop {
   color: #94a3b8;
   font-size: 0.85em;
 }
+
+
+.video-lesson-telemost {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.video-lesson-telemost__error {
+  flex: 1 0 100%;
+  margin: 0;
+  background: transparent;
+  color: #b91c1c;
+  font-size: 13px;
+  line-height: 1.35;
+}

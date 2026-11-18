@@ -185,6 +185,8 @@ import {
 } from "../connectionCheck/jaasReachability";
 import LiveKitCallView from "../components/LiveKitCallView";
 import KonturTalkLaunch from "../components/KonturTalkLaunch";
+import TelemostLaunch from "../components/TelemostLaunch";
+import { clearTelemostBackupState, setTelemostBackupState } from "../telemostBackupSession";
 import {
   CALL_CONNECTING_NOTICE,
   CALL_READY_NOTICE,
@@ -2077,6 +2079,13 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
       try {
         const statusPayload = await fetchVideoMeetingStatus(meetingUuid);
         if (cancelled) return;
+        if (statusPayload?.telemost) {
+          setDetail((prev) => (
+            prev
+              ? { ...prev, telemost: { ...(prev.telemost || {}), ...statusPayload.telemost } }
+              : prev
+          ));
+        }
         applyPresented(statusPayload?.presented || null);
         // Файлы идут через materialSession — подстраховываем, если WS не доставил событие.
         if (!canManageRef.current) {
@@ -3264,6 +3273,20 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
       onMediaProvider: (route) => {
         applyMediaRouteRef.current(route);
       },
+      onTelemostOpened: () => {
+        setDetail((prev) => (
+          prev
+            ? {
+              ...prev,
+              telemost: {
+                id: "telemost",
+                available: prev.telemost?.available !== false,
+                open: true,
+              },
+            }
+            : prev
+        ));
+      },
       onScreensharePointer: (payload) => {
         const point = payload?.payload || payload;
         const authorId = payload?.author_id;
@@ -4408,9 +4431,17 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
       ].filter(Boolean).join(" ")}
     >
       {boardChromeOpen ? (
-        detail?.konturTalk?.available && status === "live" ? (
+        (detail?.konturTalk?.available || detail?.telemost?.available) && status === "live" ? (
           <div className="video-lesson-board-dock">
-            <KonturTalkLaunch available meetingUuid={meetingUuid} />
+            <KonturTalkLaunch
+              available={Boolean(detail?.konturTalk?.available)}
+              meetingUuid={meetingUuid}
+            />
+            <TelemostLaunch
+              available={Boolean(detail?.telemost?.available)}
+              canCreate={canManage}
+              meetingUuid={meetingUuid}
+            />
           </div>
         ) : null
       ) : (
@@ -4454,6 +4485,11 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
           {roomActions}
           <KonturTalkLaunch
             available={Boolean(detail?.konturTalk?.available) && status === "live"}
+            meetingUuid={meetingUuid}
+          />
+          <TelemostLaunch
+            available={Boolean(detail?.telemost?.available) && status === "live"}
+            canCreate={canManage}
             meetingUuid={meetingUuid}
           />
         </div>
