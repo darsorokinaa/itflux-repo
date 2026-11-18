@@ -42,6 +42,7 @@ function Layout() {
     pathname === "/generator" ||
     pathname === "/gotovye-uroki" ||
     pathname === "/repetitor" ||
+    pathNorm === "/academy" ||
     pathname === "/lessons" ||
     pathname === "/interesting" ||
     pathNorm === "/rozhdestvenskiy-sbor" ||
@@ -93,6 +94,7 @@ function Layout() {
       pathNorm === "/" ? "home"
       : pathNorm === "/gotovye-uroki" || pathNorm === "/lessons" ? "lessons"
       : pathNorm === "/repetitor" ? "tutor"
+      : pathNorm === "/academy" ? "academy"
       : pathNorm === "/generator" || pathNorm === "/subject" || pathNorm.startsWith("/subject/") ? "generator"
       : pathNorm === "/oge" ? "oge"
       : pathNorm === "/ege" ? "ege"

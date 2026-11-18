@@ -1893,3 +1893,35 @@ class SocialAccountAdmin(admin.ModelAdmin):
     list_filter = ("provider",)
     search_fields = ("uid", "email", "user__username", "user__email")
     raw_id_fields = ("user",)
+
+
+from .academy_models import AcademyLead as _AcademyLead
+
+
+@admin.register(_AcademyLead)
+class AcademyLeadAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "student_name", "parent_name", "grade", "subject", "contact", "status")
+    list_filter = ("subject", "grade", "status")
+    search_fields = ("student_name", "parent_name", "contact", "comment", "notes")
+    list_editable = ("status",)
+    readonly_fields = (
+        "student_name",
+        "parent_name",
+        "grade",
+        "subject",
+        "contact",
+        "comment",
+        "consent",
+        "consent_at",
+        "consent_text_version",
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_content",
+        "utm_term",
+        "referrer",
+        "ip_hash",
+        "created_at",
+        "updated_at",
+    )
+    fields = ("status", "notes") + readonly_fields

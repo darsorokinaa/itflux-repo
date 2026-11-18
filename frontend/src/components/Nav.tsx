@@ -556,6 +556,13 @@ export default function Nav() {
           >
             <span>Тарифы</span>
           </Link>
+          <Link
+            to="/academy"
+            className="flux-secondary-link flux-academy-link"
+            aria-current={pathname === "/academy" || pathname === "/academy/" ? "page" : undefined}
+          >
+            <span>Онлайн-академия</span>
+          </Link>
           <span className="flux-secondary-spacer" />
           <HeaderSearch />
           {session.isTeacher && session.tokens != null ? (

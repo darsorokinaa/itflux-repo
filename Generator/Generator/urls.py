@@ -19,6 +19,7 @@ from Cabinet import homework_notebooks
 from Cabinet import homework_task_files
 from Cabinet.subscription_api import PaymentWebhookView
 from Cabinet.fundraiser_api import api_fundraiser_current
+from Cabinet.academy_api import api_academy_lead
 from Cabinet.views import api_teacher_application, api_teacher_community_feedback, api_school_request
 
 # MFA для /admin/ (TOTP). Включение: ADMIN_OTP_REQUIRED=true или prod DEBUG=False.
@@ -57,6 +58,7 @@ urlpatterns = [
     path("api/csrf/", views.api_csrf, name="api_csrf"),
     path("api/teacher-applications/", api_teacher_application, name="api_teacher_applications"),
     path("api/school-requests/", api_school_request, name="api_school_requests"),
+    path("api/academy-leads/", api_academy_lead, name="api_academy_leads"),
     path(
         "api/teacher-community-feedback/",
         api_teacher_community_feedback,

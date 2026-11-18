@@ -11,6 +11,7 @@ from django.utils import timezone
 SITE_ORIGIN = "https://itflux-academy.ru"
 SITE_HOST = "itflux-academy.ru"
 BRAND = "Цифровой поток"
+ACADEMY_PATH = "/academy"
 DEFAULT_DESCRIPTION = (
     "Цифровой поток — рабочее пространство учителя и репетитора: генератор вариантов ОГЭ и ЕГЭ "
     "в формате КИМ, банк из 25 000+ задач, готовые уроки, тренажёры, онлайн-доска и видеоуроки."
@@ -90,6 +91,12 @@ STATIC_PAGES = {
     ),
 }
 
+STATIC_PAGES[ACADEMY_PATH] = (
+    "Онлайн-академия цифровых технологий — " + BRAND,
+    "Готовим к ОГЭ и ЕГЭ по информатике и к ЕГЭ по профильной математике. "
+    "Занятия проходят на той же платформе, где учителя уже ведут уроки, выдают домашние работы и проверяют задания.",
+)
+
 # Алиасы: страница открывается, но каноническим считается другой адрес.
 CANONICAL_ALIASES = {"/for-teachers": "/teachers", "/about": "/", "/generator": "/subject", "/vpr": "/subject/vpr", "/login": "/cabinet/login"}
 
@@ -109,7 +116,7 @@ FOCUS_SUBJECTS = ("math", "math_base", "inf")
 FOCUS_LESSON_SUBJECT_RE = re.compile(r"^(математик|алгебр|геометр|теория вероятност|информатик)", re.I)
 NON_FOCUS_TITLE_RE = re.compile(r"хими|русск|фразеолог|\bн и нн\b|ударени|граммати|физическ|камертон|струн", re.I)
 
-SITEMAP_STATIC = ("/", "/pricing", "/repetitor", "/lessons", "/interesting", "/tasks", "/subject", "/teachers", "/privacy", "/personal-data-consent", "/offer", "/contacts", "/rozhdestvenskiy-sbor")
+SITEMAP_STATIC = ("/", "/pricing", "/repetitor", ACADEMY_PATH, "/lessons", "/interesting", "/tasks", "/subject", "/teachers", "/privacy", "/personal-data-consent", "/offer", "/contacts", "/rozhdestvenskiy-sbor")
 
 
 def _norm(path):
@@ -284,6 +291,8 @@ def resolve(path):
         if canon_path == "/":
             meta["ld"].append({"@context": "https://schema.org", "@type": "WebSite", "name": BRAND,
                                "url": SITE_ORIGIN + "/", "inLanguage": "ru"})
+        if canon_path == ACADEMY_PATH:
+            meta["h1"] = "Цифровой поток — онлайн-академия цифровых технологий"
         return meta
 
     m = re.fullmatch(r"/lessons/([^/]+)/view", p)
@@ -523,7 +532,8 @@ def sitemap_rows():
     content_lm = max([x for x in [les_lm, it_lm] + list(by_pair.values()) if x], default=None)
 
     rows = []
-    prio = {"/": "1.0", "/pricing": "0.9", "/repetitor": "0.9", "/lessons": "0.9", "/interesting": "0.9",
+    prio = {"/": "1.0", "/pricing": "0.9", "/repetitor": "0.9", ACADEMY_PATH: "0.8", "/lessons": "0.9",
+            "/interesting": "0.9",
             "/tasks": "0.8", "/subject": "0.8", "/rozhdestvenskiy-sbor": "0.6"}
     static_lm = {"/lessons": les_lm, "/interesting": it_lm, "/": content_lm, "/tasks": content_lm, "/subject": content_lm}
     for p in SITEMAP_STATIC:
