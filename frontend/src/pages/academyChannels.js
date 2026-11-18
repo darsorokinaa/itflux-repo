@@ -4,8 +4,8 @@
 
 export const ACADEMY_TELEGRAM_URL = "https://t.me/+euR2vXJwj201N2Iy";
 export const ACADEMY_VK_URL = "https://vk.ru/club243179171";
-/** Адрес канала MAX. Пока пусто: ссылка появится, когда строка будет заполнена. */
-export const ACADEMY_MAX_URL = "";
+/** Адрес канала MAX. Пустая строка скрывает ссылку в подвале академии. */
+export const ACADEMY_MAX_URL = "https://max.ru/join/WDCMDl6TEwYOQx6oAYKSB0MotkcpP7fv2uhTBM73OSo";
 
 function channel(id, label, href) {
   const url = String(href || "").trim();

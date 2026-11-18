@@ -51,19 +51,22 @@ describe("AcademyLandingPage", () => {
     const vk = screen.getByRole("link", { name: "vk.ru/club243179171" });
     expect(telegram.getAttribute("href")).toBe("https://t.me/+euR2vXJwj201N2Iy");
     expect(vk.getAttribute("href")).toBe("https://vk.ru/club243179171");
-    expect(screen.queryByRole("link", { name: /^MAX/ })).toBeNull();
+    const max = screen.getByRole("link", { name: "max.ru/join/WDCMDl6TEwYOQx6oAYKSB0MotkcpP7fv2uhTBM73OSo" });
+    expect(max.getAttribute("href")).toBe("https://max.ru/join/WDCMDl6TEwYOQx6oAYKSB0MotkcpP7fv2uhTBM73OSo");
     expect(screen.queryByRole("link", { name: /itfluxacademy/ })).toBeNull();
+    expect(screen.getByText(/Часть домашних заданий проверяется автоматически, остальные проверяет преподаватель/)).toBeTruthy();
+    expect(screen.getByText(/После заявки преподаватель выдаёт ученику на платформе набор ключевых заданий в формате экзамена/)).toBeTruthy();
+    expect(screen.queryByText(/пробный вариант/)).toBeNull();
     const calls = screen.getAllByRole("link", { name: /Записаться на/ });
     expect(calls).toHaveLength(2);
     for (const link of calls) expect(link.getAttribute("href")).toBe("#academy-form");
     expect(screen.queryByText(/Добавить перед публикацией/)).toBeNull();
   });
 
-  it("hides MAX until the constant is set and keeps the other channels", () => {
-    expect(academyChannels().map((item) => item.id)).toEqual(["telegram", "vk"]);
-    const withMax = academyChannels({ max: "https://max.ru/channel_example" });
-    expect(withMax.map((item) => item.id)).toEqual(["telegram", "vk", "max"]);
-    expect(withMax[2].href).toBe("https://max.ru/channel_example");
+  it("shows MAX from the constant and hides it when the constant is empty", () => {
+    expect(academyChannels().map((item) => item.id)).toEqual(["telegram", "vk", "max"]);
+    expect(academyChannels()[2].href).toBe("https://max.ru/join/WDCMDl6TEwYOQx6oAYKSB0MotkcpP7fv2uhTBM73OSo");
+    expect(academyChannels({ max: "" }).map((item) => item.id)).toEqual(["telegram", "vk"]);
   });
 
   it("shows validation errors and blocks a class/subject mismatch", () => {
