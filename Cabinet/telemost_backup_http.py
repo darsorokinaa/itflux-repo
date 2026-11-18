@@ -69,7 +69,7 @@ def telemost_env_flag(name, default=True):
     return bool(raw)
 
 
-def _token_secrets(token=""):
+def _token_secrets(token=None):
     return [
         value
         for value in (
@@ -88,7 +88,7 @@ def _token_secrets(token=""):
     ]
 
 
-def _payload_leaks_secret(payload, token=""):
+def _payload_leaks_secret(payload, token=None):
     secrets = _token_secrets(token)
     stack = [payload]
     while secrets and stack:
