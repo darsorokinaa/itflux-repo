@@ -29,6 +29,8 @@ import {
   refreshScreenShareSubscription,
   screenShareCaptureFallback,
 } from "../screenShareQuality";
+import { CALL_AUDIO_CAPTURE, liveKitAudioPublish } from "../callAudioQuality";
+import { collectLiveKitStats, startCallStats } from "../callStats";
 
 function useAttachedTrack(track) {
   const ref = useRef(null);
@@ -257,6 +259,7 @@ const LiveKitCallView = forwardRef(function LiveKitCallView({
     goneRef.current = false;
     let timer = 0;
     let sampler = 0;
+    let stopStats = () => {};
     const iceRef = { current: false };
     const packetsRef = { current: null };
     const confirmStartedRef = { current: 0 };
@@ -267,13 +270,12 @@ const LiveKitCallView = forwardRef(function LiveKitCallView({
       adaptiveStream: { pixelDensity: "screen" },
       dynacast: true,
       disconnectOnPageLeave: true,
-      audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      audioCaptureDefaults: { ...CALL_AUDIO_CAPTURE },
       videoCaptureDefaults: { resolution: VideoPresets.h540.resolution },
       publishDefaults: {
         simulcast: true,
         videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
-        dtx: true,
-        red: true,
+        ...liveKitAudioPublish(),
         ...liveKitScreenSharePublish(),
       },
     });
@@ -535,6 +537,15 @@ const LiveKitCallView = forwardRef(function LiveKitCallView({
         sampler = window.setInterval(() => {
           void samplePackets().then(evaluate);
         }, 1000);
+        stopStats = startCallStats({
+          meetingUuid,
+          provider: "livekit",
+          collect: () => collectLiveKitStats(room),
+          getMeta: () => ({
+            reconnects: attemptRef.current,
+            connection_quality: room.localParticipant?.connectionQuality,
+          }),
+        });
       } catch (error) {
         if (goneRef.current) return;
         setStatus("failed");
@@ -546,6 +557,7 @@ const LiveKitCallView = forwardRef(function LiveKitCallView({
       goneRef.current = true;
       window.clearTimeout(timer);
       window.clearInterval(sampler);
+      stopStats();
       try {
         room.removeAllListeners();
       } catch {

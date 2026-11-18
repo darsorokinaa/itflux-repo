@@ -223,7 +223,13 @@ describe("r107 screen orientation", () => {
     expect(options.videoCaptureDefaults.resolution).toEqual({ width: 960, height: 540 });
     expect(options.publishDefaults.videoSimulcastLayers).toHaveLength(2);
     expect(options.publishDefaults.screenShareEncoding.maxBitrate).toBeGreaterThanOrEqual(2_500_000);
-    expect(options.publishDefaults.screenShareEncoding.maxFramerate).toBeLessThanOrEqual(15);
+    expect(options.publishDefaults.screenShareEncoding.maxFramerate).toBe(8);
+    expect(options.publishDefaults.screenShareSimulcastLayers).toHaveLength(2);
+    expect(options.publishDefaults.audioPreset).toEqual({ maxBitrate: 48_000 });
+    expect(options.publishDefaults.dtx).toBe(false);
+    expect(options.publishDefaults.red).toBe(true);
+    expect(options.audioCaptureDefaults.noiseSuppression).toBe(true);
+    expect(options.audioCaptureDefaults.autoGainControl).toBe(true);
     expect(options.publishDefaults.degradationPreference).toBe("maintain-resolution");
     expect(options.publishDefaults.simulcast).toBe(true);
     expect(options.adaptiveStream.pixelDensity).toBe("screen");

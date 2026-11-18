@@ -4,15 +4,31 @@
  * Цифры ниже — потолки, не обещание картинки. Браузер, мост и слабый канал
  * могут отдать меньше. Жёсткий exact на захват не ставим: он срывает
  * getDisplayMedia в Safari и на части окон.
+ *
+ * r-call-quality: 5–8 кадров/с вместо 15. Для текста, формул и доски частота
+ * почти не важна, а на узком канале (VPN, мобильный интернет) каждый кадр
+ * получает больше бит и буквы остаются чёткими. Плюс запасные слои 720p/360p:
+ * при слабом канале ученик получает читаемую картинку, а не замирание.
  */
 
 export const SCREEN_SHARE_RECEIVE_HEIGHT = 1080;
-export const SCREEN_SHARE_MAX_FPS = 15;
+export const SCREEN_SHARE_MAX_FPS = 8;
+export const SCREEN_SHARE_MIN_FPS = 5;
 /** Квадратный потолок: и портрет, и ландшафт. Не exact. */
 export const SCREEN_SHARE_CAPTURE_EDGE = 2560;
-/** Потолок кодирования статичного экрана. Выше прежнего 1,2 Мбит/с и дефолта 2,5. */
-export const SCREEN_SHARE_BITRATE_CAP = 4_000_000;
+/** Потолок верхнего слоя при 8 к/с: на кадр приходится больше бит, чем было при 15 к/с и 4 Мбит/с. */
+export const SCREEN_SHARE_BITRATE_CAP = 2_500_000;
 
+/**
+ * Запасные слои демонстрации (LiveKit simulcast), от меньшего к большему.
+ * Верхний слой — полный захват с SCREEN_SHARE_BITRATE_CAP.
+ */
+export const SCREEN_SHARE_BACKUP_LAYERS = Object.freeze([
+  Object.freeze({ width: 640, height: 360, maxBitrate: 200_000, maxFramerate: 3 }),
+  Object.freeze({ width: 1280, height: 720, maxBitrate: 700_000, maxFramerate: SCREEN_SHARE_MIN_FPS }),
+]);
+
+/** Jitsi: только потолок. Жёсткий min раньше срывал захват в части браузеров. */
 export const JITSI_SCREEN_SHARE_FRAME_RATE = Object.freeze({
   max: SCREEN_SHARE_MAX_FPS,
 });
@@ -23,9 +39,9 @@ export const JITSI_SCREEN_SHARE_FRAME_RATE = Object.freeze({
  */
 export function jitsiScreenShareBitrateCaps() {
   return {
-    vp9: 4_500_000,
-    vp8: 5_000_000,
-    h264: 5_000_000,
+    vp9: 2_500_000,
+    vp8: 3_000_000,
+    h264: 3_000_000,
   };
 }
 
@@ -55,9 +71,26 @@ export function liveKitScreenShareEncoding() {
   };
 }
 
+/** Форма VideoPreset LiveKit (width, height, encoding) без импорта SDK. */
+export function liveKitScreenShareLayers() {
+  return SCREEN_SHARE_BACKUP_LAYERS.map((layer) => ({
+    width: layer.width,
+    height: layer.height,
+    aspectRatio: layer.width / layer.height,
+    encoding: { maxBitrate: layer.maxBitrate, maxFramerate: layer.maxFramerate },
+    resolution: {
+      width: layer.width,
+      height: layer.height,
+      frameRate: layer.maxFramerate,
+      aspectRatio: layer.width / layer.height,
+    },
+  }));
+}
+
 export function liveKitScreenSharePublish() {
   return {
     screenShareEncoding: liveKitScreenShareEncoding(),
+    screenShareSimulcastLayers: liveKitScreenShareLayers(),
     simulcast: true,
     degradationPreference: "maintain-resolution",
   };
