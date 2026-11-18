@@ -1893,3 +1893,51 @@ class SocialAccountAdmin(admin.ModelAdmin):
     list_filter = ("provider",)
     search_fields = ("uid", "email", "user__username", "user__email")
     raw_id_fields = ("user",)
+
+
+from .academy_models import AcademyLead as _AcademyLead
+
+
+@admin.register(_AcademyLead)
+class AcademyLeadAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "student_name", "parent_name", "grade", "subject", "contact", "status")
+    list_filter = ("subject", "grade", "status")
+    search_fields = ("student_name", "parent_name", "contact", "comment", "notes")
+    list_editable = ("status",)
+    readonly_fields = (
+        "student_name",
+        "parent_name",
+        "grade",
+        "subject",
+        "contact",
+        "comment",
+        "consent",
+        "consent_at",
+        "consent_text_version",
+        "consent_text",
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_content",
+        "utm_term",
+        "referrer",
+        "ip_hash",
+        "created_at",
+        "updated_at",
+    )
+    fields = ("status", "notes") + readonly_fields
+
+    @admin.display(description="Текст согласия этой версии")
+    def consent_text(self, obj):
+        from .academy_consent import academy_consent_checkbox_text, academy_consent_page_text
+        checkbox = academy_consent_checkbox_text(obj.consent_text_version)
+        page = academy_consent_page_text(obj.consent_text_version)
+        if not checkbox and not page:
+            return obj.consent_text_version
+        parts = [f"Версия: {obj.consent_text_version}"]
+        if checkbox:
+            parts.append("Галочка: " + checkbox)
+        if page:
+            parts.append(page)
+        return "\n\n".join(parts)
+
