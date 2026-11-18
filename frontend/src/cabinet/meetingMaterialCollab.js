@@ -659,10 +659,6 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       }
       if (data.type === "media.provider_changed") {
         handlers.onMediaProvider?.(data);
-        return;
-      }
-      if (data.type === "telemost.opened") {
-        handlers.onTelemostOpened?.(data);
       }
     };
 

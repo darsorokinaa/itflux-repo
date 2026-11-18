@@ -185,8 +185,6 @@ import {
 } from "../connectionCheck/jaasReachability";
 import LiveKitCallView from "../components/LiveKitCallView";
 import KonturTalkLaunch from "../components/KonturTalkLaunch";
-import TelemostLaunch from "../components/TelemostLaunch";
-import { clearTelemostBackupState, setTelemostBackupState } from "../telemostBackupSession";
 import {
   CALL_CONNECTING_NOTICE,
   CALL_READY_NOTICE,
@@ -597,7 +595,7 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
   const [failoverWatch, setFailoverWatch] = useState(false);
   const [error, setError] = useState("");
   const [mediaWarning, setMediaWarning] = useState("");
-  const [, setParticipantCount] = useState(null);
+  const [participantCount, setParticipantCount] = useState(null);
   const [finishing, setFinishing] = useState(false);
   const [finishConfirm, setFinishConfirm] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -616,9 +614,9 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
   const [materialSyncStatus, setMaterialSyncStatus] = useState("synced");
   const materialSyncStatusRef = useRef("synced");
   const materialStatusTimerRef = useRef(null);
-  const [, setRemoteCursors] = useState([]);
-  const [, setRemotePreviews] = useState({});
-  const [, setStudentViewports] = useState({});
+  const [remoteCursors, setRemoteCursors] = useState([]);
+  const [remotePreviews, setRemotePreviews] = useState({});
+  const [studentViewports, setStudentViewports] = useState({});
   const [materialPresence, setMaterialPresence] = useState([]);
   const remoteControlMachineRef = useRef(null);
   const [remoteControlState, setRemoteControlState] = useState(emptyRemoteControlSnapshot);
@@ -654,7 +652,7 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
   const remoteCursorTimersRef = useRef(new Map());
   const remoteApplyGuardRef = useRef(createRemoteApplyGuard());
   const seenOpIdsRef = useRef(new Set());
-  const _followingTeacherRef = useRef(true);
+  const followingTeacherRef = useRef(true);
   const [materialsToast, setMaterialsToast] = useState("");
   const [mobilePane, setMobilePane] = useState("call"); // call | materials
   const [roomFullscreen, setRoomFullscreen] = useState(false);
@@ -680,8 +678,8 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
   const [localCamOn, setLocalCamOn] = useState(false);
   const [callRoster, setCallRoster] = useState({ remotes: [], local: null });
   const [stayOnTopActive, setStayOnTopActive] = useState(false);
-  const [, setCallVideoPipReady] = useState(false);
-  const [, setPipNeedsGesture] = useState(false);
+  const [callVideoPipReady, setCallVideoPipReady] = useState(false);
+  const [pipNeedsGesture, setPipNeedsGesture] = useState(false);
   const [screenshareAnnUnavailable, setScreenshareAnnUnavailable] = useState(false);
   const pipHandleRef = useRef(null);
   const participantPipRef = useRef(null);
@@ -740,8 +738,8 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
   const initGenRef = useRef(0);
   const abortRef = useRef(null);
   const [roleLabel, setRoleLabel] = useState("");
-  const [, setIsModerator] = useState(false);
-  const [, setModeratorLoginHint] = useState("");
+  const [isModerator, setIsModerator] = useState(false);
+  const [moderatorLoginHint, setModeratorLoginHint] = useState("");
   const [moderatorToast, setModeratorToast] = useState("");
   const [joinState, setJoinState] = useState("");
   const [conferenceBound, setConferenceBound] = useState(0);
@@ -962,6 +960,7 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
       intendedMicOn: intendedMediaRef.current.micOn,
       intendedCamOn: intendedMediaRef.current.camOn,
     });
+    const cameraEnabled = intent.camOn;
     const startWithVideoMuted = intent.startWithVideoMuted;
     const startWithAudioMuted = intent.startWithAudioMuted;
     logConferenceStage("connect_start", {
@@ -2078,13 +2077,6 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
       try {
         const statusPayload = await fetchVideoMeetingStatus(meetingUuid);
         if (cancelled) return;
-        if (statusPayload?.telemost) {
-          setDetail((prev) => (
-            prev
-              ? { ...prev, telemost: { ...(prev.telemost || {}), ...statusPayload.telemost } }
-              : prev
-          ));
-        }
         applyPresented(statusPayload?.presented || null);
         // Файлы идут через materialSession — подстраховываем, если WS не доставил событие.
         if (!canManageRef.current) {
@@ -2597,22 +2589,6 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
   const meeting = detail?.videoMeeting;
   const canManage = Boolean(detail?.canManage);
   canManageRef.current = canManage;
-
-  useEffect(() => {
-    const live = pageState === "live";
-    if (!meetingUuid || !live) {
-      clearTelemostBackupState();
-      return undefined;
-    }
-    setTelemostBackupState({
-      meetingUuid,
-      available: Boolean(detail?.telemost?.available),
-      open: Boolean(detail?.telemost?.available && detail?.telemost?.open),
-      canCreate: canManage,
-    });
-    return undefined;
-  }, [meetingUuid, pageState, detail?.telemost?.available, detail?.telemost?.open, canManage]);
-
   const [callSwitchBusy, setCallSwitchBusy] = useState(false);
   const [pendingCallKind, setPendingCallKind] = useState("");
   const onSwitchCallKind = useCallback(async (target) => {
@@ -3287,20 +3263,6 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
       },
       onMediaProvider: (route) => {
         applyMediaRouteRef.current(route);
-      },
-      onTelemostOpened: () => {
-        setDetail((prev) => (
-          prev
-            ? {
-              ...prev,
-              telemost: {
-                id: "telemost",
-                available: prev.telemost?.available !== false,
-                open: true,
-              },
-            }
-            : prev
-        ));
       },
       onScreensharePointer: (payload) => {
         const point = payload?.payload || payload;
@@ -4446,17 +4408,9 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
       ].filter(Boolean).join(" ")}
     >
       {boardChromeOpen ? (
-        (detail?.konturTalk?.available || detail?.telemost?.available) && status === "live" ? (
+        detail?.konturTalk?.available && status === "live" ? (
           <div className="video-lesson-board-dock">
-            <KonturTalkLaunch
-              available={Boolean(detail?.konturTalk?.available)}
-              meetingUuid={meetingUuid}
-            />
-            <TelemostLaunch
-              available={Boolean(detail?.telemost?.available)}
-              canCreate={canManage}
-              meetingUuid={meetingUuid}
-            />
+            <KonturTalkLaunch available meetingUuid={meetingUuid} />
           </div>
         ) : null
       ) : (
@@ -4500,11 +4454,6 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
           {roomActions}
           <KonturTalkLaunch
             available={Boolean(detail?.konturTalk?.available) && status === "live"}
-            meetingUuid={meetingUuid}
-          />
-          <TelemostLaunch
-            available={Boolean(detail?.telemost?.available) && status === "live"}
-            canCreate={canManage}
             meetingUuid={meetingUuid}
           />
         </div>

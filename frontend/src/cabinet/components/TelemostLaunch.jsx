@@ -1,11 +1,11 @@
 import { useState } from "react";
 
-import { fetchTelemostJoin } from "../../utils/cabinetAuth";
 import {
   INVALID_LINK_MESSAGE,
   POPUP_BLOCKED_MESSAGE,
   navigateTelemostCallWindow,
   reserveTelemostCallWindow,
+  fetchTelemostJoin,
 } from "../telemostBackup";
 import { setTelemostBackupState } from "../telemostBackupSession";
 

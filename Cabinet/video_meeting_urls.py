@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import video_failover_api, video_meeting_api
+from . import telemost_backup_views, video_failover_api, video_meeting_api
 
 urlpatterns = [
     path(
@@ -35,7 +35,7 @@ urlpatterns = [
     ),
     path(
         "<uuid:meeting_uuid>/telemost/",
-        video_meeting_api.VideoMeetingTelemostView.as_view(),
+        telemost_backup_views.VideoMeetingTelemostView.as_view(),
         name="video_meeting_telemost",
     ),
     path(

@@ -77,7 +77,7 @@ export default function PersistentMeetingHost() {
         </div>
       </div>
     </div>
-    <TelemostCallCard />
+    <TelemostCallCard meetingUuid={view.uuid} />
     </>
   );
 }

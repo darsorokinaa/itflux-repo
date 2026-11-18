@@ -579,13 +579,6 @@ export function fetchKonturTalkJoin(meetingUuid) {
   });
 }
 
-export function fetchTelemostJoin(meetingUuid) {
-  return videoMeetingFetch(`/${meetingUuid}/telemost/`, {
-    method: "POST",
-    body: "{}",
-  });
-}
-
 export function fetchVideoMeetingJoinConfig(meetingUuid, extra = {}) {
   const body = {
     browserTabSessionId: extra.browserTabSessionId || extra.browser_tab_session_id || "",

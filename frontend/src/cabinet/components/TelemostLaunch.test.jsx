@@ -1,14 +1,14 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fetchTelemostJoin } from "../../utils/cabinetAuth";
-import { POPUP_BLOCKED_MESSAGE } from "../telemostBackup";
+import { POPUP_BLOCKED_MESSAGE, fetchTelemostJoin } from "../telemostBackup";
 import { clearTelemostBackupState, getTelemostBackupState } from "../telemostBackupSession";
 import TelemostLaunch from "./TelemostLaunch";
 
-vi.mock("../../utils/cabinetAuth", () => ({
-  fetchTelemostJoin: vi.fn(),
-}));
+vi.mock("../telemostBackup", async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, fetchTelemostJoin: vi.fn() };
+});
 
 describe("TelemostLaunch", () => {
   beforeEach(() => {

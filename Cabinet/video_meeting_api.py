@@ -36,11 +36,6 @@ from .meeting_present import (
 )
 from .student_api import _interactive_to_player_payload
 from .kontur_talk import issue_kontur_talk_link, kontur_talk_public_status
-from .telemost_backup import (
-    broadcast_telemost_opened,
-    issue_telemost_backup_link,
-    telemost_public_status,
-)
 from .video_meeting_service import (
     VideoMeetingError,
     build_connection_probe_config,
@@ -236,7 +231,6 @@ class VideoMeetingDetailView(APIView):
             "earlyEntry": _early_entry_or_none(event, meeting),
             "canManage": can_manage,
             "konturTalk": kontur_talk_public_status(),
-            "telemost": telemost_public_status(meeting),
             "viewerUserId": request.user.pk,
             "viewerRole": access.role,
             "canControlMaterial": bool(getattr(access, "can_control_material", can_manage)),
@@ -276,7 +270,6 @@ class VideoMeetingStatusView(APIView):
             "joinStateLabel": ui_state_message(state),
             "joinUrl": f"/cabinet/meetings/{meeting.uuid}",
             "canManage": access.role in ("teacher", "staff"),
-            "telemost": telemost_public_status(meeting),
             "actualStartedAt": (
                 meeting.actual_started_at.isoformat() if meeting.actual_started_at else None
             ),
@@ -290,37 +283,6 @@ class VideoMeetingStatusView(APIView):
                 include_state=True,
             ),
         })
-
-
-
-class VideoMeetingTelemostView(APIView):
-    """Запасной звонок Яндекс Телемоста. Не заменяет join-config Jitsi и LiveKit."""
-
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, meeting_uuid):
-        meeting = None
-        try:
-            meeting = get_meeting_by_uuid(meeting_uuid)
-            access = resolve_access(request.user, meeting.schedule_event)
-            if not access.allowed:
-                raise VideoMeetingError(access.reason or "Доступ запрещён", code="forbidden", status=403)
-            can_create = access.role in ("teacher", "coteacher", "staff")
-            if can_create and not rate_limit_check(request, "telemost_backup", 20, 60):
-                return rate_limit_drf_response()
-            payload, created = issue_telemost_backup_link(
-                meeting,
-                user=request.user,
-                can_create=can_create,
-            )
-        except VideoMeetingError as exc:
-            return _error_response(exc, meeting=meeting)
-        if created:
-            broadcast_telemost_opened(meeting)
-        response = Response(payload)
-        response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-        response["Pragma"] = "no-cache"
-        return response
 
 
 class VideoMeetingKonturTalkView(APIView):

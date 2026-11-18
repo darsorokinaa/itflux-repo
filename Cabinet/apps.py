@@ -6,4 +6,4 @@ class CabinetConfig(AppConfig):
     name = "Cabinet"
 
     def ready(self):
-        from . import signals  # noqa: F401
+        from . import signals, telemost_models  # noqa: F401
