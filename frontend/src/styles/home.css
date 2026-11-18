@@ -2397,6 +2397,132 @@ a.home-updates__card {
 
 /* ── Уровни ── */
 
+.home-first {
+  margin: 4px 0 28px;
+}
+
+.home-first__top:empty {
+  display: none;
+}
+
+.home-first__title {
+  margin: 0;
+  max-width: 16em;
+  font-size: clamp(30px, 4.2vw, 52px);
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+  font-weight: 800;
+  color: var(--text-main, #10224a);
+  text-wrap: balance;
+}
+
+.home-first__lead {
+  margin: 14px 0 0;
+  max-width: 68ch;
+  font-size: clamp(16px, 1.45vw, 19px);
+  line-height: 1.55;
+  color: var(--text-muted, #3d4d6a);
+}
+
+.home-first__actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px 18px;
+  margin-top: 28px;
+}
+
+.home-first__action {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+
+.home-first__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 52px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 1.25;
+  text-align: center;
+  text-decoration: none;
+}
+
+.home-first__button--primary {
+  background: var(--blue-main, #2b52f5);
+  color: #fff;
+}
+
+.home-first__button--primary:hover {
+  background: #1f43d6;
+}
+
+.home-first__button--secondary {
+  background: #fff;
+  color: var(--blue-main, #2b52f5);
+  border-color: var(--border-blue, #c5d4f7);
+}
+
+.home-first__button--secondary:hover {
+  background: var(--blue-soft, #eef3ff);
+}
+
+.home-first__button--ghost {
+  background: #fff;
+  color: var(--text-main, #10224a);
+  border-color: #b7c3d9;
+}
+
+.home-first__button--ghost:hover {
+  background: #fff;
+}
+
+.home-first__button:focus-visible {
+  outline: 3px solid rgba(43, 82, 245, 0.35);
+  outline-offset: 2px;
+}
+
+.home-first__caption {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.35;
+  color: #5d7198;
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .home-first__actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .home-first {
+    margin-bottom: 20px;
+  }
+
+  .home-first__title {
+    font-size: 28px;
+  }
+
+  .home-first__lead {
+    font-size: 15px;
+  }
+
+  .home-first__button {
+    min-height: 48px;
+    font-size: 15px;
+  }
+}
+
 .home-value-paths {
   margin: 8px 0 12px;
 }

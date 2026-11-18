@@ -276,6 +276,107 @@ class TeacherOnboardingStateTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["onboarding"]["completed_steps"], 0)
 
+    def _ensure_public_lesson(self):
+        from Generator.models import Lesson
+
+        lesson, _created = Lesson.objects.get_or_create(
+            slug="demo-informatics-spreadsheets-oge-10",
+            defaults={
+                "title": "Электронные таблицы: анализ данных (демо)",
+                "subject": "Информатика",
+                "short_description": "Готовый демо-урок",
+                "teacher_goal": "секрет методички",
+                "status": Lesson.Status.PUBLISHED,
+                "access_level": Lesson.AccessLevel.FREE,
+            },
+        )
+        updates = []
+        if lesson.status != Lesson.Status.PUBLISHED:
+            lesson.status = Lesson.Status.PUBLISHED
+            updates.append("status")
+        if lesson.access_level == Lesson.AccessLevel.PRIVATE:
+            lesson.access_level = Lesson.AccessLevel.FREE
+            updates.append("access_level")
+        if updates:
+            lesson.save(update_fields=updates)
+        return lesson
+
+    def test_empty_teacher_gets_sample_lesson_without_files(self):
+        import json
+
+        self._ensure_public_lesson()
+        state = build_teacher_onboarding_state(self.teacher)
+        sample = state["sample_lesson"]
+        self.assertEqual(
+            set(sample),
+            {"slug", "title", "subject", "short_description", "preview_path"},
+        )
+        blob = json.dumps(sample, ensure_ascii=False)
+        self.assertNotIn("секрет", blob)
+        self.assertNotIn("file_url", blob)
+        self.assertNotIn("/media/", blob)
+        self.assertTrue(sample["preview_path"].startswith("/lessons?preview="))
+        self.assertEqual(state["sample_next_step"]["label"], "Выдать первое домашнее задание")
+        self.assertEqual(state["sample_next_step"]["href"], "/cabinet?assign=1")
+        self.assertEqual(state["next_step"], "invite")
+
+    def test_student_and_active_teacher_do_not_get_sample(self):
+        import secrets
+
+        self._ensure_public_lesson()
+        self._student()
+        active = build_teacher_onboarding_state(self.teacher)
+        self.assertIsNone(active["sample_lesson"])
+        self.assertIsNone(active["sample_next_step"])
+        self.assertTrue(active["visible"])
+
+        pupil = User.objects.create_user("onb_pupil_sample", password=secrets.token_urlsafe(18))
+        pupil.profile.role = Profile.Role.STUDENT
+        pupil.profile.save(update_fields=["role"])
+        pupil_state = build_teacher_onboarding_state(pupil)
+        self.assertIsNone(pupil_state["sample_lesson"])
+        self.assertIsNone(pupil_state["sample_next_step"])
+
+    def test_dismiss_hides_sample_lesson(self):
+        from Cabinet.storefront_models import TeacherUiDismissal
+
+        self._ensure_public_lesson()
+        self.assertIsNotNone(build_teacher_onboarding_state(self.teacher)["sample_lesson"])
+        TeacherUiDismissal.objects.create(
+            user=self.teacher,
+            notice_key=TeacherUiDismissal.FIRST_DAY_CHECKLIST,
+        )
+        hidden = build_teacher_onboarding_state(self.teacher)
+        self.assertIsNone(hidden["sample_lesson"])
+        self.assertFalse(hidden["visible"])
+
+    def test_assigned_homework_hides_sample_lesson(self):
+        self._ensure_public_lesson()
+        student = self._student()
+        Homework.objects.create(
+            teacher=self.teacher,
+            student=student,
+            title="Первое",
+            status=HomeworkStatus.ASSIGNED,
+        )
+        state = build_teacher_onboarding_state(self.teacher)
+        self.assertIsNone(state["sample_lesson"])
+        self.assertTrue(state["flags"]["has_assignment"])
+
+    def test_platform_stats_sample_has_no_teacher_files(self):
+        self._ensure_public_lesson()
+        resp = self.client.get("/api/platform-stats/")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIsInstance(data["total_tasks"], int)
+        sample = data["sample_lesson"]
+        self.assertEqual(
+            set(sample),
+            {"slug", "title", "subject", "short_description", "preview_path"},
+        )
+        self.assertNotIn("answer", sample)
+        self.assertNotIn("teacher_goal", sample)
+
 
 class OnboardingNudgeTests(TestCase):
     def setUp(self):

@@ -7,6 +7,7 @@ export type PublicPlan = {
   price_month: string;
   price_year: string;
   currency: string;
+  is_free?: boolean;
   is_recommended?: boolean;
   badge_text?: string;
   limits?: { students?: number | null };
