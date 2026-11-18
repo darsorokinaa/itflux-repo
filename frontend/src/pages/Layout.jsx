@@ -11,6 +11,7 @@ import {
 } from "../utils/analytics";
 import { markFirstVisit, trackValueGoal } from "../utils/valuePath";
 import { isEmbeddedWindow, shouldShowCookieBanner } from "../utils/cookieBanner";
+import { isSeoLandingPath } from "./seoLandings";
 
 function Layout() {
   const { pathname, search } = useLocation();
@@ -54,7 +55,8 @@ function Layout() {
     pathname.startsWith("/search/tasks") ||
     pathname.startsWith("/search-variant") ||
     /^\/(oge|ege)$/.test(pathNorm) ||
-    isTasksPrepPicker;
+    isTasksPrepPicker ||
+    isSeoLandingPath(pathNorm);
   const lessonJoinMode = pathname.startsWith("/lesson/join");
   const query = new URLSearchParams(search || "");
   const isHomeworkQuery =

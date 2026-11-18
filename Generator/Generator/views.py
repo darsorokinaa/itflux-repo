@@ -151,6 +151,11 @@ _SPA_KNOWN_PATH_PATTERNS = (
     re.compile(r"^/(oge|ege|vpr)/?$"),
     re.compile(r"^/(oge|ege|vpr)/[a-z0-9_-]+/?$"),
     re.compile(r"^/(oge|ege|vpr)/[a-z0-9_-]+/variant/\d+/?$"),
+    re.compile(
+        r"^/(?:generator-variantov-ege-informatika|generator-variantov-oge-matematika|"
+        r"gotovye-uroki-po-matematike|interaktivnye-zadaniya-oge-ege-informatika|"
+        r"onlajn-doska-dlya-repetitora-matematiki)/?$"
+    ),
 )
 
 _SITEMAP_STATIC_PATHS = (
