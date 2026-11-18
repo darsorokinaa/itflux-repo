@@ -88,7 +88,7 @@ ONBOARDING_UX_VERSION = 3
 
 # Публичный демо-урок из Generator/Generator/migrations/0062_seed_ready_lessons_demo.py.
 SAMPLE_LESSON_SLUG = "demo-informatics-spreadsheets-oge-10"
-EMPTY_CABINET_NEXT_LABEL = "Выдайте первое домашнее задание"
+EMPTY_CABINET_NEXT_LABEL = "Выдать первое домашнее задание"
 EMPTY_CABINET_NEXT_HREF = "/cabinet?assign=1"
 
 _ACTIVE_EVENT_STATUSES = (

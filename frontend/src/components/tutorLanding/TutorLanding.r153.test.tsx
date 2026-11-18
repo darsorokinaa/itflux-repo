@@ -97,7 +97,7 @@ describe("TutorLanding / HomePage r153", () => {
     const h1 = screen.getByRole("heading", { level: 1, name: "Готовьтесь к уроку за минуты, а не часы" });
     expect(h1).toBeTruthy();
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
-    expect(screen.getByText(/Готовые уроки, 25 000\+ заданий/)).toBeTruthy();
+    expect(screen.getByText(/проверяйте результаты в одном месте\./)).toBeTruthy();
     expect(screen.getByTestId("seasonal-hero-sticker")).toBeTruthy();
     expect(screen.getAllByText("Без регистрации")).toHaveLength(2);
     expect(screen.getByText("До 5 учеников на тарифе «Старт»")).toBeTruthy();

@@ -46,7 +46,7 @@ describe("TeacherOnboardingCard", () => {
               preview_path: "/lessons?preview=demo-lesson",
             },
             sample_next_step: {
-              label: "Выдайте первое домашнее задание",
+              label: "Выдать первое домашнее задание",
               href: "/cabinet?assign=1",
             },
           }}
@@ -57,7 +57,7 @@ describe("TeacherOnboardingCard", () => {
     expect(screen.getByRole("link", { name: "Открыть урок" }).getAttribute("href")).toBe(
       "/lessons?preview=demo-lesson",
     );
-    expect(screen.getByRole("link", { name: "Выдайте первое домашнее задание" }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: "Выдать первое домашнее задание" }).getAttribute("href")).toBe(
       "/cabinet?assign=1",
     );
     expect(screen.queryByText("Отправьте приглашение")).toBeNull();
@@ -84,6 +84,6 @@ describe("TeacherOnboardingCard", () => {
     );
     expect(screen.getByText("Отправьте приглашение")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Добавить ученика" })).toBeTruthy();
-    expect(screen.queryByText("Выдайте первое домашнее задание")).toBeNull();
+    expect(screen.queryByText("Выдать первое домашнее задание")).toBeNull();
   });
 });

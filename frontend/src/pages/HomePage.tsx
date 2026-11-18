@@ -358,7 +358,7 @@ function HomeFirstHero({ lessonHref, freeLimitCaption, authedTeacher }: HomeFirs
         Готовьтесь к уроку за минуты, а не часы
       </h1>
       <p className="home-first__lead">
-        Готовые уроки, 25 000+ заданий, интерактивы и генератор ОГЭ/ЕГЭ. Проводите занятия, выдавайте домашние работы и проверяйте результаты в одном месте
+        Готовые уроки, 25 000+ заданий, интерактивы и генератор ОГЭ/ЕГЭ. Проводите занятия, выдавайте домашние работы и проверяйте результаты в одном месте.
       </p>
       <div className="home-first__actions">
         <div className="home-first__action">

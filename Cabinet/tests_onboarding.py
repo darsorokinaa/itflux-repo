@@ -316,7 +316,7 @@ class TeacherOnboardingStateTests(TestCase):
         self.assertNotIn("file_url", blob)
         self.assertNotIn("/media/", blob)
         self.assertTrue(sample["preview_path"].startswith("/lessons?preview="))
-        self.assertEqual(state["sample_next_step"]["label"], "Выдайте первое домашнее задание")
+        self.assertEqual(state["sample_next_step"]["label"], "Выдать первое домашнее задание")
         self.assertEqual(state["sample_next_step"]["href"], "/cabinet?assign=1")
         self.assertEqual(state["next_step"], "invite")
 
