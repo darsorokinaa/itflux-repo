@@ -4,6 +4,7 @@
 задач. Ответы, решения и файлы учителя в ответ не попадают. Вариант для гостя
 собирается в памяти и не создаёт запись Variant.
 """
+
 import html
 import logging
 import random
@@ -45,19 +46,35 @@ _MATH_SUBJECT = (
 
 
 def _title(h1):
-    return f"{h1} | {BRAND}"
+    return f"{h1} — {BRAND}"
 
 
-def _page(slug, h1, description, kind, level="", subject=""):
+def _page(
+    slug,
+    h1,
+    description,
+    kind,
+    level="",
+    subject="",
+    title="",
+    h2="",
+    note="",
+    cta_note="",
+    extra="",
+):
     return {
         "slug": slug,
         "path": "/" + slug,
         "h1": h1,
-        "title": _title(h1),
+        "title": title or _title(h1),
         "description": description,
         "kind": kind,
         "level": level,
         "subject": subject,
+        "h2": h2,
+        "note": note,
+        "cta_note": cta_note,
+        "extra": extra,
     }
 
 
@@ -65,41 +82,54 @@ PAGES = (
     _page(
         "generator-variantov-ege-informatika",
         "Генератор вариантов ЕГЭ по информатике",
-        "Соберите пример варианта ЕГЭ по информатике из задач открытого банка. "
-        "Условия можно смотреть без регистрации, ответы и решения на странице не показываются.",
+        "Соберите пример из нескольких заданий ЕГЭ по информатике без регистрации. "
+        "На странице только условия, без ответов и решений.",
         "variant",
         "ege",
         "inf",
+        h2="Пример из банка заданий",
+        note="Это несколько заданий из банка платформы, не полный вариант ЕГЭ. Ответы и решения скрыты.",
+        cta_note="Чтобы собрать полный вариант и открыть ответы, зарегистрируйтесь.",
     ),
     _page(
         "generator-variantov-oge-matematika",
         "Генератор вариантов ОГЭ по математике",
-        "Соберите пример варианта ОГЭ по математике из задач открытого банка. "
-        "Гость видит условия заданий без регистрации, без ответов и решений.",
+        "Для урока с учеником: пример из нескольких заданий ОГЭ по математике без регистрации. "
+        "На странице только условия, без ответов и решений.",
         "variant",
         "oge",
         "math",
+        h2="Пример из банка заданий",
+        note="Это несколько заданий из банка платформы, не полный вариант ОГЭ. Ответы и решения скрыты.",
+        cta_note="Это не полный вариант ОГЭ. Чтобы собрать полный вариант и открыть ответы, зарегистрируйтесь.",
     ),
     _page(
         "gotovye-uroki-po-matematike",
-        "Готовые уроки по математике",
-        "Опубликованные уроки по математике из каталога: тема и краткое описание открыты без входа. "
-        "Файл урока доступен после регистрации.",
+        "Готовые уроки по математике для ОГЭ и ЕГЭ",
+        "Готовые уроки по математике ОГЭ и ЕГЭ: тему и описание смотрите без регистрации. "
+        "Файл открывается после входа, если урок в каталоге бесплатный.",
         "lessons",
+        title=f"Готовые уроки по математике ОГЭ и ЕГЭ — {BRAND}",
+        h2="Примеры уроков по математике",
+        note="Ниже карточки уроков из каталога. Файл открывается после входа, если урок бесплатный.",
     ),
     _page(
         "interaktivnye-zadaniya-oge-ege-informatika",
-        "Интерактивные задания ОГЭ/ЕГЭ по информатике",
-        "Открытые тренажёры по информатике для ОГЭ и ЕГЭ. "
-        "Бесплатный интерактив из каталога можно пройти без регистрации.",
+        "Интерактивные задания ОГЭ и ЕГЭ по информатике",
+        "Тренажёры по информатике к заданиям ЕГЭ и ОГЭ. Бесплатные из каталога можно пройти без регистрации.",
         "interactive",
+        title=f"Тренажёры ОГЭ и ЕГЭ по информатике — {BRAND}",
+        h2="Тренажёр из каталога",
+        note="Без регистрации доступны только бесплатные тренажёры. Состав номеров меняется вместе с каталогом.",
     ),
     _page(
         "onlajn-doska-dlya-repetitora-matematiki",
         "Онлайн-доска для репетитора математики",
-        "Доска для занятия по математике в браузере: рисуйте и стирайте без регистрации. "
-        "Рисунок остаётся на этом устройстве и не сохраняется на сервере.",
+        "Онлайн-доска для репетитора математики: рисуйте в браузере без регистрации. "
+        "Это демо — рисунок только на этом устройстве и стирается при обновлении.",
         "board",
+        h2="Демо онлайн-доски",
+        extra="В кабинете репетитора — доска для урока с сохранением.",
     ),
 )
 
@@ -136,7 +166,9 @@ def meta_for(path):
     if page is None:
         return None
     canonical = SITE_ORIGIN + page["path"]
-    links = [(other["h1"], other["path"]) for other in PAGES if other["path"] != page["path"]]
+    links = [
+        (other["h1"], other["path"]) for other in PAGES if other["path"] != page["path"]
+    ]
     return {
         "title": page["title"],
         "description": page["description"],
@@ -196,14 +228,24 @@ def _task_payload(task):
     plain = _excerpt(raw, 100000)
     if external or len(plain) < MIN_PLAIN or len(body) > 30000:
         return None
-    spec = task.answer_spec if isinstance(getattr(task, "answer_spec", None), dict) else None
+    spec = (
+        task.answer_spec
+        if isinstance(getattr(task, "answer_spec", None), dict)
+        else None
+    )
     files = spec.get("files") if spec else None
     body = scrub_teacher_links(body, files)
     task_list = task.task
     number = task_list.task_number if task_list else None
     level = task_list.level.level if task_list and task_list.level_id else ""
-    subject = task_list.subject.subject_short if task_list and task_list.subject_id else ""
-    href = f"/zadaniya/{level}/{subject}/{number}" if level and subject and number is not None else ""
+    subject = (
+        task_list.subject.subject_short if task_list and task_list.subject_id else ""
+    )
+    href = (
+        f"/zadaniya/{level}/{subject}/{number}"
+        if level and subject and number is not None
+        else ""
+    )
     subtopic = task.subtopic.title if task.subtopic_id and task.subtopic else ""
     title = (task_list.task_title if task_list else "") or f"Задание {number}"
     return {
@@ -262,10 +304,18 @@ def _lesson_rows(limit):
         .order_by("id")
         if _math_subject(lesson)
     ]
-    free = [lesson for lesson in rows if (lesson.access_level or "free") in ("free", "")]
-    pool = free or rows
-    pool.sort(key=lambda lesson: (lesson.task_number is None, lesson.task_number or 0, lesson.id))
-    return pool[:limit]
+    # Платные уроки не подставляем: файл после входа открывается только у бесплатных.
+    free = [
+        lesson for lesson in rows if (lesson.access_level or "free") in ("free", "")
+    ]
+    free.sort(
+        key=lambda lesson: (
+            lesson.task_number is None,
+            lesson.task_number or 0,
+            lesson.id,
+        )
+    )
+    return free[:limit]
 
 
 def _lesson_payload(lesson):
@@ -312,9 +362,12 @@ def _interactive_score(item):
 
 def _interactive_rows(limit):
     rows = []
-    published = InterestingItem.objects.filter(status=InterestingItem.Status.PUBLISHED).order_by("id")
+    published = InterestingItem.objects.filter(
+        status=InterestingItem.Status.PUBLISHED
+    ).order_by("id")
     for item in published:
-        if not _INFORMATICS_RE.search(item.title or ""):
+        title = item.title or ""
+        if not _INFORMATICS_RE.search(title) or not _EXAM_RE.search(title):
             continue
         if not _can_play_interesting(item):
             continue
@@ -323,12 +376,20 @@ def _interactive_rows(limit):
     return rows[:limit]
 
 
+def _assignment_title(title):
+    """Номер в подписи карточки: «задание №15», а не голое «№15»."""
+    text = title or ""
+    text = re.sub(r"(?i)(?<!задание\s)№\s*(\d+)", r"задание №\1", text)
+    text = re.sub(r"(?i)(?<!№)(?<!\d)задание\s+(\d+)(?!\d)", r"задание №\1", text)
+    return text
+
+
 def _interactive_payload(item):
     return {
         "kind": "interactive",
         "id": item.id,
         "slug": item.slug,
-        "title": item.title,
+        "title": _assignment_title(item.title),
         "text": _excerpt(item.short_description or "", 420),
         "tag": item.tag or "",
         "href": f"/interesting/{item.slug}/view",
@@ -367,6 +428,10 @@ def public_payload(page):
         "description": page["description"],
         "canonical": SITE_ORIGIN + page["path"],
         "kind": page["kind"],
+        "h2": page.get("h2") or "",
+        "note": page.get("note") or "",
+        "cta_note": page.get("cta_note") or "",
+        "extra": page.get("extra") or "",
         "materials": materials,
         "play": play,
         "register_path": register_path(page["slug"]),
@@ -382,9 +447,17 @@ def prerender_body(path):
     except Exception:
         logger.exception("seo landing examples failed for %s", path)
         materials = []
-    parts = ['<section class="seo-prerender-examples"><h2>Примеры из открытого каталога</h2>']
+    parts = [
+        f'<p style="font-size:16px;margin:0 0 12px">{html.escape(page["description"])}</p>',
+        '<section class="seo-prerender-examples">',
+        f"<h2>{html.escape(page.get('h2') or '')}</h2>",
+    ]
+    if page.get("note"):
+        parts.append(f"<p>{html.escape(page['note'])}</p>")
+    if page.get("extra"):
+        parts.append(f"<p>{html.escape(page['extra'])}</p>")
     if not materials:
-        parts.append("<p>Примеры подставляются из открытого каталога, когда они есть в банке.</p>")
+        parts.append("<p>Примеры появятся, когда они есть в каталоге.</p>")
     for item in materials:
         parts.append("<article>")
         parts.append(f"<h3>{html.escape(item.get('title') or '')}</h3>")
@@ -392,8 +465,12 @@ def prerender_body(path):
             parts.append(f"<p>{html.escape(item['text'])}</p>")
         href = item.get("href") or ""
         if href:
-            parts.append(f'<p><a href="{html.escape(href, quote=True)}">Открыть материал</a></p>')
+            parts.append(
+                f'<p><a href="{html.escape(href, quote=True)}">Открыть материал</a></p>'
+            )
         parts.append("</article>")
+    if page.get("cta_note"):
+        parts.append(f"<p>{html.escape(page['cta_note'])}</p>")
     parts.append(
         f'<p><a href="{html.escape(register_path(page["slug"]), quote=True)}">Зарегистрироваться</a></p>'
     )

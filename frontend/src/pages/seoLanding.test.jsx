@@ -12,7 +12,7 @@ vi.mock("../components/MathContent", () => ({
 const MATERIALS = {
   slug: "generator-variantov-ege-informatika",
   h1: "Генератор вариантов ЕГЭ по информатике",
-  description: "Соберите пример варианта ЕГЭ по информатике из задач открытого банка.",
+    description: "Соберите пример из нескольких заданий ЕГЭ по информатике без регистрации. На странице только условия, без ответов и решений.",
   kind: "variant",
   materials: [
     {
@@ -123,6 +123,7 @@ describe("SEO landing", () => {
     fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 10, clientY: 10, buttons: 1 });
     fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 40, clientY: 30, buttons: 1 });
     fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 40, clientY: 30 });
-    expect(screen.getByText(/на сервер он не отправляется/)).toBeTruthy();
+    expect(screen.getByText(/На сервер он не отправляется/)).toBeTruthy();
+    expect(screen.getByText(/В кабинете репетитора/)).toBeTruthy();
   });
 });

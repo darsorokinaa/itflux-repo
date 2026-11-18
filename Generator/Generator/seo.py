@@ -441,18 +441,6 @@ def inject(index_html, path, meta):
     doc = doc.replace("</head>", "  " + "\n  ".join(extra) + "\n</head>", 1)
     if not meta.get("noindex") or meta is NOT_FOUND_META:
         h1 = meta.get("h1") or title.split(" — ")[0]
-        block = (
-            '<div id="seo-prerender" style="max-width:960px;margin:0 auto;padding:24px 16px;'
-            'font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#1f2a44">'
-            f'<h1 style="font-size:28px;margin:0 0 12px">{html.escape(h1)}</h1>'
-            f'<p style="font-size:16px;margin:0 0 12px">{html.escape(desc)}</p>'
-            '<nav style="font-size:15px"><a href="/">Главная</a> · <a href="/pricing">Тарифы</a> · '
-            '<a href="/lessons">Готовые уроки</a> · <a href="/interesting">Тренажёры</a> · '
-            '<a href="/tasks">Банк задач</a> · <a href="/zadaniya">Задания ОГЭ и ЕГЭ</a> · '
-            '<a href="/subject">Генератор вариантов</a></nav>'
-            + "".join(f'<p style="font-size:15px;margin:12px 0 0"><a href="{_attr(href)}">{html.escape(label)}</a></p>'
-                      for label, href in (meta.get("links") or []))
-        )
         landing_body = ""
         try:
             from . import seo_landings
@@ -460,7 +448,22 @@ def inject(index_html, path, meta):
         except Exception:
             import logging
             logging.getLogger(__name__).exception("seo landing prerender failed")
-        block += landing_body + "</div>"
+        # У лендинга первый абзац после H1 — description из prerender_body, без второго такого же абзаца.
+        lead = "" if landing_body else f'<p style="font-size:16px;margin:0 0 12px">{html.escape(desc)}</p>'
+        block = (
+            '<div id="seo-prerender" style="max-width:960px;margin:0 auto;padding:24px 16px;'
+            'font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#1f2a44">'
+            f'<h1 style="font-size:28px;margin:0 0 12px">{html.escape(h1)}</h1>'
+            + lead
+            + landing_body
+            + '<nav style="font-size:15px"><a href="/">Главная</a> · <a href="/pricing">Тарифы</a> · '
+            '<a href="/lessons">Готовые уроки</a> · <a href="/interesting">Тренажёры</a> · '
+            '<a href="/tasks">Банк задач</a> · <a href="/zadaniya">Задания ОГЭ и ЕГЭ</a> · '
+            '<a href="/subject">Генератор вариантов</a></nav>'
+            + "".join(f'<p style="font-size:15px;margin:12px 0 0"><a href="{_attr(href)}">{html.escape(label)}</a></p>'
+                      for label, href in (meta.get("links") or []))
+            + "</div>"
+        )
         doc = doc.replace('<div id="root"></div>', block + '\n  <div id="root"></div>', 1)
     return doc
 

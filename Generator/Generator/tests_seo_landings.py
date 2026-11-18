@@ -1,4 +1,5 @@
 """SEO-лендинги: индексируемая вёрстка, примеры без ответов, лимит гостевого демо."""
+
 import tempfile
 from pathlib import Path
 
@@ -7,12 +8,20 @@ from django.core.cache import cache
 from django.core.files.base import ContentFile
 from django.test import TestCase, override_settings
 
-from Generator.models import InterestingItem, Lesson, Level, Subject, Task, TaskList, Variant
+from Generator.models import (
+    InterestingItem,
+    Lesson,
+    Level,
+    Subject,
+    Task,
+    TaskList,
+    Variant,
+)
 from Generator.seo_landings import MATERIALS_LIMIT, PAGES, SAMPLE_LIMIT
 
 INDEX = (
     '<!doctype html><html><head><meta name="description" content="x" /><title>x</title></head>'
-    "<body><div id=\"root\"></div></body></html>"
+    '<body><div id="root"></div></body></html>'
 )
 _TMP = Path(tempfile.mkdtemp())
 (_TMP / "index.html").write_text(INDEX, encoding="utf-8")
@@ -30,7 +39,9 @@ TASK8_TITLE = "Тренажёр: задание №8 ЕГЭ по информа�
 
 
 def _long(text):
-    return f"<p>{text} Условие достаточно длинное для примера на публичной странице.</p>"
+    return (
+        f"<p>{text} Условие достаточно длинное для примера на публичной странице.</p>"
+    )
 
 
 @override_settings(
@@ -85,7 +96,8 @@ class SeoLandingTests(TestCase):
         )
         Task.objects.create(
             task=lists[2],
-            task_template=_long("Длинное условие со внешней картинкой") + f'<img src="{EVIL_SRC}">',
+            task_template=_long("Длинное условие со внешней картинкой")
+            + f'<img src="{EVIL_SRC}">',
             is_active=True,
             scope="global",
         )
@@ -117,7 +129,9 @@ class SeoLandingTests(TestCase):
             row = tasklist(math, oge, number, title)
             Task.objects.create(
                 task=row,
-                task_template=_long(f"Открытое условие ОГЭ по математике номер {number}"),
+                task_template=_long(
+                    f"Открытое условие ОГЭ по математике номер {number}"
+                ),
                 is_active=True,
                 scope="global",
                 answer=SECRET_ANSWER,
@@ -195,17 +209,35 @@ class SeoLandingTests(TestCase):
                 access_level=access,
             )
             if with_file:
-                item.file.save("index.html", ContentFile("<p>Тренажёр</p>".encode()), save=True)
+                item.file.save(
+                    "index.html", ContentFile("<p>Тренажёр</p>".encode()), save=True
+                )
             return item
 
-        trainer(TASK8_TITLE, "seo-inf-8", InterestingItem.AccessLevel.FREE, InterestingItem.Status.PUBLISHED)
+        trainer(
+            TASK8_TITLE,
+            "seo-inf-8",
+            InterestingItem.AccessLevel.FREE,
+            InterestingItem.Status.PUBLISHED,
+        )
         trainer(
             "История развития информатики",
             "seo-inf-history",
             InterestingItem.AccessLevel.FREE,
             InterestingItem.Status.PUBLISHED,
         )
-        trainer(PAID_TRAINER, "seo-inf-paid", InterestingItem.AccessLevel.TEACHER, InterestingItem.Status.PUBLISHED)
+        trainer(
+            "Тренажёр ЕГЭ по информатике, №15",
+            "seo-inf-15",
+            InterestingItem.AccessLevel.FREE,
+            InterestingItem.Status.PUBLISHED,
+        )
+        trainer(
+            PAID_TRAINER,
+            "seo-inf-paid",
+            InterestingItem.AccessLevel.TEACHER,
+            InterestingItem.Status.PUBLISHED,
+        )
         trainer(
             "Черновик тренажёра по информатике",
             "seo-inf-draft",
@@ -243,13 +275,23 @@ class SeoLandingTests(TestCase):
             self.assertEqual(response.status_code, 200, page["path"])
             self.assertIn(f"<title>{page['title']}</title>", body)
             self.assertIn(page["description"], body)
-            self.assertIn(f"<h1 style=\"font-size:28px;margin:0 0 12px\">{page['h1']}</h1>", body)
+            self.assertIn(
+                f'<h1 style="font-size:28px;margin:0 0 12px">{page["h1"]}</h1>', body
+            )
             canonical = f"https://itflux-academy.ru{page['path']}"
             self.assertIn(f'<link rel="canonical" href="{canonical}" />', body)
             self.assertIn("Зарегистрироваться", body)
             self.assertIn(f"utm_campaign={page['slug']}", body)
             self.assertIn("utm_source=seo", body)
             self.assertIn("utm_medium=landing", body)
+            self.assertIn(
+                f'<h1 style="font-size:28px;margin:0 0 12px">{page["h1"]}</h1><p style="font-size:16px;margin:0 0 12px">{page["description"]}</p>',
+                body,
+            )
+            self.assertIn(" — Цифровой поток", page["title"])
+            self.assertNotIn("открытый банк", body)
+            self.assertNotIn("25 000", body)
+            self.assertNotIn("25000", body)
             self.assertNotIn(SECRET_ANSWER, body)
             self.assertNotIn(SECRET_SOLUTION, body)
             self.assertNotIn(TEACHER_MARK, body)
@@ -258,7 +300,9 @@ class SeoLandingTests(TestCase):
 
         sitemap = self.get("/sitemap.xml").content.decode()
         for page in PAGES:
-            self.assertIn(f"<loc>https://itflux-academy.ru{page['path']}</loc>", sitemap)
+            self.assertIn(
+                f"<loc>https://itflux-academy.ru{page['path']}</loc>", sitemap
+            )
 
     def test_examples_skip_private_answers_and_files(self):
         ege = self.get("/api/seo/landing/generator-variantov-ege-informatika/").json()
@@ -292,12 +336,17 @@ class SeoLandingTests(TestCase):
         self.assertNotIn(PRIVATE_LESSON, str(lessons))
         self.assertNotIn("Урок химии", str(lessons))
 
-        interactive = self.get("/api/seo/landing/interaktivnye-zadaniya-oge-ege-informatika/").json()
+        interactive = self.get(
+            "/api/seo/landing/interaktivnye-zadaniya-oge-ege-informatika/"
+        ).json()
         self.assertEqual(interactive["play"]["slug"], "seo-inf-8")
         slugs = [item["slug"] for item in interactive["materials"]]
         self.assertEqual(slugs[0], "seo-inf-8")
-        self.assertIn("seo-inf-history", slugs)
+        self.assertNotIn("seo-inf-history", slugs)
         self.assertNotIn("seo-inf-paid", slugs)
+        self.assertIn(
+            "задание №15", " ".join(item["title"] for item in interactive["materials"])
+        )
         self.assertNotIn("seo-inf-draft", slugs)
         self.assertNotIn("seo-math-trainer", slugs)
         self.assertNotIn("seo-inf-nofile", slugs)
@@ -310,17 +359,33 @@ class SeoLandingTests(TestCase):
         self.assertEqual(Variant.objects.count(), before)
         self.assertNotIn(SECRET_ANSWER, first.content.decode())
         self.assertEqual(first["Cache-Control"], "no-store")
-        self.assertEqual(self.get("/api/seo/landing/gotovye-uroki-po-matematike/sample/").status_code, 404)
+        self.assertEqual(
+            self.get(
+                "/api/seo/landing/gotovye-uroki-po-matematike/sample/"
+            ).status_code,
+            404,
+        )
         self.assertEqual(self.get("/api/seo/landing/missing-slug/").status_code, 404)
 
         cache.clear()
         statuses = [
-            self.get("/api/seo/landing/generator-variantov-oge-matematika/sample/").status_code
+            self.get(
+                "/api/seo/landing/generator-variantov-oge-matematika/sample/"
+            ).status_code
             for _ in range(SAMPLE_LIMIT + 1)
         ]
         self.assertEqual(statuses[:SAMPLE_LIMIT], [200] * SAMPLE_LIMIT)
         self.assertEqual(statuses[-1], 429)
         self.assertLess(MATERIALS_LIMIT, 100)
+
+    def test_paid_lessons_are_not_shown_when_nothing_is_free(self):
+        Lesson.objects.filter(subject="Математика").update(
+            access_level=Lesson.AccessLevel.PROFESSIONAL
+        )
+        cache.clear()
+        payload = self.get("/api/seo/landing/gotovye-uroki-po-matematike/").json()
+        self.assertEqual(payload["materials"], [])
+        self.assertIn("если урок в каталоге бесплатный", payload["description"])
 
     def test_unknown_path_stays_404(self):
         response = self.get("/nope-seo-landing")

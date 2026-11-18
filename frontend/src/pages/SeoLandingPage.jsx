@@ -85,10 +85,13 @@ export default function SeoLandingPage() {
         <article className="seo-landing">
           <p className="pain-landing__eyebrow">Цифровой поток</p>
           <h1 className="pain-landing__title">{page.h1}</h1>
-          <p className="pain-landing__lead">{page.description}</p>
+          <p className="pain-landing__lead">{page.description || fallback.description}</p>
           <div className="pain-landing__actions">
             <Link className="pain-landing__cta" to={registerTo}>Зарегистрироваться</Link>
           </div>
+          {(page.cta_note || fallback.ctaNote) ? (
+            <p className="seo-landing__note">{page.cta_note || fallback.ctaNote}</p>
+          ) : null}
 
           {status === "loading" ? <p className="seo-landing__status">Загружаем примеры…</p> : null}
           {status === "error" ? <p className="seo-landing__status">Не удалось загрузить примеры из каталога.</p> : null}
@@ -96,17 +99,15 @@ export default function SeoLandingPage() {
           {fallback.kind === "variant" ? (
             <section className="seo-landing__section" aria-label="Пример варианта">
               <div className="seo-landing__section-head">
-                <h2>Пример из открытого банка</h2>
+                <h2>{fallback.h2}</h2>
                 <button type="button" onClick={loadSample} disabled={sampleState === "loading"}>
                   {demoTasks ? "Собрать другой пример" : "Собрать пример"}
                 </button>
               </div>
-              <p className="seo-landing__note">
-                Это несколько заданий открытого банка, не полный официальный вариант. Ответы и решения скрыты.
-              </p>
+              <p className="seo-landing__note">{page.note || fallback.note}</p>
               {sampleState === "limited" ? <p className="seo-landing__status">Слишком много попыток. Попробуйте позже.</p> : null}
               {sampleState === "error" ? <p className="seo-landing__status">Не удалось собрать пример. Попробуйте ещё раз.</p> : null}
-              {sampleState === "empty" ? <p className="seo-landing__status">В открытом банке нет подходящих заданий для примера.</p> : null}
+              {sampleState === "empty" ? <p className="seo-landing__status">В банке заданий нет подходящих заданий для примера.</p> : null}
               <div className="seo-landing__tasks">
                 {tasks.map((item) => <TaskCard key={item.id} item={item} />)}
               </div>
@@ -115,8 +116,8 @@ export default function SeoLandingPage() {
 
           {fallback.kind === "lessons" ? (
             <section className="seo-landing__section" aria-label="Уроки">
-              <h2>Уроки из каталога</h2>
-              <p className="seo-landing__note">Ниже карточки опубликованных уроков. Файл урока открывается после регистрации.</p>
+              <h2>{fallback.h2}</h2>
+              <p className="seo-landing__note">{page.note || fallback.note}</p>
               <div className="seo-landing__materials seo-landing__materials--cards">
                 {materials.map((item, index) => (
                   <button
@@ -145,7 +146,8 @@ export default function SeoLandingPage() {
 
           {fallback.kind === "interactive" ? (
             <section className="seo-landing__section" aria-label="Интерактив">
-              <h2>Тренажёр из каталога</h2>
+              <h2>{fallback.h2}</h2>
+              <p className="seo-landing__note">{page.note || fallback.note}</p>
               <div className="seo-landing__materials seo-landing__materials--cards">
                 {materials.map((item) => (
                   <article key={item.slug} className="seo-landing__card seo-landing__card--static">
@@ -159,14 +161,15 @@ export default function SeoLandingPage() {
               {payload?.play?.view_path ? (
                 <iframe className="seo-landing__frame" title={payload.play.title || "Интерактив"} src={payload.play.view_path} />
               ) : status === "ready" ? (
-                <p className="seo-landing__status">Сейчас в открытом каталоге нет тренажёра, который можно пройти без входа.</p>
+                <p className="seo-landing__status">Сейчас в каталоге нет бесплатного тренажёра, который можно пройти без входа.</p>
               ) : null}
             </section>
           ) : null}
 
           {fallback.kind === "board" ? (
             <section className="seo-landing__section" aria-label="Доска">
-              <h2>Доска для объяснения</h2>
+              <h2>{fallback.h2}</h2>
+              <p className="seo-landing__note">{page.extra || fallback.extra}</p>
               <div className="seo-landing__board-layout">
                 <SeoBoardDemo />
                 <div className="seo-landing__tasks">
