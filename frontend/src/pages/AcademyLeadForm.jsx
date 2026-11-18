@@ -27,8 +27,18 @@ function FieldError({ id, children }) {
   return <p className="academy-error" id={id} role="alert">{children}</p>;
 }
 
+function invalidState(errors, key) {
+  return errors[key] ? "true" : "false";
+}
+
 function describedBy(base, key, errors) {
-  return errors[key] ? `${base}-${key}-error` : undefined;
+  if (!errors[key]) return undefined;
+  return `${base}-${key}-error`;
+}
+
+function subjectDisabled(grade, grades) {
+  if (grade === "") return false;
+  return !grades.includes(Number(grade));
 }
 
 async function sendAcademyLead(form, acquisition) {
@@ -130,7 +140,7 @@ export default function AcademyLeadForm() {
     <form className="academy-form" onSubmit={submit} noValidate>
       <div className="academy-field">
         <label htmlFor={`${formBase}-student_name`}>Имя ученика</label>
-        <input id={`${formBase}-student_name`} value={form.student_name} onChange={(event) => setField("student_name", event.target.value)} autoComplete="section-student name" maxLength={200} required aria-invalid={errors.student_name ? "true" : "false"} aria-describedby={describedBy(formBase, "student_name", errors)} />
+        <input id={`${formBase}-student_name`} value={form.student_name} onChange={(event) => setField("student_name", event.target.value)} autoComplete="section-student name" maxLength={200} required aria-invalid={invalidState(errors, "student_name")} aria-describedby={describedBy(formBase, "student_name", errors)} />
         <FieldError id={`${formBase}-student_name-error`}>{errors.student_name}</FieldError>
       </div>
       <div className="academy-field">
@@ -139,7 +149,7 @@ export default function AcademyLeadForm() {
       </div>
       <div className="academy-field">
         <label htmlFor={`${formBase}-grade`}>Класс</label>
-        <select id={`${formBase}-grade`} value={form.grade} onChange={(event) => setField("grade", event.target.value)} required aria-invalid={errors.grade ? "true" : "false"} aria-describedby={describedBy(formBase, "grade", errors)}>
+        <select id={`${formBase}-grade`} value={form.grade} onChange={(event) => setField("grade", event.target.value)} required aria-invalid={invalidState(errors, "grade")} aria-describedby={describedBy(formBase, "grade", errors)}>
           <option value="">Выберите класс</option>
           <option value="9">9</option>
           <option value="10">10</option>
@@ -149,17 +159,17 @@ export default function AcademyLeadForm() {
       </div>
       <div className="academy-field">
         <label htmlFor={`${formBase}-subject`}>Предмет</label>
-        <select id={`${formBase}-subject`} value={form.subject} onChange={(event) => setField("subject", event.target.value)} required aria-invalid={errors.subject ? "true" : "false"} aria-describedby={describedBy(formBase, "subject", errors)}>
+        <select id={`${formBase}-subject`} value={form.subject} onChange={(event) => setField("subject", event.target.value)} required aria-invalid={invalidState(errors, "subject")} aria-describedby={describedBy(formBase, "subject", errors)}>
           <option value="">Выберите предмет</option>
           {SUBJECTS.map((item) => (
-            <option key={item.value} value={item.value} disabled={form.grade !== "" && !item.grades.includes(Number(form.grade))}>{item.label}</option>
+            <option key={item.value} value={item.value} disabled={subjectDisabled(form.grade, item.grades)}>{item.label}</option>
           ))}
         </select>
         <FieldError id={`${formBase}-subject-error`}>{errors.subject}</FieldError>
       </div>
       <div className="academy-field">
         <label htmlFor={`${formBase}-contact`}>Контакт — Telegram @username или телефон</label>
-        <input id={`${formBase}-contact`} value={form.contact} onChange={(event) => setField("contact", event.target.value)} autoComplete="tel" inputMode="text" maxLength={80} required aria-invalid={errors.contact ? "true" : "false"} aria-describedby={describedBy(formBase, "contact", errors)} />
+        <input id={`${formBase}-contact`} value={form.contact} onChange={(event) => setField("contact", event.target.value)} autoComplete="tel" inputMode="text" maxLength={80} required aria-invalid={invalidState(errors, "contact")} aria-describedby={describedBy(formBase, "contact", errors)} />
         <FieldError id={`${formBase}-contact-error`}>{errors.contact}</FieldError>
       </div>
       <div className="academy-field">
@@ -174,7 +184,7 @@ export default function AcademyLeadForm() {
         </label>
       </div>
       <label className="academy-consent">
-        <input id={`${formBase}-consent`} type="checkbox" checked={form.consent} onChange={(event) => setField("consent", event.target.checked)} aria-invalid={errors.consent ? "true" : "false"} aria-describedby={describedBy(formBase, "consent", errors)} />
+        <input id={`${formBase}-consent`} type="checkbox" checked={form.consent} onChange={(event) => setField("consent", event.target.checked)} aria-invalid={invalidState(errors, "consent")} aria-describedby={describedBy(formBase, "consent", errors)} />
         <span>
           Я родитель (законный представитель) ученика и даю{" "}
           <Link to="/academy/consent">согласие на обработку персональных данных</Link>
@@ -183,7 +193,7 @@ export default function AcademyLeadForm() {
         </span>
       </label>
       <FieldError id={`${formBase}-consent-error`}>{errors.consent}</FieldError>
-      {formError ? <p className="academy-error" role="alert">{formError}</p> : null}
+      <FieldError id={`${formBase}-form-error`}>{formError}</FieldError>
       <button className="academy-btn academy-submit" type="submit" disabled={sending}>
         {sending ? "Отправляем…" : "Записаться на диагностику"}
       </button>

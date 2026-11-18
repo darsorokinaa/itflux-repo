@@ -202,24 +202,17 @@ def _schedule_email(lead: AcademyLead) -> None:
     transaction.on_commit(send)
 
 
-@require_http_methods(["POST"])
-def api_academy_lead(request):
-    if not rate_limit_check(request, "academy_lead", ACADEMY_RATE_LIMIT, ACADEMY_RATE_WINDOW_SEC):
-        return rate_limit_json_response("academy_lead")
+def _read_payload(request):
     try:
         data = json.loads(request.body.decode("utf-8") or "{}")
     except (TypeError, ValueError):
-        return JsonResponse({"ok": False, "error": "Некорректный JSON"}, status=400)
-    if not isinstance(data, dict):
-        return JsonResponse({"ok": False, "error": "Некорректные данные"}, status=400)
-    if str(data.get("company_website") or "").strip():
-        logger.info("academy lead honeypot hit")
-        return JsonResponse({"ok": True, "message": ACADEMY_SUCCESS_MESSAGE})
+        return None, JsonResponse({"ok": False, "error": "Некорректный JSON"}, status=400)
+    if isinstance(data, dict):
+        return data, None
+    return None, JsonResponse({"ok": False, "error": "Некорректные данные"}, status=400)
 
-    cleaned, errors = validate_academy_lead(data)
-    if errors:
-        return JsonResponse({"ok": False, "errors": errors}, status=400)
 
+def _store_lead(request, cleaned):
     with transaction.atomic():
         lead = AcademyLead.objects.create(
             student_name=cleaned["student_name"],
@@ -241,3 +234,23 @@ def api_academy_lead(request):
         )
         _schedule_email(lead)
     return JsonResponse({"ok": True, "id": lead.pk, "message": ACADEMY_SUCCESS_MESSAGE})
+
+
+def _lead_response(request, data):
+    if str(data.get("company_website") or "").strip():
+        logger.info("academy lead honeypot hit")
+        return JsonResponse({"ok": True, "message": ACADEMY_SUCCESS_MESSAGE})
+    cleaned, errors = validate_academy_lead(data)
+    if errors:
+        return JsonResponse({"ok": False, "errors": errors}, status=400)
+    return _store_lead(request, cleaned)
+
+
+@require_http_methods(["POST"])
+def api_academy_lead(request):
+    if not rate_limit_check(request, "academy_lead", ACADEMY_RATE_LIMIT, ACADEMY_RATE_WINDOW_SEC):
+        return rate_limit_json_response("academy_lead")
+    data, error = _read_payload(request)
+    if error is not None:
+        return error
+    return _lead_response(request, data)
