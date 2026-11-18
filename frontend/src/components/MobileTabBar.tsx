@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { displayName } from "../pages/CabinetAuthPage";
 import { fetchCabinetSession, getCabinetHomePath } from "../utils/cabinetAuth";
+import { loginHrefWithColleague } from "../cabinet/colleagueInvite";
 
 type TabKey = "home" | "lessons" | "tasks" | "generator" | "cabinet";
 
@@ -115,7 +116,8 @@ function useCabinetTab() {
   const name = user ? displayName(user) : "";
   const entryPath = typeof window !== "undefined" ? window.location.pathname.replace(/\/+$/, "") || "/" : "";
   const teacherEntry = entryPath === "/" || entryPath === "/pricing";
-  const href = authed ? getCabinetHomePath(user) : teacherEntry ? "/cabinet/login?role=teacher" : "/cabinet/login";
+  const entryHref = teacherEntry ? "/cabinet/login?role=teacher" : "/cabinet/login";
+  const href = authed ? getCabinetHomePath(user) : loginHrefWithColleague(entryHref);
   const label = authed
     ? (user?.role === "teacher" ? `Кабинет учителя — ${name}` : `Личный кабинет — ${name}`)
     : "Личный кабинет";

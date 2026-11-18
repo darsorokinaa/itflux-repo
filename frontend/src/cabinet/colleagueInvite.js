@@ -46,6 +46,38 @@ export function readColleagueCode() {
   }
 }
 
+export function formatRuDays(count) {
+  const number = Math.abs(Number(count) || 0);
+  const tail = number % 100;
+  const last = number % 10;
+  let word = "дней";
+  if (!(tail > 10 && tail < 20)) {
+    if (last === 1) word = "день";
+    else if (last >= 2 && last <= 4) word = "дня";
+  }
+  return `${number} ${word}`;
+}
+
+/** Keeps a stored colleague code on the registration entry, without changing other links. */
+export function currentColleagueCode() {
+  const stored = readColleagueCode();
+  if (stored) return stored;
+  if (typeof window === "undefined") return "";
+  return cleanColleagueCode(new URLSearchParams(window.location.search).get("colleague"));
+}
+
+export function loginHrefWithColleague(href) {
+  const code = currentColleagueCode();
+  const raw = String(href || "");
+  if (!code || !raw.startsWith("/cabinet/login")) return raw;
+  const [path, query = ""] = raw.split("?");
+  const params = new URLSearchParams(query);
+  params.set("colleague", code);
+  if (!params.get("mode")) params.set("mode", "register");
+  if (!params.get("role")) params.set("role", "teacher");
+  return `${path}?${params.toString()}`;
+}
+
 export function ensureDeviceId() {
   if (typeof window === "undefined") return "";
   try {

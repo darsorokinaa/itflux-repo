@@ -4,7 +4,7 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 
 from .colleague_invite import COOKIE_NAME, ColleagueInviteService
-from .colleague_models import ColleagueInviteSettings
+from .colleague_models import ColleagueInviteSettings, ru_days
 from .rate_limit import rate_limit_check
 
 
@@ -44,9 +44,8 @@ def api_colleague_touch(request, code):
             "valid": True,
             "bonus_days": days,
             "message": (
-                "Регистрация по приглашению коллеги. "
-                "После первого домашнего задания или проведённого урока "
-                f"пригласивший получит {days} дн. тарифа «Репетитор»."
+                "Вас пригласил коллега. Когда вы выдадите первое домашнее задание "
+                f"или проведёте урок, он получит {ru_days(days)} тарифа «Репетитор»."
             ),
         }
     )

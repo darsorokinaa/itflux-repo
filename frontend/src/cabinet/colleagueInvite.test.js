@@ -4,6 +4,8 @@ import {
   captureColleagueCode,
   COLLEAGUE_COOKIE,
   COLLEAGUE_STORAGE_KEY,
+  formatRuDays,
+  loginHrefWithColleague,
   readColleagueCode,
 } from "./colleagueInvite";
 
@@ -31,6 +33,18 @@ describe("colleague invite capture", () => {
     expect(readColleagueCode()).toBe("zzzzzzzz");
     expect(sessionStorage.getItem(COLLEAGUE_STORAGE_KEY)).toBe("zzzzzzzz");
     expect(localStorage.getItem("cabinet_acquisition")).not.toContain("zzzzzzzz");
+  });
+
+  it("uses the admin day count with a Russian plural and keeps it on the registration link", () => {
+    expect(formatRuDays(1)).toBe("1 день");
+    expect(formatRuDays(3)).toBe("3 дня");
+    expect(formatRuDays(7)).toBe("7 дней");
+    expect(formatRuDays(21)).toBe("21 день");
+    captureColleagueCode("ab12cd34");
+    const params = new URLSearchParams(loginHrefWithColleague("/cabinet/login?role=teacher").split("?")[1]);
+    expect(params.get("role")).toBe("teacher");
+    expect(params.get("mode")).toBe("register");
+    expect(params.get("colleague")).toBe("ab12cd34");
   });
 
   it("ignores a colleague code that is not a token", () => {

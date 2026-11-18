@@ -20,6 +20,7 @@ from Cabinet.colleague_models import (
     ColleagueInviteLink,
     ColleagueInviteSettings,
     ColleagueReferral,
+    ru_days,
 )
 from Cabinet.models import (
     Homework,
@@ -425,8 +426,14 @@ class ColleagueInviteTests(TestCase):
         self.assertEqual(payload["invited"], 2)
         self.assertEqual(payload["qualified"], 1)
         self.assertEqual(payload["bonus_days"], 7)
-        self.assertIn(self.link.code, payload["path"])
-        self.assertIn("role=teacher", payload["path"])
+        self.assertEqual(payload["monthly_cap"], 10)
+        self.assertEqual(payload["path"], f"/?colleague={self.link.code}")
+        self.assertEqual(
+            payload["url"],
+            f"https://itflux-academy.ru/?colleague={self.link.code}",
+        )
+        self.assertNotIn("127.0.0.1", payload["url"])
+        self.assertNotIn("дн.", ru_days(7))
 
     def test_register_keeps_utm_and_stores_referrer(self):
         secret = get_random_string(24)
@@ -461,6 +468,22 @@ class ColleagueInviteTests(TestCase):
         self.assertEqual(referral.inviter_id, self.inviter.pk)
         self.assertEqual(referral.device_fingerprint, hash_device(device))
         self.assertEqual(referral.status, ColleagueReferral.Status.PENDING)
+
+    def test_day_word_follows_russian_plural(self):
+        self.assertEqual(ru_days(1), "1 день")
+        self.assertEqual(ru_days(3), "3 дня")
+        self.assertEqual(ru_days(7), "7 дней")
+        self.assertEqual(ru_days(21), "21 день")
+        self.assertNotIn("дн.", ru_days(11))
+
+    def test_touch_banner_uses_admin_days_without_abbreviation(self):
+        with patch("Cabinet.colleague_api.rate_limit_check", return_value=True):
+            response = self.client.get(f"/api/cabinet/colleague/{self.link.code}/touch/")
+        self.assertEqual(response.status_code, 200, response.content)
+        message = response.json()["message"]
+        self.assertIn("Вас пригласил коллега", message)
+        self.assertIn("7 дней тарифа «Репетитор»", message)
+        self.assertNotIn("дн.", message)
 
     def test_normalized_email_strips_gmail_dots_and_plus(self):
         self.assertEqual(normalize_email("A.B+tag@gmail.com"), "ab@gmail.com")

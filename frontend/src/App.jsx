@@ -102,7 +102,7 @@ import { ensureSiteFavicon } from "./utils/ensureSiteFavicon";
 import { markUpdateFromClientRequired } from "./utils/appUpdate";
 import { SeasonalThemeProvider } from "./seasonal/SeasonalThemeProvider";
 import { captureAcquisition, savePromoCode } from "./cabinet/visitContext";
-import { captureColleagueCode } from "./cabinet/colleagueInvite";
+import { captureColleagueCode, ensureDeviceId } from "./cabinet/colleagueInvite";
 import { importWithRetry } from "./utils/importWithRetry";
 import { useActiveLiveMeeting } from "./cabinet/liveMeetingSession";
 
@@ -389,16 +389,25 @@ function ClientUpdateRequiredListener() {
 
 function VisitContextCapture() {
   const { search } = useLocation();
+  const colleague = new URLSearchParams(search).get("colleague");
+  if (colleague) captureColleagueCode(colleague);
   useEffect(() => {
     captureAcquisition({
       search,
       referrer: typeof document !== "undefined" ? document.referrer : "",
     });
-    const colleague = new URLSearchParams(search).get("colleague");
-    if (colleague) captureColleagueCode(colleague);
+    if (colleague) {
+      const code = captureColleagueCode(colleague);
+      if (code) {
+        ensureDeviceId();
+        fetch(`/api/cabinet/colleague/${encodeURIComponent(code)}/touch/`, {
+          credentials: "same-origin",
+        }).catch(() => {});
+      }
+    }
     const promo = new URLSearchParams(search).get("promo");
     if (promo && promo.trim()) savePromoCode(promo.trim());
-  }, [search]);
+  }, [search, colleague]);
   return null;
 }
 

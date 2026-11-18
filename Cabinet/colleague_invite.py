@@ -18,6 +18,7 @@ from .colleague_models import (
     ColleagueInviteLink,
     ColleagueInviteSettings,
     ColleagueReferral,
+    ru_days,
 )
 from .models import Profile, TariffPlan, TeacherSubscription
 
@@ -283,7 +284,13 @@ class ColleagueInviteService:
 
     @staticmethod
     def public_path(link: ColleagueInviteLink) -> str:
-        return f"/cabinet/login?mode=register&role=teacher&colleague={link.code}"
+        return f"/?colleague={link.code}"
+
+    @staticmethod
+    def public_url(link: ColleagueInviteLink, request=None) -> str:
+        from .platform_mail import public_site_origin
+
+        return f"{public_site_origin(request)}/?colleague={link.code}"
 
     @staticmethod
     def remember_owner_visit(
@@ -327,6 +334,7 @@ class ColleagueInviteService:
             "monthly_used": used,
             "code": link.code,
             "path": ColleagueInviteService.public_path(link),
+            "url": ColleagueInviteService.public_url(link, request),
             "invited": invited,
             "qualified": qualified,
         }
@@ -607,7 +615,7 @@ class ColleagueInviteService:
             )
             _audit(
                 action=ColleagueInviteAudit.Action.DEFERRED_APPLIED,
-                detail=f"После другого тарифа открыт «Репетитор» на {item.bonus_days} дн.",
+                detail=f"После другого тарифа открыт «Репетитор» на {ru_days(item.bonus_days)}.",
                 referral=item,
                 bonus_days=item.bonus_days,
             )
@@ -676,14 +684,14 @@ def _grant_locked(referral: ColleagueReferral, reason: str) -> ColleagueReferral
         action = ColleagueInviteAudit.Action.DEFERRED
         detail = (
             f"Коллега квалифицирован ({_qualification_label(reason)}). "
-            f"+{days} дн. «Репетитор» ждут окончания текущего тарифа"
+            f"+{ru_days(days)} «Репетитор» ждут окончания текущего тарифа"
         )
     else:
         referral.status = ColleagueReferral.Status.GRANTED
         action = ColleagueInviteAudit.Action.GRANTED
         detail = (
             f"Коллега квалифицирован ({_qualification_label(reason)}). "
-            f"+{days} дн. тарифа «Репетитор»"
+            f"+{ru_days(days)} тарифа «Репетитор»"
         )
     referral.save(
         update_fields=[

@@ -4,6 +4,22 @@ from django.conf import settings
 from django.db import models
 
 
+def ru_days(count: int) -> str:
+    """«1 день», «3 дня», «7 дней», «21 день»."""
+    number = abs(int(count))
+    tail = number % 100
+    last = number % 10
+    if 10 < tail < 20:
+        word = "дней"
+    elif last == 1:
+        word = "день"
+    elif 2 <= last <= 4:
+        word = "дня"
+    else:
+        word = "дней"
+    return f"{number} {word}"
+
+
 class ColleagueInviteSettings(models.Model):
     """Одна строка настроек. Срок бонуса и месячный лимит меняются в админке."""
 
@@ -30,7 +46,10 @@ class ColleagueInviteSettings(models.Model):
         verbose_name_plural = "Настройки приглашения коллег"
 
     def __str__(self):
-        return f"Коллеги: +{self.bonus_days} дн. «Репетитор», до {self.monthly_cap} в месяц"
+        return (
+            f"Коллеги: +{ru_days(self.bonus_days)} «Репетитор», "
+            f"до {self.monthly_cap} в месяц"
+        )
 
     def save(self, *args, **kwargs):
         self.pk = 1
