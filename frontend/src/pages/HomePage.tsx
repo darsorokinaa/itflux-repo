@@ -11,7 +11,11 @@ import HeroSection from "../components/HeroSection";
 import HomePiggyBank from "../components/HomePiggyBank";
 import TeacherQuotesBlock from "../components/TeacherQuotesBlock";
 import SeasonalHeroSticker from "../seasonal/SeasonalHeroSticker";
+import { useTariffPlans } from "../components/tutorLanding/useTariffPlans";
 import { type LevelId } from "../data/levels";
+import { trackActivationIntent } from "../cabinet/activationAnalytics";
+import { readAcquisition } from "../cabinet/visitContext";
+import { fetchCabinetSession } from "../utils/cabinetAuth";
 import { formatTasksCount } from "../utils/formatTasksCount";
 import { formatIntRu } from "../utils/formatIntRu";
 import { trackValueGoal } from "../utils/valuePath";
@@ -19,12 +23,37 @@ import { trackValueGoal } from "../utils/valuePath";
 /** Продающие куски (ссылка на тарифы в value paths и т.п.). Блоки после value paths снова всегда на главной. */
 const SHOW_HOME_SALES = false;
 
+type SampleLesson = {
+  slug: string;
+  title: string;
+  subject: string;
+  short_description: string;
+  preview_path: string;
+};
+
 type PlatformStats = {
   total_tasks: number;
   subjects_count: number;
   generated_variants_count: number;
   tasks_by_level: Record<string, number>;
+  sample_lesson?: SampleLesson | null;
 };
+
+const ONLINE_LESSON_PATH = "/cabinet/schedule?create=1";
+
+function safeInternalPath(path: string | undefined, fallback: string) {
+  if (!path || !path.startsWith("/") || path.startsWith("//")) return fallback;
+  return path;
+}
+
+function trackHeroClick(path: "lesson" | "tasks" | "students") {
+  const acq = readAcquisition();
+  const utm: Record<string, string> = {};
+  for (const key of ["utm_source", "utm_medium", "utm_campaign", "utm_content"] as const) {
+    if (acq[key]) utm[key] = acq[key];
+  }
+  trackValueGoal("value_path_selected", { path, source: "home_hero", ...utm });
+}
 
 type HomeLevel = {
   id: LevelId;
@@ -79,6 +108,14 @@ export default function HomePage() {
   const { hash } = useLocation();
   const [selected, setSelected] = useState<LevelId | null>(null);
   const [stats, setStats] = useState<PlatformStats | null>(null);
+  const [authedTeacher, setAuthedTeacher] = useState(false);
+  const { plans } = useTariffPlans();
+  const startPlan = plans?.find((plan) => plan.slug === "start")
+    || plans?.find((plan) => plan.is_free);
+  const freeStudentLimit = startPlan?.limits?.students;
+  const freeLimitCaption = typeof freeStudentLimit === "number"
+    ? `До ${formatIntRu(freeStudentLimit)} учеников на тарифе «${startPlan?.name || "Старт"}»`
+    : "";
   const heroTasksCountLabel =
     stats != null && stats.total_tasks > 0 ? formatIntRu(stats.total_tasks) : "11 667";
   const heroSubjectsCountLabel =
@@ -89,6 +126,19 @@ export default function HomePage() {
     stats != null && stats.generated_variants_count >= 0
       ? formatIntRu(stats.generated_variants_count)
       : "0";
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchCabinetSession()
+      .then((session: { authenticated?: boolean; user?: { role?: string } } | null) => {
+        if (cancelled) return;
+        setAuthedTeacher(Boolean(session?.authenticated && session?.user?.role === "teacher"));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -130,8 +180,13 @@ export default function HomePage() {
     <div className="digital-flow-page relative min-h-screen overflow-x-hidden">
 
       <div className="digital-flow-page__wrap">
-        <main className="home-page__main">
+          <main className="home-page__main">
           {/* До «Что вам нужно сейчас?» продающий TutorLanding/hero не возвращаем. */}
+          <HomeFirstHero
+            lessonHref={safeInternalPath(stats?.sample_lesson?.preview_path, "/lessons")}
+            freeLimitCaption={freeLimitCaption}
+            authedTeacher={authedTeacher}
+          />
           <HomeValuePathsBlock />
           <HomePiggyBank />
           {/* Блоки, которые раньше шли ПОСЛЕ value paths — вернуть (кроме продающих из TutorLanding). */}
@@ -283,15 +338,75 @@ const HOME_VALUE_PATHS: ReadonlyArray<HomeValuePath> = [
   },
 ];
 
+type HomeFirstHeroProps = {
+  lessonHref: string;
+  freeLimitCaption: string;
+  authedTeacher: boolean;
+};
+
+function HomeFirstHero({ lessonHref, freeLimitCaption, authedTeacher }: HomeFirstHeroProps) {
+  const onlineHref = authedTeacher
+    ? ONLINE_LESSON_PATH
+    : `/cabinet/login?mode=register&role=teacher&next=${encodeURIComponent(ONLINE_LESSON_PATH)}`;
+
+  return (
+    <section className="home-first" aria-labelledby="home-first-heading">
+      <div className="home-first__top">
+        <SeasonalHeroSticker />
+      </div>
+      <h1 id="home-first-heading" className="home-first__title">
+        Готовьтесь к уроку за минуты, а не часы
+      </h1>
+      <p className="home-first__lead">
+        Готовые уроки, 25 000+ заданий, интерактивы и генератор ОГЭ/ЕГЭ. Проводите занятия, выдавайте домашние работы и проверяйте результаты в одном месте
+      </p>
+      <div className="home-first__actions">
+        <div className="home-first__action">
+          <Link
+            to={lessonHref}
+            className="home-first__button home-first__button--primary"
+            onClick={() => trackHeroClick("lesson")}
+          >
+            Попробовать готовый урок
+          </Link>
+          <p className="home-first__caption">Без регистрации</p>
+        </div>
+        <div className="home-first__action">
+          <Link
+            to="/subject"
+            className="home-first__button home-first__button--secondary"
+            onClick={() => trackHeroClick("tasks")}
+          >
+            Создать вариант ОГЭ/ЕГЭ
+          </Link>
+          <p className="home-first__caption">Без регистрации</p>
+        </div>
+        <div className="home-first__action">
+          <Link
+            to={onlineHref}
+            className="home-first__button home-first__button--ghost"
+            onClick={() => {
+              trackHeroClick("students");
+              if (authedTeacher) {
+                trackActivationIntent("lesson_creation_started", { source: "home_hero" });
+              }
+            }}
+          >
+            Провести онлайн-урок
+          </Link>
+          {freeLimitCaption ? <p className="home-first__caption">{freeLimitCaption}</p> : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function HomeValuePathsBlock() {
   return (
-    <section className="home-value-paths home-now" aria-labelledby="home-value-paths-heading">
-      <div className="home-now__top">
-        <SeasonalHeroSticker />
-        <h1 id="home-value-paths-heading" className="home-value-paths__heading">
-          Что вам нужно сейчас?
-        </h1>
-      </div>
+    <section className="home-value-paths" aria-labelledby="home-value-paths-heading">
+      <h2 id="home-value-paths-heading" className="home-value-paths__heading">
+        Что вам нужно сейчас?
+      </h2>
       <div className="home-value-paths__grid">
         {HOME_VALUE_PATHS.map((item) => (
           <Link

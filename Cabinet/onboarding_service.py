@@ -26,6 +26,7 @@ from .models import (
     Homework,
     InteractiveBoard,
     LessonPlanItem,
+    Profile,
     ScheduleEvent,
     ScheduleEventMaterial,
     Student,
@@ -84,6 +85,11 @@ CTA_BY_STEP = {
 }
 
 ONBOARDING_UX_VERSION = 3
+
+# Публичный демо-урок из Generator/Generator/migrations/0062_seed_ready_lessons_demo.py.
+SAMPLE_LESSON_SLUG = "demo-informatics-spreadsheets-oge-10"
+EMPTY_CABINET_NEXT_LABEL = "Выдайте первое домашнее задание"
+EMPTY_CABINET_NEXT_HREF = "/cabinet?assign=1"
 
 _ACTIVE_EVENT_STATUSES = (
     ScheduleEvent.Status.PLANNED,
@@ -290,6 +296,72 @@ def teacher_has_shared_access(teacher: User) -> bool:
     ).exists()
 
 
+def _is_teacher_account(teacher: User) -> bool:
+    profile = getattr(teacher, "profile", None)
+    return profile is not None and profile.role == Profile.Role.TEACHER
+
+
+def public_sample_lesson_payload() -> dict[str, str] | None:
+    """Карточка опубликованного урока без файлов, ответов и методички.
+
+    Ссылка ведёт в публичный предпросмотр. Оригинал урока не копируется.
+    """
+    from urllib.parse import quote
+
+    from Generator.models import Lesson
+
+    published = Lesson.objects.filter(status=Lesson.Status.PUBLISHED).exclude(
+        access_level=Lesson.AccessLevel.PRIVATE,
+    )
+    lesson = published.filter(slug=SAMPLE_LESSON_SLUG).first()
+    if lesson is None:
+        lesson = (
+            published.filter(access_level=Lesson.AccessLevel.FREE)
+            .order_by("-views_count", "id")
+            .first()
+        )
+    if lesson is None:
+        lesson = published.filter(demo_enabled=True).order_by("-views_count", "id").first()
+    if lesson is None:
+        lesson = published.order_by("-views_count", "id").first()
+    if lesson is None:
+        return None
+    slug = (lesson.slug or "").strip()
+    if not slug or "/" in slug or slug.startswith(".") or "\\" in slug:
+        return None
+    description = (lesson.short_description or "").strip()
+    if len(description) > 400:
+        description = description[:397].rstrip() + "…"
+    return {
+        "slug": slug,
+        "title": (lesson.title or "").strip() or "Готовый урок",
+        "subject": (lesson.subject or "").strip(),
+        "short_description": description,
+        "preview_path": "/lessons?preview=" + quote(slug, safe=""),
+    }
+
+
+def _show_empty_cabinet_sample(
+    teacher: User,
+    *,
+    dismissed: bool,
+    has_student: bool,
+    has_assignment: bool,
+    has_event: bool,
+    has_conducted: bool,
+) -> bool:
+    """Пустой кабинет нового учителя. Ученики и учителя с активностью не видят блок."""
+    if not _is_teacher_account(teacher):
+        return False
+    if dismissed or has_assignment or has_student or has_event or has_conducted:
+        return False
+    return _checklist_audience(
+        teacher,
+        has_student=has_student,
+        has_assignment=has_assignment,
+    )
+
+
 def checklist_dismissed(teacher: User) -> bool:
     from .storefront_models import TeacherUiDismissal
 
@@ -398,6 +470,22 @@ def build_teacher_onboarding_state(teacher: User) -> dict[str, Any]:
         for key in ACTIVATION_STEP_KEYS
     ]
 
+    show_sample = _show_empty_cabinet_sample(
+        teacher,
+        dismissed=dismissed,
+        has_student=has_student,
+        has_assignment=has_assignment,
+        has_event=has_event,
+        has_conducted=has_conducted,
+    )
+    sample_lesson = public_sample_lesson_payload() if show_sample else None
+    sample_next_step = None
+    if sample_lesson is not None:
+        sample_next_step = {
+            "label": EMPTY_CABINET_NEXT_LABEL,
+            "href": EMPTY_CABINET_NEXT_HREF,
+        }
+
     return {
         "visible": visible,
         "dismissed": dismissed,
@@ -407,6 +495,8 @@ def build_teacher_onboarding_state(teacher: User) -> dict[str, Any]:
         "cta": cta,
         "steps": steps,
         "ux_version": ONBOARDING_UX_VERSION,
+        "sample_lesson": sample_lesson,
+        "sample_next_step": sample_next_step,
         "flags": {
             "has_student": has_student,
             "has_assignment": has_assignment,

@@ -2740,12 +2740,16 @@ def api_platform_stats(request):
         tasks_by_level[level_str] = int(
             Task.active_objects.filter(task__level=level_instance).count()
         )
+    from Cabinet.onboarding_service import public_sample_lesson_payload
+
     return JsonResponse(
         {
             "total_tasks": int(total_tasks),
             "subjects_count": int(subjects_count),
             "generated_variants_count": int(generated_variants_count),
             "tasks_by_level": tasks_by_level,
+            # total_tasks — Task.active_objects: is_active=True и scope=global.
+            "sample_lesson": public_sample_lesson_payload(),
         }
     )
 
