@@ -246,6 +246,12 @@ def resolve(path):
             "noindex": False, "ld": [], "h1": None, "public": True}
     canon_path = CANONICAL_ALIASES.get(p, p)
 
+    from . import seo_landings
+    landing = seo_landings.meta_for(p)
+    if landing is not None:
+        meta.update(landing)
+        return meta
+
     if NOINDEX_RE.match(p) or p in ("/login",):
         meta["noindex"] = True
         meta["public"] = p in ("/cabinet/login", "/login")
@@ -446,8 +452,15 @@ def inject(index_html, path, meta):
             '<a href="/subject">Генератор вариантов</a></nav>'
             + "".join(f'<p style="font-size:15px;margin:12px 0 0"><a href="{_attr(href)}">{html.escape(label)}</a></p>'
                       for label, href in (meta.get("links") or []))
-            + '</div>'
         )
+        landing_body = ""
+        try:
+            from . import seo_landings
+            landing_body = seo_landings.prerender_body(path)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("seo landing prerender failed")
+        block += landing_body + "</div>"
         doc = doc.replace('<div id="root"></div>', block + '\n  <div id="root"></div>', 1)
     return doc
 
@@ -552,6 +565,12 @@ def sitemap_rows():
     except Exception:
         import logging
         logging.getLogger(__name__).exception("sitemap zadaniya failed")
+    try:
+        from . import seo_landings
+        rows.extend(seo_landings.sitemap_rows())
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("sitemap seo landings failed")
     return rows
 
 

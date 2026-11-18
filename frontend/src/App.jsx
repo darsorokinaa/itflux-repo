@@ -31,6 +31,7 @@ const InterestingPage = lazy(() => import("./pages/InterestingPage"));
 const InterestingViewerPage = lazy(() => import("./pages/InterestingViewerPage"));
 const ForTeachersPage = lazy(() => import("./pages/ForTeachersPage"));
 const TutorLandingPage = lazy(() => import("./pages/TutorLandingPage"));
+const SeoLandingPage = lazy(() => import("./pages/SeoLandingPage"));
 const TeacherBookingPage = lazy(() => import("./pages/TeacherBookingPage"));
 const CabinetAuthPage = lazy(() => import("./pages/CabinetAuthPage"));
 const OAuthRolePage = lazy(() => import("./r91/OAuthRolePage"));
@@ -102,6 +103,7 @@ import { ensureSiteFavicon } from "./utils/ensureSiteFavicon";
 import { markUpdateFromClientRequired } from "./utils/appUpdate";
 import { SeasonalThemeProvider } from "./seasonal/SeasonalThemeProvider";
 import { captureAcquisition, savePromoCode } from "./cabinet/visitContext";
+import { SEO_LANDINGS } from "./pages/seoLandings";
 import { importWithRetry } from "./utils/importWithRetry";
 import { useActiveLiveMeeting } from "./cabinet/liveMeetingSession";
 
@@ -161,6 +163,8 @@ function getMetaDescriptionForPath(pathname) {
   if (Object.prototype.hasOwnProperty.call(EXACT_META_DESCRIPTIONS, exactPath)) {
     return EXACT_META_DESCRIPTIONS[exactPath];
   }
+  const landing = SEO_LANDINGS[exactPath.replace(/^\//, "")];
+  if (landing) return landing.description;
 
   if (path.startsWith("/tasks")) {
     return "Банк заданий ОГЭ, ЕГЭ и ВПР: фильтры по предмету, номеру и подтеме, создание варианта и рабочей тетради.";
@@ -633,6 +637,13 @@ function App() {
           <Route path="/lesson/join/variant/:variant_id" element={<LessonJoinVariantRedirect />} />
 
           <Route path="/vpr" element={<Navigate to="/subject/vpr" replace />} />
+
+          {Object.keys(SEO_LANDINGS).map((slug) => (
+            <Route key={slug} path={`/${slug}`} element={<SeoLandingPage key={slug} />} />
+          ))}
+          {Object.keys(SEO_LANDINGS).map((slug) => (
+            <Route key={`${slug}-slash`} path={`/${slug}/`} element={<SeoLandingPage key={`${slug}/`} />} />
+          ))}
 
           <Route path="/:level" element={<ExamLevelHubPage />} />
 

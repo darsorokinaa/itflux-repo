@@ -8,6 +8,7 @@ from django.views.static import serve
 from . import views
 from . import cdn_handoff  # r93
 from . import load_timing  # r105
+from . import seo_landings
 from . import seo_tasks  # r36
 from . import public_task_check  # r130
 from .vpr_pack_files import api_task_pack_file
@@ -323,6 +324,8 @@ urlpatterns = [
     path("robots.txt", views.robots_txt),
     path("sitemap.xml", views.sitemap_xml),
     path("api/seo/meta/", views.api_seo_meta, name="api_seo_meta"),
+    path("api/seo/landing/<slug:slug>/", seo_landings.api_landing, name="api_seo_landing"),
+    path("api/seo/landing/<slug:slug>/sample/", seo_landings.api_landing_sample, name="api_seo_landing_sample"),
     path("api/razbor/", razbor_api.api_razbor_list, name="api_razbor_list"),  # r131
     path("api/razbor/<str:exam>/<str:subject>/<int:number>/", razbor_api.api_razbor_detail, name="api_razbor_detail"),
     # r87: дубль /gotovye-uroki -> 301 /lessons (query сохраняется); хабы /zadaniya
