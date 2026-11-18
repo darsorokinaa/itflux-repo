@@ -1,6 +1,11 @@
 from django.urls import path
 
-from . import telemost_backup_views, video_failover_api, video_meeting_api
+from . import (
+    call_stats_views,
+    telemost_backup_views,
+    video_failover_api,
+    video_meeting_api,
+)
 
 urlpatterns = [
     path(
@@ -57,6 +62,11 @@ urlpatterns = [
         "<uuid:meeting_uuid>/technical-events/",
         video_meeting_api.VideoMeetingTechnicalEventView.as_view(),
         name="video_meeting_technical_event",
+    ),
+    path(
+        "<uuid:meeting_uuid>/call-stats/",
+        call_stats_views.VideoMeetingCallStatsView.as_view(),
+        name="video_meeting_call_stats",
     ),
     path(
         "<uuid:meeting_uuid>/attendance/join/",

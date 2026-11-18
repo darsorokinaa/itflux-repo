@@ -1,0 +1,15 @@
+{% extends "admin/change_list.html" %}
+{% block result_list %}
+{% if call_stats_totals and call_stats_totals.samples %}
+<p class="help" style="margin:8px 0 12px">
+  Снимков: <strong>{{ call_stats_totals.samples }}</strong> ·
+  RTT в среднем: <strong>{{ call_stats_totals.rtt_avg|floatformat:0|default:"—" }} мс</strong> ·
+  потери входящие: <strong>{{ call_stats_totals.loss_in_avg|floatformat:1|default:"—" }}%</strong> ·
+  исходящие: <strong>{{ call_stats_totals.loss_out_avg|floatformat:1|default:"—" }}%</strong> ·
+  мин. кадров демонстрации: <strong>{{ call_stats_totals.share_fps_min|floatformat:1|default:"—" }}</strong> ·
+  переподключений (макс.): <strong>{{ call_stats_totals.reconnects|default:0 }}</strong>.
+  Чтобы смотреть одну встречу, введите её номер в поиск.
+</p>
+{% endif %}
+{{ block.super }}
+{% endblock %}

@@ -23,6 +23,7 @@ import {
   jitsiScreenShareBitrateCaps,
 } from "./screenShareQuality";
 import { attachMediaWatchdog } from "./jitsiMediaWatchdog";
+import { JITSI_AUDIO_QUALITY } from "./callAudioQuality";
 import { createCallSessionId } from "./jitsiCallState";
 import {
   canonicalJitsiRoomName,
@@ -611,9 +612,9 @@ export function buildJitsiConfigOverwrite({
     disableAGC: false,
     disableHPF: false,
     enableOpusRed: true,
-    audioQuality: { stereo: false, enableOpusDtx: false },
+    audioQuality: { ...JITSI_AUDIO_QUALITY },
     constraints: jitsiCameraConstraints(),
-    // Демонстрация: потолок 15 fps без жёсткого min (min срывал захват).
+    // Демонстрация: потолок 8 fps без жёсткого min (min срывал захват).
     // Битрейт ssHigh — потолок текста, не камера. Сеть может отдать меньше.
     desktopSharingFrameRate: { ...JITSI_SCREEN_SHARE_FRAME_RATE },
     videoQuality: {

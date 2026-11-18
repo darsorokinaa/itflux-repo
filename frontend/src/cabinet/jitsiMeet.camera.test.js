@@ -62,12 +62,14 @@ describe("meeting camera preference", () => {
 
   it("caps screen share for text without a hard capture minimum or a higher camera bitrate", () => {
     const cfg = buildJitsiConfigOverwrite();
-    expect(cfg.desktopSharingFrameRate).toEqual({ max: 15 });
+    expect(cfg.desktopSharingFrameRate).toEqual({ max: 8 });
+    expect(cfg.audioQuality).toEqual({ stereo: false, enableOpusDtx: false, opusMaxAverageBitrate: 48_000 });
+    expect(cfg.enableOpusRed).toBe(true);
     expect(cfg.desktopSharingFrameRate).not.toHaveProperty("min");
     expect(cfg.videoQuality.screenshareCodec).toBe("VP9");
     expect(cfg.videoQuality.mobileScreenshareCodec).toBe("VP8");
-    expect(cfg.videoQuality.vp9.maxBitratesVideo.ssHigh).toBeGreaterThanOrEqual(4_000_000);
-    expect(cfg.videoQuality.vp8.maxBitratesVideo.ssHigh).toBeGreaterThanOrEqual(4_500_000);
+    expect(cfg.videoQuality.vp9.maxBitratesVideo.ssHigh).toBe(2_500_000);
+    expect(cfg.videoQuality.vp8.maxBitratesVideo.ssHigh).toBe(3_000_000);
     expect(cfg.videoQuality.h264.maxBitratesVideo.ssHigh).toBe(cfg.videoQuality.vp8.maxBitratesVideo.ssHigh);
     expect(cfg.videoQuality.vp9.maxBitratesVideo.fullHd).toBe(1_500_000);
     expect(cfg.videoQuality.vp8.maxBitratesVideo.fullHd).toBe(1_500_000);

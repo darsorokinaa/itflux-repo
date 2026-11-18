@@ -2,13 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   JITSI_SCREEN_SHARE_FRAME_RATE,
+  SCREEN_SHARE_BACKUP_LAYERS,
   SCREEN_SHARE_BITRATE_CAP,
   SCREEN_SHARE_CAPTURE,
   SCREEN_SHARE_CAPTURE_EDGE,
   SCREEN_SHARE_MAX_FPS,
+  SCREEN_SHARE_MIN_FPS,
   SCREEN_SHARE_RECEIVE_HEIGHT,
   jitsiScreenShareBitrateCaps,
   liveKitScreenShareEncoding,
+  liveKitScreenShareLayers,
   liveKitScreenSharePublish,
   refreshScreenShareSubscription,
   screenShareCaptureFallback,
@@ -19,17 +22,32 @@ describe("screen share quality policy", () => {
   it("keeps a text-first frame cap without a hard minimum", () => {
     expect(JITSI_SCREEN_SHARE_FRAME_RATE).toEqual({ max: SCREEN_SHARE_MAX_FPS });
     expect(JITSI_SCREEN_SHARE_FRAME_RATE).not.toHaveProperty("min");
-    expect(SCREEN_SHARE_MAX_FPS).toBeLessThanOrEqual(15);
+    expect(SCREEN_SHARE_MAX_FPS).toBe(8);
+    expect(SCREEN_SHARE_MIN_FPS).toBe(5);
     expect(SCREEN_SHARE_RECEIVE_HEIGHT).toBe(1080);
   });
 
-  it("raises only the screen-share bitrate ceiling", () => {
+  it("keeps a sharp top layer at 8 fps without flooding a narrow channel", () => {
     const caps = jitsiScreenShareBitrateCaps();
-    expect(caps.vp9).toBeGreaterThanOrEqual(4_000_000);
+    expect(caps.vp9).toBe(2_500_000);
     expect(caps.vp8).toBeGreaterThanOrEqual(caps.vp9);
     expect(caps.h264).toBe(caps.vp8);
-    expect(SCREEN_SHARE_BITRATE_CAP).toBeGreaterThanOrEqual(2_500_000);
-    expect(SCREEN_SHARE_BITRATE_CAP).toBeLessThanOrEqual(6_000_000);
+    expect(SCREEN_SHARE_BITRATE_CAP).toBe(2_500_000);
+    // Бит на кадр выше, чем было при 15 к/с и 4 Мбит/с.
+    expect(SCREEN_SHARE_BITRATE_CAP / SCREEN_SHARE_MAX_FPS).toBeGreaterThan(4_000_000 / 15);
+  });
+
+  it("adds readable backup layers for weak receivers", () => {
+    expect(SCREEN_SHARE_BACKUP_LAYERS.map((layer) => layer.height)).toEqual([360, 720]);
+    const layers = liveKitScreenShareLayers();
+    expect(layers).toHaveLength(2);
+    expect(layers[0].encoding.maxBitrate).toBeLessThan(layers[1].encoding.maxBitrate);
+    expect(layers[1].encoding.maxBitrate).toBeLessThan(SCREEN_SHARE_BITRATE_CAP);
+    layers.forEach((layer) => {
+      expect(layer.encoding.maxFramerate).toBeLessThanOrEqual(SCREEN_SHARE_MIN_FPS);
+      expect(layer.resolution.height).toBe(layer.height);
+    });
+    expect(liveKitScreenSharePublish().screenShareSimulcastLayers).toHaveLength(2);
   });
 
   it("asks for detail on an expanded stage and not on a minimized strip", () => {
