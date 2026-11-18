@@ -238,6 +238,17 @@ def _request_conference(token, payload):
     )
 
 
+def request_conference(token, payload):
+    """Публичная обёртка для запасного звонка и тестов."""
+    return _request_conference(token, payload)
+
+
+def clear_telemost_token_cache():
+    _token_cache["value"] = ""
+    _token_cache["expires_at"] = 0.0
+
+
+
 def _parse_api_error(response):
     try:
         body = response.json()
@@ -254,6 +265,11 @@ def _parse_api_error(response):
             message = code or f"Ошибка Телемоста (HTTP {response.status_code})."
 
     return code, message, body
+
+
+def parse_api_error(response):
+    """Публичная обёртка для запасного звонка."""
+    return _parse_api_error(response)
 
 
 def create_telemost_conference(*, cohost_email=None):

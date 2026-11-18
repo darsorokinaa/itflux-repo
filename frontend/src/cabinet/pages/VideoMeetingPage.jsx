@@ -2598,6 +2598,22 @@ export default function VideoMeetingPage({ meetingUuid: meetingUuidProp = "", pr
   const meeting = detail?.videoMeeting;
   const canManage = Boolean(detail?.canManage);
   canManageRef.current = canManage;
+
+  useEffect(() => {
+    const live = pageState === "live";
+    if (!meetingUuid || !live) {
+      clearTelemostBackupState();
+      return undefined;
+    }
+    setTelemostBackupState({
+      meetingUuid,
+      available: Boolean(detail?.telemost?.available),
+      open: Boolean(detail?.telemost?.available && detail?.telemost?.open),
+      canCreate: canManage,
+    });
+    return undefined;
+  }, [meetingUuid, pageState, detail?.telemost?.available, detail?.telemost?.open, canManage]);
+
   const [callSwitchBusy, setCallSwitchBusy] = useState(false);
   const [pendingCallKind, setPendingCallKind] = useState("");
   const onSwitchCallKind = useCallback(async (target) => {

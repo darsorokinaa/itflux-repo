@@ -9,11 +9,10 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from Cabinet.choices import ParticipantRole, ParticipantStatus
-from Cabinet.models import Profile, ScheduleEventParticipant, Student, VideoMeeting
+from Cabinet.models import Profile, ScheduleEventParticipant, Student
 from Cabinet.schedule_service import create_single_event
 from Cabinet.telemost_models import TelemostConference
 from Cabinet.video_meeting_service import get_or_create_meeting_for_event, start_meeting
-
 
 YANDEX_JOIN_URL = "https://telemost.yandex.ru/j/abc123XYZ"
 SERVICE_TOKEN = "unit-test-telemost-token"
@@ -52,19 +51,33 @@ class TelemostBackupApiTests(TestCase):
         self.client = APIClient()
         self.teacher = User.objects.create_user(username="tm_teacher", password="pass")
         Profile.objects.filter(user=self.teacher).update(
-            role=Profile.Role.TEACHER, name="Анна", surname="Учитель",
+            role=Profile.Role.TEACHER,
+            name="Анна",
+            surname="Учитель",
         )
-        self.student_user = User.objects.create_user(username="tm_student", password="pass")
+        self.student_user = User.objects.create_user(
+            username="tm_student", password="pass"
+        )
         Profile.objects.filter(user=self.student_user).update(
-            role=Profile.Role.STUDENT, name="Иван", surname="Ученик",
+            role=Profile.Role.STUDENT,
+            name="Иван",
+            surname="Ученик",
         )
-        self.outsider = User.objects.create_user(username="tm_outsider", password="pass")
+        self.outsider = User.objects.create_user(
+            username="tm_outsider", password="pass"
+        )
         Profile.objects.filter(user=self.outsider).update(role=Profile.Role.STUDENT)
-        self.coteacher = User.objects.create_user(username="tm_coteacher", password="pass")
-        Profile.objects.filter(user=self.coteacher).update(
-            role=Profile.Role.TEACHER, name="Олег", surname="Соучитель",
+        self.coteacher = User.objects.create_user(
+            username="tm_coteacher", password="pass"
         )
-        self.staff = User.objects.create_user(username="tm_staff", password="pass", is_staff=True)
+        Profile.objects.filter(user=self.coteacher).update(
+            role=Profile.Role.TEACHER,
+            name="Олег",
+            surname="Соучитель",
+        )
+        self.staff = User.objects.create_user(
+            username="tm_staff", password="pass", is_staff=True
+        )
         Profile.objects.filter(user=self.staff).update(role=Profile.Role.TEACHER)
         self.student = Student.objects.create(
             teacher=self.teacher,
@@ -98,7 +111,9 @@ class TelemostBackupApiTests(TestCase):
             student_ids=[self.student.pk],
             notify=False,
         )
-        meeting, _created = get_or_create_meeting_for_event(event=event, created_by=self.teacher)
+        meeting, _created = get_or_create_meeting_for_event(
+            event=event, created_by=self.teacher
+        )
         start_meeting(meeting=meeting, user=self.teacher)
         meeting.refresh_from_db()
         return meeting
@@ -106,11 +121,15 @@ class TelemostBackupApiTests(TestCase):
     def _post(self, user, meeting=None):
         meeting = meeting or self.meeting
         self.client.force_login(user)
-        return self.client.post(f"/api/video-meetings/{meeting.uuid}/telemost/", {}, format="json")
+        return self.client.post(
+            f"/api/video-meetings/{meeting.uuid}/telemost/", {}, format="json"
+        )
 
     def test_teacher_and_student_share_one_conference(self):
         yandex = _FakeResponse(201, {"id": "conf-1", "join_url": YANDEX_JOIN_URL})
-        with patch("Cabinet.telemost_backup._request_conference", return_value=yandex) as mocked:
+        with patch(
+            "Cabinet.telemost_backup.request_conference", return_value=yandex
+        ) as mocked:
             teacher = self._post(self.teacher)
             student = self._post(self.student_user)
         self.assertEqual(teacher.status_code, 200)
@@ -120,27 +139,31 @@ class TelemostBackupApiTests(TestCase):
         self.assertEqual(teacher.data["id"], "conf-1")
         self.assertEqual(student.data["url"], teacher.data["url"])
         self.assertEqual(student.data["id"], teacher.data["id"])
-        self.assertEqual(TelemostConference.objects.filter(meeting=self.meeting).count(), 1)
+        self.assertEqual(
+            TelemostConference.objects.filter(meeting=self.meeting).count(), 1
+        )
         mocked.assert_called_once_with(SERVICE_TOKEN, {"waiting_room_level": "PUBLIC"})
         self.assertNotIn(SERVICE_TOKEN, str(teacher.data))
         self.assertNotIn(SERVICE_TOKEN, str(student.data))
 
     def test_coteacher_and_staff_can_create(self):
         yandex = _FakeResponse(201, {"id": "conf-2", "join_url": YANDEX_JOIN_URL})
-        with patch("Cabinet.telemost_backup._request_conference", return_value=yandex):
+        with patch("Cabinet.telemost_backup.request_conference", return_value=yandex):
             res = self._post(self.coteacher)
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.data["url"], YANDEX_JOIN_URL)
 
         other = self._live_meeting("Другой урок")
-        yandex2 = _FakeResponse(201, {"id": "conf-3", "join_url": "https://telemost.yandex.ru/j/staffRoom"})
-        with patch("Cabinet.telemost_backup._request_conference", return_value=yandex2):
+        yandex2 = _FakeResponse(
+            201, {"id": "conf-3", "join_url": "https://telemost.yandex.ru/j/staffRoom"}
+        )
+        with patch("Cabinet.telemost_backup.request_conference", return_value=yandex2):
             res = self._post(self.staff, other)
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.data["id"], "conf-3")
 
     def test_student_cannot_create_before_teacher(self):
-        with patch("Cabinet.telemost_backup._request_conference") as mocked:
+        with patch("Cabinet.telemost_backup.request_conference") as mocked:
             res = self._post(self.student_user)
         self.assertEqual(res.status_code, 409)
         self.assertEqual(res.data["code"], "telemost_not_open")
@@ -166,8 +189,10 @@ class TelemostBackupApiTests(TestCase):
             student_ids=[self.student.pk],
             notify=False,
         )
-        meeting, _created = get_or_create_meeting_for_event(event=event, created_by=self.teacher)
-        with patch("Cabinet.telemost_backup._request_conference") as mocked:
+        meeting, _created = get_or_create_meeting_for_event(
+            event=event, created_by=self.teacher
+        )
+        with patch("Cabinet.telemost_backup.request_conference") as mocked:
             res = self._post(self.teacher, meeting)
         self.assertEqual(res.status_code, 409)
         self.assertEqual(res.data["code"], "not_live")
@@ -183,11 +208,15 @@ class TelemostBackupApiTests(TestCase):
         self.client.force_login(self.student_user)
         detail = self.client.get(f"/api/video-meetings/{self.meeting.uuid}/")
         self.assertEqual(detail.status_code, 200)
-        self.assertEqual(detail.data["telemost"], {"id": "telemost", "available": True, "open": True})
+        self.assertEqual(
+            detail.data["telemost"], {"id": "telemost", "available": True, "open": True}
+        )
         self.assertNotIn(YANDEX_JOIN_URL, str(detail.data["telemost"]))
         status = self.client.get(f"/api/video-meetings/{self.meeting.uuid}/status/")
         self.assertEqual(status.status_code, 200)
-        self.assertEqual(status.data["telemost"], {"id": "telemost", "available": True, "open": True})
+        self.assertEqual(
+            status.data["telemost"], {"id": "telemost", "available": True, "open": True}
+        )
         self.assertNotIn(YANDEX_JOIN_URL, str(status.data))
 
     @override_settings(
@@ -202,7 +231,7 @@ class TelemostBackupApiTests(TestCase):
         detail = self.client.get(f"/api/video-meetings/{self.meeting.uuid}/")
         self.assertEqual(detail.data["telemost"]["available"], False)
         self.assertEqual(detail.data["telemost"]["open"], False)
-        with patch("Cabinet.telemost_backup._request_conference") as mocked:
+        with patch("Cabinet.telemost_backup.request_conference") as mocked:
             res = self._post(self.teacher)
         self.assertEqual(res.status_code, 503)
         self.assertEqual(res.data["code"], "telemost_not_configured")
@@ -216,30 +245,38 @@ class TelemostBackupApiTests(TestCase):
     )
     def test_accepts_telemost_oauth_token_alias(self):
         yandex = _FakeResponse(201, {"id": "alias-1", "join_url": YANDEX_JOIN_URL})
-        with patch("Cabinet.telemost_backup._request_conference", return_value=yandex) as mocked:
+        with patch(
+            "Cabinet.telemost_backup.request_conference", return_value=yandex
+        ) as mocked:
             res = self._post(self.teacher)
         self.assertEqual(res.status_code, 200)
-        mocked.assert_called_once_with("alias-service-token", {"waiting_room_level": "PUBLIC"})
+        mocked.assert_called_once_with(
+            "alias-service-token", {"waiting_room_level": "PUBLIC"}
+        )
 
     def test_yandex_401_returns_russian_error_and_does_not_keep_conference(self):
         yandex = _FakeResponse(401, {"error": "Unauthorized"}, text="Unauthorized")
-        with patch("Cabinet.telemost_backup._request_conference", return_value=yandex):
+        with patch("Cabinet.telemost_backup.request_conference", return_value=yandex):
             res = self._post(self.teacher)
         self.assertEqual(res.status_code, 502)
         self.assertEqual(res.data["code"], "telemost_unauthorized")
         self.assertIn("токен", res.data["error"].lower())
-        self.assertFalse(TelemostConference.objects.filter(meeting=self.meeting).exists())
+        self.assertFalse(
+            TelemostConference.objects.filter(meeting=self.meeting).exists()
+        )
         self.assertNotIn(SERVICE_TOKEN, str(res.data))
 
     def test_yandex_403_and_429(self):
         forbidden = _FakeResponse(403, {"error": "Forbidden"})
-        with patch("Cabinet.telemost_backup._request_conference", return_value=forbidden):
+        with patch(
+            "Cabinet.telemost_backup.request_conference", return_value=forbidden
+        ):
             res = self._post(self.teacher)
         self.assertEqual(res.status_code, 502)
         self.assertEqual(res.data["code"], "telemost_forbidden")
 
         limited = _FakeResponse(429, {"error": "TooManyRequests"})
-        with patch("Cabinet.telemost_backup._request_conference", return_value=limited):
+        with patch("Cabinet.telemost_backup.request_conference", return_value=limited):
             res = self._post(self.teacher)
         self.assertEqual(res.status_code, 429)
         self.assertEqual(res.data["code"], "telemost_rate_limited")
@@ -260,8 +297,10 @@ class TelemostBackupApiTests(TestCase):
             201,
             {"id": "bad", "join_url": YANDEX_JOIN_URL, "token": SERVICE_TOKEN},
         )
-        with patch("Cabinet.telemost_backup._request_conference", return_value=yandex):
+        with patch("Cabinet.telemost_backup.request_conference", return_value=yandex):
             res = self._post(self.teacher)
         self.assertEqual(res.status_code, 502)
-        self.assertFalse(TelemostConference.objects.filter(meeting=self.meeting).exists())
+        self.assertFalse(
+            TelemostConference.objects.filter(meeting=self.meeting).exists()
+        )
         self.assertNotIn(SERVICE_TOKEN, str(res.data))
