@@ -13,14 +13,10 @@ export const IFRAME_NOTE = (
 export const INVALID_LINK_MESSAGE = "Не удалось получить ссылку на видеовстречу.";
 
 export function isSafeTelemostJoinUrl(url) {
-  if (typeof url !== "string") return false;
-  const trimmed = url.trim();
-  if (!JOIN_URL_RE.test(trimmed)) return false;
+  if (typeof url !== "string" || !JOIN_URL_RE.test(url.trim())) return false;
   try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== "https:") return false;
-    if (parsed.username || parsed.password) return false;
-    return true;
+    const parsed = new URL(url.trim());
+    return parsed.protocol === "https:" && !parsed.username && !parsed.password;
   } catch {
     return false;
   }

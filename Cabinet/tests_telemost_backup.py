@@ -96,7 +96,7 @@ class TelemostBackupApiTests(TestCase):
             display_name="Олег Соучитель",
         )
 
-    def _live_meeting(self, title):
+    def _event_meeting(self, title, *, start=False):
         now = timezone.now()
         event = create_single_event(
             teacher=self.teacher,
@@ -114,9 +114,13 @@ class TelemostBackupApiTests(TestCase):
         meeting, _created = get_or_create_meeting_for_event(
             event=event, created_by=self.teacher
         )
-        start_meeting(meeting=meeting, user=self.teacher)
-        meeting.refresh_from_db()
+        if start:
+            start_meeting(meeting=meeting, user=self.teacher)
+            meeting.refresh_from_db()
         return meeting
+
+    def _live_meeting(self, title):
+        return self._event_meeting(title, start=True)
 
     def _post(self, user, meeting=None):
         meeting = meeting or self.meeting
@@ -175,23 +179,7 @@ class TelemostBackupApiTests(TestCase):
         self.assertEqual(res.status_code, 403)
 
     def test_not_live_returns_409(self):
-        now = timezone.now()
-        event = create_single_event(
-            teacher=self.teacher,
-            data={
-                "title": "Ещё не начат",
-                "starts_at": now + timedelta(minutes=5),
-                "ends_at": now + timedelta(minutes=50),
-                "event_type": "individual_lesson",
-                "format": "online",
-                "notify_participants": False,
-            },
-            student_ids=[self.student.pk],
-            notify=False,
-        )
-        meeting, _created = get_or_create_meeting_for_event(
-            event=event, created_by=self.teacher
-        )
+        meeting = self._event_meeting("Ещё не начат", start=False)
         with patch("Cabinet.telemost_backup.request_conference") as mocked:
             res = self._post(self.teacher, meeting)
         self.assertEqual(res.status_code, 409)

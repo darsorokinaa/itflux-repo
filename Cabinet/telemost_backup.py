@@ -13,11 +13,9 @@ from django.conf import settings
 from django.db import transaction
 
 from .telemost import (
-    clear_telemost_token_cache,
+    TELEMOST_API_URL,
     is_telemost_meeting_url,
     normalize_telemost_url,
-    parse_api_error,
-    request_conference,
     resolve_telemost_oauth_token,
 )
 from .telemost_models import TelemostConference
@@ -26,8 +24,8 @@ from .video_meeting_service import VideoMeetingError, assert_can_join_meeting
 logger = logging.getLogger(__name__)
 
 PROVIDER_ID = "telemost"
+HTTP_CREATED = 201
 
-# Сообщения без технических деталей токена и без упоминания личного аккаунта.
 _MSG_NOT_CONFIGURED = "Запасной звонок в Телемосте сейчас недоступен."
 _MSG_AUTH_INVALID = (
     "Сервисный аккаунт Телемоста не настроен или токен недействителен. "
@@ -45,6 +43,13 @@ _MSG_ORG = (
     "Автоматическое создание встречи в Телемосте недоступно для этого аккаунта. "
     "Нужен сервисный аккаунт Яндекс 360 или подходящий тариф."
 )
+
+_YANDEX_STATUS_ERRORS = {
+    401: (_MSG_AUTH_INVALID, "telemost_unauthorized", 502),
+    403: (_MSG_FORBIDDEN, "telemost_forbidden", 502),
+    429: (_MSG_RATE_LIMITED, "telemost_rate_limited", 429),
+    402: (_MSG_ORG, "telemost_payment_required", 502),
+}
 
 
 def _env_flag(name, default=True):
@@ -71,9 +76,10 @@ def telemost_backup_token_configured():
 
 
 def telemost_backup_available():
-    if not _env_flag("TELEMOST_BACKUP_ENABLED", True):
-        return False
-    return telemost_backup_token_configured()
+    return (
+        _env_flag("TELEMOST_BACKUP_ENABLED", True)
+        and telemost_backup_token_configured()
+    )
 
 
 def telemost_public_status(meeting=None):
@@ -102,52 +108,84 @@ def _payload_leaks_secret(payload, token=""):
         )
         if value
     ]
-    if not secrets:
-        return False
-
-    def walk(item):
+    stack = [payload]
+    while secrets and stack:
+        item = stack.pop()
         if isinstance(item, dict):
-            return any(walk(value) for value in item.values())
-        if isinstance(item, (list, tuple)):
-            return any(walk(value) for value in item)
-        if isinstance(item, str):
-            return any(secret in item for secret in secrets)
-        return False
-
-    return walk(payload)
+            stack.extend(item.values())
+        elif isinstance(item, (list, tuple)):
+            stack.extend(item)
+        elif isinstance(item, str) and any(secret in item for secret in secrets):
+            return True
+    return False
 
 
 def _serialize_conference(conference):
+    created = conference.created_at.isoformat() if conference.created_at else None
     return {
         "provider": PROVIDER_ID,
         "id": conference.conference_id,
         "url": conference.join_url,
-        "created_at": conference.created_at.isoformat()
-        if conference.created_at
-        else None,
+        "created_at": created,
     }
 
 
 def _map_yandex_error(status, code, message):
-    if code == "ApiRestrictedToOrganizations":
-        return VideoMeetingError(_MSG_ORG, code="telemost_org_required", status=403)
-    if status == 401:
-        return VideoMeetingError(
-            _MSG_AUTH_INVALID, code="telemost_unauthorized", status=502
-        )
-    if status == 403:
-        return VideoMeetingError(_MSG_FORBIDDEN, code="telemost_forbidden", status=502)
-    if status == 429:
-        return VideoMeetingError(
-            _MSG_RATE_LIMITED, code="telemost_rate_limited", status=429
-        )
-    if status == 402:
-        return VideoMeetingError(_MSG_ORG, code="telemost_payment_required", status=502)
-    text = message or _MSG_CREATE_FAILED
-    # Не пробрасываем сырой ответ API клиенту, если он не из нашего словаря.
-    if "OAuth" in text or "token" in text.lower() or "Bearer" in text:
-        text = _MSG_CREATE_FAILED
-    return VideoMeetingError(text, code="telemost_unavailable", status=502)
+    mapped = (
+        (_MSG_ORG, "telemost_org_required", 403)
+        if code == "ApiRestrictedToOrganizations"
+        else _YANDEX_STATUS_ERRORS.get(status)
+    )
+    if not mapped:
+        text = message or _MSG_CREATE_FAILED
+        if "OAuth" in text or "token" in text.lower() or "Bearer" in text:
+            text = _MSG_CREATE_FAILED
+        mapped = (text, "telemost_unavailable", 502)
+    text, err, http = mapped
+    return VideoMeetingError(text, code=err, status=http)
+
+
+def request_conference(token, payload):
+    return requests.post(
+        TELEMOST_API_URL,
+        headers={
+            "Authorization": f"OAuth {token}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=20,
+    )
+
+
+def _resolve_backup_token(*, force_refresh=False):
+    explicit = _first_setting("TELEMOST_OAUTH_TOKEN", "YANDEX_TELEMOST_OAUTH_TOKEN")
+    if explicit and not force_refresh:
+        return explicit, None
+    return resolve_telemost_oauth_token(force_refresh=force_refresh)
+
+
+def _parse_created_conference(response, token):
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise VideoMeetingError(
+            _MSG_BAD_LINK, code="telemost_bad_response", status=502
+        ) from exc
+    if _payload_leaks_secret(data, token=token):
+        logger.error("Telemost API response contained a secret; discarded")
+        raise VideoMeetingError(_MSG_BAD_LINK, code="telemost_bad_response", status=502)
+    join_url = normalize_telemost_url((data.get("join_url") or "").strip())
+    if not is_telemost_meeting_url(join_url):
+        raise VideoMeetingError(_MSG_BAD_LINK, code="telemost_bad_response", status=502)
+    return {"id": str(data.get("id") or "").strip(), "join_url": join_url}
+
+
+def _can_refresh_token():
+    return bool(
+        _first_setting("TELEMOST_REFRESH_TOKEN", "YANDEX_TELEMOST_REFRESH_TOKEN")
+        and _first_setting("TELEMOST_CLIENT_ID", "YANDEX_TELEMOST_CLIENT_ID")
+        and _first_setting("TELEMOST_CLIENT_SECRET", "YANDEX_TELEMOST_CLIENT_SECRET")
+    )
 
 
 def _create_public_conference():
@@ -156,9 +194,8 @@ def _create_public_conference():
         _MSG_CREATE_FAILED, code="telemost_unavailable", status=502
     )
     refreshed = False
-
     for _attempt in range(2):
-        token, error = resolve_telemost_oauth_token(force_refresh=refreshed)
+        token, error = _resolve_backup_token(force_refresh=refreshed)
         if not token:
             if refreshed:
                 raise last_error
@@ -167,7 +204,6 @@ def _create_public_conference():
                 code="telemost_not_configured",
                 status=503,
             )
-
         try:
             response = request_conference(token, {"waiting_room_level": "PUBLIC"})
         except requests.RequestException:
@@ -175,48 +211,27 @@ def _create_public_conference():
             raise VideoMeetingError(
                 _MSG_NETWORK, code="telemost_network", status=502
             ) from None
-
-        if response.status_code == 201:
-            try:
-                data = response.json()
-            except ValueError:
-                raise VideoMeetingError(
-                    _MSG_BAD_LINK, code="telemost_bad_response", status=502
-                )
-            if _payload_leaks_secret(data, token=token):
-                logger.error("Telemost API response contained a secret; discarded")
-                raise VideoMeetingError(
-                    _MSG_BAD_LINK, code="telemost_bad_response", status=502
-                )
-            join_url = normalize_telemost_url((data.get("join_url") or "").strip())
-            conference_id = str(data.get("id") or "").strip()
-            if not is_telemost_meeting_url(join_url):
-                raise VideoMeetingError(
-                    _MSG_BAD_LINK, code="telemost_bad_response", status=502
-                )
-            return {"id": conference_id, "join_url": join_url}
-
-        code, message, _body = parse_api_error(response)
+        if response.status_code == HTTP_CREATED:
+            return _parse_created_conference(response, token)
+        try:
+            body = response.json()
+            code = body.get("error") or body.get("message") or ""
+        except ValueError:
+            code = ""
         logger.warning(
             "Telemost backup API error status=%s code=%s",
             response.status_code,
             code or "unknown",
         )
-        last_error = _map_yandex_error(response.status_code, code, message)
-
-        can_refresh = bool(
-            _first_setting("TELEMOST_REFRESH_TOKEN", "YANDEX_TELEMOST_REFRESH_TOKEN")
-            and _first_setting("TELEMOST_CLIENT_ID", "YANDEX_TELEMOST_CLIENT_ID")
-            and _first_setting(
-                "TELEMOST_CLIENT_SECRET", "YANDEX_TELEMOST_CLIENT_SECRET"
-            )
-        )
-        if response.status_code in (401, 403) and not refreshed and can_refresh:
-            clear_telemost_token_cache()
+        last_error = _map_yandex_error(response.status_code, code, "")
+        if (
+            response.status_code in (401, 403)
+            and not refreshed
+            and _can_refresh_token()
+        ):
             refreshed = True
             continue
         raise last_error
-
     raise last_error
 
 
@@ -226,18 +241,14 @@ def issue_telemost_backup_link(meeting, *, user, can_create):
     existing = TelemostConference.objects.filter(meeting=meeting).first()
     if existing and is_telemost_meeting_url(existing.join_url):
         return _serialize_conference(existing), False
-
     if not can_create:
         raise VideoMeetingError(_MSG_NOT_OPEN, code="telemost_not_open", status=409)
-
     if not telemost_backup_available():
         raise VideoMeetingError(
             _MSG_NOT_CONFIGURED,
             code="telemost_not_configured",
             status=503,
         )
-
-    created_payload = None
     with transaction.atomic():
         locked = type(meeting).objects.select_for_update().get(pk=meeting.pk)
         existing = TelemostConference.objects.filter(meeting=locked).first()
@@ -259,10 +270,7 @@ def broadcast_telemost_opened(meeting):
 
         broadcast_material_event(
             meeting.uuid,
-            {
-                "type": "telemost.opened",
-                "provider": PROVIDER_ID,
-            },
+            {"type": "telemost.opened", "provider": PROVIDER_ID},
         )
     except Exception:
         logger.warning("Failed to broadcast telemost.opened", exc_info=True)
